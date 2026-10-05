@@ -150,6 +150,24 @@ enum Command {
         #[arg(long, default_value_t = 3)]
         timeout: u64,
     },
+    /// Handler for a scanner's own Scan button: pull the pages with the vendor's tool and save them
+    ScanButton {
+        /// The SANE device name the vendor's listener passes, e.g. brother4:net1;dev0
+        #[arg(trailing_var_arg = true)]
+        device: Vec<String>,
+        /// Folder to save into (default: ~/Scans)
+        #[arg(long)]
+        dir: Option<PathBuf>,
+        /// pdf, jpeg or png
+        #[arg(long, value_enum, default_value_t = FormatArg::Pdf)]
+        format: FormatArg,
+        /// Resolution in dots per inch
+        #[arg(long, default_value_t = 300)]
+        dpi: u32,
+        /// color, gray or bw
+        #[arg(long, value_enum, default_value_t = ModeArg::Color)]
+        mode: ModeArg,
+    },
     /// Make a printer flash its display so you know which one it is
     Identify {
         /// Its number in `kagaz discover`, an IP address, hostname, or part of its name
@@ -675,6 +693,13 @@ fn main() -> Result<()> {
             }
             Ok(())
         }
+        Command::ScanButton {
+            device,
+            dir,
+            format,
+            dpi,
+            mode,
+        } => scan_button(device, dir, format, dpi, mode),
         Command::Identify { device, timeout } => {
             let devices = discover(&DiscoverOptions {
                 timeout: Duration::from_secs(timeout),
@@ -854,6 +879,108 @@ fn print_plan(p: &install::Plan, remove: bool) {
     }
     show("Will run as administrator:", &p.admin_script);
     show("Then as you:", &p.user_script);
+}
+
+/// The Scan-button handler: everything it does is logged to the cache
+/// folder and reported with a desktop notification, since nobody is
+/// watching a terminal when the printer's button is pressed.
+fn scan_button(
+    device: Vec<String>,
+    dir: Option<PathBuf>,
+    format: FormatArg,
+    dpi: u32,
+    mode: ModeArg,
+) -> Result<()> {
+    let dir = dir.unwrap_or_else(kagaz_core::paths::scans_dir);
+    let cache = kagaz_core::paths::cache_dir();
+    let _ = std::fs::create_dir_all(&cache);
+    let log_path = cache.join("scan-button.log");
+    let log = |line: &str| {
+        let t = kagaz_core::localtime::now();
+        let text = format!(
+            "{:04}-{:02}-{:02} {:02}:{:02}:{:02} {line}\n",
+            t.year, t.month, t.day, t.hour, t.minute, t.second
+        );
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log_path)
+        {
+            let _ = std::io::Write::write_all(&mut f, text.as_bytes());
+        }
+        println!("{line}");
+    };
+    let notify = |summary: &str, body: &str| {
+        let _ = std::process::Command::new("notify-send")
+            .args(["-i", "scanner", summary, body])
+            .status();
+    };
+    let device_name = device.join(" ");
+    log(&format!(
+        "button pressed, device \"{device_name}\", saving to {}",
+        dir.display()
+    ));
+    let result = (|| -> Result<Vec<kagaz_core::output::Written>> {
+        anyhow::ensure!(!device_name.is_empty(), "no scanner device name was passed");
+        std::fs::create_dir_all(&dir)?;
+        let work = std::env::temp_dir().join(format!("kagaz-button-{}", std::process::id()));
+        std::fs::create_dir_all(&work)?;
+        let pulled = kagaz_core::scan::vendor::brother_pull(&device_name, dpi, &work)
+            .and_then(|files| kagaz_core::scan::vendor::pages_from_files(&files, dpi));
+        let _ = std::fs::remove_dir_all(&work);
+        let pages = pulled?;
+        let format = match format {
+            FormatArg::Pdf => Format::Pdf,
+            FormatArg::Jpeg => Format::Jpeg,
+            FormatArg::Png => Format::Png,
+        };
+        let color = match mode {
+            ModeArg::Color => ColorMode::Color,
+            ModeArg::Gray => ColorMode::Gray,
+            ModeArg::Bw => ColorMode::BlackWhite,
+        };
+        let stamp = kagaz_core::localtime::now().file_stamp();
+        let mut path = dir.join(format!("scan-{stamp}.{}", format.extension()));
+        let mut n = 1;
+        while path.exists() {
+            n += 1;
+            path = dir.join(format!("scan-{stamp} ({n}).{}", format.extension()));
+        }
+        Ok(kagaz_core::output::write(
+            &pages,
+            &OutputOptions {
+                format,
+                color,
+                quality: None,
+                max_bytes: None,
+            },
+            &path,
+        )?)
+    })();
+    match result {
+        Ok(written) => {
+            let names: Vec<String> = written
+                .iter()
+                .map(|w| {
+                    format!(
+                        "{} ({} page{}, {})",
+                        w.path.display(),
+                        w.pages,
+                        if w.pages == 1 { "" } else { "s" },
+                        human_size(w.bytes)
+                    )
+                })
+                .collect();
+            log(&format!("saved {}", names.join(", ")));
+            notify("Scan saved", &names.join("\n"));
+            Ok(())
+        }
+        Err(e) => {
+            log(&format!("failed: {e}"));
+            notify("Scan failed", &e.to_string());
+            Err(e)
+        }
+    }
 }
 
 /// Pick one device by what the user typed, or explain why that failed.

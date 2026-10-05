@@ -29,7 +29,7 @@ admin_steps = [
   "brsaneconfig4 -a name={name} model={model} ip={ip}",
   "if command -v ufw >/dev/null && ufw status 2>/dev/null | grep -q '^Status: active'; then ufw allow from {ip} to any port 54925 proto udp comment 'Brother scan-key tool (Kagaz)'; fi",
   "cfg=/opt/brother/scanner/brscan-skey/brscan-skey.config; [ -f \"$cfg.orig\" ] || cp \"$cfg\" \"$cfg.orig\"",
-  "sed -i 's|^FILE=.*|FILE=\"{kagaz} scan {ip} -o {scans_dir}\"|; s|^IMAGE=.*|IMAGE=\"{kagaz} scan {ip} --format jpeg -o {scans_dir}\"|; s|^OCR=.*|OCR=\"{kagaz} scan {ip} -o {scans_dir}\"|' /opt/brother/scanner/brscan-skey/brscan-skey.config",
+  "sed -i 's|^FILE=.*|FILE=\"{kagaz} scan-button --dir {scans_dir}\"|; s|^IMAGE=.*|IMAGE=\"{kagaz} scan-button --dir {scans_dir} --format jpeg\"|; s|^OCR=.*|OCR=\"{kagaz} scan-button --dir {scans_dir}\"|' /opt/brother/scanner/brscan-skey/brscan-skey.config",
 ]
 user_steps = [
   "mkdir -p {scans_dir} ~/.config/autostart",

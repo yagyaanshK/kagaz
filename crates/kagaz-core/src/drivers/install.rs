@@ -510,7 +510,7 @@ mod tests {
                 .contains("brsaneconfig4 -a name=DCP-L2540DW model=DCP-L2540DW ip=198.51.100.167"));
             assert!(p
                 .admin_script
-                .contains("FILE=\"/usr/bin/kagaz scan 198.51.100.167 -o /home/me/Scans\""));
+                .contains("FILE=\"/usr/bin/kagaz scan-button --dir /home/me/Scans\""));
             assert!(p.user_script.contains("autostart/brscan-skey.desktop"));
             assert!(p.remove_script.contains("dpkg -r brscan-skey brscan4"));
             assert!(p.notes.iter().any(|n| n.contains("/home/me/Scans")));
