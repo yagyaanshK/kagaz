@@ -4,6 +4,7 @@
 pub mod device;
 pub mod discovery;
 pub mod explain;
+pub mod ipp;
 pub mod localtime;
 pub mod output;
 pub mod scan;

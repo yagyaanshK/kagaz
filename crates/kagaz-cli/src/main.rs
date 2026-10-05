@@ -3,6 +3,7 @@
 
 use anyhow::Result;
 use clap::{Parser, Subcommand, ValueEnum};
+use kagaz_core::ipp::status::PrinterStatus;
 use kagaz_core::output::{human_size, parse_size, Format, OutputOptions};
 use kagaz_core::scan::{ColorMode, Event, Paper, ScanRequest, Source};
 use kagaz_core::{
@@ -84,6 +85,25 @@ enum Command {
         /// Output file (default: scan-<date>-<time>.<ext> in the current directory)
         #[arg(short, long)]
         output: Option<PathBuf>,
+        /// Seconds to listen for answers while finding the device
+        #[arg(long, default_value_t = 3)]
+        timeout: u64,
+    },
+    /// Ask a printer how it is doing over IPP: state, problems, toner, paper, queue
+    Status {
+        /// Its number in `kagaz discover`, an IP address, hostname, or part of its name
+        device: String,
+        /// Seconds to listen for answers while finding the device
+        #[arg(long, default_value_t = 3)]
+        timeout: u64,
+        /// Print machine-readable JSON instead of a table
+        #[arg(long)]
+        json: bool,
+    },
+    /// Make a printer flash its display so you know which one it is
+    Identify {
+        /// Its number in `kagaz discover`, an IP address, hostname, or part of its name
+        device: String,
         /// Seconds to listen for answers while finding the device
         #[arg(long, default_value_t = 3)]
         timeout: u64,
@@ -410,6 +430,149 @@ fn main() -> Result<()> {
             }
             Ok(())
         }
+        Command::Status {
+            device,
+            timeout,
+            json,
+        } => {
+            let devices = discover(&DiscoverOptions {
+                timeout: Duration::from_secs(timeout),
+                ..Default::default()
+            })?;
+            let d = select_device(&devices, &device)?;
+            let s = kagaz_core::ipp::status::fetch(d)?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&s)?);
+                return Ok(());
+            }
+            print_status(d, &s);
+            Ok(())
+        }
+        Command::Identify { device, timeout } => {
+            let devices = discover(&DiscoverOptions {
+                timeout: Duration::from_secs(timeout),
+                ..Default::default()
+            })?;
+            let d = select_device(&devices, &device)?;
+            kagaz_core::ipp::status::identify(d)?;
+            println!("{} should be flashing its display now.", title(d));
+            Ok(())
+        }
+    }
+}
+
+fn print_status(d: &Device, s: &PrinterStatus) {
+    let model = s
+        .make_and_model
+        .clone()
+        .or_else(|| s.info.clone())
+        .unwrap_or_else(|| title(d));
+    let addr = d
+        .addresses
+        .first()
+        .map(|a| format!(" at {a}"))
+        .unwrap_or_default();
+    println!("{model} ({}){addr}", s.name);
+    if let Some(loc) = &s.location {
+        println!("  location   {loc}");
+    }
+    let mut state = s.state.label().to_string();
+    if !s.accepting_jobs {
+        state.push_str(", not accepting jobs");
+    }
+    match s.queued_jobs {
+        0 => state.push_str(", nothing queued"),
+        1 => state.push_str(", 1 job queued"),
+        n => state.push_str(&format!(", {n} jobs queued")),
+    }
+    println!("  state      {state}");
+    for r in &s.reasons {
+        let sev = match r.severity.as_str() {
+            "error" => "problem",
+            "warning" => "warning",
+            "report" => "note",
+            _ => "note",
+        };
+        println!("  {sev:<10} {}", r.text);
+    }
+    if let Some(m) = &s.message {
+        println!("  message    {m}");
+    }
+    for sup in &s.supplies {
+        let level = match sup.level {
+            Some(l) => format!("{l}%"),
+            None => "level unknown".to_string(),
+        };
+        let low = sup
+            .low_at
+            .map(|l| format!(" (low at {l}%)"))
+            .unwrap_or_default();
+        println!("  {:<10} {} {level}{low}", sup.kind, sup.name);
+    }
+    if !s.media_ready.is_empty() {
+        let names: Vec<String> = s
+            .media_ready
+            .iter()
+            .map(|m| kagaz_core::ipp::status::media_name(m))
+            .collect();
+        println!("  paper      {} loaded", names.join(", "));
+    }
+    let mut prints = vec![if s.color { "colour" } else { "black and white" }.to_string()];
+    if let Some(ppm) = s.pages_per_minute {
+        prints.push(format!("{ppm} pages/min"));
+    }
+    if s.duplex {
+        prints.push("two-sided".into());
+    }
+    if let Some(dpi) = s.max_dpi {
+        prints.push(format!("up to {dpi} dpi"));
+    }
+    println!("  prints     {}", prints.join(", "));
+    let formats: Vec<&str> = s
+        .document_formats
+        .iter()
+        .map(|f| match f.as_str() {
+            "image/pwg-raster" => "PWG Raster (IPP Everywhere)",
+            "image/urf" => "Apple Raster (AirPrint)",
+            "application/pdf" => "PDF",
+            "application/postscript" => "PostScript",
+            "application/octet-stream" => "raw",
+            "image/jpeg" => "JPEG",
+            other => other,
+        })
+        .collect();
+    if !formats.is_empty() {
+        println!("  accepts    {}", formats.join(", "));
+    }
+    if let Some(up) = s.up_time {
+        let (h, m) = (up / 3600, up % 3600 / 60);
+        println!(
+            "  on for     {}",
+            if h > 0 {
+                format!("{h} h {m} min")
+            } else {
+                format!("{m} min")
+            }
+        );
+    }
+    for j in &s.jobs {
+        println!(
+            "  job {:<6} {} ({}, {}{})",
+            j.id,
+            if j.name.is_empty() {
+                "untitled"
+            } else {
+                &j.name
+            },
+            j.state,
+            j.user,
+            j.impressions_completed
+                .map(|n| format!(", {n} pages done"))
+                .unwrap_or_default()
+        );
+    }
+    if let Some(url) = &s.more_info {
+        println!("  web page   {url}");
     }
 }
 
