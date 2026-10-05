@@ -213,7 +213,7 @@ fn explain_print(device: &Device, host: &Host, ports: &[(u16, &'static str)]) ->
             Os::MacOs => "macOS has no AirPrint (URF) support on this printer; it should still print over IPP Everywhere, but that is not verified.".to_string(),
             Os::Other => "Any IPP Everywhere-capable system prints to it without a driver.".to_string(),
         });
-        details.push("Kagaz will also print to it directly over IPP (milestone 3).".to_string());
+        details.push("`kagaz print` sends to it directly over IPP as well.".to_string());
         return Verdict {
             status: Status::Works,
             summary: format!("works without a driver ({})", standards.join(", ")),
@@ -307,7 +307,7 @@ fn explain_print(device: &Device, host: &Host, ports: &[(u16, &'static str)]) ->
                 details.push("A generic PCL or PostScript driver may work; the vendor's own driver is the reliable choice.".to_string());
             }
         }
-        details.push("Kagaz's driver finder (milestone 4) will fetch the vendor's official driver for this model.".to_string());
+        details.push("`kagaz driver <device>` fetches the vendor's official driver for this model after showing you what it will do.".to_string());
         return Verdict {
             status: Status::NeedsDriver,
             summary: "needs the vendor's printer driver".to_string(),
@@ -401,7 +401,7 @@ fn explain_scan(device: &Device, host: &Host) -> Verdict {
             }
             Os::Other => false,
         };
-        details.push("Kagaz will scan from it directly over eSCL and WSD on every OS (milestone 2), so none of this will be needed.".to_string());
+        details.push("`kagaz scan` and the Kagaz window scan from it directly over eSCL and WSD on every OS, so none of this is needed for Kagaz itself.".to_string());
         let status = if native {
             Status::Works
         } else {
@@ -438,7 +438,7 @@ fn explain_scan(device: &Device, host: &Host) -> Verdict {
                 _ => "For Brother that is the official full driver package from support.brother.com.".to_string(),
             });
         }
-        details.push("Kagaz's driver finder (milestone 4) will fetch and install it after showing you what it does.".to_string());
+        details.push("`kagaz driver <device>` fetches and installs it after showing you exactly what it will do.".to_string());
         return Verdict {
             status: Status::NeedsDriver,
             summary: "needs the vendor's scanner driver".to_string(),
