@@ -1,0 +1,51 @@
+# Pending tasks
+
+Things that are written but not yet verified, or known gaps. Tick them off
+with the commit that closes them.
+
+## Needs hardware or a person at the device
+
+- [ ] **Feeder, multi-page scan over WSD.** `kagaz scan brother --source feeder`
+      with a few pages loaded. The single-page glass path and the empty-feeder
+      fallback are verified; the "keep retrieving until the job is gone" loop
+      for the feeder is not.
+- [ ] **eSCL on a real device.** `crates/kagaz-core/src/scan/escl.rs` is written
+      from the specification with hand-built fixtures
+      (`tests/fixtures/escl/`). Needs any eSCL/AirScan scanner. Once verified,
+      record real fixtures and make the dispatcher in `scan/mod.rs` prefer
+      eSCL over WSD.
+- [ ] **USB discovery live check.** Plug the Brother in over USB and run
+      `kagaz discover --no-mdns --no-wsd --no-snmp`. Expect the classic printer
+      class (7/1/2) with the IEEE 1284 ID read from sysfs. Record the ID as a
+      fixture under `tests/fixtures/usb/` and point the test in
+      `discovery/usb.rs` at it.
+- [ ] **Windows run.** On the PC at 198.51.100.57: `kagaz discover`,
+      `kagaz explain`, `kagaz scan` against the Brother. Known gap: the IEEE
+      1284 ID of USB printers is not read on Windows (usbprint.sys owns the
+      device); the USB product string is used instead.
+- [ ] **macOS run.** No Mac available.
+
+## Known gaps in the code
+
+- [ ] **eSCL over TLS only** (`_uscans` with no `_uscan`): refused with a
+      message, because `ureq` is built without TLS. Decide between rustls
+      (size) and native-tls (per-OS libs) when a device needs it.
+- [ ] **mDNS TXT record missed now and then.** About 2 runs in 20, the
+      Brother's IPP TXT record does not arrive within the 800 ms fallback
+      window in `discovery/mdns_txt.rs`, so the print verdict drops to
+      "WSD" only (or "AirPrint" only via the SNMP CMD field). A second TXT
+      query, or a longer window, would likely fix it. Kept as is on request.
+- [ ] **IPP-USB scan capability** is reported as "likely, not checked": no
+      eSCL probe over the USB cable yet.
+- [ ] **Duplex over WSD** is coded (MediaBack) but untested: the Brother has
+      no duplex feeder.
+- [ ] **Scan preview** (low-dpi quick scan to screen) waits for the desktop
+      app.
+
+## Roadmap, not yet started
+
+- [ ] M3 driverless print over IPP, with job and supplies status.
+- [ ] M4 driver finder: `drivers/` TOML database and the consent-based vendor
+      installer flow, starting with Brother on Linux (brscan4 + brscan-skey,
+      reference in `installations/brother-scanner/`).
+- [ ] Desktop app (Tauri) once the Linux build libraries are installed.
