@@ -54,9 +54,9 @@ with the commit that closes them.
 - [ ] M4 driver finder: `drivers/` TOML database and the consent-based vendor
       installer flow, starting with Brother on Linux (brscan4 + brscan-skey,
       reference in `installations/brother-scanner/`).
-- [ ] **Desktop app (Tauri 2, plain HTML/CSS/JS) in `apps/desktop/`.** Written
-      (device list, About = explain, Scan = kagaz scan) but NOT yet compiled:
-      it needs `sudo apt install libwebkit2gtk-4.1-dev libgtk-3-dev
-      libayatana-appindicator3-dev librsvg2-dev pkg-config libxdo-dev`, then
-      `cargo build -p kagaz-desktop`. It is outside the workspace's default
-      members so `cargo build` and `cargo test` stay green without it.
+- [ ] **Desktop app (Tauri 2, plain HTML/CSS/JS) in `apps/desktop/`.** Compiles
+      and runs (`cargo run -p kagaz-desktop`) but the window has only been
+      checked by the author of the code, not by a person looking at it: the
+      device list, the About pane and a scan from the Scan pane need a look.
+      It is outside the workspace's default members so `cargo build` and
+      `cargo test` stay green without the webkit2gtk/gtk libraries.

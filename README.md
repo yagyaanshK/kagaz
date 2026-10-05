@@ -69,7 +69,7 @@ and Valetudo communities have already done, without asking you to run either.
 ```
 crates/kagaz-core   library: discovery, device model, module host, driver database
 crates/kagaz-cli    the `kagaz` command, a thin layer over the core
-apps/desktop        the desktop app (Tauri), another thin layer over the core
+apps/desktop        the desktop app (Tauri 2, plain HTML/CSS/JS), another thin layer over the core
 modules/            device-class modules (first: printers and scanners), built to WebAssembly
 drivers/            community-maintained database: model -> official driver per OS
 docs/               design notes and protocol references
@@ -140,6 +140,10 @@ prints a PDF, JPEG or PNG without a driver on any IPP Everywhere printer:
 rendered here (pure Rust) at the printer's resolution and paper size, sent
 as PWG Raster. `--copies`, `--paper`, `--gray`, and `--dry-run` to check
 with the printer without printing.
+
+The desktop window (`cargo run -p kagaz-desktop`) shows the same devices,
+the same plain-words explanation and the same scan options; on Linux it
+needs the webkit2gtk and gtk3 development packages to build.
 
 ## Roadmap
 
