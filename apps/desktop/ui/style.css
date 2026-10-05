@@ -1,4 +1,5 @@
 :root {
+  color-scheme: light dark;
   --bg: #f6f5f2;
   --panel: #ffffff;
   --text: #1d1d1b;
@@ -123,6 +124,27 @@ select, button, input {
   border: 1px solid var(--line);
   border-radius: 6px;
   padding: 6px 8px;
+}
+/* Draw selects ourselves: the native look ignores our colours in dark mode. */
+select {
+  appearance: none;
+  -webkit-appearance: none;
+  color: var(--text);
+  background-color: var(--panel);
+  background-image: linear-gradient(45deg, transparent 50%, var(--text) 50%),
+                    linear-gradient(135deg, var(--text) 50%, transparent 50%);
+  background-position: calc(100% - 16px) 55%, calc(100% - 11px) 55%;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+  padding-right: 30px;
+}
+select option {
+  color: var(--text);
+  background: var(--panel);
+}
+select:focus-visible, button:focus-visible, input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 button { cursor: pointer; }
 button:disabled { opacity: 0.6; cursor: default; }

@@ -54,9 +54,8 @@ with the commit that closes them.
 - [ ] M4 driver finder: `drivers/` TOML database and the consent-based vendor
       installer flow, starting with Brother on Linux (brscan4 + brscan-skey,
       reference in `installations/brother-scanner/`).
-- [ ] **Desktop app (Tauri 2, plain HTML/CSS/JS) in `apps/desktop/`.** Compiles
-      and runs (`cargo run -p kagaz-desktop`) but the window has only been
-      checked by the author of the code, not by a person looking at it: the
-      device list, the About pane and a scan from the Scan pane need a look.
-      It is outside the workspace's default members so `cargo build` and
-      `cargo test` stay green without the webkit2gtk/gtk libraries.
+- [ ] **Desktop app: a scan from the Scan pane.** The window builds, runs, lists
+      the Brother and fills the About pane (checked by the user on
+      2026-10-05); nobody has yet clicked Scan in it. `cargo run -p kagaz-desktop`;
+      the crate is outside the default members so `cargo build`/`cargo test`
+      stay green without the webkit2gtk/gtk libraries.
