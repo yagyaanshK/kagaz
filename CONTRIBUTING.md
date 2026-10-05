@@ -27,3 +27,7 @@ Plain, descriptive messages that say what changed and why. Do not add
 
 Run `kagaz discover --report` and attach the output. It contains the device's
 advertised capabilities and nothing personal.
+
+## Licensing
+
+Kagaz is GPL-3.0-or-later. Contributions need the [Contributor License Agreement](CLA.md): comment "I have read and agree to the CLA" on your first pull request. It keeps your copyright and lets the project offer commercial licenses alongside the GPL.

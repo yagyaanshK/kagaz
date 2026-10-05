@@ -157,4 +157,4 @@ model, pointing at the vendor's official downloads.
 
 ## License
 
-GPL-3.0-or-later. See [LICENSE](LICENSE).
+GPL-3.0-or-later. See [LICENSE](LICENSE). Contributions are accepted under the [CLA](CLA.md), which lets the project also be licensed commercially to parties who cannot use the GPL.
