@@ -91,7 +91,7 @@ async function rescan() {
 // ---------- detail ----------
 
 function canScan(d) {
-  return has(d, "Escl", "WsdScan");
+  return has(d, "Escl", "WsdScan", "SaneNet");
 }
 
 async function select(i) {
@@ -219,27 +219,67 @@ function dpiLabel(dpi) {
   return `${dpi} dpi (${hint})`;
 }
 
-async function loadCapabilities(d, i) {
+let caps = null; // what the selected device offers, per engine
+
+function engineCaps() {
+  if (!caps) return null;
+  const engine = $("scan-form").querySelector('select[name="engine"]').value;
+  return engine === "Driver" ? caps.driver : caps.driverless;
+}
+
+// The resolution list always shows every value either engine offers; the
+// note says which engine takes the chosen one. The choice stays with you.
+function renderResolutions() {
   const dpiSel = $("scan-form").querySelector('select[name="dpi"]');
   const srcSel = $("scan-form").querySelector('select[name="source"]');
-  dpiSel.disabled = true;
-  try {
-    const caps = await invoke("scan_capabilities", { device: d });
-    if (current !== i) return;
-    const res = caps.resolutions.length ? caps.resolutions : [300];
-    const preferred = res.includes(300) ? 300 : res.filter((r) => r <= 300).pop() || res[0];
-    dpiSel.innerHTML = res.map((r) => `<option value="${r}" ${r === preferred ? "selected" : ""}>${dpiLabel(r)}</option>`).join("");
-    for (const opt of srcSel.options) {
-      const needsFeeder = opt.value === "Feeder" || opt.value === "FeederDuplex";
-      opt.disabled = (needsFeeder && !caps.feeder) || (opt.value === "Glass" && !caps.glass) || (opt.value === "FeederDuplex" && !caps.duplex);
-      opt.hidden = opt.disabled;
-    }
-    if (srcSel.selectedOptions[0]?.disabled) srcSel.value = caps.glass ? "Glass" : "Feeder";
-    $("scan-state").textContent = `${caps.protocol}: ${res.join(", ")} dpi` + (caps.feeder ? ", glass and feeder" : ", glass only") + (caps.duplex ? ", both sides" : "");
-  } catch (e) {
-    $("scan-state").textContent = "Could not ask the scanner what it offers: " + e;
+  const engSel = $("scan-form").querySelector('select[name="engine"]');
+  if (!caps) return;
+  const dl = caps.driverless ? caps.driverless.resolutions : [];
+  const dr = caps.driver ? caps.driver.resolutions : [];
+  const all = [...new Set([...dl, ...dr])].sort((a, b) => a - b);
+  const current = Number(dpiSel.value) || 300;
+  const chosen = all.includes(current) ? current : all.includes(300) ? 300 : all[all.length - 1];
+  dpiSel.innerHTML = all
+    .map((r) => {
+      const who = dl.includes(r) && dr.includes(r) ? "" : dl.includes(r) ? " · no driver" : " · driver";
+      return `<option value="${r}" ${r === chosen ? "selected" : ""}>${dpiLabel(r)}${who}</option>`;
+    })
+    .join("");
+  for (const opt of engSel.options) {
+    opt.disabled = (opt.value === "Driver" && !caps.driver) || (opt.value === "Driverless" && !caps.driverless);
   }
-  dpiSel.disabled = false;
+  if (engSel.selectedOptions[0]?.disabled) engSel.value = caps.driverless ? "Driverless" : "Driver";
+  const ec = engineCaps();
+  for (const opt of srcSel.options) {
+    const needsFeeder = opt.value === "Feeder" || opt.value === "FeederDuplex";
+    opt.disabled = !ec || (needsFeeder && !ec.feeder) || (opt.value === "Glass" && !ec.glass) || (opt.value === "FeederDuplex" && !ec.duplex);
+  }
+  if (srcSel.selectedOptions[0]?.disabled) srcSel.value = ec && ec.glass ? "Glass" : "Feeder";
+  const dpi = Number(dpiSel.value);
+  const note = $("engine-note");
+  if (ec && !ec.resolutions.includes(dpi)) {
+    const other = engSel.value === "Driver" ? "no driver" : "the installed vendor driver";
+    note.textContent = `${dpi} dpi is not offered via ${ec.via}; it is offered with "${other}". Scanning will refuse as set.`;
+    note.classList.add("cap-warn");
+  } else if (ec) {
+    note.textContent = `via ${ec.via}: ${ec.resolutions.join(", ")} dpi` + (ec.feeder ? ", glass and feeder" : ", glass only") + (ec.duplex ? ", both sides" : "");
+    note.classList.remove("cap-warn");
+  } else {
+    note.textContent = "";
+  }
+}
+
+async function loadCapabilities(d, i) {
+  caps = null;
+  $("engine-note").textContent = "asking the scanner what it offers…";
+  try {
+    const c = await invoke("scan_capabilities", { device: d });
+    if (current !== i) return;
+    caps = c;
+    renderResolutions();
+  } catch (e) {
+    $("engine-note").textContent = "Could not ask the scanner what it offers: " + e;
+  }
   Pictures.update($("scan-form"));
 }
 
@@ -308,6 +348,7 @@ $("scan-form").addEventListener("submit", async (ev) => {
         dpi: Number(f.get("dpi")),
         color: f.get("color"),
         paper: f.get("paper"),
+        engine: f.get("engine"),
       },
       output: {
         format,
@@ -330,6 +371,9 @@ $("scan-form").addEventListener("submit", async (ev) => {
 });
 
 $("rescan").addEventListener("click", rescan);
-$("scan-form").addEventListener("change", () => Pictures.update($("scan-form")));
+$("scan-form").addEventListener("change", () => {
+  renderResolutions();
+  Pictures.update($("scan-form"));
+});
 Pictures.update($("scan-form"));
 rescan();

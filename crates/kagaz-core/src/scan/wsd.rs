@@ -19,6 +19,8 @@ use std::time::Duration;
 
 const NS_SCAN: &str = "http://schemas.microsoft.com/windows/2006/08/wdp/scan";
 const ANONYMOUS: &str = "http://schemas.xmlsoap.org/ws/2004/08/addressing/role/anonymous";
+/// Resolutions worth asking about beyond the advertised list.
+const PROBE_RESOLUTIONS: &[u32] = &[150, 400, 600, 1200];
 
 /// Capabilities of one input source, in the units the protocol uses.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -87,6 +89,30 @@ impl WsdScanner {
         let (caps, status) = parse_elements(&text)?;
         scanner.caps = caps;
         scanner.status = status;
+        // Devices advertise fewer resolutions than they accept (a Brother
+        // lists 100-300 and takes 600); ask about the usual extras once.
+        for source in [Source::Glass, Source::Feeder] {
+            let listed = match source {
+                Source::Glass => scanner.caps.platen.as_ref().map(|c| c.resolutions.clone()),
+                _ => scanner.caps.feeder.as_ref().map(|c| c.resolutions.clone()),
+            };
+            let Some(listed) = listed else { continue };
+            let mut extra = Vec::new();
+            for dpi in PROBE_RESOLUTIONS {
+                if !listed.contains(dpi) && scanner.validate_resolution(source, *dpi) {
+                    extra.push(*dpi);
+                }
+            }
+            let target = match source {
+                Source::Glass => scanner.caps.platen.as_mut(),
+                _ => scanner.caps.feeder.as_mut(),
+            };
+            if let Some(c) = target {
+                c.resolutions.extend(extra);
+                c.resolutions.sort_unstable();
+                c.resolutions.dedup();
+            }
+        }
         Ok(scanner)
     }
 
@@ -139,6 +165,50 @@ impl WsdScanner {
             }
         }
         self.run_job(req, Source::Glass, on_event)
+    }
+
+    /// Does the device accept a job at `dpi` on `source`? Printers advertise
+    /// fewer resolutions than they take (a Brother lists 100-300 and accepts
+    /// 600), so this asks instead of trusting the list.
+    pub fn validate_resolution(&self, source: Source, dpi: u32) -> bool {
+        let caps = match source {
+            Source::Glass => self.caps.platen.as_ref(),
+            _ => self.caps.feeder.as_ref(),
+        };
+        let Some(caps) = caps else {
+            return false;
+        };
+        let color = caps
+            .colors
+            .iter()
+            .find(|c| c.as_str() == "RGB24")
+            .or_else(|| caps.colors.first())
+            .cloned()
+            .unwrap_or_else(|| "RGB24".into());
+        let format = ["jfif", "exif", "png"]
+            .iter()
+            .find(|f| self.caps.formats.iter().any(|have| have == *f))
+            .map(|f| f.to_string())
+            .unwrap_or_else(|| "jfif".into());
+        let params = JobParams {
+            source,
+            dpi,
+            color,
+            format,
+            width: 1000.min(caps.max_width),
+            height: 1000.min(caps.max_height),
+        };
+        let body =
+            create_job_body(&params).replace("CreateScanJobRequest", "ValidateScanTicketRequest");
+        match self.post("ValidateScanTicket", &body) {
+            Ok((_, reply)) => {
+                let text = String::from_utf8_lossy(&reply);
+                check_fault(&text).is_ok()
+                    && !text.contains("ValidTicket>0<")
+                    && !text.contains("ValidTicket>false<")
+            }
+            Err(_) => false,
+        }
     }
 
     /// Choose what to ask for, given the request and what the device offers.

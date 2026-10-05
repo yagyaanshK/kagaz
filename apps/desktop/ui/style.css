@@ -185,3 +185,5 @@ button:disabled { opacity: 0.6; cursor: default; }
 
 #button-panel { margin-top: 26px; padding-top: 14px; border-top: 1px solid var(--line); }
 #button-panel h3 { margin-top: 0; }
+
+label small { font-size: 12px; min-height: 1.2em; }

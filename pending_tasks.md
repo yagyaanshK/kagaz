@@ -42,6 +42,16 @@ with the commit that closes them.
 - [ ] **Scan preview** (low-dpi quick scan to screen) waits for the desktop
       app.
 
+## Scanning engines
+
+- [ ] **Driver engine at high resolution.** `kagaz scan --engine driver --dpi 600`
+      (grey, full A4, Brother brscan4 over Wi-Fi) did not finish in five
+      minutes on 2026-10-06; 100 dpi takes 36 s. Find out whether scanimage
+      hangs or is just that slow, and show progress or a time estimate.
+- [ ] **Driverless resolutions are probed, not advertised.** The Brother lists
+      100-300 over WSD but validates and scans 600; Kagaz asks about 150, 400,
+      600 and 1200 at connect time. Check the same on an eSCL device.
+
 ## Desktop app polish
 
 - [x] Illustrations next to each option in the Scan pane and a badge per
