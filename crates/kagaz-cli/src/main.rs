@@ -61,10 +61,17 @@ fn main() -> Result<()> {
                 return Ok(());
             }
             if devices.is_empty() {
-                println!(
-                    "No printers or scanners found on USB or within {timeout} s on the network."
-                );
-                println!("Try a longer --timeout, and check that this computer and the device are on the same network.");
+                let network = opts.use_mdns || opts.use_wsd;
+                match (opts.use_usb, network) {
+                    (true, true) => println!(
+                        "No printers or scanners found on USB or within {timeout} s on the network."
+                    ),
+                    (true, false) => println!("No printers or scanners found on USB."),
+                    _ => println!("No printers or scanners answered within {timeout} s."),
+                }
+                if network {
+                    println!("Try a longer --timeout, and check that this computer and the device are on the same network.");
+                }
                 return Ok(());
             }
             for d in &devices {
