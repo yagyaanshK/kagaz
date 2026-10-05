@@ -111,6 +111,7 @@ async function select(i) {
 
   $("button-state").textContent = "";
   loadButtonSettings(d);
+  if (canScan(d)) loadCapabilities(d, i);
   $("about-loading").classList.remove("hidden");
   $("about-body").classList.add("hidden");
   try {
@@ -145,7 +146,6 @@ function showTab(name) {
   document.querySelectorAll(".tab").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
   $("tab-about").classList.toggle("hidden", name !== "about");
   $("tab-scan").classList.toggle("hidden", name !== "scan");
-  $("tab-button").classList.toggle("hidden", name !== "button");
 }
 
 // ---------- the printer's own Scan button (Brother scan-key tool) ----------
@@ -197,14 +197,45 @@ function renderButtonSettings(list) {
 }
 
 async function loadButtonSettings(d) {
-  const tab = $("tab-button-btn");
+  const panel = $("button-panel");
   const brother = (d.manufacturer || "").toLowerCase() === "brother";
   let list = null;
   if (brother) {
     try { list = await invoke("button_settings"); } catch (_) { list = null; }
   }
-  tab.classList.toggle("hidden", !list);
+  panel.classList.toggle("hidden", !list);
   if (list) renderButtonSettings(list);
+}
+
+// ---------- what this scanner offers ----------
+
+function dpiLabel(dpi) {
+  const hint = dpi <= 150 ? "quick" : dpi <= 300 ? "documents" : "photos, slow";
+  return `${dpi} dpi (${hint})`;
+}
+
+async function loadCapabilities(d, i) {
+  const dpiSel = $("scan-form").querySelector('select[name="dpi"]');
+  const srcSel = $("scan-form").querySelector('select[name="source"]');
+  dpiSel.disabled = true;
+  try {
+    const caps = await invoke("scan_capabilities", { device: d });
+    if (current !== i) return;
+    const res = caps.resolutions.length ? caps.resolutions : [300];
+    const preferred = res.includes(300) ? 300 : res.filter((r) => r <= 300).pop() || res[0];
+    dpiSel.innerHTML = res.map((r) => `<option value="${r}" ${r === preferred ? "selected" : ""}>${dpiLabel(r)}</option>`).join("");
+    for (const opt of srcSel.options) {
+      const needsFeeder = opt.value === "Feeder" || opt.value === "FeederDuplex";
+      opt.disabled = (needsFeeder && !caps.feeder) || (opt.value === "Glass" && !caps.glass) || (opt.value === "FeederDuplex" && !caps.duplex);
+      opt.hidden = opt.disabled;
+    }
+    if (srcSel.selectedOptions[0]?.disabled) srcSel.value = caps.glass ? "Glass" : "Feeder";
+    $("scan-state").textContent = `${caps.protocol}: ${res.join(", ")} dpi` + (caps.feeder ? ", glass and feeder" : ", glass only") + (caps.duplex ? ", both sides" : "");
+  } catch (e) {
+    $("scan-state").textContent = "Could not ask the scanner what it offers: " + e;
+  }
+  dpiSel.disabled = false;
+  Pictures.update($("scan-form"));
 }
 
 document.querySelectorAll(".tab").forEach((b) =>
