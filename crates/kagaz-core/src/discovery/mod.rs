@@ -2,6 +2,7 @@
 //! methods and merges the results into one entry per physical device.
 
 pub mod mdns;
+pub mod mdns_txt;
 pub mod wsd;
 
 use crate::device::{merge_devices, Device};

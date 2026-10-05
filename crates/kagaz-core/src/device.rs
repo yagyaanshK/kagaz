@@ -138,7 +138,66 @@ impl Device {
                 self.addresses.push(a);
             }
         }
-        self.services.extend(other.services);
+        for svc in other.services {
+            self.add_service(svc);
+        }
+    }
+
+    /// Add a service, folding it into an existing one for the same endpoint
+    /// (mDNS can report a service several times as its records arrive).
+    pub fn add_service(&mut self, svc: Service) {
+        if let Some(existing) = self
+            .services
+            .iter_mut()
+            .find(|e| e.protocol == svc.protocol && e.source == svc.source && e.port == svc.port)
+        {
+            for (k, v) in svc.attributes {
+                existing.attributes.entry(k).or_insert(v);
+            }
+            if existing.endpoint.is_none() {
+                existing.endpoint = svc.endpoint;
+            }
+        } else {
+            self.services.push(svc);
+        }
+    }
+
+    /// The printing standards a device supports without a driver, by name.
+    pub fn driverless_print_standards(&self) -> Vec<&'static str> {
+        let mut out = Vec::new();
+        let pdl = self
+            .services
+            .iter()
+            .filter(|s| matches!(s.protocol, Protocol::Ipp | Protocol::Ipps))
+            .filter_map(|s| s.attributes.get("pdl"))
+            .next();
+        if let Some(pdl) = pdl {
+            if pdl.contains("image/pwg-raster") {
+                out.push("IPP Everywhere");
+            }
+            if pdl.contains("image/urf") {
+                out.push("AirPrint");
+            }
+        }
+        if self.has_protocol(Protocol::WsdPrint) {
+            out.push("WSD");
+        }
+        if out.is_empty() && self.can_print_driverless() {
+            out.push("IPP");
+        }
+        out
+    }
+
+    /// The scanning standards a device supports without a driver, by name.
+    pub fn driverless_scan_standards(&self) -> Vec<&'static str> {
+        let mut out = Vec::new();
+        if self.has_protocol(Protocol::Escl) || self.has_protocol(Protocol::Escls) {
+            out.push("eSCL");
+        }
+        if self.has_protocol(Protocol::WsdScan) {
+            out.push("WSD");
+        }
+        out
     }
 }
 
@@ -149,7 +208,14 @@ pub fn merge_devices(found: Vec<Device>) -> Vec<Device> {
         if let Some(existing) = out.iter_mut().find(|e| e.same_device(&d)) {
             existing.merge(d);
         } else {
-            out.push(d);
+            let mut fresh = Device {
+                services: Vec::new(),
+                ..d.clone()
+            };
+            for svc in d.services {
+                fresh.add_service(svc);
+            }
+            out.push(fresh);
         }
     }
     for d in &mut out {

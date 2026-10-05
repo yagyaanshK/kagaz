@@ -34,6 +34,9 @@ pub fn browse(timeout: Duration) -> Result<Vec<Device>, String> {
         for (rx, proto) in &receivers {
             while let Ok(event) = rx.recv_timeout(Duration::from_millis(50)) {
                 got_any = true;
+                if std::env::var_os("KAGAZ_DEBUG").is_some() {
+                    eprintln!("mdns event: {event:?}");
+                }
                 if let ServiceEvent::ServiceResolved(info) = event {
                     found.push(device_from_info(&info, *proto));
                 }
@@ -50,15 +53,19 @@ pub fn browse(timeout: Duration) -> Result<Vec<Device>, String> {
     Ok(found)
 }
 
-fn device_from_info(info: &mdns_sd::ServiceInfo, proto: Protocol) -> Device {
+fn device_from_info(info: &mdns_sd::ResolvedService, proto: Protocol) -> Device {
     let mut attributes = BTreeMap::new();
-    for prop in info.get_properties().iter() {
+    for prop in info.txt_properties.iter() {
         attributes.insert(prop.key().to_string(), prop.val_str().to_string());
     }
+    if attributes.is_empty() {
+        // See mdns_txt: the library will not ask for a late TXT record.
+        attributes = super::mdns_txt::fetch_txt(&info.fullname, Duration::from_millis(800));
+    }
     // Instance name is "<name>._ipp._tcp.local."; keep the part before the type.
-    let full = info.get_fullname();
+    let full = info.fullname.as_str();
     let name = full
-        .strip_suffix(info.get_type())
+        .strip_suffix(info.ty_domain.as_str())
         .map(|s| s.trim_end_matches('.').to_string())
         .unwrap_or_else(|| full.to_string())
         .replace("\\032", " ");
@@ -76,19 +83,19 @@ fn device_from_info(info: &mdns_sd::ServiceInfo, proto: Protocol) -> Device {
         .get("rp")
         .or_else(|| attributes.get("rs"))
         .cloned();
-    let hostname = Some(info.get_hostname().trim_end_matches('.').to_string());
+    let hostname = Some(info.host.trim_end_matches('.').to_string());
 
     Device {
         name,
         manufacturer,
         model,
         hostname,
-        addresses: info.get_addresses().iter().copied().collect(),
+        addresses: info.addresses.iter().map(|a| a.to_ip_addr()).collect(),
         uuid: attributes.get("UUID").cloned(),
         services: vec![Service {
             protocol: proto,
             source: "mdns".into(),
-            port: Some(info.get_port()),
+            port: Some(info.port),
             endpoint,
             attributes,
         }],

@@ -1,12 +1,19 @@
 # Kagaz
 
-**Printers and scanners that just work. Any OS, any device, any connection.**
+**Devices that just work. Any OS, any device, any connection.**
 
-Kagaz (कागज़, "paper") is a free, open-source tool that removes the friction of
-connecting printers and scanners: finding the device, knowing what it can do,
-getting the right driver when one is needed, and then printing and scanning
-from one fast, small app. It runs on Linux, Windows and macOS from the same
-code, as a desktop app and as a command-line tool.
+Kagaz (कागज़, "paper") is a free, open-source toolbox for the devices around
+you that come with bad software: printers and scanners first, then robot
+vacuums, IP cameras, doorbells and whatever else answers on the network or a
+cable. It finds the device, tells you what it can do, gets the official
+driver when one is needed, and lets you use the device from one fast, small
+app or from the command line. No always-on server, no hub, no account: one
+small binary on your laptop, on Linux, Windows or macOS.
+
+The base app stays tiny because it knows nothing about any particular kind
+of device. Support for each device class is a module you download on demand,
+and so is the optional AI assistant that can work out how to talk to a device
+nobody has written a module for yet.
 
 > Status: early development. Nothing to download yet. See [Roadmap](#roadmap).
 
@@ -18,6 +25,13 @@ cable. On a good day the operating system notices and everything works. On a
 bad day you are on a vendor website guessing which of twelve downloads applies
 to you, then discovering the "Scan to PC" button needs a second tool with four
 manual steps. Kagaz is built for the bad days.
+
+## What it is not
+
+Not a smart-home hub. Home Assistant is excellent at running a house from an
+always-on box; Kagaz is the tool you open on a laptop when you want to deal
+with a device, and it borrows freely from the protocol work the Home Assistant
+and Valetudo communities have already done, without asking you to run either.
 
 ## Principles
 
@@ -39,13 +53,24 @@ manual steps. Kagaz is built for the bad days.
 5. **Honest about limits.** If a device cannot work on this OS without a
    driver that does not exist, Kagaz says so in plain words instead of
    pretending.
+6. **Modules, on demand, sandboxed.** Each device class is a module compiled
+   to WebAssembly: one file that runs the same on every OS, written in any
+   language, and allowed to reach only the device and ports it declares. The
+   core and the UI are native and stay on the fast path; modules only do
+   device talk, which the network bounds, not the CPU.
+7. **AI only when you ask for it.** An optional assistant module can
+   write and test a driver for an unknown device on the fly. It runs with any
+   model you configure, local or remote, with your own keys, and anything it
+   writes runs in the same sandbox as every other module, after you have seen
+   what it will do. Nothing of this ships in the base app.
 
 ## How it is built
 
 ```
-crates/kagaz-core   library: discovery, device model, protocols, driver database, scan/print
+crates/kagaz-core   library: discovery, device model, module host, driver database
 crates/kagaz-cli    the `kagaz` command, a thin layer over the core
 apps/desktop        the desktop app (Tauri), another thin layer over the core
+modules/            device-class modules (first: printers and scanners), built to WebAssembly
 drivers/            community-maintained database: model -> official driver per OS
 docs/               design notes and protocol references
 ```
@@ -92,6 +117,15 @@ WS-Discovery) and says which of them can print and scan without a driver.
 - **M5 Extras, all optional downloads.** OCR to searchable PDF (Tesseract),
   the printer's Scan-button listener (cross-vendor push scan), smart filing
   with on-device models, print queue and supplies view.
+- **M6 Module host.** Move the printer/scanner support into the first
+  WebAssembly module; the base app becomes device-agnostic.
+- **M7 More device classes, each its own module.** Robot vacuums (starting
+  with devices on the Tuya/SmartLife platform), IP cameras and doorbells
+  (ONVIF, RTSP), and onward as contributors bring devices.
+- **M8 AI assistant module.** Configurable model backends (local servers,
+  OpenRouter, OpenAI-compatible and Anthropic endpoints, the Claude Agent SDK
+  as the agent runtime), used to draft, test and package a module for a
+  device that has none.
 
 ## Contributing
 

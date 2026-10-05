@@ -25,7 +25,7 @@ enum Command {
         #[arg(long, default_value_t = 3)]
         timeout: u64,
         /// Print machine-readable JSON instead of a table
-        #[arg(long)]
+        #[arg(long, alias = "report")]
         json: bool,
         /// Skip mDNS/DNS-SD (AirPrint, IPP Everywhere, eSCL announcements)
         #[arg(long)]
@@ -89,12 +89,14 @@ fn main() -> Result<()> {
                 );
                 let protos: Vec<&str> = d.protocols().iter().map(|p| p.label()).collect();
                 println!("  protocols  {}", protos.join(", "));
+                let print_std = d.driverless_print_standards().join(", ");
+                let scan_std = d.driverless_scan_standards().join(", ");
                 println!(
                     "  print      {}",
                     verdict(
                         d.can_print_driverless(),
                         d.has_protocol(Protocol::PdlDataStream) || d.has_protocol(Protocol::Lpd),
-                        "driverless (IPP/WSD)",
+                        &format!("driverless ({print_std})"),
                         "needs a driver (raw/LPD only)"
                     )
                 );
@@ -103,7 +105,7 @@ fn main() -> Result<()> {
                     verdict(
                         d.can_scan_driverless(),
                         d.has_protocol(Protocol::SaneNet),
-                        "driverless (eSCL/WSD)",
+                        &format!("driverless ({scan_std})"),
                         "needs the vendor's scanner driver"
                     )
                 );
