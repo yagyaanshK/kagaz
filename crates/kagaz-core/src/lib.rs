@@ -4,6 +4,9 @@
 pub mod device;
 pub mod discovery;
 pub mod explain;
+pub mod localtime;
+pub mod output;
+pub mod scan;
 pub mod select;
 
 pub use device::{Device, Protocol, Service, UsbInfo};

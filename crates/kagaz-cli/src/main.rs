@@ -2,10 +2,13 @@
 //! scriptable and fast.
 
 use anyhow::Result;
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
+use kagaz_core::output::{human_size, parse_size, Format, OutputOptions};
+use kagaz_core::scan::{ColorMode, Event, Paper, ScanRequest, Source};
 use kagaz_core::{
     discover, explain, open_ports, Device, DiscoverOptions, Host, Protocol, SelectError,
 };
+use std::path::PathBuf;
 use std::time::Duration;
 
 #[derive(Parser)]
@@ -21,7 +24,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Find printers and scanners on the network and say what they can do
+    /// Find printers and scanners on the network and USB, and say what they can do
     Discover {
         /// Seconds to listen for answers
         #[arg(long, default_value_t = 3)]
@@ -53,6 +56,68 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Scan without a driver (WSD, later eSCL) to a PDF, JPEG or PNG file
+    Scan {
+        /// Its number in `kagaz discover`, an IP address, hostname, or part of its name
+        device: String,
+        /// Where the paper is; auto = the feeder if it has paper, else the glass
+        #[arg(long, value_enum, default_value_t = SourceArg::Auto)]
+        source: SourceArg,
+        /// Resolution in dots per inch
+        #[arg(long, default_value_t = 300)]
+        dpi: u32,
+        /// Colour, grey or black-and-white (converted here if the scanner only does colour)
+        #[arg(long, value_enum, default_value_t = ModeArg::Color)]
+        mode: ModeArg,
+        /// Output format; defaults to the extension of --output, else pdf
+        #[arg(long, value_enum)]
+        format: Option<FormatArg>,
+        /// Paper size to scan
+        #[arg(long, value_enum, default_value_t = PaperArg::A4)]
+        paper: PaperArg,
+        /// JPEG quality 1-100 when pages are re-encoded (default 85; untouched pages keep the scanner's quality)
+        #[arg(long)]
+        quality: Option<u8>,
+        /// Keep each output file at or under this size, e.g. 2M or 500K; pages are re-encoded and shrunk as needed
+        #[arg(long)]
+        max_size: Option<String>,
+        /// Output file (default: scan-<date>-<time>.<ext> in the current directory)
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+        /// Seconds to listen for answers while finding the device
+        #[arg(long, default_value_t = 3)]
+        timeout: u64,
+    },
+}
+
+#[derive(Clone, Copy, ValueEnum, PartialEq, Eq)]
+enum SourceArg {
+    Auto,
+    Glass,
+    Feeder,
+    Duplex,
+}
+
+#[derive(Clone, Copy, ValueEnum, PartialEq, Eq)]
+enum ModeArg {
+    Color,
+    Gray,
+    Bw,
+}
+
+#[derive(Clone, Copy, ValueEnum, PartialEq, Eq)]
+enum FormatArg {
+    Pdf,
+    Jpeg,
+    Png,
+}
+
+#[derive(Clone, Copy, ValueEnum, PartialEq, Eq)]
+enum PaperArg {
+    A4,
+    Letter,
+    Legal,
+    Max,
 }
 
 fn main() -> Result<()> {
@@ -139,6 +204,12 @@ fn main() -> Result<()> {
                 println!("  protocols  {}", protos.join(", "));
                 let print_std = d.driverless_print_standards().join(", ");
                 let scan_std = d.driverless_scan_standards().join(", ");
+                if d.protocols() == [Protocol::Snmp] {
+                    println!("  print      unknown: answers SNMP but advertises no print service");
+                    println!("  scan       unknown: answers SNMP but advertises no scan service");
+                    println!();
+                    continue;
+                }
                 let driver_print = d.has_protocol(Protocol::PdlDataStream)
                     || d.has_protocol(Protocol::Lpd)
                     || d.has_protocol(Protocol::UsbPrinter);
@@ -147,13 +218,6 @@ fn main() -> Result<()> {
                 } else {
                     "needs a driver (raw/LPD only)"
                 };
-                let snmp_only = d.protocols() == [Protocol::Snmp];
-                if snmp_only {
-                    println!("  print      unknown: answers SNMP but advertises no print service");
-                    println!("  scan       unknown: answers SNMP but advertises no scan service");
-                    println!();
-                    continue;
-                }
                 println!(
                     "  print      {}",
                     verdict(
@@ -180,7 +244,7 @@ fn main() -> Result<()> {
                 }
                 println!();
             }
-            println!("Run `kagaz explain <number>` for what this computer can do with a device and what would fix it.");
+            println!("Run `kagaz explain <number>` for what this computer can do with a device, or `kagaz scan <number>` to scan.");
             Ok(())
         }
         Command::Explain {
@@ -188,31 +252,11 @@ fn main() -> Result<()> {
             timeout,
             json,
         } => {
-            let opts = DiscoverOptions {
+            let devices = discover(&DiscoverOptions {
                 timeout: Duration::from_secs(timeout),
                 ..Default::default()
-            };
-            let devices = discover(&opts)?;
-            let d = match kagaz_core::find(&devices, &device) {
-                Ok(d) => d,
-                Err(SelectError::Ambiguous { candidates, .. }) => {
-                    eprintln!("\"{device}\" matches several devices:");
-                    for i in candidates {
-                        eprintln!("  {i}. {}", title(&devices[i - 1]));
-                    }
-                    anyhow::bail!("pick one by number: kagaz explain <number>");
-                }
-                Err(e) => {
-                    if devices.is_empty() {
-                        anyhow::bail!("{e}: nothing was found at all (see `kagaz discover`)");
-                    }
-                    eprintln!("Found:");
-                    for (i, d) in devices.iter().enumerate() {
-                        eprintln!("  {}. {}", i + 1, title(d));
-                    }
-                    anyhow::bail!("{e}");
-                }
-            };
+            })?;
+            let d = select_device(&devices, &device)?;
             let host = Host::detect();
             let ports = d
                 .addresses
@@ -255,6 +299,140 @@ fn main() -> Result<()> {
                 }
             }
             Ok(())
+        }
+        Command::Scan {
+            device,
+            source,
+            dpi,
+            mode,
+            format,
+            paper,
+            quality,
+            max_size,
+            output,
+            timeout,
+        } => {
+            let max_bytes = match &max_size {
+                Some(s) => Some(parse_size(s).ok_or_else(|| {
+                    anyhow::anyhow!("--max-size: cannot read \"{s}\" (try 2M or 500K)")
+                })?),
+                None => None,
+            };
+            if let Some(q) = quality {
+                anyhow::ensure!((1..=100).contains(&q), "--quality must be 1-100");
+            }
+            let format = match (format, &output) {
+                (Some(f), _) => match f {
+                    FormatArg::Pdf => Format::Pdf,
+                    FormatArg::Jpeg => Format::Jpeg,
+                    FormatArg::Png => Format::Png,
+                },
+                (None, Some(p)) => p
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .and_then(Format::from_extension)
+                    .unwrap_or(Format::Pdf),
+                (None, None) => Format::Pdf,
+            };
+            let path = output.unwrap_or_else(|| {
+                PathBuf::from(format!(
+                    "scan-{}.{}",
+                    kagaz_core::localtime::now().file_stamp(),
+                    format.extension()
+                ))
+            });
+            let color = match mode {
+                ModeArg::Color => ColorMode::Color,
+                ModeArg::Gray => ColorMode::Gray,
+                ModeArg::Bw => ColorMode::BlackWhite,
+            };
+            let req = ScanRequest {
+                source: match source {
+                    SourceArg::Auto => Source::Auto,
+                    SourceArg::Glass => Source::Glass,
+                    SourceArg::Feeder => Source::Feeder,
+                    SourceArg::Duplex => Source::FeederDuplex,
+                },
+                dpi,
+                color,
+                paper: match paper {
+                    PaperArg::A4 => Paper::A4,
+                    PaperArg::Letter => Paper::Letter,
+                    PaperArg::Legal => Paper::Legal,
+                    PaperArg::Max => Paper::Max,
+                },
+            };
+
+            println!("Looking for \"{device}\"...");
+            let devices = discover(&DiscoverOptions {
+                timeout: Duration::from_secs(timeout),
+                ..Default::default()
+            })?;
+            let d = select_device(&devices, &device)?;
+            println!("Scanning from {}", title(d));
+            let pages = kagaz_core::scan::scan(d, &req, &mut |e| match e {
+                Event::Starting { source, dpi } => {
+                    let where_ = match source {
+                        Source::Glass => "the glass",
+                        Source::Feeder => "the feeder",
+                        Source::FeederDuplex => "the feeder, both sides",
+                        Source::Auto => "the scanner",
+                    };
+                    println!("  from {where_} at {dpi} dpi...");
+                }
+                Event::FeederEmpty => println!("  the feeder is empty; using the glass instead"),
+                Event::Page { number, bytes } => {
+                    println!("  page {number} received ({})", human_size(bytes as u64))
+                }
+                Event::Substituted(note) => println!("  note: {note}"),
+            })?;
+            let written = kagaz_core::output::write(
+                &pages,
+                &OutputOptions {
+                    format,
+                    color,
+                    quality,
+                    max_bytes,
+                },
+                &path,
+            )?;
+            for w in &written {
+                println!(
+                    "Saved {} ({} page{}, {})",
+                    w.path.display(),
+                    w.pages,
+                    if w.pages == 1 { "" } else { "s" },
+                    human_size(w.bytes)
+                );
+                if let Some(warning) = &w.warning {
+                    println!("  warning: {warning}");
+                }
+            }
+            Ok(())
+        }
+    }
+}
+
+/// Pick one device by what the user typed, or explain why that failed.
+fn select_device<'a>(devices: &'a [Device], selector: &str) -> Result<&'a Device> {
+    match kagaz_core::find(devices, selector) {
+        Ok(d) => Ok(d),
+        Err(SelectError::Ambiguous { candidates, .. }) => {
+            eprintln!("\"{selector}\" matches several devices:");
+            for i in candidates {
+                eprintln!("  {i}. {}", title(&devices[i - 1]));
+            }
+            anyhow::bail!("pick one by number")
+        }
+        Err(e) => {
+            if devices.is_empty() {
+                anyhow::bail!("{e}: nothing was found at all (see `kagaz discover`)");
+            }
+            eprintln!("Found:");
+            for (i, d) in devices.iter().enumerate() {
+                eprintln!("  {}. {}", i + 1, title(d));
+            }
+            anyhow::bail!("{e}")
         }
     }
 }

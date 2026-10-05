@@ -106,6 +106,8 @@ fn device_from_match(from: IpAddr, m: ProbeMatch) -> Option<Device> {
         .cloned();
 
     let mut protocols: Vec<Protocol> = Vec::new();
+    // Each hosted service has its own address; that is what print and scan talk to.
+    let mut endpoints: BTreeMap<Protocol, String> = BTreeMap::new();
     let mut attributes = BTreeMap::new();
     attributes.insert("types".into(), m.types.join(" "));
     if let Some(x) = &xaddr {
@@ -114,11 +116,17 @@ fn device_from_match(from: IpAddr, m: ProbeMatch) -> Option<Device> {
             device.name = meta.friendly_name.clone().unwrap_or_default();
             device.manufacturer = meta.manufacturer;
             device.model = meta.model;
-            for hosted in meta.hosted_types {
-                if hosted.contains("PrinterServiceType") {
-                    protocols.push(Protocol::WsdPrint);
-                } else if hosted.contains("ScannerServiceType") {
-                    protocols.push(Protocol::WsdScan);
+            for (types, address) in meta.hosted {
+                let proto = if types.contains("PrinterServiceType") {
+                    Protocol::WsdPrint
+                } else if types.contains("ScannerServiceType") {
+                    Protocol::WsdScan
+                } else {
+                    continue;
+                };
+                protocols.push(proto);
+                if let Some(a) = address {
+                    endpoints.insert(proto, a);
                 }
             }
         }
@@ -141,8 +149,12 @@ fn device_from_match(from: IpAddr, m: ProbeMatch) -> Option<Device> {
         .map(|p| Service {
             protocol: p,
             source: "wsd".into(),
-            port: xaddr.as_deref().and_then(port_of),
-            endpoint: xaddr.clone(),
+            port: endpoints
+                .get(&p)
+                .map(String::as_str)
+                .or(xaddr.as_deref())
+                .and_then(port_of),
+            endpoint: endpoints.get(&p).cloned().or_else(|| xaddr.clone()),
             attributes: attributes.clone(),
         })
         .collect();
@@ -155,12 +167,13 @@ fn port_of(url: &str) -> Option<u16> {
     host_port.rsplit(':').next()?.parse().ok()
 }
 
-#[derive(Debug, Default)]
-struct Metadata {
-    friendly_name: Option<String>,
-    manufacturer: Option<String>,
-    model: Option<String>,
-    hosted_types: Vec<String>,
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(crate) struct Metadata {
+    pub friendly_name: Option<String>,
+    pub manufacturer: Option<String>,
+    pub model: Option<String>,
+    /// Hosted services: (types, endpoint address when it is an http(s) URL).
+    pub hosted: Vec<(String, Option<String>)>,
 }
 
 /// WS-Transfer Get: asks the device for its model and hosted services.
@@ -178,7 +191,12 @@ fn get_metadata(xaddr: &str, to: &str) -> Option<Metadata> {
         .send_string(&body)
         .ok()?;
     let text = resp.into_string().ok()?;
-    let doc = Document::parse(&text).ok()?;
+    parse_metadata(&text)
+}
+
+/// Read the model and hosted services out of a WS-Transfer Get reply.
+pub(crate) fn parse_metadata(text: &str) -> Option<Metadata> {
+    let doc = Document::parse(text).ok()?;
     let find = |tag: &str| {
         doc.descendants()
             .find(|n| n.has_tag_name(tag))
@@ -186,20 +204,56 @@ fn get_metadata(xaddr: &str, to: &str) -> Option<Metadata> {
             .map(|t| t.trim().to_string())
             .filter(|t| !t.is_empty())
     };
-    let hosted_types = doc
+    let hosted = doc
         .descendants()
         .filter(|n| n.has_tag_name("Hosted"))
-        .filter_map(|h| {
-            h.descendants()
-                .find(|n| n.has_tag_name("Types"))
-                .and_then(|n| n.text())
+        .map(|h| {
+            let text_of = |tag: &str| {
+                h.descendants()
+                    .find(|n| n.has_tag_name(tag))
+                    .and_then(|n| n.text())
+                    .map(|t| t.trim().to_string())
+            };
+            let address = h
+                .descendants()
+                .filter(|n| n.has_tag_name("Address"))
+                .filter_map(|n| n.text())
+                .map(|t| t.trim().to_string())
+                .find(|t| t.starts_with("http://") || t.starts_with("https://"));
+            (text_of("Types").unwrap_or_default(), address)
         })
-        .map(|t| t.trim().to_string())
         .collect();
     Some(Metadata {
         friendly_name: find("FriendlyName"),
         manufacturer: find("Manufacturer"),
         model: find("ModelName"),
-        hosted_types,
+        hosted,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn metadata_lists_hosted_service_addresses() {
+        let text =
+            include_str!("../../tests/fixtures/wsd-scan/brother-dcp-l2540dw.metadata.response.xml");
+        let m = parse_metadata(text).unwrap();
+        assert_eq!(m.manufacturer.as_deref(), Some("Brother"));
+        assert_eq!(m.model.as_deref(), Some("Brother DCP-L2540DW series"));
+        assert_eq!(
+            m.friendly_name.as_deref(),
+            Some("Brother DCP-L2540DW series [000000000001]")
+        );
+        assert_eq!(m.hosted.len(), 2);
+        assert_eq!(
+            m.hosted[1],
+            (
+                "wscn:ScannerServiceType".to_string(),
+                Some("http://198.51.100.167:80/WebServices/ScannerService".to_string())
+            )
+        );
+        assert!(m.hosted[0].0.contains("PrinterServiceType"));
+    }
 }

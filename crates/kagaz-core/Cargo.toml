@@ -8,7 +8,10 @@ repository.workspace = true
 authors.workspace = true
 
 [dependencies]
+flate2 = "1"
+libc = "0.2"
 if-addrs = "0.15"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 mdns-sd = "0.21"
 nusb = "0.2"
 roxmltree = "0.20"
