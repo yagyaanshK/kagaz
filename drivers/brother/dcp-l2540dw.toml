@@ -34,10 +34,10 @@ admin_steps = [
 user_steps = [
   "mkdir -p {scans_dir} ~/.config/autostart",
   "printf '[Desktop Entry]\\nType=Application\\nName=Brother scan-key listener\\nComment=Waits for the Scan button on the {model} and runs Kagaz\\nExec=/usr/bin/brscan-skey\\nX-GNOME-Autostart-Delay=15\\nNoDisplay=true\\n' > ~/.config/autostart/brscan-skey.desktop",
-  "pkill -x brscan-skey; (nohup /usr/bin/brscan-skey >/dev/null 2>&1 &)",
+  "pkill -x brscan-skey-exe || true; sleep 1; (nohup /usr/bin/brscan-skey >/dev/null 2>&1 &)",
 ]
 remove_steps = [
-  "pkill -x brscan-skey || true",
+  "pkill -x brscan-skey-exe || true",
   "brsaneconfig4 -r {name} || true",
   "if command -v ufw >/dev/null; then ufw delete allow from {ip} to any port 54925 proto udp || true; fi",
   "dpkg -r brscan-skey brscan4",
