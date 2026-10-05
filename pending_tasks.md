@@ -44,9 +44,13 @@ with the commit that closes them.
 
 ## Roadmap, not yet started
 
-- [ ] M3 driverless print over IPP (`kagaz print <device> <file>`): status and
-      identify are done; the Print-Job step waits for an OK to use a sheet of
-      paper on the Brother for the test.
+- [x] M3 driverless print over IPP: `kagaz print` sends PWG Raster; one test
+      page printed on the Brother (job 91, 2026-10-05).
+- [ ] **AirPrint-only printers (URF, no PWG Raster).** `kagaz print` refuses
+      them with a message. Apple Raster is PWG Raster with a different header;
+      add it when such a printer is around to test.
+- [ ] **Two-sided printing** is coded (sides keyword, back-side rotation per
+      pwg-raster-document-sheet-back) but only one-sided has been printed.
 - [ ] M4 driver finder: `drivers/` TOML database and the consent-based vendor
       installer flow, starting with Brother on Linux (brscan4 + brscan-skey,
       reference in `installations/brother-scanner/`).

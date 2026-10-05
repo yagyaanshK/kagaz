@@ -132,6 +132,15 @@ ask a printer over IPP how it is doing (state, problems in plain words,
 toner, loaded paper, queue) and make it flash its display so you know which
 one it is.
 
+```
+kagaz print brother document.pdf --sides long
+```
+
+prints a PDF, JPEG or PNG without a driver on any IPP Everywhere printer:
+rendered here (pure Rust) at the printer's resolution and paper size, sent
+as PWG Raster. `--copies`, `--paper`, `--gray`, and `--dry-run` to check
+with the printer without printing.
+
 ## Roadmap
 
 - **M1 Find and explain.** Discover printers and scanners on the network and
@@ -142,7 +151,7 @@ one it is.
   PDF/JPEG/PNG), identical on all OSes. WSD done; eSCL written, awaiting a
   device to verify it on.
 - **M3 Driverless print.** Print over IPP, with job and supplies status.
-  Status and identify done; printing next.
+  Done for IPP Everywhere (PWG Raster) printers; AirPrint-only (URF) printers next.
 - **M4 Driver finder.** The `drivers/` database and the consent-based
   vendor-installer flow, starting with Brother on Linux (which is where this
   project was born).
