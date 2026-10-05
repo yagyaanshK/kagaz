@@ -33,6 +33,9 @@ enum Command {
         /// Skip WS-Discovery (the Windows "Web Services" protocol)
         #[arg(long)]
         no_wsd: bool,
+        /// Skip the USB bus
+        #[arg(long)]
+        no_usb: bool,
     },
 }
 
@@ -44,11 +47,13 @@ fn main() -> Result<()> {
             json,
             no_mdns,
             no_wsd,
+            no_usb,
         } => {
             let opts = DiscoverOptions {
                 timeout: Duration::from_secs(timeout),
                 use_mdns: !no_mdns,
                 use_wsd: !no_wsd,
+                use_usb: !no_usb,
             };
             let devices = discover(&opts)?;
             if json {
@@ -56,7 +61,9 @@ fn main() -> Result<()> {
                 return Ok(());
             }
             if devices.is_empty() {
-                println!("No printers or scanners answered within {timeout} s.");
+                println!(
+                    "No printers or scanners found on USB or within {timeout} s on the network."
+                );
                 println!("Try a longer --timeout, and check that this computer and the device are on the same network.");
                 return Ok(());
             }
@@ -78,37 +85,66 @@ fn main() -> Result<()> {
                         m
                     );
                 }
-                let addrs: Vec<String> = d.addresses.iter().map(|a| a.to_string()).collect();
-                println!(
-                    "  address    {}{}",
-                    addrs.join(", "),
-                    d.hostname
-                        .as_deref()
-                        .map(|h| format!("  ({h})"))
-                        .unwrap_or_default()
-                );
+                if !d.addresses.is_empty() {
+                    let addrs: Vec<String> = d.addresses.iter().map(|a| a.to_string()).collect();
+                    println!(
+                        "  address    {}{}",
+                        addrs.join(", "),
+                        d.hostname
+                            .as_deref()
+                            .map(|h| format!("  ({h})"))
+                            .unwrap_or_default()
+                    );
+                }
+                if let Some(u) = &d.usb {
+                    println!(
+                        "  usb        bus {} device {}  ({:04x}:{:04x}){}",
+                        u.bus,
+                        u.address,
+                        u.vendor_id,
+                        u.product_id,
+                        u.serial
+                            .as_deref()
+                            .map(|s| format!("  serial {s}"))
+                            .unwrap_or_default()
+                    );
+                }
                 let protos: Vec<&str> = d.protocols().iter().map(|p| p.label()).collect();
                 println!("  protocols  {}", protos.join(", "));
                 let print_std = d.driverless_print_standards().join(", ");
                 let scan_std = d.driverless_scan_standards().join(", ");
+                let driver_print = d.has_protocol(Protocol::PdlDataStream)
+                    || d.has_protocol(Protocol::Lpd)
+                    || d.has_protocol(Protocol::UsbPrinter);
+                let driver_print_note = if d.has_protocol(Protocol::UsbPrinter) {
+                    "needs the vendor's printer driver (classic USB printer port)"
+                } else {
+                    "needs a driver (raw/LPD only)"
+                };
                 println!(
                     "  print      {}",
                     verdict(
                         d.can_print_driverless(),
-                        d.has_protocol(Protocol::PdlDataStream) || d.has_protocol(Protocol::Lpd),
+                        driver_print,
                         &format!("driverless ({print_std})"),
-                        "needs a driver (raw/LPD only)"
+                        driver_print_note
                     )
                 );
-                println!(
-                    "  scan       {}",
+                let scan = if d.may_scan_over_ipp_usb() {
+                    "likely, driverless over IPP-USB (eSCL); not checked over the cable yet"
+                        .to_string()
+                } else {
                     verdict(
                         d.can_scan_driverless(),
                         d.has_protocol(Protocol::SaneNet),
                         &format!("driverless ({scan_std})"),
-                        "needs the vendor's scanner driver"
+                        "needs the vendor's scanner driver",
                     )
-                );
+                };
+                println!("  scan       {scan}");
+                if let Some(note) = d.identity_note() {
+                    println!("  note       {note}");
+                }
                 println!();
             }
             Ok(())

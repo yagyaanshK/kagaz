@@ -26,13 +26,20 @@ pub enum Protocol {
     Lpd,
     /// SANE `_scanner._tcp` advertisement (vendor-specific scanning).
     SaneNet,
+    /// IPP over USB (USB printer class 7/1/4): driverless IPP, and usually eSCL, over the cable.
+    IppUsb,
+    /// Classic USB printer class interface (7/1/1-3): needs a driver that speaks the device's language.
+    UsbPrinter,
     /// Something else, kept for the report.
     Other,
 }
 
 impl Protocol {
     pub fn is_driverless_print(self) -> bool {
-        matches!(self, Protocol::Ipp | Protocol::Ipps | Protocol::WsdPrint)
+        matches!(
+            self,
+            Protocol::Ipp | Protocol::Ipps | Protocol::WsdPrint | Protocol::IppUsb
+        )
     }
     pub fn is_driverless_scan(self) -> bool {
         matches!(self, Protocol::Escl | Protocol::Escls | Protocol::WsdScan)
@@ -48,6 +55,8 @@ impl Protocol {
             Protocol::PdlDataStream => "raw-9100",
             Protocol::Lpd => "LPD",
             Protocol::SaneNet => "SANE-net",
+            Protocol::IppUsb => "IPP-USB",
+            Protocol::UsbPrinter => "USB-printer",
             Protocol::Other => "other",
         }
     }
@@ -57,13 +66,37 @@ impl Protocol {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Service {
     pub protocol: Protocol,
-    /// Where it came from: "mdns" or "wsd".
+    /// Where it came from: "mdns", "wsd" or "usb".
     pub source: String,
     pub port: Option<u16>,
     /// Resource path or full URL, when known.
     pub endpoint: Option<String>,
     /// Raw attributes (TXT records for mDNS, metadata fields for WSD).
     pub attributes: BTreeMap<String, String>,
+}
+
+/// Where a device sits on the USB bus and how it identifies itself there.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UsbInfo {
+    pub bus: u8,
+    pub address: u8,
+    pub vendor_id: u16,
+    pub product_id: u16,
+    pub serial: Option<String>,
+}
+
+impl UsbInfo {
+    /// True when both describe the same plugged-in device: same vendor and
+    /// product, and the same serial when there is one, else the same socket.
+    pub fn same_device(&self, other: &UsbInfo) -> bool {
+        if self.vendor_id != other.vendor_id || self.product_id != other.product_id {
+            return false;
+        }
+        match (&self.serial, &other.serial) {
+            (Some(a), Some(b)) => a == b,
+            _ => self.bus == other.bus && self.address == other.address,
+        }
+    }
 }
 
 /// A physical printer or scanner.
@@ -77,6 +110,9 @@ pub struct Device {
     pub addresses: Vec<IpAddr>,
     /// Stable identifier when the device gives one (mDNS UUID / WSD endpoint).
     pub uuid: Option<String>,
+    /// Set when the device was found on a USB cable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usb: Option<UsbInfo>,
     pub services: Vec<Service>,
 }
 
@@ -113,6 +149,11 @@ impl Device {
                 return true;
             }
         }
+        if let (Some(a), Some(b)) = (&self.usb, &other.usb) {
+            if a.same_device(b) {
+                return true;
+            }
+        }
         self.addresses.iter().any(|a| other.addresses.contains(a))
     }
 
@@ -132,6 +173,9 @@ impl Device {
         }
         if self.uuid.is_none() {
             self.uuid = other.uuid;
+        }
+        if self.usb.is_none() {
+            self.usb = other.usb;
         }
         for a in other.addresses {
             if !self.addresses.contains(&a) {
@@ -182,10 +226,28 @@ impl Device {
         if self.has_protocol(Protocol::WsdPrint) {
             out.push("WSD");
         }
+        if self.has_protocol(Protocol::IppUsb) {
+            out.push("IPP-USB");
+        }
         if out.is_empty() && self.can_print_driverless() {
             out.push("IPP");
         }
         out
+    }
+
+    /// True when the device speaks IPP over USB, which usually carries eSCL
+    /// scanning too, but that has not been checked over the cable yet.
+    pub fn may_scan_over_ipp_usb(&self) -> bool {
+        self.has_protocol(Protocol::IppUsb) && !self.can_scan_driverless()
+    }
+
+    /// A note from discovery about something that could not be read, e.g. the
+    /// USB device's identity. Shown to the user next to the device.
+    pub fn identity_note(&self) -> Option<&str> {
+        self.services
+            .iter()
+            .find_map(|s| s.attributes.get("identity_note"))
+            .map(String::as_str)
     }
 
     /// The scanning standards a device supports without a driver, by name.
@@ -223,4 +285,77 @@ pub fn merge_devices(found: Vec<Device>) -> Vec<Device> {
         d.services.sort_by_key(|s| s.protocol);
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn usb_device(serial: Option<&str>, bus: u8, address: u8, protocol: Protocol) -> Device {
+        Device {
+            name: "Brother DCP-L2540DW series".into(),
+            usb: Some(UsbInfo {
+                bus,
+                address,
+                vendor_id: 0x04f9,
+                product_id: 0x0357,
+                serial: serial.map(str::to_string),
+            }),
+            services: vec![Service {
+                protocol,
+                source: "usb".into(),
+                port: None,
+                endpoint: None,
+                attributes: BTreeMap::new(),
+            }],
+            ..Device::default()
+        }
+    }
+
+    #[test]
+    fn usb_sightings_merge_by_serial_or_socket() {
+        let a = usb_device(Some("U63879A1J"), 1, 5, Protocol::UsbPrinter);
+        let b = usb_device(Some("U63879A1J"), 1, 5, Protocol::IppUsb);
+        let other_unit = usb_device(Some("U00000000"), 1, 6, Protocol::UsbPrinter);
+        let merged = merge_devices(vec![a, b, other_unit]);
+        assert_eq!(merged.len(), 2);
+        assert_eq!(
+            merged[0].protocols(),
+            vec![Protocol::IppUsb, Protocol::UsbPrinter]
+        );
+
+        let no_serial_a = usb_device(None, 2, 3, Protocol::UsbPrinter);
+        let no_serial_b = usb_device(None, 2, 4, Protocol::UsbPrinter);
+        assert_eq!(merge_devices(vec![no_serial_a, no_serial_b]).len(), 2);
+    }
+
+    #[test]
+    fn usb_device_does_not_swallow_network_sightings() {
+        let cable = usb_device(Some("U63879A1J"), 1, 5, Protocol::UsbPrinter);
+        let network = Device {
+            name: "Brother DCP-L2540DW series".into(),
+            addresses: vec!["198.51.100.167".parse().unwrap()],
+            services: vec![Service {
+                protocol: Protocol::Ipp,
+                source: "mdns".into(),
+                port: Some(631),
+                endpoint: None,
+                attributes: BTreeMap::new(),
+            }],
+            ..Device::default()
+        };
+        assert!(!cable.same_device(&network));
+        assert_eq!(merge_devices(vec![cable, network]).len(), 2);
+    }
+
+    #[test]
+    fn ipp_usb_counts_as_driverless_print() {
+        let d = usb_device(None, 1, 1, Protocol::IppUsb);
+        assert!(d.can_print_driverless());
+        assert_eq!(d.driverless_print_standards(), vec!["IPP-USB"]);
+        assert!(d.may_scan_over_ipp_usb());
+        let legacy = usb_device(None, 1, 1, Protocol::UsbPrinter);
+        assert!(!legacy.can_print_driverless());
+        assert!(!legacy.may_scan_over_ipp_usb());
+    }
 }

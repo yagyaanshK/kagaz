@@ -92,6 +92,7 @@ fn device_from_info(info: &mdns_sd::ResolvedService, proto: Protocol) -> Device 
         hostname,
         addresses: info.addresses.iter().map(|a| a.to_ip_addr()).collect(),
         uuid: attributes.get("UUID").cloned(),
+        usb: None,
         services: vec![Service {
             protocol: proto,
             source: "mdns".into(),

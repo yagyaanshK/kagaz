@@ -3,6 +3,7 @@
 
 pub mod mdns;
 pub mod mdns_txt;
+pub mod usb;
 pub mod wsd;
 
 use crate::device::{merge_devices, Device};
@@ -14,6 +15,7 @@ pub struct DiscoverOptions {
     pub timeout: Duration,
     pub use_mdns: bool,
     pub use_wsd: bool,
+    pub use_usb: bool,
 }
 
 impl Default for DiscoverOptions {
@@ -22,6 +24,7 @@ impl Default for DiscoverOptions {
             timeout: Duration::from_secs(3),
             use_mdns: true,
             use_wsd: true,
+            use_usb: true,
         }
     }
 }
@@ -32,6 +35,8 @@ pub enum DiscoverError {
     Mdns(String),
     #[error("WS-Discovery: {0}")]
     Wsd(#[from] std::io::Error),
+    #[error("USB: {0}")]
+    Usb(String),
 }
 
 /// Run every enabled discovery method and return one `Device` per physical device.
@@ -39,12 +44,13 @@ pub fn discover(opts: &DiscoverOptions) -> Result<Vec<Device>, DiscoverError> {
     let mut found = Vec::new();
     let mut errors = Vec::new();
 
-    // Both methods wait for the full timeout, so run them side by side.
+    // The network methods wait for the full timeout, so run everything side by side.
     std::thread::scope(|s| {
         let mdns_handle = opts
             .use_mdns
             .then(|| s.spawn(|| mdns::browse(opts.timeout)));
         let wsd_handle = opts.use_wsd.then(|| s.spawn(|| wsd::probe(opts.timeout)));
+        let usb_handle = opts.use_usb.then(|| s.spawn(usb::scan));
         if let Some(h) = mdns_handle {
             match h.join().expect("mdns thread panicked") {
                 Ok(v) => found.extend(v),
@@ -55,6 +61,12 @@ pub fn discover(opts: &DiscoverOptions) -> Result<Vec<Device>, DiscoverError> {
             match h.join().expect("wsd thread panicked") {
                 Ok(v) => found.extend(v),
                 Err(e) => errors.push(DiscoverError::Wsd(e)),
+            }
+        }
+        if let Some(h) = usb_handle {
+            match h.join().expect("usb thread panicked") {
+                Ok(v) => found.extend(v),
+                Err(e) => errors.push(DiscoverError::Usb(e)),
             }
         }
     });

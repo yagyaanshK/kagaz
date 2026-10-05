@@ -4,5 +4,5 @@
 pub mod device;
 pub mod discovery;
 
-pub use device::{Device, Protocol, Service};
+pub use device::{Device, Protocol, Service, UsbInfo};
 pub use discovery::{discover, DiscoverOptions};
