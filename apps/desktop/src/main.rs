@@ -127,6 +127,45 @@ async fn scan(
     .await
 }
 
+#[derive(Debug, Clone, Deserialize)]
+struct ButtonChange {
+    action: String,
+    resolution: u32,
+    size: String,
+    duplex: bool,
+}
+
+/// The Brother Scan-button settings on this computer, when the tool is installed.
+#[tauri::command]
+fn button_settings() -> Option<Vec<kagaz_core::scan::button_settings::ActionSettings>> {
+    use kagaz_core::scan::button_settings as bs;
+    bs::available().then(bs::get_all)
+}
+
+#[tauri::command]
+fn button_settings_set(
+    change: ButtonChange,
+) -> Result<Vec<kagaz_core::scan::button_settings::ActionSettings>, String> {
+    use kagaz_core::scan::button_settings as bs;
+    bs::set(
+        &change.action,
+        change.resolution,
+        change.duplex,
+        &change.size,
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(bs::get_all())
+}
+
+#[tauri::command]
+fn button_settings_reset(
+    action: String,
+) -> Result<Vec<kagaz_core::scan::button_settings::ActionSettings>, String> {
+    use kagaz_core::scan::button_settings as bs;
+    bs::reset(&action).map_err(|e| e.to_string())?;
+    Ok(bs::get_all())
+}
+
 #[tauri::command]
 fn default_scan_name(extension: String) -> String {
     format!(
@@ -144,7 +183,10 @@ fn main() {
             explain_device,
             choose_save_path,
             scan,
-            default_scan_name
+            default_scan_name,
+            button_settings,
+            button_settings_set,
+            button_settings_reset
         ])
         .run(tauri::generate_context!())
         .expect("error while running the Kagaz window");

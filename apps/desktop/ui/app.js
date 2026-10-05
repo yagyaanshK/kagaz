@@ -109,6 +109,8 @@ async function select(i) {
   scanTab.disabled = !canScan(d);
   scanTab.title = canScan(d) ? "" : "This device does not offer driverless scanning";
 
+  $("button-state").textContent = "";
+  loadButtonSettings(d);
   $("about-loading").classList.remove("hidden");
   $("about-body").classList.add("hidden");
   try {
@@ -143,6 +145,66 @@ function showTab(name) {
   document.querySelectorAll(".tab").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
   $("tab-about").classList.toggle("hidden", name !== "about");
   $("tab-scan").classList.toggle("hidden", name !== "scan");
+  $("tab-button").classList.toggle("hidden", name !== "button");
+}
+
+// ---------- the printer's own Scan button (Brother scan-key tool) ----------
+
+const RESOLUTIONS = [100, 150, 200, 300, 400, 600, 1200];
+const SIZES = ["A4", "Letter", "Legal", "A5", "A6", "A3", "MAX"];
+
+function renderButtonSettings(list) {
+  const tbody = $("button-table").querySelector("tbody");
+  tbody.innerHTML = "";
+  for (const a of list) {
+    const tr = document.createElement("tr");
+    const opts = (values, current) =>
+      values.map((v) => `<option value="${v}" ${String(v) === String(current) ? "selected" : ""}>${v}</option>`).join("");
+    const origin = { User: "your setting", System: "Brother's default", BuiltIn: "built-in default" }[a.origin] || a.origin;
+    tr.innerHTML = `<td>${a.action}</td>
+      <td><select data-key="resolution">${opts(RESOLUTIONS.includes(a.resolution) ? RESOLUTIONS : [a.resolution, ...RESOLUTIONS], a.resolution)}</select> dpi</td>
+      <td><select data-key="size">${opts(SIZES.includes(a.size) ? SIZES : [a.size, ...SIZES], a.size)}</select></td>
+      <td><select data-key="duplex"><option value="false" ${!a.duplex ? "selected" : ""}>no</option><option value="true" ${a.duplex ? "selected" : ""}>yes</option></select></td>
+      <td class="muted">${origin}</td>
+      <td>${a.origin === "User" ? '<button type="button" data-reset>Brother default</button>' : ""}</td>`;
+    tr.querySelectorAll("select").forEach((sel) =>
+      sel.addEventListener("change", async () => {
+        const get = (k) => tr.querySelector(`select[data-key="${k}"]`).value;
+        try {
+          const updated = await invoke("button_settings_set", {
+            change: { action: a.action, resolution: Number(get("resolution")), size: get("size"), duplex: get("duplex") === "true" },
+          });
+          $("button-state").textContent = `Saved for "${a.action}" in your ~/.brscan-skey copy.`;
+          renderButtonSettings(updated);
+        } catch (e) {
+          $("button-state").textContent = "Could not save: " + e;
+        }
+      })
+    );
+    const reset = tr.querySelector("button[data-reset]");
+    if (reset)
+      reset.addEventListener("click", async () => {
+        try {
+          const updated = await invoke("button_settings_reset", { action: a.action });
+          $("button-state").textContent = `"${a.action}" is back to Brother's default.`;
+          renderButtonSettings(updated);
+        } catch (e) {
+          $("button-state").textContent = "Could not reset: " + e;
+        }
+      });
+    tbody.appendChild(tr);
+  }
+}
+
+async function loadButtonSettings(d) {
+  const tab = $("tab-button-btn");
+  const brother = (d.manufacturer || "").toLowerCase() === "brother";
+  let list = null;
+  if (brother) {
+    try { list = await invoke("button_settings"); } catch (_) { list = null; }
+  }
+  tab.classList.toggle("hidden", !list);
+  if (list) renderButtonSettings(list);
 }
 
 document.querySelectorAll(".tab").forEach((b) =>

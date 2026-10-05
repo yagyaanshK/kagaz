@@ -1,6 +1,7 @@
 //! Driverless scanning. The protocol modules (`wsd`, later `escl`) turn a
 //! `ScanRequest` into pages; the `output` module turns pages into files.
 
+pub mod button_settings;
 pub mod escl;
 pub mod multipart;
 pub mod vendor;

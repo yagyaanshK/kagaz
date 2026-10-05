@@ -59,6 +59,8 @@ with the commit that closes them.
 - [ ] M4 driver finder: `drivers/` TOML database and the consent-based vendor
       installer flow, starting with Brother on Linux (brscan4 + brscan-skey,
       reference in `installations/brother-scanner/`).
+- [ ] **Desktop app: the new 'Scan button' tab and the illustrations have not
+      been looked at yet.**
 - [ ] **Desktop app: a scan from the Scan pane.** The window builds, runs, lists
       the Brother and fills the About pane (checked by the user on
       2026-10-05); nobody has yet clicked Scan in it. `cargo run -p kagaz-desktop`;

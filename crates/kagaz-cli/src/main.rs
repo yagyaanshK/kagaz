@@ -168,6 +168,18 @@ enum Command {
         #[arg(long, value_enum, default_value_t = ModeArg::Color)]
         mode: ModeArg,
     },
+    /// Show or change the settings behind a Brother's Scan button (per-user copies of Brother's own files)
+    ButtonSettings {
+        /// Change one action: `--set image resolution=300 size=A4 duplex=off` (actions: file, image, ocr, email)
+        #[arg(long, num_args = 2.., value_name = "ACTION KEY=VALUE")]
+        set: Vec<String>,
+        /// Delete the per-user copy for an action (or `all`) so Brother's default applies again
+        #[arg(long, value_name = "ACTION")]
+        reset: Option<String>,
+        /// Print machine-readable JSON
+        #[arg(long)]
+        json: bool,
+    },
     /// Make a printer flash its display so you know which one it is
     Identify {
         /// Its number in `kagaz discover`, an IP address, hostname, or part of its name
@@ -700,6 +712,69 @@ fn main() -> Result<()> {
             format,
             mode,
         } => scan_button(device, &action, dir, format, mode),
+        Command::ButtonSettings { set, reset, json } => {
+            use kagaz_core::scan::button_settings as bs;
+            if !bs::available() {
+                anyhow::bail!(
+                    "Brother's scan-key tool is not installed here; `kagaz driver <device>` installs it"
+                );
+            }
+            if let Some(which) = reset {
+                let actions: Vec<&str> = if which == "all" {
+                    bs::ACTIONS.to_vec()
+                } else {
+                    vec![which.as_str()]
+                };
+                for a in actions {
+                    bs::reset(a)?;
+                }
+            }
+            if !set.is_empty() {
+                let action = set[0].as_str();
+                bs::check_action(action)?;
+                let mut cur = bs::get(action);
+                for kv in &set[1..] {
+                    let (k, v) = kv
+                        .split_once('=')
+                        .ok_or_else(|| anyhow::anyhow!("expected KEY=VALUE, got \"{kv}\""))?;
+                    match k {
+                        "resolution" | "dpi" => cur.resolution = v.parse()?,
+                        "size" | "paper" => cur.size = v.to_string(),
+                        "duplex" => {
+                            cur.duplex =
+                                matches!(v.to_ascii_lowercase().as_str(), "on" | "yes" | "true")
+                        }
+                        other => anyhow::bail!(
+                            "unknown setting \"{other}\"; use resolution, size or duplex"
+                        ),
+                    }
+                }
+                bs::set(action, cur.resolution, cur.duplex, &cur.size)?;
+            }
+            let all = bs::get_all();
+            if json {
+                println!("{}", serde_json::to_string_pretty(&all)?);
+                return Ok(());
+            }
+            println!("Scan button on this computer (Brother scan-key tool):");
+            for a in &all {
+                println!(
+                    "  {:<6} {} dpi, {}, {}   [{}]",
+                    a.action,
+                    a.resolution,
+                    a.size,
+                    if a.duplex { "both sides" } else { "one side" },
+                    match a.origin {
+                        bs::Origin::User => format!("your setting, {}", a.user_file.display()),
+                        bs::Origin::System => "Brother's default".to_string(),
+                        bs::Origin::BuiltIn => "built-in default (no settings file)".to_string(),
+                    }
+                );
+            }
+            println!("Change: kagaz button-settings --set image resolution=300 size=A4 duplex=off");
+            println!("Back to Brother's default: kagaz button-settings --reset image");
+            Ok(())
+        }
         Command::Identify { device, timeout } => {
             let devices = discover(&DiscoverOptions {
                 timeout: Duration::from_secs(timeout),
