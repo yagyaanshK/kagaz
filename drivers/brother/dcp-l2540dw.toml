@@ -31,7 +31,7 @@ size = 59150
 admin_steps = [
   "brsaneconfig4 -a name={name} model={model} ip={ip}",
   "if command -v ufw >/dev/null && ufw status 2>/dev/null | grep -q '^Status: active'; then ufw allow from {ip} to any port 54925 proto udp comment 'Brother scan-key tool (Kagaz)'; fi",
-  "d=/opt/brother/scanner/brscan-skey/script; for a in file image ocr; do printf '#!/bin/sh\\n# Written by Kagaz: the printer\\x27s Scan to PC > %s action.\\nexec \\x27{kagaz}\\x27 scan-button --action %s --dir \\x27{scans_dir}\\x27 \"$@\"\\n' \"$a\" \"$a\" > \"$d/kagaz-scanto$a.sh\"; chmod 755 \"$d/kagaz-scanto$a.sh\"; done",
+  "d=/opt/brother/scanner/brscan-skey/script; for a in file image ocr; do printf '#!/bin/sh\\n# Written by Kagaz: the printer\\047s Scan to PC > %s action.\\nexec \\047{kagaz}\\047 scan-button --action %s --dir \\047{scans_dir}\\047 \"$@\"\\n' \"$a\" \"$a\" > \"$d/kagaz-scanto$a.sh\"; chmod 755 \"$d/kagaz-scanto$a.sh\"; done",
   "cfg=/opt/brother/scanner/brscan-skey/brscan-skey.config; [ -f \"$cfg.orig\" ] || cp \"$cfg\" \"$cfg.orig\"",
   "sed -i 's|^FILE=.*|FILE=\"bash /opt/brother/scanner/brscan-skey/script/kagaz-scantofile.sh\"|; s|^IMAGE=.*|IMAGE=\"bash /opt/brother/scanner/brscan-skey/script/kagaz-scantoimage.sh\"|; s|^OCR=.*|OCR=\"bash /opt/brother/scanner/brscan-skey/script/kagaz-scantoocr.sh\"|' /opt/brother/scanner/brscan-skey/brscan-skey.config",
 ]
