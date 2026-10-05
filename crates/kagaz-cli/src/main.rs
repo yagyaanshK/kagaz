@@ -161,9 +161,6 @@ enum Command {
         /// pdf, jpeg or png
         #[arg(long, value_enum, default_value_t = FormatArg::Pdf)]
         format: FormatArg,
-        /// Resolution in dots per inch
-        #[arg(long, default_value_t = 300)]
-        dpi: u32,
         /// color, gray or bw
         #[arg(long, value_enum, default_value_t = ModeArg::Color)]
         mode: ModeArg,
@@ -697,9 +694,8 @@ fn main() -> Result<()> {
             device,
             dir,
             format,
-            dpi,
             mode,
-        } => scan_button(device, dir, format, dpi, mode),
+        } => scan_button(device, dir, format, mode),
         Command::Identify { device, timeout } => {
             let devices = discover(&DiscoverOptions {
                 timeout: Duration::from_secs(timeout),
@@ -888,7 +884,6 @@ fn scan_button(
     device: Vec<String>,
     dir: Option<PathBuf>,
     format: FormatArg,
-    dpi: u32,
     mode: ModeArg,
 ) -> Result<()> {
     let dir = dir.unwrap_or_else(kagaz_core::paths::scans_dir);
@@ -915,9 +910,24 @@ fn scan_button(
             .args(["-i", "scanner", summary, body])
             .status();
     };
-    let device_name = device.join(" ");
+    // The listener appends the SANE device name and then the model name;
+    // Brother's own script uses only the first.
+    let device_name: String = device
+        .iter()
+        .map(|a| a.trim().to_string())
+        .find(|a| a.contains(':'))
+        .or_else(|| device.first().map(|a| a.trim().to_string()))
+        .unwrap_or_default();
+    let settings = kagaz_core::scan::vendor::brother_settings();
     log(&format!(
-        "button pressed, device \"{device_name}\", saving to {}",
+        "button pressed, device \"{device_name}\" (args {:?}), {} dpi, {}, saving to {}",
+        device,
+        settings.resolution,
+        if settings.duplex {
+            "feeder both sides"
+        } else {
+            "flatbed"
+        },
         dir.display()
     ));
     let result = (|| -> Result<Vec<kagaz_core::output::Written>> {
@@ -925,8 +935,10 @@ fn scan_button(
         std::fs::create_dir_all(&dir)?;
         let work = std::env::temp_dir().join(format!("kagaz-button-{}", std::process::id()));
         std::fs::create_dir_all(&work)?;
-        let pulled = kagaz_core::scan::vendor::brother_pull(&device_name, dpi, &work)
-            .and_then(|files| kagaz_core::scan::vendor::pages_from_files(&files, dpi));
+        let pulled = kagaz_core::scan::vendor::brother_pull(&device_name, &settings, &work)
+            .and_then(|files| {
+                kagaz_core::scan::vendor::pages_from_files(&files, settings.resolution)
+            });
         let _ = std::fs::remove_dir_all(&work);
         let pages = pulled?;
         let format = match format {

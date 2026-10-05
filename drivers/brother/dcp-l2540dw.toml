@@ -48,4 +48,5 @@ notes = [
   "The printer announces button presses to this computer on UDP port 54925; the installer opens it in ufw when ufw is active.",
   "Scans started from the printer's button are saved to {scans_dir}.",
   "The OCR choice on the printer scans like File for now; searchable PDFs come with the OCR extra later.",
+  "Resolution, paper size and duplex for button scans come from Brother's own settings file (~/.brscan-skey/scantofile.config, else /etc/opt/brother/scanner/brscan-skey/scantofile.config; Brother ships resolution=100).",
 ]
