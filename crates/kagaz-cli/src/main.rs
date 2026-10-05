@@ -5,6 +5,7 @@ use anyhow::Result;
 use clap::{Parser, Subcommand, ValueEnum};
 use kagaz_core::ipp::status::PrinterStatus;
 use kagaz_core::output::{human_size, parse_size, Format, OutputOptions};
+use kagaz_core::print::{Event as PrintEvent, PrintRequest, Sides};
 use kagaz_core::scan::{ColorMode, Event, Paper, ScanRequest, Source};
 use kagaz_core::{
     discover, explain, open_ports, Device, DiscoverOptions, Host, Protocol, SelectError,
@@ -100,6 +101,31 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Print a PDF, JPEG or PNG without a driver (IPP Everywhere)
+    Print {
+        /// Its number in `kagaz discover`, an IP address, hostname, or part of its name
+        device: String,
+        /// The file to print
+        file: PathBuf,
+        /// Number of copies
+        #[arg(long, default_value_t = 1)]
+        copies: u32,
+        /// one, long (two-sided, flip on the long edge) or short
+        #[arg(long, value_enum, default_value_t = SidesArg::One)]
+        sides: SidesArg,
+        /// Paper size; the printer's default when not given
+        #[arg(long, value_enum)]
+        paper: Option<PaperArg>,
+        /// Print in black and white even on a colour printer
+        #[arg(long)]
+        gray: bool,
+        /// Do everything except send the job: render, and ask the printer to validate it
+        #[arg(long)]
+        dry_run: bool,
+        /// Seconds to listen for answers while finding the device
+        #[arg(long, default_value_t = 3)]
+        timeout: u64,
+    },
     /// Make a printer flash its display so you know which one it is
     Identify {
         /// Its number in `kagaz discover`, an IP address, hostname, or part of its name
@@ -108,6 +134,13 @@ enum Command {
         #[arg(long, default_value_t = 3)]
         timeout: u64,
     },
+}
+
+#[derive(Clone, Copy, ValueEnum, PartialEq, Eq)]
+enum SidesArg {
+    One,
+    Long,
+    Short,
 }
 
 #[derive(Clone, Copy, ValueEnum, PartialEq, Eq)]
@@ -446,6 +479,72 @@ fn main() -> Result<()> {
                 return Ok(());
             }
             print_status(d, &s);
+            Ok(())
+        }
+        Command::Print {
+            device,
+            file,
+            copies,
+            sides,
+            paper,
+            gray,
+            dry_run,
+            timeout,
+        } => {
+            anyhow::ensure!(file.is_file(), "{} is not a file", file.display());
+            let devices = discover(&DiscoverOptions {
+                timeout: Duration::from_secs(timeout),
+                ..Default::default()
+            })?;
+            let d = select_device(&devices, &device)?;
+            let req = PrintRequest {
+                copies,
+                sides: match sides {
+                    SidesArg::One => Sides::OneSided,
+                    SidesArg::Long => Sides::TwoSidedLongEdge,
+                    SidesArg::Short => Sides::TwoSidedShortEdge,
+                },
+                media: paper.map(|p| {
+                    match p {
+                        PaperArg::A4 => "iso_a4_210x297mm",
+                        PaperArg::Letter => "na_letter_8.5x11in",
+                        PaperArg::Legal => "na_legal_8.5x14in",
+                        PaperArg::Max => "iso_a4_210x297mm",
+                    }
+                    .to_string()
+                }),
+                color: !gray,
+                job_name: None,
+            };
+            println!("Printing {} on {}", file.display(), title(d));
+            let result = kagaz_core::print::print(d, &file, &req, dry_run, &mut |e| match e {
+                PrintEvent::Planned(p) => println!(
+                    "  {} at {} dpi, {}, {}{}",
+                    kagaz_core::ipp::status::media_name(&p.media),
+                    p.dpi,
+                    if p.gray { "black and white" } else { "colour" },
+                    p.sides.keyword(),
+                    if p.copies > 1 {
+                        format!(", {} copies", p.copies)
+                    } else {
+                        String::new()
+                    }
+                ),
+                PrintEvent::Rendering { page, of } => {
+                    println!("  rendering page {page} of {of}...")
+                }
+                PrintEvent::Validated => println!("  the printer accepts the job settings"),
+                PrintEvent::Sending { bytes } => {
+                    println!("  sending {}...", human_size(bytes as u64))
+                }
+                PrintEvent::Submitted { job_id, state } => println!("  job {job_id} {state}"),
+            })?;
+            match result {
+                None => println!("Dry run: nothing was sent."),
+                Some((id, _)) => {
+                    println!("Sent as job {id}. `kagaz status {device}` shows the queue.")
+                }
+            }
             Ok(())
         }
         Command::Identify { device, timeout } => {
