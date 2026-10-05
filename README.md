@@ -98,8 +98,9 @@ no GNOME-only or systemd-only assumptions in the core.
 cargo run -p kagaz-cli -- discover
 ```
 
-finds every printer and scanner on your network (mDNS/DNS-SD and
-WS-Discovery) and on your USB ports (IPP-USB and the classic printer class,
+finds every printer and scanner on your network (mDNS/DNS-SD,
+WS-Discovery, and an SNMP broadcast for printers that announce nothing) and
+on your USB ports (IPP-USB and the classic printer class,
 with the device's IEEE 1284 identity), and says which of them can print and
 scan without a driver. `--json` gives machine-readable output.
 

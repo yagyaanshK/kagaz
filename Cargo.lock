@@ -399,6 +399,7 @@ dependencies = [
 name = "kagaz-core"
 version = "0.1.0"
 dependencies = [
+ "if-addrs",
  "mdns-sd",
  "nusb",
  "roxmltree",

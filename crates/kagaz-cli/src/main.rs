@@ -36,6 +36,9 @@ enum Command {
         /// Skip the USB bus
         #[arg(long)]
         no_usb: bool,
+        /// Skip SNMP (the broadcast question for printers that announce nothing)
+        #[arg(long)]
+        no_snmp: bool,
     },
 }
 
@@ -48,12 +51,14 @@ fn main() -> Result<()> {
             no_mdns,
             no_wsd,
             no_usb,
+            no_snmp,
         } => {
             let opts = DiscoverOptions {
                 timeout: Duration::from_secs(timeout),
                 use_mdns: !no_mdns,
                 use_wsd: !no_wsd,
                 use_usb: !no_usb,
+                use_snmp: !no_snmp,
             };
             let devices = discover(&opts)?;
             if json {
@@ -61,7 +66,7 @@ fn main() -> Result<()> {
                 return Ok(());
             }
             if devices.is_empty() {
-                let network = opts.use_mdns || opts.use_wsd;
+                let network = opts.use_mdns || opts.use_wsd || opts.use_snmp;
                 match (opts.use_usb, network) {
                     (true, true) => println!(
                         "No printers or scanners found on USB or within {timeout} s on the network."
@@ -116,6 +121,12 @@ fn main() -> Result<()> {
                             .unwrap_or_default()
                     );
                 }
+                if let Some(serial) = d.attribute("serial") {
+                    println!("  serial     {serial}");
+                }
+                if let Some(pages) = d.attribute("pages_printed") {
+                    println!("  pages      {pages} printed so far");
+                }
                 let protos: Vec<&str> = d.protocols().iter().map(|p| p.label()).collect();
                 println!("  protocols  {}", protos.join(", "));
                 let print_std = d.driverless_print_standards().join(", ");
@@ -128,6 +139,13 @@ fn main() -> Result<()> {
                 } else {
                     "needs a driver (raw/LPD only)"
                 };
+                let snmp_only = d.protocols() == [Protocol::Snmp];
+                if snmp_only {
+                    println!("  print      unknown: answers SNMP but advertises no print service");
+                    println!("  scan       unknown: answers SNMP but advertises no scan service");
+                    println!();
+                    continue;
+                }
                 println!(
                     "  print      {}",
                     verdict(

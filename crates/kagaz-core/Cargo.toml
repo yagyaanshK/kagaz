@@ -8,6 +8,7 @@ repository.workspace = true
 authors.workspace = true
 
 [dependencies]
+if-addrs = "0.15"
 mdns-sd = "0.21"
 nusb = "0.2"
 roxmltree = "0.20"

@@ -30,6 +30,8 @@ pub enum Protocol {
     IppUsb,
     /// Classic USB printer class interface (7/1/1-3): needs a driver that speaks the device's language.
     UsbPrinter,
+    /// Answers SNMP (printer MIB): identity and status, not a way to print or scan.
+    Snmp,
     /// Something else, kept for the report.
     Other,
 }
@@ -57,6 +59,7 @@ impl Protocol {
             Protocol::SaneNet => "SANE-net",
             Protocol::IppUsb => "IPP-USB",
             Protocol::UsbPrinter => "USB-printer",
+            Protocol::Snmp => "SNMP",
             Protocol::Other => "other",
         }
     }
@@ -66,7 +69,7 @@ impl Protocol {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Service {
     pub protocol: Protocol,
-    /// Where it came from: "mdns", "wsd" or "usb".
+    /// Where it came from: "mdns", "wsd", "usb" or "snmp".
     pub source: String,
     pub port: Option<u16>,
     /// Resource path or full URL, when known.
@@ -239,6 +242,14 @@ impl Device {
     /// scanning too, but that has not been checked over the cable yet.
     pub fn may_scan_over_ipp_usb(&self) -> bool {
         self.has_protocol(Protocol::IppUsb) && !self.can_scan_driverless()
+    }
+
+    /// The first value of `key` across every service's attributes.
+    pub fn attribute(&self, key: &str) -> Option<&str> {
+        self.services
+            .iter()
+            .find_map(|s| s.attributes.get(key))
+            .map(String::as_str)
     }
 
     /// A note from discovery about something that could not be read, e.g. the

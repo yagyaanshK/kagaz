@@ -304,11 +304,10 @@ fn permission_note() -> String {
 mod tests {
     use super::*;
 
-    // What a Brother DCP-L2540DW reports; reconstructed from the usb_MFG,
-    // usb_MDL and usb_CMD fields it mirrors in its AirPrint TXT record, until
-    // the cable recording in tests/fixtures/usb replaces it.
-    const BROTHER_ID: &str =
-        "MFG:Brother;CMD:PJL,PCL,PCLXL,URF;MDL:DCP-L2540DW series;CLS:PRINTER;";
+    // The Brother DCP-L2540DW's IEEE 1284 Device ID as its SNMP agent reports
+    // it (tests/fixtures/snmp); the string on the USB cable is expected to be
+    // the same and will be recorded when the printer is plugged in.
+    const BROTHER_ID: &str = "MFG:Brother;CMD:PJL,PCL,PCLXL,URF;MDL:DCP-L2540DW series;CLS:PRINTER;CID:Brother Laser Type1;URF:W8,CP1,IS4-1,MT1-3-4-5-8,OB10,PQ4,RS300-600,V1.3,DM1;";
 
     #[test]
     fn parses_short_keys() {
