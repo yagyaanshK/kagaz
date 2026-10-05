@@ -111,6 +111,114 @@ pub enum ScanError {
     Busy(String),
 }
 
+/// What a scanner offers, in the terms the window and the CLI present.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Capabilities {
+    pub protocol: String,
+    pub resolutions: Vec<u32>,
+    pub glass: bool,
+    pub feeder: bool,
+    pub duplex: bool,
+    /// Colour modes the device itself produces (Kagaz converts to the others).
+    pub colors: Vec<String>,
+}
+
+/// Ask `device` what it can do, over the protocol it offers.
+pub fn capabilities(device: &Device) -> Result<Capabilities, ScanError> {
+    if let Some(url) = device
+        .services
+        .iter()
+        .find(|s| s.protocol == Protocol::WsdScan)
+        .and_then(|s| s.endpoint.clone())
+    {
+        let w = wsd::WsdScanner::connect(&url)?;
+        let mut resolutions: Vec<u32> = w
+            .caps
+            .platen
+            .iter()
+            .chain(w.caps.feeder.iter())
+            .flat_map(|c| c.resolutions.iter().copied())
+            .collect();
+        resolutions.sort_unstable();
+        resolutions.dedup();
+        let mut colors: Vec<String> = w
+            .caps
+            .platen
+            .iter()
+            .chain(w.caps.feeder.iter())
+            .flat_map(|c| c.colors.iter().cloned())
+            .collect();
+        colors.sort();
+        colors.dedup();
+        return Ok(Capabilities {
+            protocol: "WSD".into(),
+            resolutions,
+            glass: w.caps.platen.is_some(),
+            feeder: w.caps.feeder.is_some(),
+            duplex: w.caps.duplex,
+            colors,
+        });
+    }
+    if let Some(base) = escl_base(device) {
+        let e = escl::EsclScanner::connect(&base)?;
+        let mut resolutions: Vec<u32> = e
+            .caps
+            .platen
+            .iter()
+            .chain(e.caps.feeder.iter())
+            .flat_map(|c| c.resolutions.iter().copied())
+            .collect();
+        resolutions.sort_unstable();
+        resolutions.dedup();
+        let mut colors: Vec<String> = e
+            .caps
+            .platen
+            .iter()
+            .chain(e.caps.feeder.iter())
+            .flat_map(|c| c.colors.iter().cloned())
+            .collect();
+        colors.sort();
+        colors.dedup();
+        return Ok(Capabilities {
+            protocol: "eSCL".into(),
+            resolutions,
+            glass: e.caps.platen.is_some(),
+            feeder: e.caps.feeder.is_some(),
+            duplex: e.caps.duplex,
+            colors,
+        });
+    }
+    Err(ScanError::NotSupported(if device.name.is_empty() {
+        "this device".to_string()
+    } else {
+        device.name.clone()
+    }))
+}
+
+/// The eSCL base URL for a device, when it advertises eSCL over plain HTTP.
+fn escl_base(device: &Device) -> Option<String> {
+    let svc = device
+        .services
+        .iter()
+        .find(|s| s.protocol == Protocol::Escl)?;
+    let ip = device
+        .addresses
+        .iter()
+        .find(|a| a.is_ipv4())
+        .or(device.addresses.first())?;
+    let host = match ip {
+        std::net::IpAddr::V4(v4) => v4.to_string(),
+        std::net::IpAddr::V6(v6) => format!("[{v6}]"),
+    };
+    let path = svc
+        .endpoint
+        .as_deref()
+        .map(|p| p.trim_matches('/'))
+        .filter(|p| !p.is_empty())
+        .unwrap_or("eSCL");
+    Some(format!("http://{host}:{}/{path}", svc.port.unwrap_or(80)))
+}
+
 /// Scan from `device` using whichever driverless protocol it offers,
 /// reporting progress through `on_event`.
 pub fn scan(

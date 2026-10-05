@@ -48,6 +48,11 @@ async fn explain_device(device: Device) -> Result<Explanation, String> {
     .await
 }
 
+#[tauri::command]
+async fn scan_capabilities(device: Device) -> Result<kagaz_core::scan::Capabilities, String> {
+    blocking(move || kagaz_core::scan::capabilities(&device).map_err(|e| e.to_string())).await
+}
+
 #[derive(Debug, Clone, Deserialize)]
 struct OutputRequest {
     format: Format,
@@ -181,6 +186,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             discover,
             explain_device,
+            scan_capabilities,
             choose_save_path,
             scan,
             default_scan_name,

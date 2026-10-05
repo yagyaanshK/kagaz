@@ -28,7 +28,6 @@
       <nav class="tabs">
         <button class="tab active" data-tab="about">About</button>
         <button class="tab" data-tab="scan">Scan</button>
-        <button class="tab hidden" data-tab="button" id="tab-button-btn">Scan button</button>
       </nav>
 
       <div id="tab-about" class="tab-pane">
@@ -58,9 +57,7 @@
             <label>Resolution
               <figure class="pic" id="pic-dpi"></figure>
               <select name="dpi">
-                <option value="150">150 dpi (quick)</option>
-                <option value="300" selected>300 dpi (documents)</option>
-                <option value="600">600 dpi (photos)</option>
+                <option value="300" selected>300 dpi</option>
               </select>
             </label>
             <label>Colour
@@ -104,15 +101,16 @@
           </div>
         </form>
         <ul id="scan-log"></ul>
-      </div>
 
-      <div id="tab-button" class="tab-pane hidden">
-        <p class="muted">What the printer's own Scan to PC button does when it picks this computer. These are Brother's settings, kept in Brother's files; Kagaz writes only your personal copy and "Brother default" removes it.</p>
+        <section id="button-panel" class="hidden">
+          <h3>The printer's own Scan button</h3>
+          <p class="muted">What the printer's own Scan to PC button does when it picks this computer. These are Brother's settings, kept in Brother's files; Kagaz writes only your personal copy and "Brother default" removes it.</p>
         <table id="button-table">
           <thead><tr><th>Action</th><th>Resolution</th><th>Paper</th><th>Both sides</th><th>Comes from</th><th></th></tr></thead>
           <tbody></tbody>
         </table>
         <p id="button-state" class="muted"></p>
+        </section>
       </div>
 
       <div id="unsupported" class="hidden">

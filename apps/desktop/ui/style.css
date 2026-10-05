@@ -182,3 +182,6 @@ button:disabled { opacity: 0.6; cursor: default; }
 #button-table th { color: var(--muted); font-weight: 500; }
 #button-table select { padding: 4px 26px 4px 6px; }
 #button-table button { padding: 4px 8px; font-size: 12px; }
+
+#button-panel { margin-top: 26px; padding-top: 14px; border-top: 1px solid var(--line); }
+#button-panel h3 { margin-top: 0; }
