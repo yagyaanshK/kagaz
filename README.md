@@ -123,6 +123,15 @@ in the current directory: the feeder if it has paper, else the glass, at
 `--paper`, `-o file` change that, and `--max-size 2M` keeps a file under a
 size by re-encoding and shrinking pages, so no separate compressor is needed.
 
+```
+kagaz status brother
+kagaz identify brother
+```
+
+ask a printer over IPP how it is doing (state, problems in plain words,
+toner, loaded paper, queue) and make it flash its display so you know which
+one it is.
+
 ## Roadmap
 
 - **M1 Find and explain.** Discover printers and scanners on the network and
@@ -133,6 +142,7 @@ size by re-encoding and shrinking pages, so no separate compressor is needed.
   PDF/JPEG/PNG), identical on all OSes. WSD done; eSCL written, awaiting a
   device to verify it on.
 - **M3 Driverless print.** Print over IPP, with job and supplies status.
+  Status and identify done; printing next.
 - **M4 Driver finder.** The `drivers/` database and the consent-based
   vendor-installer flow, starting with Brother on Linux (which is where this
   project was born).

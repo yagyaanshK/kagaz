@@ -44,7 +44,9 @@ with the commit that closes them.
 
 ## Roadmap, not yet started
 
-- [ ] M3 driverless print over IPP, with job and supplies status.
+- [ ] M3 driverless print over IPP (`kagaz print <device> <file>`): status and
+      identify are done; the Print-Job step waits for an OK to use a sheet of
+      paper on the Brother for the test.
 - [ ] M4 driver finder: `drivers/` TOML database and the consent-based vendor
       installer flow, starting with Brother on Linux (brscan4 + brscan-skey,
       reference in `installations/brother-scanner/`).
