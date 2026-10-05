@@ -437,7 +437,7 @@ fn main() -> Result<()> {
                 Event::Page { number, bytes } => {
                     println!("  page {number} received ({})", human_size(bytes as u64))
                 }
-                Event::Substituted(note) => println!("  note: {note}"),
+                Event::Substituted { note } => println!("  note: {note}"),
             })?;
             let written = kagaz_core::output::write(
                 &pages,

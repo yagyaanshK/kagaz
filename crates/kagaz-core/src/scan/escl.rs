@@ -249,7 +249,7 @@ impl EsclScanner {
     ) -> Result<Vec<Page>, ScanError> {
         let (params, notes) = self.params_for(req, source)?;
         for n in notes {
-            on_event(Event::Substituted(n));
+            on_event(Event::Substituted { note: n });
         }
         on_event(Event::Starting {
             source,

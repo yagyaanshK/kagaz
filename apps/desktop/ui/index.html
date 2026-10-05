@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Kagaz</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <aside id="sidebar">
+    <header>
+      <h1>Kagaz</h1>
+      <button id="rescan" title="Look again on the network and USB">Look again</button>
+    </header>
+    <p id="search-note" class="muted">Looking for printers and scanners…</p>
+    <ul id="devices"></ul>
+  </aside>
+
+  <main id="main">
+    <section id="empty" class="pane">
+      <p class="muted">Pick a device on the left.</p>
+    </section>
+
+    <section id="detail" class="pane hidden">
+      <h2 id="d-title"></h2>
+      <p id="d-sub" class="muted"></p>
+
+      <nav class="tabs">
+        <button class="tab active" data-tab="about">About</button>
+        <button class="tab" data-tab="scan">Scan</button>
+      </nav>
+
+      <div id="tab-about" class="tab-pane">
+        <p id="about-loading" class="muted">Working out what this computer can do with it…</p>
+        <div id="about-body" class="hidden">
+          <h3>Print: <span id="about-print-summary"></span></h3>
+          <ul id="about-print-details"></ul>
+          <h3>Scan: <span id="about-scan-summary"></span></h3>
+          <ul id="about-scan-details"></ul>
+          <h3 id="about-notes-head">Also</h3>
+          <ul id="about-notes"></ul>
+        </div>
+      </div>
+
+      <div id="tab-scan" class="tab-pane hidden">
+        <form id="scan-form">
+          <div class="grid">
+            <label>Paper is
+              <select name="source">
+                <option value="Auto">in the feeder if loaded, else on the glass</option>
+                <option value="Glass">on the glass</option>
+                <option value="Feeder">in the feeder</option>
+                <option value="FeederDuplex">in the feeder, both sides</option>
+              </select>
+            </label>
+            <label>Resolution
+              <select name="dpi">
+                <option value="150">150 dpi (quick)</option>
+                <option value="300" selected>300 dpi (documents)</option>
+                <option value="600">600 dpi (photos)</option>
+              </select>
+            </label>
+            <label>Colour
+              <select name="color">
+                <option value="Color">colour</option>
+                <option value="Gray">grey</option>
+                <option value="BlackWhite">black and white</option>
+              </select>
+            </label>
+            <label>Paper size
+              <select name="paper">
+                <option value="A4">A4</option>
+                <option value="Letter">Letter</option>
+                <option value="Legal">Legal</option>
+                <option value="Max">whole glass</option>
+              </select>
+            </label>
+            <label>Save as
+              <select name="format">
+                <option value="Pdf">PDF</option>
+                <option value="Jpeg">JPEG</option>
+                <option value="Png">PNG</option>
+              </select>
+            </label>
+            <label>Keep under
+              <select name="max">
+                <option value="">no limit</option>
+                <option value="500000">500 KB</option>
+                <option value="1000000">1 MB</option>
+                <option value="2000000">2 MB</option>
+                <option value="5000000">5 MB</option>
+              </select>
+            </label>
+          </div>
+          <div class="actions">
+            <button type="submit" id="scan-go">Scan…</button>
+            <span id="scan-state" class="muted"></span>
+          </div>
+        </form>
+        <ul id="scan-log"></ul>
+      </div>
+
+      <div id="unsupported" class="hidden">
+        <p class="muted" id="unsupported-text"></p>
+      </div>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>

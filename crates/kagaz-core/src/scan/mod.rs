@@ -80,7 +80,8 @@ pub struct Page {
 }
 
 /// Something worth telling the user while a scan runs.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Event {
     /// About to ask the device for a job on this source.
     Starting { source: Source, dpi: u32 },
@@ -89,7 +90,7 @@ pub enum Event {
     /// A page arrived (1-based number, size in bytes).
     Page { number: usize, bytes: usize },
     /// The device could not give what was asked and this was used instead.
-    Substituted(String),
+    Substituted { note: String },
 }
 
 #[derive(Debug, thiserror::Error)]
