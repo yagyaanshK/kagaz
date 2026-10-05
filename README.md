@@ -152,6 +152,17 @@ package with its checksum status and every command it will run, downloads
 and verifies the packages, and runs the administrator steps through the OS
 prompt only after you type yes. `--remove` undoes it.
 
+```
+kagaz button-settings
+kagaz button-settings --set image resolution=300
+```
+
+shows and changes what a Brother's own Scan to PC button does (resolution,
+paper, both sides) per action. The values live in Brother's files; Kagaz
+writes only your personal copy in `~/.brscan-skey/` and `--reset` removes
+it so Brother's default applies again. The window has the same under
+"Scan button".
+
 The desktop window (`cargo run -p kagaz-desktop`) shows the same devices,
 the same plain-words explanation and the same scan options; on Linux it
 needs the webkit2gtk and gtk3 development packages to build.

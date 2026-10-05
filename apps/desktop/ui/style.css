@@ -175,3 +175,10 @@ button:disabled { opacity: 0.6; cursor: default; }
 .verdict.NeedsDriver { color: var(--warn); }
 .verdict.Unknown { color: var(--muted); }
 #pic-source { height: 72px; }
+
+/* Scan-button settings table */
+#button-table { border-collapse: collapse; width: 100%; margin-top: 8px; }
+#button-table th, #button-table td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); font-size: 13px; }
+#button-table th { color: var(--muted); font-weight: 500; }
+#button-table select { padding: 4px 26px 4px 6px; }
+#button-table button { padding: 4px 8px; font-size: 12px; }
