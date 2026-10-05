@@ -3,6 +3,7 @@
 
 pub mod escl;
 pub mod multipart;
+pub mod vendor;
 pub mod wsd;
 
 use crate::device::{Device, Protocol};
