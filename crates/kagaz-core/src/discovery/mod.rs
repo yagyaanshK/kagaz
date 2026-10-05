@@ -94,5 +94,19 @@ pub fn discover(opts: &DiscoverOptions) -> Result<Vec<Device>, DiscoverError> {
         // this returns at once when everyone already answered.
         let _ = snmp::enrich(&mut devices, Duration::from_secs(1));
     }
+    // A stable order, so "device 2" means the same thing on the next run.
+    devices.sort_by(|a, b| {
+        a.name
+            .to_lowercase()
+            .cmp(&b.name.to_lowercase())
+            .then_with(|| a.addresses.cmp(&b.addresses))
+            .then_with(|| usb_key(a).cmp(&usb_key(b)))
+    });
     Ok(devices)
+}
+
+fn usb_key(d: &Device) -> Option<(u16, u16, u8, u8)> {
+    d.usb
+        .as_ref()
+        .map(|u| (u.vendor_id, u.product_id, u.bus, u.address))
 }

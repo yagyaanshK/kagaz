@@ -3,7 +3,9 @@
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use kagaz_core::{discover, DiscoverOptions, Protocol};
+use kagaz_core::{
+    discover, explain, open_ports, Device, DiscoverOptions, Host, Protocol, SelectError,
+};
 use std::time::Duration;
 
 #[derive(Parser)]
@@ -39,6 +41,17 @@ enum Command {
         /// Skip SNMP (the broadcast question for printers that announce nothing)
         #[arg(long)]
         no_snmp: bool,
+    },
+    /// Say in plain words whether this computer can print to and scan from a device, and what would fix it
+    Explain {
+        /// Its number in `kagaz discover`, an IP address, hostname, USB vendor:product id, or part of its name
+        device: String,
+        /// Seconds to listen for answers while finding the device
+        #[arg(long, default_value_t = 3)]
+        timeout: u64,
+        /// Print machine-readable JSON instead of prose
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -79,13 +92,8 @@ fn main() -> Result<()> {
                 }
                 return Ok(());
             }
-            for d in &devices {
-                let title = if d.name.is_empty() {
-                    d.model.clone().unwrap_or_else(|| "Unknown device".into())
-                } else {
-                    d.name.clone()
-                };
-                println!("{title}");
+            for (i, d) in devices.iter().enumerate() {
+                println!("{}. {}", i + 1, title(d));
                 if let Some(m) = &d.model {
                     println!(
                         "  model      {}{}",
@@ -172,8 +180,90 @@ fn main() -> Result<()> {
                 }
                 println!();
             }
+            println!("Run `kagaz explain <number>` for what this computer can do with a device and what would fix it.");
             Ok(())
         }
+        Command::Explain {
+            device,
+            timeout,
+            json,
+        } => {
+            let opts = DiscoverOptions {
+                timeout: Duration::from_secs(timeout),
+                ..Default::default()
+            };
+            let devices = discover(&opts)?;
+            let d = match kagaz_core::find(&devices, &device) {
+                Ok(d) => d,
+                Err(SelectError::Ambiguous { candidates, .. }) => {
+                    eprintln!("\"{device}\" matches several devices:");
+                    for i in candidates {
+                        eprintln!("  {i}. {}", title(&devices[i - 1]));
+                    }
+                    anyhow::bail!("pick one by number: kagaz explain <number>");
+                }
+                Err(e) => {
+                    if devices.is_empty() {
+                        anyhow::bail!("{e}: nothing was found at all (see `kagaz discover`)");
+                    }
+                    eprintln!("Found:");
+                    for (i, d) in devices.iter().enumerate() {
+                        eprintln!("  {}. {}", i + 1, title(d));
+                    }
+                    anyhow::bail!("{e}");
+                }
+            };
+            let host = Host::detect();
+            let ports = d
+                .addresses
+                .iter()
+                .find(|a| a.is_ipv4())
+                .map(|ip| open_ports(*ip, Duration::from_millis(800)))
+                .unwrap_or_default();
+            let e = explain(d, &host, &ports);
+            if json {
+                println!("{}", serde_json::to_string_pretty(&e)?);
+                return Ok(());
+            }
+            let place = if let Some(ip) = d.addresses.first() {
+                format!("at {ip}")
+            } else if let Some(u) = &d.usb {
+                format!("on USB ({:04x}:{:04x})", u.vendor_id, u.product_id)
+            } else {
+                String::new()
+            };
+            println!(
+                "{} {place}  (this computer runs {})",
+                e.device,
+                e.host.os.label()
+            );
+            println!();
+            println!("Print: {}", e.print.summary);
+            for line in &e.print.details {
+                println!("  {line}");
+            }
+            println!();
+            println!("Scan: {}", e.scan.summary);
+            for line in &e.scan.details {
+                println!("  {line}");
+            }
+            if !e.notes.is_empty() {
+                println!();
+                println!("Also:");
+                for line in &e.notes {
+                    println!("  {line}");
+                }
+            }
+            Ok(())
+        }
+    }
+}
+
+fn title(d: &Device) -> String {
+    if d.name.is_empty() {
+        d.model.clone().unwrap_or_else(|| "Unknown device".into())
+    } else {
+        d.name.clone()
     }
 }
 

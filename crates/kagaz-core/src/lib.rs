@@ -3,6 +3,10 @@
 
 pub mod device;
 pub mod discovery;
+pub mod explain;
+pub mod select;
 
 pub use device::{Device, Protocol, Service, UsbInfo};
 pub use discovery::{discover, DiscoverOptions};
+pub use explain::{explain, open_ports, Explanation, Host, Os, Status, Verdict};
+pub use select::{find, SelectError};

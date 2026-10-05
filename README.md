@@ -104,6 +104,14 @@ on your USB ports (IPP-USB and the classic printer class,
 with the device's IEEE 1284 identity), and says which of them can print and
 scan without a driver. `--json` gives machine-readable output.
 
+```
+kagaz explain 1
+```
+
+(or `kagaz explain 192.168.1.20`, `kagaz explain brother`) says in plain
+words whether this computer can print to and scan from that device right
+now, why, and what would fix it.
+
 ## Roadmap
 
 - **M1 Find and explain.** Discover printers and scanners on the network and
