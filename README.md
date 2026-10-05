@@ -116,7 +116,8 @@ now, why, and what would fix it.
 kagaz scan brother
 ```
 
-scans without a driver (WSD-Scan today; eSCL next) to `scan-<date>-<time>.pdf`
+scans without a driver (WSD-Scan, verified on a Brother; eSCL written from
+the specification, not yet verified on a device) to `scan-<date>-<time>.pdf`
 in the current directory: the feeder if it has paper, else the glass, at
 300 dpi in colour. `--source`, `--dpi`, `--mode gray|bw`, `--format jpeg|png`,
 `--paper`, `-o file` change that, and `--max-size 2M` keeps a file under a
@@ -129,7 +130,8 @@ size by re-encoding and shrinking pages, so no separate compressor is needed.
   protocols, and what this OS can do with the device right now. CLI first,
   then the window.
 - **M2 Driverless scan.** Scan over eSCL and WSD (glass and feeder, preview,
-  PDF/JPEG/PNG), identical on all OSes. WSD done; eSCL in progress.
+  PDF/JPEG/PNG), identical on all OSes. WSD done; eSCL written, awaiting a
+  device to verify it on.
 - **M3 Driverless print.** Print over IPP, with job and supplies status.
 - **M4 Driver finder.** The `drivers/` database and the consent-based
   vendor-installer flow, starting with Brother on Linux (which is where this

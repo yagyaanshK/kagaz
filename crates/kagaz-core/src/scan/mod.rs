@@ -1,6 +1,7 @@
 //! Driverless scanning. The protocol modules (`wsd`, later `escl`) turn a
 //! `ScanRequest` into pages; the `output` module turns pages into files.
 
+pub mod escl;
 pub mod multipart;
 pub mod wsd;
 
@@ -114,6 +115,9 @@ pub fn scan(
     req: &ScanRequest,
     on_event: &mut dyn FnMut(Event),
 ) -> Result<Vec<Page>, ScanError> {
+    // WSD first while it is the protocol verified on real hardware; eSCL is
+    // written from the specification and takes over once it has been
+    // checked against a device.
     if let Some(svc) = device
         .services
         .iter()
@@ -125,6 +129,36 @@ pub fn scan(
             .ok_or_else(|| ScanError::Protocol("WSD scan service has no address".into()))?;
         let scanner = wsd::WsdScanner::connect(&url)?;
         return scanner.scan(req, on_event);
+    }
+    if let Some(svc) = device
+        .services
+        .iter()
+        .find(|s| s.protocol == Protocol::Escl)
+    {
+        let ip = device
+            .addresses
+            .iter()
+            .find(|a| a.is_ipv4())
+            .or(device.addresses.first())
+            .ok_or_else(|| ScanError::Protocol("eSCL service has no address".into()))?;
+        let host = match ip {
+            std::net::IpAddr::V4(v4) => v4.to_string(),
+            std::net::IpAddr::V6(v6) => format!("[{v6}]"),
+        };
+        let path = svc
+            .endpoint
+            .as_deref()
+            .map(|p| p.trim_matches('/'))
+            .filter(|p| !p.is_empty())
+            .unwrap_or("eSCL");
+        let base = format!("http://{host}:{}/{path}", svc.port.unwrap_or(80));
+        let scanner = escl::EsclScanner::connect(&base)?;
+        return scanner.scan(req, on_event);
+    }
+    if device.has_protocol(Protocol::Escls) {
+        return Err(ScanError::NotSupported(
+            "this scanner only offers eSCL over TLS, which Kagaz cannot speak yet".into(),
+        ));
     }
     Err(ScanError::NotSupported(if device.name.is_empty() {
         "this device".to_string()
