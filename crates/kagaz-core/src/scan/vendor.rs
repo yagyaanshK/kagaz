@@ -30,13 +30,13 @@ impl Default for BrotherSettings {
     }
 }
 
-pub fn brother_settings() -> BrotherSettings {
+/// `action` is "file", "image", "ocr" or "email": each has its own settings file.
+pub fn brother_settings(action: &str) -> BrotherSettings {
+    let file = format!("scanto{action}.config");
     let home = std::env::var_os("HOME").map(PathBuf::from);
     let candidates = [
-        home.map(|h| h.join(".brscan-skey/scantofile.config")),
-        Some(PathBuf::from(
-            "/etc/opt/brother/scanner/brscan-skey/scantofile.config",
-        )),
+        home.map(|h| h.join(".brscan-skey").join(&file)),
+        Some(PathBuf::from("/etc/opt/brother/scanner/brscan-skey").join(&file)),
     ];
     for path in candidates.into_iter().flatten() {
         if let Ok(text) = std::fs::read_to_string(&path) {
