@@ -105,9 +105,14 @@ async function select(i) {
   $("scan-log").innerHTML = "";
   $("scan-state").textContent = "";
   showTab("about");
-  const scanTab = document.querySelector('.tab[data-tab="scan"]');
-  scanTab.disabled = !canScan(d);
-  scanTab.title = canScan(d) ? "" : "This device does not offer driverless scanning";
+  const scannable = canScan(d);
+  $("scan-unavailable").classList.toggle("hidden", scannable);
+  $("scan-form").classList.toggle("hidden", !scannable);
+  if (!scannable) {
+    $("scan-unavailable-text").textContent = has(d, "SaneNet")
+      ? "This device was seen only with its vendor's own scanning protocol, which needs the vendor's driver (see About). No driverless scan service (eSCL or WSD) answered this time."
+      : "No driverless scan service (eSCL or WSD) was seen on this device, so Kagaz cannot scan from it.";
+  }
 
   $("button-state").textContent = "";
   loadButtonSettings(d);

@@ -23,9 +23,17 @@ pub fn probe(timeout: Duration) -> io::Result<Vec<Device>> {
     socket.send_to(probe.as_bytes(), MULTICAST)?;
 
     let deadline = Instant::now() + timeout;
+    // A second probe a second later catches devices that were busy or
+    // slow to wake for the first one.
+    let resend_at = Instant::now() + Duration::from_secs(1);
+    let mut resent = false;
     let mut buf = vec![0u8; 65536];
     let mut matches: Vec<(SocketAddr, ProbeMatch)> = Vec::new();
     while Instant::now() < deadline {
+        if !resent && Instant::now() >= resend_at {
+            resent = true;
+            let _ = socket.send_to(probe.as_bytes(), MULTICAST);
+        }
         match socket.recv_from(&mut buf) {
             Ok((n, from)) => {
                 if let Ok(text) = std::str::from_utf8(&buf[..n]) {
@@ -183,7 +191,7 @@ fn get_metadata(xaddr: &str, to: &str) -> Option<Metadata> {
         uuid::Uuid::new_v4()
     );
     let agent = ureq::AgentBuilder::new()
-        .timeout(Duration::from_secs(3))
+        .timeout(Duration::from_secs(8))
         .build();
     let resp = agent
         .post(xaddr)
