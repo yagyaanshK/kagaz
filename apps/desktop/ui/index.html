@@ -33,9 +33,9 @@
       <div id="tab-about" class="tab-pane">
         <p id="about-loading" class="muted">Working out what this computer can do with it…</p>
         <div id="about-body" class="hidden">
-          <h3>Print: <span id="about-print-summary"></span></h3>
+          <h3><span class="badge" id="about-print-badge"></span>Print: <span id="about-print-summary"></span></h3>
           <ul id="about-print-details"></ul>
-          <h3>Scan: <span id="about-scan-summary"></span></h3>
+          <h3><span class="badge" id="about-scan-badge"></span>Scan: <span id="about-scan-summary"></span></h3>
           <ul id="about-scan-details"></ul>
           <h3 id="about-notes-head">Also</h3>
           <ul id="about-notes"></ul>
@@ -46,6 +46,7 @@
         <form id="scan-form">
           <div class="grid">
             <label>Paper is
+              <figure class="pic" id="pic-source"></figure>
               <select name="source">
                 <option value="Auto">in the feeder if loaded, else on the glass</option>
                 <option value="Glass">on the glass</option>
@@ -54,6 +55,7 @@
               </select>
             </label>
             <label>Resolution
+              <figure class="pic" id="pic-dpi"></figure>
               <select name="dpi">
                 <option value="150">150 dpi (quick)</option>
                 <option value="300" selected>300 dpi (documents)</option>
@@ -61,6 +63,7 @@
               </select>
             </label>
             <label>Colour
+              <figure class="pic" id="pic-color"></figure>
               <select name="color">
                 <option value="Color">colour</option>
                 <option value="Gray">grey</option>
@@ -68,6 +71,7 @@
               </select>
             </label>
             <label>Paper size
+              <figure class="pic" id="pic-paper"></figure>
               <select name="paper">
                 <option value="A4">A4</option>
                 <option value="Letter">Letter</option>
@@ -76,6 +80,7 @@
               </select>
             </label>
             <label>Save as
+              <figure class="pic" id="pic-format"></figure>
               <select name="format">
                 <option value="Pdf">PDF</option>
                 <option value="Jpeg">JPEG</option>
@@ -106,6 +111,7 @@
     </section>
   </main>
 
+  <script src="pictures.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

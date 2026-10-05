@@ -44,11 +44,8 @@ with the commit that closes them.
 
 ## Desktop app polish
 
-- [ ] **Illustrations next to each option** (asked 2026-10-05): small inline
-      pictures in the Scan pane showing where the paper goes (glass corner,
-      feeder, face up/down), paper orientation, and what colour/grey/black-and-
-      white give; a sketch per verdict in About. For people who would rather
-      look than read.
+- [x] Illustrations next to each option in the Scan pane and a badge per
+      verdict in About (inline SVG, 2026-10-06). Worth a look in the window.
 
 ## Roadmap, not yet started
 

@@ -120,6 +120,8 @@ async function select(i) {
     $("about-notes-head").classList.toggle("hidden", e.notes.length === 0);
     $("about-print-summary").textContent = e.print.summary;
     $("about-scan-summary").textContent = e.scan.summary;
+    $("about-print-badge").innerHTML = Pictures.verdict(e.print.status);
+    $("about-scan-badge").innerHTML = Pictures.verdict(e.scan.status);
     $("about-loading").classList.add("hidden");
     $("about-body").classList.remove("hidden");
   } catch (err) {
@@ -230,4 +232,6 @@ $("scan-form").addEventListener("submit", async (ev) => {
 });
 
 $("rescan").addEventListener("click", rescan);
+$("scan-form").addEventListener("change", () => Pictures.update($("scan-form")));
+Pictures.update($("scan-form"));
 rescan();
