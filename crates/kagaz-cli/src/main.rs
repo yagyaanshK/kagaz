@@ -56,7 +56,7 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
-    /// Scan without a driver (WSD, later eSCL) to a PDF, JPEG or PNG file
+    /// Scan without a driver (WSD or eSCL) to a PDF, JPEG or PNG file
     Scan {
         /// Its number in `kagaz discover`, an IP address, hostname, or part of its name
         device: String,
