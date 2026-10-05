@@ -25,11 +25,15 @@ sha256 = "6360f7e6fbb55dda9dcd05a030dca12e56f8d8ce0377d4a836297084f5cea891"
 size = 59150
 
 [linux]
+# The listener copies each configured command into a small fixed buffer, so
+# the commands stay as short as Brother's own: a wrapper script per action in
+# Brother's script folder, with the real command inside.
 admin_steps = [
   "brsaneconfig4 -a name={name} model={model} ip={ip}",
   "if command -v ufw >/dev/null && ufw status 2>/dev/null | grep -q '^Status: active'; then ufw allow from {ip} to any port 54925 proto udp comment 'Brother scan-key tool (Kagaz)'; fi",
+  "d=/opt/brother/scanner/brscan-skey/script; for a in file image ocr; do printf '#!/bin/sh\\n# Written by Kagaz: the printer\\x27s Scan to PC > %s action.\\nexec \\x27{kagaz}\\x27 scan-button --action %s --dir \\x27{scans_dir}\\x27 \"$@\"\\n' \"$a\" \"$a\" > \"$d/kagaz-scanto$a.sh\"; chmod 755 \"$d/kagaz-scanto$a.sh\"; done",
   "cfg=/opt/brother/scanner/brscan-skey/brscan-skey.config; [ -f \"$cfg.orig\" ] || cp \"$cfg\" \"$cfg.orig\"",
-  "sed -i 's|^FILE=.*|FILE=\"{kagaz} scan-button --dir {scans_dir}\"|; s|^IMAGE=.*|IMAGE=\"{kagaz} scan-button --dir {scans_dir} --format jpeg\"|; s|^OCR=.*|OCR=\"{kagaz} scan-button --dir {scans_dir}\"|' /opt/brother/scanner/brscan-skey/brscan-skey.config",
+  "sed -i 's|^FILE=.*|FILE=\"bash /opt/brother/scanner/brscan-skey/script/kagaz-scantofile.sh\"|; s|^IMAGE=.*|IMAGE=\"bash /opt/brother/scanner/brscan-skey/script/kagaz-scantoimage.sh\"|; s|^OCR=.*|OCR=\"bash /opt/brother/scanner/brscan-skey/script/kagaz-scantoocr.sh\"|' /opt/brother/scanner/brscan-skey/brscan-skey.config",
 ]
 user_steps = [
   "mkdir -p {scans_dir} ~/.config/autostart",
@@ -40,6 +44,7 @@ remove_steps = [
   "pkill -x brscan-skey-exe || true",
   "brsaneconfig4 -r {name} || true",
   "if command -v ufw >/dev/null; then ufw delete allow from {ip} to any port 54925 proto udp || true; fi",
+  "rm -f /opt/brother/scanner/brscan-skey/script/kagaz-scanto*.sh",
   "dpkg -r brscan-skey brscan4",
 ]
 remove_user_steps = ["rm -f ~/.config/autostart/brscan-skey.desktop"]
@@ -48,5 +53,5 @@ notes = [
   "The printer announces button presses to this computer on UDP port 54925; the installer opens it in ufw when ufw is active.",
   "Scans started from the printer's button are saved to {scans_dir}.",
   "The OCR choice on the printer scans like File for now; searchable PDFs come with the OCR extra later.",
-  "Resolution, paper size and duplex for button scans come from Brother's own settings file (~/.brscan-skey/scantofile.config, else /etc/opt/brother/scanner/brscan-skey/scantofile.config; Brother ships resolution=100).",
+  "Button scans use Brother's own settings, exactly as Brother's scripts do: ~/.brscan-skey/scantofile.config, scantoimage.config, scantoocr.config, else the copies under /etc/opt/brother/scanner/brscan-skey (Brother ships 100 dpi, A4, one side for every action).",
 ]

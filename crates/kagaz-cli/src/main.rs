@@ -155,12 +155,15 @@ enum Command {
         /// The SANE device name the vendor's listener passes, e.g. brother4:net1;dev0
         #[arg(trailing_var_arg = true)]
         device: Vec<String>,
+        /// Which button action this is: file, image or ocr (picks Brother's settings file and the output format)
+        #[arg(long, default_value = "file")]
+        action: String,
         /// Folder to save into (default: ~/Scans)
         #[arg(long)]
         dir: Option<PathBuf>,
-        /// pdf, jpeg or png
-        #[arg(long, value_enum, default_value_t = FormatArg::Pdf)]
-        format: FormatArg,
+        /// pdf, jpeg or png (default: jpeg for image, pdf otherwise)
+        #[arg(long, value_enum)]
+        format: Option<FormatArg>,
         /// color, gray or bw
         #[arg(long, value_enum, default_value_t = ModeArg::Color)]
         mode: ModeArg,
@@ -692,10 +695,11 @@ fn main() -> Result<()> {
         }
         Command::ScanButton {
             device,
+            action,
             dir,
             format,
             mode,
-        } => scan_button(device, dir, format, mode),
+        } => scan_button(device, &action, dir, format, mode),
         Command::Identify { device, timeout } => {
             let devices = discover(&DiscoverOptions {
                 timeout: Duration::from_secs(timeout),
@@ -882,10 +886,16 @@ fn print_plan(p: &install::Plan, remove: bool) {
 /// watching a terminal when the printer's button is pressed.
 fn scan_button(
     device: Vec<String>,
+    action: &str,
     dir: Option<PathBuf>,
-    format: FormatArg,
+    format: Option<FormatArg>,
     mode: ModeArg,
 ) -> Result<()> {
+    let format = format.unwrap_or(if action == "image" {
+        FormatArg::Jpeg
+    } else {
+        FormatArg::Pdf
+    });
     let dir = dir.unwrap_or_else(kagaz_core::paths::scans_dir);
     let cache = kagaz_core::paths::cache_dir();
     let _ = std::fs::create_dir_all(&cache);
@@ -918,9 +928,9 @@ fn scan_button(
         .find(|a| a.contains(':'))
         .or_else(|| device.first().map(|a| a.trim().to_string()))
         .unwrap_or_default();
-    let settings = kagaz_core::scan::vendor::brother_settings();
+    let settings = kagaz_core::scan::vendor::brother_settings(action);
     log(&format!(
-        "button pressed, device \"{device_name}\" (args {:?}), {} dpi, {}, saving to {}",
+        "button pressed ({action}), device \"{device_name}\" (args {:?}), {} dpi, {}, saving to {}",
         device,
         settings.resolution,
         if settings.duplex {
