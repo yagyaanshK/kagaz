@@ -293,14 +293,15 @@ fn encode(img: DynamicImage, format: Format, quality: u8) -> Result<Kind, Output
             })
         }
         Format::Jpeg | Format::Pdf => {
-            let components = if img.color().channel_count() == 1 {
-                1
-            } else {
-                3
+            // Encode the concrete buffer: a `DynamicImage` view is seen as
+            // RGBA by the encoder and would come out with three components.
+            let mut enc = JpegEncoder::new_with_quality(&mut buf, quality);
+            let result = match &img {
+                DynamicImage::ImageLuma8(grey) => enc.encode_image(grey).map(|()| 1),
+                DynamicImage::ImageRgb8(rgb) => enc.encode_image(rgb).map(|()| 3),
+                other => enc.encode_image(&other.to_rgb8()).map(|()| 3),
             };
-            JpegEncoder::new_with_quality(&mut buf, quality)
-                .encode_image(&img)
-                .map_err(|e| OutputError::Image(e.to_string()))?;
+            let components = result.map_err(|e| OutputError::Image(e.to_string()))?;
             Ok(Kind::Jpeg {
                 data: buf.into_inner(),
                 components,
