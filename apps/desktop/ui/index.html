@@ -49,6 +49,13 @@
         </div>
         <form id="scan-form">
           <div class="grid">
+            <label>Scan with
+              <select name="engine">
+                <option value="Driverless">Kagaz, no driver (eSCL / WSD)</option>
+                <option value="Driver">the installed vendor driver</option>
+              </select>
+              <small id="engine-note" class="muted"></small>
+            </label>
             <label>Paper is
               <figure class="pic" id="pic-source"></figure>
               <select name="source">

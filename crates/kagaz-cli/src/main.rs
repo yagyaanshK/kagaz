@@ -78,6 +78,9 @@ enum Command {
         /// Paper size to scan
         #[arg(long, value_enum, default_value_t = PaperArg::A4)]
         paper: PaperArg,
+        /// Who talks to the scanner: driverless (Kagaz over eSCL/WSD) or driver (the installed vendor driver via SANE)
+        #[arg(long, value_enum, default_value_t = EngineArg::Driverless)]
+        engine: EngineArg,
         /// JPEG quality 1-100 when pages are re-encoded (default 85; untouched pages keep the scanner's quality)
         #[arg(long)]
         quality: Option<u8>,
@@ -188,6 +191,12 @@ enum Command {
         #[arg(long, default_value_t = 3)]
         timeout: u64,
     },
+}
+
+#[derive(Clone, Copy, ValueEnum, PartialEq, Eq)]
+enum EngineArg {
+    Driverless,
+    Driver,
 }
 
 #[derive(Clone, Copy, ValueEnum, PartialEq, Eq)]
@@ -414,6 +423,7 @@ fn main() -> Result<()> {
             mode,
             format,
             paper,
+            engine,
             quality,
             max_size,
             output,
@@ -471,6 +481,10 @@ fn main() -> Result<()> {
                     PaperArg::Letter => Paper::Letter,
                     PaperArg::Legal => Paper::Legal,
                     PaperArg::Max => Paper::Max,
+                },
+                engine: match engine {
+                    EngineArg::Driverless => kagaz_core::scan::Engine::Driverless,
+                    EngineArg::Driver => kagaz_core::scan::Engine::Driver,
                 },
             };
 
