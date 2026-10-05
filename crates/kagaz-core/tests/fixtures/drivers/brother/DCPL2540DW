@@ -1,0 +1,8 @@
+[DCP-L2540DW]
+PRN_CUP_RPM=dcpl2540dwcupswrapper-3.2.0-2.i386.rpm
+PRN_CUP_DEB=dcpl2540dwcupswrapper-3.2.0-1.i386.deb
+PRN_LPD_RPM=dcpl2540dwlpr-3.2.0-2.i386.rpm
+PRN_LPD_DEB=dcpl2540dwlpr-3.2.0-1.i386.deb
+PRINTERNAME=DCPL2540DW
+SCANNER_DRV=brscan4
+SCANKEY_DRV=brscan-skey

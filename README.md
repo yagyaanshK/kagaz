@@ -141,6 +141,17 @@ rendered here (pure Rust) at the printer's resolution and paper size, sent
 as PWG Raster. `--copies`, `--paper`, `--gray`, and `--dry-run` to check
 with the printer without printing.
 
+```
+kagaz driver brother --plan
+kagaz driver brother
+```
+
+finds the vendor's official driver for a device in the `drivers/` database
+(or, for Brother on Linux, on Brother's own download server), shows every
+package with its checksum status and every command it will run, downloads
+and verifies the packages, and runs the administrator steps through the OS
+prompt only after you type yes. `--remove` undoes it.
+
 The desktop window (`cargo run -p kagaz-desktop`) shows the same devices,
 the same plain-words explanation and the same scan options; on Linux it
 needs the webkit2gtk and gtk3 development packages to build.
@@ -158,7 +169,8 @@ needs the webkit2gtk and gtk3 development packages to build.
   Done for IPP Everywhere (PWG Raster) printers; AirPrint-only (URF) printers next.
 - **M4 Driver finder.** The `drivers/` database and the consent-based
   vendor-installer flow, starting with Brother on Linux (which is where this
-  project was born).
+  project was born). Database, Brother lookup, plan and install flow done;
+  Windows and macOS entries to come.
 - **M5 Extras, all optional downloads.** OCR to searchable PDF (Tesseract),
   the printer's Scan-button listener (cross-vendor push scan), smart filing
   with on-device models, print queue and supplies view.

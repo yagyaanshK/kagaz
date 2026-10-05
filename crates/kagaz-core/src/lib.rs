@@ -3,10 +3,12 @@
 
 pub mod device;
 pub mod discovery;
+pub mod drivers;
 pub mod explain;
 pub mod ipp;
 pub mod localtime;
 pub mod output;
+pub mod paths;
 pub mod print;
 pub mod scan;
 pub mod select;

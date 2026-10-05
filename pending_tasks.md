@@ -42,6 +42,14 @@ with the commit that closes them.
 - [ ] **Scan preview** (low-dpi quick scan to screen) waits for the desktop
       app.
 
+## Desktop app polish
+
+- [ ] **Illustrations next to each option** (asked 2026-10-05): small inline
+      pictures in the Scan pane showing where the paper goes (glass corner,
+      feeder, face up/down), paper orientation, and what colour/grey/black-and-
+      white give; a sketch per verdict in About. For people who would rather
+      look than read.
+
 ## Roadmap, not yet started
 
 - [x] M3 driverless print over IPP: `kagaz print` sends PWG Raster; one test

@@ -1,0 +1,4 @@
+RPM32=brscan-skey-0.3.4-0.i386.rpm
+DEB32=brscan-skey-0.3.4-0.i386.deb
+RPM64=brscan-skey-0.3.4-0.x86_64.rpm
+DEB64=brscan-skey-0.3.4-0.amd64.deb

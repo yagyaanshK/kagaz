@@ -3,6 +3,7 @@
 
 use anyhow::Result;
 use clap::{Parser, Subcommand, ValueEnum};
+use kagaz_core::drivers::{self, install};
 use kagaz_core::ipp::status::PrinterStatus;
 use kagaz_core::output::{human_size, parse_size, Format, OutputOptions};
 use kagaz_core::print::{Event as PrintEvent, PrintRequest, Sides};
@@ -122,6 +123,29 @@ enum Command {
         /// Do everything except send the job: render, and ask the printer to validate it
         #[arg(long)]
         dry_run: bool,
+        /// Seconds to listen for answers while finding the device
+        #[arg(long, default_value_t = 3)]
+        timeout: u64,
+    },
+    /// Find, download and install the vendor's official driver for a device, after showing exactly what it will do
+    Driver {
+        /// Its number in `kagaz discover`, an IP address, hostname, or part of its name
+        device: String,
+        /// Only show the plan, change nothing
+        #[arg(long)]
+        plan: bool,
+        /// Go ahead without the "yes" question (you have read the plan)
+        #[arg(long)]
+        yes: bool,
+        /// Undo a previous install instead
+        #[arg(long)]
+        remove: bool,
+        /// Where downloaded packages are kept (default: the cache folder, or KAGAZ_DOWNLOAD_DIR)
+        #[arg(long)]
+        download_dir: Option<PathBuf>,
+        /// Where scans started from the device's own button are saved (default: ~/Scans)
+        #[arg(long)]
+        scans_dir: Option<PathBuf>,
         /// Seconds to listen for answers while finding the device
         #[arg(long, default_value_t = 3)]
         timeout: u64,
@@ -387,13 +411,17 @@ fn main() -> Result<()> {
                     .unwrap_or(Format::Pdf),
                 (None, None) => Format::Pdf,
             };
-            let path = output.unwrap_or_else(|| {
-                PathBuf::from(format!(
-                    "scan-{}.{}",
-                    kagaz_core::localtime::now().file_stamp(),
-                    format.extension()
-                ))
-            });
+            let default_name = format!(
+                "scan-{}.{}",
+                kagaz_core::localtime::now().file_stamp(),
+                format.extension()
+            );
+            // `-o <folder>` means "in that folder with the default name".
+            let path = match output {
+                Some(p) if p.is_dir() => p.join(&default_name),
+                Some(p) => p,
+                None => PathBuf::from(default_name),
+            };
             let color = match mode {
                 ModeArg::Color => ColorMode::Color,
                 ModeArg::Gray => ColorMode::Gray,
@@ -547,6 +575,106 @@ fn main() -> Result<()> {
             }
             Ok(())
         }
+        Command::Driver {
+            device,
+            plan: plan_only,
+            yes,
+            remove,
+            download_dir,
+            scans_dir,
+            timeout,
+        } => {
+            let devices = discover(&DiscoverOptions {
+                timeout: Duration::from_secs(timeout),
+                ..Default::default()
+            })?;
+            let d = select_device(&devices, &device)?;
+            let os = kagaz_core::Os::current();
+            let entries = drivers::load()?;
+            let entry = match drivers::find(&entries, d) {
+                Some(e) => e.clone(),
+                None => {
+                    let is_brother = d
+                        .manufacturer
+                        .as_deref()
+                        .is_some_and(|m| m.eq_ignore_ascii_case("brother"));
+                    let model = d.model.clone().unwrap_or_else(|| d.name.clone());
+                    let key = drivers::model_key(d.manufacturer.as_deref(), &model);
+                    if is_brother && os == kagaz_core::Os::Linux && !key.is_empty() {
+                        println!(
+                            "No database entry for {}; asking Brother's download server...",
+                            title(d)
+                        );
+                        match drivers::brother::resolve(
+                            &key,
+                            &model,
+                            install::package_kind(os),
+                            install::arch(),
+                        ) {
+                            Ok(Some(e)) => e,
+                            Ok(None) => {
+                                anyhow::bail!("Brother's server knows no Linux packages for {key}")
+                            }
+                            Err(e) => anyhow::bail!("could not ask Brother's server: {e}"),
+                        }
+                    } else {
+                        anyhow::bail!(
+                            "no driver entry for {} yet; drivers/README.md explains how to add one",
+                            title(d)
+                        );
+                    }
+                }
+            };
+            let mut ctx = install::Context::for_device(d);
+            if let Some(dir) = download_dir {
+                ctx.download_dir = dir;
+            }
+            if let Some(dir) = scans_dir {
+                ctx.scans_dir = dir;
+            }
+            let plan = install::plan(&entry, os, &ctx, &title(d))?;
+            print_plan(&plan, remove);
+            if plan_only {
+                return Ok(());
+            }
+            if !yes {
+                print!("Type yes to go ahead: ");
+                std::io::Write::flush(&mut std::io::stdout())?;
+                let mut answer = String::new();
+                std::io::stdin().read_line(&mut answer)?;
+                if answer.trim() != "yes" {
+                    println!("Nothing done.");
+                    return Ok(());
+                }
+            }
+            let mut report = |e: install::Event| match e {
+                install::Event::Downloading { name, bytes } => println!(
+                    "  downloading {name}{}...",
+                    bytes
+                        .map(|b| format!(" ({})", human_size(b)))
+                        .unwrap_or_default()
+                ),
+                install::Event::Verified { name, cached } => println!(
+                    "  {name}: checksum matches{}",
+                    if cached { " (already downloaded)" } else { "" }
+                ),
+                install::Event::Unverified { name } => {
+                    println!(
+                        "  {name}: no checksum on record; trusting the vendor's server over TLS"
+                    )
+                }
+                install::Event::AdminStep => println!("  asking for administrator rights..."),
+                install::Event::UserStep => println!("  finishing as your user..."),
+                install::Event::Done => println!("Done."),
+            };
+            if remove {
+                install::remove(&plan, &mut report)?;
+            } else {
+                install::install(&plan, &mut report)?;
+                println!("Run `kagaz explain {device}` to see what changed.");
+            }
+            Ok(())
+        }
         Command::Identify { device, timeout } => {
             let devices = discover(&DiscoverOptions {
                 timeout: Duration::from_secs(timeout),
@@ -673,6 +801,59 @@ fn print_status(d: &Device, s: &PrinterStatus) {
     if let Some(url) = &s.more_info {
         println!("  web page   {url}");
     }
+}
+
+fn print_plan(p: &install::Plan, remove: bool) {
+    println!(
+        "{} for {}",
+        if remove {
+            "Removing the driver"
+        } else {
+            "Driver"
+        },
+        p.device
+    );
+    println!("  entry      {}", p.source);
+    for n in &p.notes {
+        println!("  note       {n}");
+    }
+    let show = |heading: &str, script: &str| {
+        if script.trim().is_empty() {
+            return;
+        }
+        println!("{heading}");
+        for l in script.lines().filter(|l| *l != "set -e") {
+            println!("    {l}");
+        }
+    };
+    if remove {
+        show("Will run as administrator:", &p.remove_script);
+        show("Then as you:", &p.remove_user_script);
+        return;
+    }
+    if !p.packages.is_empty() {
+        println!("Packages (kept under {}):", p.download_dir.display());
+        for pk in &p.packages {
+            println!(
+                "    {:<14} {}  {}{}{}",
+                pk.name,
+                pk.url,
+                pk.size.map(human_size).unwrap_or_default(),
+                if pk.sha256.is_some() {
+                    "  checksum pinned"
+                } else {
+                    "  NO checksum on record"
+                },
+                if p.already_installed.contains(&pk.name) {
+                    "  (already installed)"
+                } else {
+                    ""
+                }
+            );
+        }
+    }
+    show("Will run as administrator:", &p.admin_script);
+    show("Then as you:", &p.user_script);
 }
 
 /// Pick one device by what the user typed, or explain why that failed.

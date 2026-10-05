@@ -1,0 +1,51 @@
+# Brother DCP-L2540DW: prints driverless (IPP Everywhere / AirPrint / WSD) and
+# scans driverless over WSD. The vendor driver is only needed for the
+# printer's own Scan button ("Scan to PC"), which talks to Brother's scan-key
+# tool, and for SANE applications that want the brother4 backend.
+
+[model]
+manufacturer = "Brother"
+models = ["DCP-L2540DW", "DCP-L2540DW series"]
+functions = ["scan", "scan-button"]
+
+[[linux.packages]]
+name = "brscan4"
+kind = "deb"
+arch = "x86_64"
+url = "https://download.brother.com/pub/com/linux/linux/packages/brscan4-0.4.11-1.amd64.deb"
+sha256 = "027b73648722ac8c8eb1a9c419d284a6562cc763feac9740a2b75a683b092972"
+size = 111246
+
+[[linux.packages]]
+name = "brscan-skey"
+kind = "deb"
+arch = "x86_64"
+url = "https://download.brother.com/pub/com/linux/linux/packages/brscan-skey-0.3.4-0.amd64.deb"
+sha256 = "6360f7e6fbb55dda9dcd05a030dca12e56f8d8ce0377d4a836297084f5cea891"
+size = 59150
+
+[linux]
+admin_steps = [
+  "brsaneconfig4 -a name={name} model={model} ip={ip}",
+  "if command -v ufw >/dev/null && ufw status 2>/dev/null | grep -q '^Status: active'; then ufw allow from {ip} to any port 54925 proto udp comment 'Brother scan-key tool (Kagaz)'; fi",
+  "cfg=/opt/brother/scanner/brscan-skey/brscan-skey.config; [ -f \"$cfg.orig\" ] || cp \"$cfg\" \"$cfg.orig\"",
+  "sed -i 's|^FILE=.*|FILE=\"{kagaz} scan {ip} -o {scans_dir}\"|; s|^IMAGE=.*|IMAGE=\"{kagaz} scan {ip} --format jpeg -o {scans_dir}\"|; s|^OCR=.*|OCR=\"{kagaz} scan {ip} -o {scans_dir}\"|' /opt/brother/scanner/brscan-skey/brscan-skey.config",
+]
+user_steps = [
+  "mkdir -p {scans_dir} ~/.config/autostart",
+  "printf '[Desktop Entry]\\nType=Application\\nName=Brother scan-key listener\\nComment=Waits for the Scan button on the {model} and runs Kagaz\\nExec=/usr/bin/brscan-skey\\nX-GNOME-Autostart-Delay=15\\nNoDisplay=true\\n' > ~/.config/autostart/brscan-skey.desktop",
+  "pkill -x brscan-skey; (nohup /usr/bin/brscan-skey >/dev/null 2>&1 &)",
+]
+remove_steps = [
+  "pkill -x brscan-skey || true",
+  "brsaneconfig4 -r {name} || true",
+  "if command -v ufw >/dev/null; then ufw delete allow from {ip} to any port 54925 proto udp || true; fi",
+  "dpkg -r brscan-skey brscan4",
+]
+remove_user_steps = ["rm -f ~/.config/autostart/brscan-skey.desktop"]
+notes = [
+  "Printing and scanning already work without this driver; it adds the printer's Scan button (Scan to PC > File/Image/OCR) and the brother4 SANE backend.",
+  "The printer announces button presses to this computer on UDP port 54925; the installer opens it in ufw when ufw is active.",
+  "Scans started from the printer's button are saved to {scans_dir}.",
+  "The OCR choice on the printer scans like File for now; searchable PDFs come with the OCR extra later.",
+]

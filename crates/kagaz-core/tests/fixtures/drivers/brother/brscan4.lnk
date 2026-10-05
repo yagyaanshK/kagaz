@@ -1,0 +1,4 @@
+RPM32=brscan4-0.4.11-2.i386.rpm
+DEB32=brscan4-0.4.11-1.i386.deb
+RPM64=brscan4-0.4.11-2.x86_64.rpm
+DEB64=brscan4-0.4.11-1.amd64.deb
