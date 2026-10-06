@@ -6,6 +6,7 @@ pub mod device;
 pub mod discovery;
 pub mod drivers;
 pub mod explain;
+pub mod extras;
 pub mod ipp;
 pub mod localtime;
 pub mod output;

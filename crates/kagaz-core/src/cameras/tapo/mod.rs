@@ -4,7 +4,9 @@
 
 pub mod cloud;
 pub mod relay;
+pub mod serve;
 pub mod tls;
 
 pub use cloud::{Camera, CloudError, Session};
 pub use relay::{request_relay, stream_preview, RelayError, RelayParams};
+pub use serve::TsServer;
