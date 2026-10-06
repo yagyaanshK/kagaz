@@ -23,3 +23,10 @@ uuid = { version = "1", features = ["v4"] }
 hayro = "0.8.0"
 sha2 = "0.11.0"
 toml = "1.1.6"
+hmac = "0.13.0"
+sha1 = "0.11.0"
+md-5 = "0.11.0"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+rustls-pki-types = "1"
+webpki-roots = "1"
+base64 = "0.22"

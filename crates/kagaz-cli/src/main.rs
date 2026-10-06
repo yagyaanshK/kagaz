@@ -183,6 +183,9 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Tapo cameras through your TP-Link account, the way the Tapo app reaches them
+    #[command(subcommand)]
+    Tapo(TapoCommand),
     /// Make a printer flash its display so you know which one it is
     Identify {
         /// Its number in `kagaz discover`, an IP address, hostname, or part of its name
@@ -190,6 +193,37 @@ enum Command {
         /// Seconds to listen for answers while finding the device
         #[arg(long, default_value_t = 3)]
         timeout: u64,
+    },
+}
+
+#[derive(Subcommand)]
+enum TapoCommand {
+    /// Log in to your TP-Link account (asks for the email code if the account has one); the session is kept in a private file
+    Login {
+        /// Account email
+        #[arg(long)]
+        email: Option<String>,
+    },
+    /// Forget the saved session
+    Logout,
+    /// List the account's cameras
+    Cameras {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Record a camera's live view through the relay to a file (MPEG-TS), to prove the path works
+    Record {
+        /// Camera name, or part of it, or its device id
+        camera: String,
+        /// How long to record
+        #[arg(long, default_value_t = 10)]
+        seconds: u64,
+        /// Output file (default: tapo-<name>-<date>-<time>.ts)
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+        /// HD or VGA
+        #[arg(long, default_value = "HD")]
+        resolution: String,
     },
 }
 
@@ -789,6 +823,7 @@ fn main() -> Result<()> {
             println!("Back to Brother's default: kagaz button-settings --reset image");
             Ok(())
         }
+        Command::Tapo(cmd) => tapo_command(cmd),
         Command::Identify { device, timeout } => {
             let devices = discover(&DiscoverOptions {
                 timeout: Duration::from_secs(timeout),
@@ -1092,6 +1127,174 @@ fn scan_button(
             Err(e)
         }
     }
+}
+
+fn prompt(label: &str) -> Result<String> {
+    print!("{label}");
+    std::io::Write::flush(&mut std::io::stdout())?;
+    let mut s = String::new();
+    std::io::stdin().read_line(&mut s)?;
+    Ok(s.trim().to_string())
+}
+
+/// Read a password without echoing it (Unix); plain input elsewhere.
+fn prompt_secret(label: &str) -> Result<String> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::io::AsRawFd;
+        let fd = std::io::stdin().as_raw_fd();
+        let mut term: libc::termios = unsafe { std::mem::zeroed() };
+        // SAFETY: tcgetattr/tcsetattr only read and write the termios we own.
+        let is_tty = unsafe { libc::tcgetattr(fd, &mut term) } == 0;
+        if is_tty {
+            let saved = term;
+            term.c_lflag &= !libc::ECHO;
+            unsafe { libc::tcsetattr(fd, libc::TCSANOW, &term) };
+            let r = prompt(label);
+            unsafe { libc::tcsetattr(fd, libc::TCSANOW, &saved) };
+            println!();
+            return r;
+        }
+    }
+    prompt(label)
+}
+
+fn tapo_command(cmd: TapoCommand) -> Result<()> {
+    use kagaz_core::cameras::tapo::{self, CloudError, Session};
+    let path = Session::default_path();
+    match cmd {
+        TapoCommand::Login { email } => {
+            let email = match email {
+                Some(e) => e,
+                None => prompt("TP-Link account email: ")?,
+            };
+            let password = prompt_secret("Password (not shown): ")?;
+            let mut session = Session::begin(&email);
+            match session.do_login(&password) {
+                Ok(()) => {}
+                Err(CloudError::MfaRequired { types, .. }) => {
+                    let mfa_type = if types.contains(&tapo::cloud::MFA_EMAIL) || types.is_empty() {
+                        tapo::cloud::MFA_EMAIL
+                    } else {
+                        types[0]
+                    };
+                    session.send_mfa_code(mfa_type)?;
+                    println!(
+                        "TP-Link sent a verification code{}.",
+                        if mfa_type == tapo::cloud::MFA_EMAIL {
+                            " to your email"
+                        } else {
+                            ""
+                        }
+                    );
+                    let code = prompt("Code: ")?;
+                    session.submit_mfa(&code, mfa_type)?;
+                }
+                Err(e) => return Err(e.into()),
+            }
+            session.save(&path)?;
+            println!(
+                "Logged in. Session kept in {} (readable only by you).",
+                path.display()
+            );
+            let cams = session.cameras()?;
+            println!(
+                "{} camera{} on the account:",
+                cams.len(),
+                if cams.len() == 1 { "" } else { "s" }
+            );
+            for c in &cams {
+                println!("  {}  ({}, {})", c.name, c.model, c.device_id);
+            }
+            Ok(())
+        }
+        TapoCommand::Logout => {
+            match std::fs::remove_file(&path) {
+                Ok(()) => println!("Forgot the session at {}.", path.display()),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => println!("No saved session."),
+                Err(e) => return Err(e.into()),
+            }
+            Ok(())
+        }
+        TapoCommand::Cameras { json } => {
+            let session = load_tapo_session(&path)?;
+            let cams = session.cameras()?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&cams)?);
+                return Ok(());
+            }
+            for c in &cams {
+                println!("{}  ({}, {})", c.name, c.model, c.device_id);
+            }
+            Ok(())
+        }
+        TapoCommand::Record {
+            camera,
+            seconds,
+            output,
+            resolution,
+        } => {
+            let session = load_tapo_session(&path)?;
+            let cams = session.cameras()?;
+            let needle = camera.to_lowercase();
+            let cam = cams
+                .iter()
+                .find(|c| {
+                    c.device_id.eq_ignore_ascii_case(&camera) || c.name.to_lowercase() == needle
+                })
+                .or_else(|| {
+                    cams.iter()
+                        .find(|c| c.name.to_lowercase().contains(&needle))
+                })
+                .ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "no camera matches \"{camera}\"; `kagaz tapo cameras` lists them"
+                    )
+                })?;
+            let track = format!("preview-{}", cam.device_id);
+            println!("Asking TP-Link's relay for {}...", cam.name);
+            let relay = tapo::request_relay(&session, &cam.device_id, &cam.app_server, &track)?;
+            let out = output.unwrap_or_else(|| {
+                PathBuf::from(format!(
+                    "tapo-{}-{}.ts",
+                    cam.name.replace(|c: char| !c.is_alphanumeric(), "-"),
+                    kagaz_core::localtime::now().file_stamp()
+                ))
+            });
+            let mut file = std::fs::File::create(&out)?;
+            let start = std::time::Instant::now();
+            let mut parts = 0u64;
+            println!("Streaming for {seconds} s...");
+            let total = tapo::stream_preview(
+                &relay,
+                &session.terminal_uuid,
+                &track,
+                &resolution,
+                &mut |chunk| {
+                    let _ = std::io::Write::write_all(&mut file, chunk);
+                    parts += 1;
+                    if parts == 1 {
+                        println!(
+                            "  first video arrived after {:.1} s",
+                            start.elapsed().as_secs_f32()
+                        );
+                    }
+                    start.elapsed().as_secs() < seconds
+                },
+            )?;
+            println!(
+                "Saved {} ({}, {parts} parts)",
+                out.display(),
+                human_size(total)
+            );
+            Ok(())
+        }
+    }
+}
+
+fn load_tapo_session(path: &std::path::Path) -> Result<kagaz_core::cameras::tapo::Session> {
+    kagaz_core::cameras::tapo::Session::load(path)
+        .map_err(|_| anyhow::anyhow!("not logged in; run `kagaz tapo login` first"))
 }
 
 /// Pick one device by what the user typed, or explain why that failed.
