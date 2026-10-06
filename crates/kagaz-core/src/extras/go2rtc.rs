@@ -319,6 +319,16 @@ impl Engine {
         )
     }
 
+    /// The URL of a stream as MPEG-TS over HTTP: what WebKit's media stack
+    /// plays best in a plain `<video>` (its MP4 output is refused there).
+    pub fn ts_url(&self, name: &str) -> String {
+        format!(
+            "http://127.0.0.1:{}/api/stream.ts?src={}",
+            self.api_port,
+            yaml_key(name)
+        )
+    }
+
     /// The WebSocket URL go2rtc's MSE/WebRTC player uses.
     pub fn ws_url(&self, name: &str) -> String {
         format!(
