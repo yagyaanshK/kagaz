@@ -203,27 +203,50 @@ impl Session {
         Err(CloudError::Auth(trim(&data.to_string())))
     }
 
-    /// Ask TP-Link to send the verification code (2 = email).
-    pub fn send_mfa_code(&self, mfa_type: u32) -> Result<(), CloudError> {
+    /// Ask TP-Link to send the verification code: 2 = email, 1 = a push to a
+    /// Tapo app already bound to the account (a fresh terminal has none, so
+    /// email is the one that works). The email endpoint is not documented;
+    /// the candidates are tried in order until one is accepted.
+    pub fn send_mfa_code(&self, mfa_type: u32, password: &str) -> Result<String, CloudError> {
+        let endpoints: &[&str] = if mfa_type == MFA_EMAIL {
+            &[
+                "/api/v2/account/getEmailVC4TerminalMFA",
+                "/api/v2/account/sendEmailVC4TerminalMFA",
+                "/api/v2/account/getPushVC4TerminalMFA",
+                "/api/v2/account/getVC4TerminalMFA",
+                "/api/v2/account/getEmailVerifyCode",
+            ]
+        } else {
+            &["/api/v2/account/getPushVC4TerminalMFA"]
+        };
         let body = json!({
             "appType": APP_TYPE,
             "cloudUserName": self.email,
+            "cloudPassword": password,
             "MFAProcessId": self.mfa_process_id,
             "MFAType": mfa_type,
             "terminalUUID": self.terminal_uuid,
         });
-        let data = account_post(
-            &self.account_base,
-            "/api/v2/account/getPushVC4TerminalMFA",
-            &body,
-        )?;
-        match data.get("errorCode").and_then(Value::as_i64).unwrap_or(0) {
-            0 => Ok(()),
-            code => Err(CloudError::Auth(format!(
-                "could not send the code ({code}): {}",
-                trim(&data.to_string())
-            ))),
+        let mut last = String::new();
+        for endpoint in endpoints {
+            let data = account_post(&self.account_base, endpoint, &body)?;
+            let outer = data.get("error_code").and_then(Value::as_i64).unwrap_or(0);
+            let inner = data
+                .get("result")
+                .and_then(|r| r.get("errorCode"))
+                .and_then(|c| {
+                    c.as_i64()
+                        .or_else(|| c.as_str().and_then(|s| s.parse().ok()))
+                })
+                .unwrap_or(0);
+            if outer == 0 && inner == 0 {
+                return Ok(endpoint.to_string());
+            }
+            last = format!("{endpoint}: {}", trim(&data.to_string()));
         }
+        Err(CloudError::Auth(format!(
+            "TP-Link would not send the code: {last}"
+        )))
     }
 
     /// Finish the login with the code TP-Link sent.
