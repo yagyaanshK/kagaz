@@ -178,6 +178,22 @@ enlarge. `kagaz tapo record <camera> --seconds 10` saves raw video to prove
 the path. No Tapo Care subscription is needed; only your own cameras are
 reachable.
 
+```
+kagaz tapo recordings <camera> --date 2026-10-06
+kagaz tapo download <camera> --from "2026-10-06 10:00" --to +10
+```
+
+What is on a camera's SD card, and saving some of it: `recordings` lists
+the card, the days with footage and one day's clips (times on the camera's
+own clock); `download` saves a span as MP4 through the video engine (or raw
+MPEG-TS with `--ts`), as fast as the camera sends it. In the window, switch
+"Live" to "Playback": pick a day and a time and press "Play all", or click a
+camera's timeline, and every camera shows the same moment from its card;
+"Download…" under a camera saves a span. Cameras can be arranged into
+groups ("rooms"): "Rearrange", "Add group", drag cameras between groups,
+collapse a group, "View" one alone, play one group from a chosen time. The
+layout is kept in `~/.config/kagaz/cameras.toml`.
+
 The desktop window (`cargo run -p kagaz-desktop`) shows the same devices,
 the same plain-words explanation and the same scan options; on Linux it
 needs the webkit2gtk and gtk3 development packages to build.

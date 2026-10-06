@@ -374,6 +374,15 @@ $("scan-form").addEventListener("submit", async (ev) => {
 // ---------- cameras (Tapo through the account, go2rtc as the engine) ----------
 
 let camStatus = null;
+// Groups ("rooms"): { groups: [{name, cameras: [id], collapsed}], ungrouped: [id], ungrouped_collapsed }
+let layout = { groups: [], ungrouped: [], ungrouped_collapsed: false };
+let rearranging = false;
+// null = every group; -1 = Ungrouped; otherwise an index into layout.groups
+let viewGroup = null;
+// Playback: per camera, the clips of the chosen day; and each tile's running playback
+let pbDays = {};      // device_id -> { utc_offset_minutes, dates, today }
+let pbClips = {};     // device_id -> { day_start, clips: [{start,end,video_type}], utc_offset_minutes }
+let pbOffset = 0;     // the cameras' clock, minutes east of UTC (first camera asked)
 
 function showCameras() {
   current = null;
@@ -393,7 +402,26 @@ async function refreshCameras() {
   }
   $("cam-message").textContent = camStatus.message || "";
   $("cam-start").classList.toggle("hidden", camStatus.running || !camStatus.logged_in);
-  if (camStatus.running) renderCameraGrid();
+  if (camStatus.running) {
+    await loadLayout();
+    renderCameraGrid();
+  }
+}
+
+async function loadLayout() {
+  try {
+    layout = await invoke("camera_layout");
+  } catch (e) {
+    $("cam-message").textContent = "Could not read the camera groups: " + e;
+  }
+}
+
+async function saveLayout() {
+  try {
+    await invoke("save_camera_layout", { layout });
+  } catch (e) {
+    $("cam-message").textContent = "Could not save the camera groups: " + e;
+  }
 }
 
 function loadPlayer(src) {
@@ -408,7 +436,11 @@ function loadPlayer(src) {
   });
 }
 
-// Release a tile's player and its connection before replacing it.
+function isPlayback() {
+  return $("cam-when").value === "playback";
+}
+
+// Release a tile's player, its connection and any playback it holds.
 function teardownTile(tile) {
   const v = tile.querySelector("video");
   if (v) {
@@ -420,6 +452,39 @@ function teardownTile(tile) {
   }
   tile.querySelector("video, video-stream")?.remove();
   if (tile._watch) { clearInterval(tile._watch); tile._watch = null; }
+  if (tile._playback) {
+    const pb = tile._playback;
+    tile._playback = null;
+    invoke("playback_stop", { token: pb.token, stream: pb.stream }).catch(() => {});
+  }
+}
+
+// Watch the clock: if it stops advancing, say so over the last frame.
+function watchTile(tile, onTick) {
+  let lastT = -1, stalledSince = 0, started = Date.now();
+  tile._watch = setInterval(() => {
+    const v = tile.querySelector("video") || tile.querySelector("video-stream")?.video;
+    if (!v) return;
+    const t = v.currentTime || 0;
+    const now = Date.now();
+    if (onTick && onTick(v, t, lastT)) return;
+    if (v.error) {
+      setState(tile, "lost", "no data from the camera");
+      return;
+    }
+    if (t > lastT + 0.05) {
+      lastT = t; stalledSince = 0;
+      setState(tile, "live", "");
+      return;
+    }
+    if (!stalledSince) stalledSince = now;
+    const quiet = (now - stalledSince) / 1000;
+    const total = (now - started) / 1000;
+    if (lastT < 0 && total > 20) setState(tile, "lost", "no data from the camera");
+    else if (lastT < 0) setState(tile, "connecting", "connecting…");
+    else if (quiet > 15) setState(tile, "lost", "no data from the camera");
+    else if (quiet > 2) setState(tile, "waiting", "waiting for the camera…");
+  }, 1000);
 }
 
 function mountTile(tile, cam, big) {
@@ -441,30 +506,49 @@ function mountTile(tile, cam, big) {
   }
   tile.insertBefore(player, tile.firstChild);
   setState(tile, "connecting", "connecting…");
-  // Watch the clock: if it stops advancing, say so over the last frame.
-  let lastT = -1, stalledSince = 0, started = Date.now();
-  tile._watch = setInterval(() => {
-    const v = tile.querySelector("video") || tile.querySelector("video-stream")?.video;
-    if (!v) return;
-    const t = v.currentTime || 0;
+  watchTile(tile, null);
+}
+
+// Play recorded footage from `from` (unix) to the end of that camera-day.
+async function mountPlayback(tile, cam, from) {
+  teardownTile(tile);
+  const clips = pbClips[cam.device_id];
+  const to = clips ? clips.day_start + 86400 : from + 3600;
+  if (from >= to) { setState(tile, "lost", "that time is after the end of the day"); return; }
+  setState(tile, "connecting", "asking the camera for its recording…");
+  let handle;
+  try {
+    handle = await invoke("playback_start", { deviceId: cam.device_id, from, to });
+  } catch (e) {
+    setState(tile, "lost", "could not start: " + e);
+    return;
+  }
+  tile._playback = { token: handle.token, stream: handle.stream, from };
+  const player = document.createElement("video");
+  player.autoplay = true;
+  player.muted = true;
+  player.playsInline = true;
+  player.src = handle.ts_url;
+  tile.insertBefore(player, tile.firstChild);
+  let finished = false, lastPoll = 0;
+  const cell = tile.closest(".cam-cell");
+  watchTile(tile, (v, t, lastT) => {
+    // Position marker and clock on the timeline.
+    if (cell) updatePosition(cell, cam, from + t);
     const now = Date.now();
-    if (v.error) {
-      setState(tile, "lost", "no data from the camera");
-      return;
+    if (now - lastPoll > 2000 && tile._playback) {
+      lastPoll = now;
+      invoke("playback_state", { token: tile._playback.token }).then((st) => {
+        if (st.finished) finished = st.error ? "ended: " + st.error : "end of the recording";
+      }).catch(() => {});
     }
-    if (t > lastT + 0.05) {
-      lastT = t; stalledSince = 0;
-      setState(tile, "live", "");
-      return;
+    if (finished && t <= lastT + 0.05) {
+      setState(tile, "lost", finished);
+      tile.querySelector(".cam-reload")?.classList.add("hidden");
+      return true;
     }
-    if (!stalledSince) stalledSince = now;
-    const quiet = (now - stalledSince) / 1000;
-    const total = (now - started) / 1000;
-    if (lastT < 0 && total > 20) setState(tile, "lost", "no data from the camera");
-    else if (lastT < 0) setState(tile, "connecting", "connecting…");
-    else if (quiet > 15) setState(tile, "lost", "no data from the camera");
-    else if (quiet > 2) setState(tile, "waiting", "waiting for the camera…");
-  }, 1000);
+    return false;
+  });
 }
 
 function setState(tile, state, text) {
@@ -475,10 +559,179 @@ function setState(tile, state, text) {
   o.classList.toggle("hidden", state === "live");
 }
 
+function cameraById(id) {
+  return camStatus.cameras.find((c) => c.device_id === id);
+}
+
+// The groups to show, in order: each as { key, name, ids, collapsed }.
+function visibleGroups() {
+  const all = layout.groups.map((g, i) => ({ key: i, name: g.name, ids: g.cameras, collapsed: g.collapsed }));
+  if (layout.ungrouped.length || !all.length || rearranging) {
+    all.push({ key: -1, name: "Ungrouped", ids: layout.ungrouped, collapsed: layout.ungrouped_collapsed });
+  }
+  if (viewGroup === null) return all;
+  return all.filter((g) => g.key === viewGroup);
+}
+
+function groupList(key) {
+  return key === -1 ? layout.ungrouped : layout.groups[key].cameras;
+}
+
+// ---- building the grid ----
+
+function buildTile(cam) {
+  const tile = document.createElement("div");
+  tile.className = "cam-tile";
+  const name = document.createElement("div");
+  name.className = "cam-name";
+  name.textContent = cam.name;
+  tile.appendChild(name);
+  const overlay = document.createElement("div");
+  overlay.className = "cam-overlay hidden";
+  overlay.innerHTML = '<div class="spinner"></div><div class="cam-overlay-text"></div><button type="button" class="cam-reload">Reload</button>';
+  overlay.querySelector(".cam-reload").addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    remount(tile, cam);
+  });
+  tile.appendChild(overlay);
+  tile.addEventListener("click", (ev) => {
+    if (ev.target.closest(".cam-reload")) return;
+    const cell = tile.closest(".cam-cell");
+    const big = !cell.classList.contains("big");
+    cell.classList.toggle("big", big);
+    tile.classList.toggle("big", big);
+    if (!isPlayback()) mountTile(tile, cam, big);
+  });
+  return tile;
+}
+
+function remount(tile, cam) {
+  const big = tile.classList.contains("big");
+  if (isPlayback()) {
+    const from = tile._playback ? tile._playback.from : chosenTime();
+    if (from !== null) mountPlayback(tile, cam, from);
+  } else {
+    mountTile(tile, cam, big);
+  }
+}
+
+function buildCell(cam) {
+  const cell = document.createElement("div");
+  cell.className = "cam-cell";
+  cell.dataset.id = cam.device_id;
+  const tile = buildTile(cam);
+  cell.appendChild(tile);
+  if (isPlayback()) cell.appendChild(buildTimeline(cam, tile));
+  return cell;
+}
+
+function buildPlaceholder(cam) {
+  const cell = document.createElement("div");
+  cell.className = "cam-cell";
+  cell.dataset.id = cam.device_id;
+  const tile = document.createElement("div");
+  tile.className = "cam-tile placeholder";
+  tile.textContent = cam.name;
+  tile.draggable = true;
+  tile.addEventListener("dragstart", (ev) => {
+    ev.dataTransfer.setData("text/plain", cam.device_id);
+    ev.dataTransfer.effectAllowed = "move";
+    tile.classList.add("dragging");
+  });
+  tile.addEventListener("dragend", () => tile.classList.remove("dragging"));
+  cell.appendChild(tile);
+  return cell;
+}
+
+function moveCamera(id, toKey, beforeId) {
+  for (const g of layout.groups) g.cameras = g.cameras.filter((x) => x !== id);
+  layout.ungrouped = layout.ungrouped.filter((x) => x !== id);
+  const list = groupList(toKey);
+  const at = beforeId ? list.indexOf(beforeId) : -1;
+  if (at >= 0) list.splice(at, 0, id); else list.push(id);
+}
+
+function buildGroup(g) {
+  const box = document.createElement("div");
+  box.className = "cam-group" + (g.collapsed ? " collapsed" : "");
+  box.dataset.key = g.key;
+  const head = document.createElement("div");
+  head.className = "cam-group-head";
+  const collapse = document.createElement("button");
+  collapse.className = "collapse";
+  collapse.type = "button";
+  collapse.textContent = g.collapsed ? "▸" : "▾";
+  collapse.title = g.collapsed ? "Show this group" : "Hide this group";
+  collapse.addEventListener("click", () => {
+    if (g.key === -1) layout.ungrouped_collapsed = !layout.ungrouped_collapsed;
+    else layout.groups[g.key].collapsed = !layout.groups[g.key].collapsed;
+    saveLayout();
+    renderCameraGrid();
+  });
+  head.appendChild(collapse);
+  const title = document.createElement("span");
+  title.textContent = `${g.name} (${g.ids.length})`;
+  head.appendChild(title);
+  const tools = document.createElement("div");
+  tools.className = "cam-group-tools";
+  const small = (text, titleText, onClick) => {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "small"; b.textContent = text; b.title = titleText;
+    b.addEventListener("click", onClick);
+    tools.appendChild(b);
+  };
+  if (rearranging) {
+    if (g.key !== -1) {
+      small("Rename", "Rename this group", () => {
+        const name = prompt("Group name", g.name);
+        if (name && name.trim()) { layout.groups[g.key].name = name.trim(); saveLayout(); renderCameraGrid(); }
+      });
+      small("Remove", "Remove the group; its cameras go back to Ungrouped", () => {
+        layout.ungrouped.push(...layout.groups[g.key].cameras);
+        layout.groups.splice(g.key, 1);
+        if (viewGroup === g.key) viewGroup = null;
+        saveLayout(); renderCameraGrid();
+      });
+    }
+  } else {
+    if (viewGroup === null && visibleGroups().length > 1) {
+      small("View", "Show only this group", () => { viewGroup = g.key; renderCameraGrid(); });
+    }
+    if (isPlayback()) {
+      small("Play group", "Play every camera in this group from the chosen time", () => playGroup(box));
+    }
+  }
+  head.appendChild(tools);
+  box.appendChild(head);
+  const inner = document.createElement("div");
+  inner.className = "cam-grid-inner";
+  if (rearranging) {
+    inner.addEventListener("dragover", (ev) => { ev.preventDefault(); ev.dataTransfer.dropEffect = "move"; inner.classList.add("drop-target"); });
+    inner.addEventListener("dragleave", () => inner.classList.remove("drop-target"));
+    inner.addEventListener("drop", (ev) => {
+      ev.preventDefault();
+      inner.classList.remove("drop-target");
+      const id = ev.dataTransfer.getData("text/plain");
+      if (!id) return;
+      const over = ev.target.closest(".cam-cell");
+      moveCamera(id, g.key, over && over.dataset.id !== id ? over.dataset.id : null);
+      saveLayout();
+      renderCameraGrid();
+    });
+  }
+  for (const id of g.ids) {
+    const cam = cameraById(id);
+    if (!cam) continue;
+    inner.appendChild(rearranging ? buildPlaceholder(cam) : buildCell(cam));
+  }
+  box.appendChild(inner);
+  return box;
+}
+
 async function renderCameraGrid() {
   const grid = $("cam-grid");
   grid.style.setProperty("--cols", $("cam-layout").value);
-  if ($("cam-mode").value !== "ts") {
+  if (!isPlayback() && !rearranging && $("cam-mode").value !== "ts") {
     try {
       await loadPlayer(camStatus.player_script);
     } catch (e) {
@@ -488,37 +741,208 @@ async function renderCameraGrid() {
   }
   grid.querySelectorAll(".cam-tile").forEach(teardownTile);
   grid.innerHTML = "";
-  for (const cam of camStatus.cameras) {
-    const tile = document.createElement("div");
-    tile.className = "cam-tile";
-    const name = document.createElement("div");
-    name.className = "cam-name";
-    name.textContent = cam.name;
-    tile.appendChild(name);
-    const overlay = document.createElement("div");
-    overlay.className = "cam-overlay hidden";
-    overlay.innerHTML = '<div class="spinner"></div><div class="cam-overlay-text"></div><button type="button" class="cam-reload">Reload</button>';
-    overlay.querySelector(".cam-reload").addEventListener("click", (ev) => {
-      ev.stopPropagation();
-      mountTile(tile, cam, tile.classList.contains("big"));
-    });
-    tile.appendChild(overlay);
-    mountTile(tile, cam, false);
-    tile.addEventListener("click", (ev) => {
-      if (ev.target.closest(".cam-reload")) return;
-      const big = !tile.classList.contains("big");
-      tile.classList.toggle("big", big);
-      mountTile(tile, cam, big);
-    });
-    grid.appendChild(tile);
+  $("cam-rearrange-bar").classList.toggle("hidden", !rearranging);
+  $("cam-viewing").classList.toggle("hidden", viewGroup === null);
+  $("cam-rearrange").classList.toggle("hidden", rearranging);
+  $("pb-controls").classList.toggle("hidden", !isPlayback());
+  $("cam-reload-all").classList.toggle("hidden", isPlayback());
+  for (const g of visibleGroups()) grid.appendChild(buildGroup(g));
+  if (!rearranging) {
+    if (isPlayback()) {
+      await preparePlayback();
+    } else {
+      grid.querySelectorAll(".cam-cell").forEach((cell) => {
+        const tile = cell.querySelector(".cam-tile");
+        mountTile(tile, cameraById(cell.dataset.id), false);
+      });
+    }
   }
   $("cam-state").textContent = `${camStatus.cameras.length} cameras`;
 }
+
+// ---- playback ----
+
+// The chosen date and time as a unix time on the cameras' clock, or null.
+function chosenTime() {
+  const d = $("pb-date").value, t = $("pb-time").value || "00:00";
+  if (!d) return null;
+  const [y, m, day] = d.split("-").map(Number);
+  const [hh, mm] = t.split(":").map(Number);
+  return Date.UTC(y, m - 1, day, hh, mm) / 1000 - pbOffset * 60;
+}
+
+function clockText(unix) {
+  const d = new Date((unix + pbOffset * 60) * 1000);
+  const p = (n) => String(n).padStart(2, "0");
+  return `${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}`;
+}
+
+// Ask every visible camera for the chosen day's clips; fill the timelines.
+async function preparePlayback() {
+  const cells = [...$("cam-grid").querySelectorAll(".cam-cell")];
+  if (!cells.length) return;
+  if (!$("pb-date").value) {
+    try {
+      const first = await invoke("recording_days", { deviceId: cells[0].dataset.id, days: 30 });
+      pbOffset = first.utc_offset_minutes;
+      $("pb-date").value = first.dates.length ? first.dates[first.dates.length - 1] : first.today;
+      $("pb-date").max = first.today;
+      $("pb-date").title = `Day, on the cameras' own clock. Days with footage on the first camera: ${first.dates.join(", ") || "none in the last 30 days"}`;
+    } catch (e) {
+      $("cam-message").textContent = "Could not ask the camera for its recordings: " + e;
+      return;
+    }
+  }
+  if (!$("pb-time").value) $("pb-time").value = "10:00";
+  const date = $("pb-date").value;
+  await Promise.all(cells.map(async (cell) => {
+    const id = cell.dataset.id;
+    const cam = cameraById(id);
+    const tile = cell.querySelector(".cam-tile");
+    setState(tile, "lost", "pick a time and press Play, or click the timeline");
+    tile.querySelector(".cam-reload")?.classList.add("hidden");
+    try {
+      pbClips[id] = await invoke("recording_clips", { deviceId: id, date });
+      pbOffset = pbClips[id].utc_offset_minutes;
+    } catch (e) {
+      pbClips[id] = null;
+      setState(tile, "lost", "no recording list: " + e);
+    }
+    fillTimeline(cell, cam);
+  }));
+}
+
+function buildTimeline(cam, tile) {
+  const wrap = document.createElement("div");
+  const bar = document.createElement("div");
+  bar.className = "pb-bar";
+  bar.title = "The day's recordings; click to play from there";
+  bar.addEventListener("click", (ev) => {
+    const clips = pbClips[cam.device_id];
+    if (!clips) return;
+    const r = bar.getBoundingClientRect();
+    const at = clips.day_start + Math.floor(((ev.clientX - r.left) / r.width) * 86400);
+    mountPlayback(tile, cam, at);
+  });
+  wrap.appendChild(bar);
+  const row = document.createElement("div");
+  row.className = "pb-row";
+  row.innerHTML = '<span class="pb-at">—</span><button type="button" class="pb-download">Download…</button><span class="muted pb-note"></span>';
+  row.querySelector(".pb-download").addEventListener("click", () => downloadForm(wrap, cam, tile));
+  wrap.appendChild(row);
+  return wrap;
+}
+
+function fillTimeline(cell, cam) {
+  const bar = cell.querySelector(".pb-bar");
+  const note = cell.querySelector(".pb-note");
+  if (!bar) return;
+  bar.innerHTML = "";
+  const clips = pbClips[cam.device_id];
+  if (!clips) { note.textContent = ""; return; }
+  for (const c of clips.clips) {
+    const seg = document.createElement("div");
+    seg.className = "clip" + (c.video_type === 2 ? " event" : "");
+    seg.style.left = `${((c.start - clips.day_start) / 86400) * 100}%`;
+    seg.style.width = `${Math.max(0.2, ((c.end - c.start) / 86400) * 100)}%`;
+    seg.title = `${clockText(c.start)} – ${clockText(c.end)}`;
+    bar.appendChild(seg);
+  }
+  const pos = document.createElement("div");
+  pos.className = "pos hidden";
+  bar.appendChild(pos);
+  const total = clips.clips.reduce((a, c) => a + (c.end - c.start), 0);
+  const card = clips.sd_card;
+  note.textContent = clips.clips.length
+    ? `${clips.clips.length} recordings, ${Math.round(total / 60)} min` + (card.state !== "normal" ? `; card ${card.state}` : "")
+    : (card.state === "normal" ? "nothing recorded that day" : `SD card ${card.state}`);
+}
+
+function updatePosition(cell, cam, at) {
+  const clips = pbClips[cam.device_id];
+  const pos = cell.querySelector(".pb-bar .pos");
+  if (clips && pos) {
+    pos.classList.remove("hidden");
+    pos.style.left = `${((at - clips.day_start) / 86400) * 100}%`;
+  }
+  const label = cell.querySelector(".pb-at");
+  if (label) label.textContent = clockText(at);
+}
+
+function playAll(root) {
+  const from = chosenTime();
+  if (from === null) { $("cam-message").textContent = "Pick a date first."; return; }
+  root.querySelectorAll(".cam-cell").forEach((cell) => {
+    const cam = cameraById(cell.dataset.id);
+    mountPlayback(cell.querySelector(".cam-tile"), cam, from);
+  });
+}
+
+function playGroup(box) { playAll(box); }
+
+function downloadForm(wrap, cam, tile) {
+  let form = wrap.querySelector(".pb-form");
+  if (form) { form.remove(); return; }
+  form = document.createElement("div");
+  form.className = "pb-form";
+  const at = tile._playback ? tile._playback.from : chosenTime();
+  const start = at !== null ? clockText(at).slice(0, 5) : ($("pb-time").value || "10:00");
+  form.innerHTML = `from <input type="time" class="pb-from" value="${start}" step="60"> for <input type="number" class="pb-mins" value="10" min="1" max="720"> min <button type="button" class="pb-save">Save as MP4…</button><span class="muted pb-dl-note"></span>`;
+  form.querySelector(".pb-save").addEventListener("click", async () => {
+    const clips = pbClips[cam.device_id];
+    if (!clips) return;
+    const [hh, mm] = form.querySelector(".pb-from").value.split(":").map(Number);
+    const from = clips.day_start + hh * 3600 + mm * 60;
+    const mins = Number(form.querySelector(".pb-mins").value) || 10;
+    const to = from + mins * 60;
+    const stamp = `${$("pb-date").value}-${String(hh).padStart(2, "0")}${String(mm).padStart(2, "0")}`;
+    const safe = cam.name.replace(/[^\p{L}\p{N}]+/gu, "-");
+    let path;
+    try {
+      path = await invoke("choose_save_path", { suggestedName: `${safe}-${stamp}.mp4`, extension: "mp4" });
+    } catch (e) { return; }
+    if (!path) return;
+    const note = form.querySelector(".pb-dl-note");
+    note.textContent = "asking the camera…";
+    form.querySelector(".pb-save").disabled = true;
+    form.dataset.deviceId = cam.device_id;
+    try {
+      const bytes = await invoke("download_recording", { deviceId: cam.device_id, from, to, path });
+      note.textContent = `saved ${human(bytes)}`;
+    } catch (e) {
+      note.textContent = "failed: " + e;
+    }
+    form.querySelector(".pb-save").disabled = false;
+  });
+  wrap.appendChild(form);
+}
+
+listen("download-progress", (e) => {
+  const p = e.payload;
+  document.querySelectorAll(`.pb-form[data-device-id="${p.device_id}"] .pb-dl-note`).forEach((n) => {
+    n.textContent = `saving… ${human(p.bytes)}`;
+  });
+});
+
+// ---- controls ----
 
 $("cameras-open").addEventListener("click", showCameras);
 $("cam-layout").addEventListener("change", () => $("cam-grid").style.setProperty("--cols", $("cam-layout").value));
 $("cam-mode").addEventListener("change", () => { if (camStatus && camStatus.running) renderCameraGrid(); });
 $("cam-reload-all").addEventListener("click", () => { if (camStatus && camStatus.running) renderCameraGrid(); });
+$("cam-when").addEventListener("change", () => { if (camStatus && camStatus.running) renderCameraGrid(); });
+$("pb-date").addEventListener("change", () => { if (camStatus && camStatus.running) renderCameraGrid(); });
+$("pb-play").addEventListener("click", () => playAll($("cam-grid")));
+$("cam-rearrange").addEventListener("click", () => { rearranging = true; viewGroup = null; renderCameraGrid(); });
+$("cam-rearrange-done").addEventListener("click", () => { rearranging = false; renderCameraGrid(); });
+$("cam-add-group").addEventListener("click", () => {
+  const name = prompt("Name of the new group (a room, a floor, a side of the house)", "");
+  if (!name || !name.trim()) return;
+  layout.groups.push({ name: name.trim(), cameras: [], collapsed: false });
+  saveLayout();
+  renderCameraGrid();
+});
+$("cam-show-all").addEventListener("click", () => { viewGroup = null; renderCameraGrid(); });
 $("cam-start").addEventListener("click", async () => {
   $("cam-start").disabled = true;
   $("cam-state").textContent = "starting…";
@@ -526,6 +950,7 @@ $("cam-start").addEventListener("click", async () => {
     camStatus = await invoke("cameras_start");
     $("cam-message").textContent = "";
     $("cam-start").classList.add("hidden");
+    await loadLayout();
     renderCameraGrid();
   } catch (e) {
     $("cam-message").textContent = "Could not start: " + e;

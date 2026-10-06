@@ -29,6 +29,15 @@
       <div class="cam-head">
         <h2>Cameras</h2>
         <div class="actions">
+          <select id="cam-when" title="Live view, or recorded footage from the cameras' SD cards">
+            <option value="live" selected>Live</option>
+            <option value="playback">Playback</option>
+          </select>
+          <span id="pb-controls" class="hidden">
+            <input type="date" id="pb-date" title="Day, on the cameras' own clock">
+            <input type="time" id="pb-time" step="60" title="Time of day, on the cameras' own clock">
+            <button id="pb-play" type="button" title="Play every camera shown from this time">Play all</button>
+          </span>
           <select id="cam-mode" title="How the window plays the video">
             <option value="ts" selected>playback: direct</option>
             <option value="mse">playback: MSE</option>
@@ -41,10 +50,20 @@
           </select>
           <button id="cam-start" type="button">Start</button>
           <button id="cam-reload-all" type="button" title="Reconnect every tile">Reload all</button>
+          <button id="cam-rearrange" type="button" title="Make groups and drag cameras between them">Rearrange</button>
           <span id="cam-state" class="muted"></span>
         </div>
       </div>
       <p id="cam-message" class="muted"></p>
+      <div id="cam-rearrange-bar" class="hidden">
+        <span class="muted">Drag a camera onto a group. </span>
+        <button id="cam-add-group" type="button">Add group</button>
+        <button id="cam-rearrange-done" type="button">Done</button>
+      </div>
+      <div id="cam-viewing" class="hidden">
+        <span class="muted">Showing one group. </span>
+        <button id="cam-show-all" type="button">Show all</button>
+      </div>
       <div id="cam-grid"></div>
     </section>
 

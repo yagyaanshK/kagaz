@@ -1,7 +1,7 @@
 //! `kagaz`: the command-line face of Kagaz. Everything the desktop app can do,
 //! scriptable and fast.
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
 use kagaz_core::drivers::{self, install};
 use kagaz_core::ipp::status::PrinterStatus;
@@ -230,6 +230,36 @@ enum TapoCommand {
         /// HD or VGA
         #[arg(long, default_value = "HD")]
         resolution: String,
+    },
+    /// What is on a camera's SD card: the card, the days with footage, and one day's clips
+    Recordings {
+        /// Camera name, or part of it, or its device id
+        camera: String,
+        /// The day to list clips for, YYYY-MM-DD in the camera's own clock (default: today)
+        #[arg(long)]
+        date: Option<String>,
+        /// How many days back to look for footage
+        #[arg(long, default_value_t = 7)]
+        days: u32,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Save recorded footage from a camera's SD card as an MP4 file (through the video engine)
+    Download {
+        /// Camera name, or part of it, or its device id
+        camera: String,
+        /// Start, "YYYY-MM-DD HH:MM[:SS]" in the camera's own clock
+        #[arg(long)]
+        from: String,
+        /// End, "YYYY-MM-DD HH:MM[:SS]" or "+MM" minutes after the start
+        #[arg(long)]
+        to: String,
+        /// Output file (default: <camera>-<from>.mp4 in the current folder)
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+        /// Save the camera's raw MPEG-TS instead, without the video engine
+        #[arg(long)]
+        ts: bool,
     },
 }
 
@@ -1253,21 +1283,7 @@ fn tapo_command(cmd: TapoCommand) -> Result<()> {
         } => {
             let session = load_tapo_session(&path)?;
             let cams = session.cameras()?;
-            let needle = camera.to_lowercase();
-            let cam = cams
-                .iter()
-                .find(|c| {
-                    c.device_id.eq_ignore_ascii_case(&camera) || c.name.to_lowercase() == needle
-                })
-                .or_else(|| {
-                    cams.iter()
-                        .find(|c| c.name.to_lowercase().contains(&needle))
-                })
-                .ok_or_else(|| {
-                    anyhow::anyhow!(
-                        "no camera matches \"{camera}\"; `kagaz tapo cameras` lists them"
-                    )
-                })?;
+            let cam = find_camera(&cams, &camera)?;
             let track = format!("preview-{}", cam.device_id);
             println!("Asking TP-Link's relay for {}...", cam.name);
             let relay = tapo::request_relay(
@@ -1312,7 +1328,204 @@ fn tapo_command(cmd: TapoCommand) -> Result<()> {
             );
             Ok(())
         }
+        TapoCommand::Recordings {
+            camera,
+            date,
+            days,
+            json,
+        } => {
+            use kagaz_core::cameras::tapo::recordings::{self, Recordings};
+            let session = load_tapo_session(&path)?;
+            let cams = session.cameras()?;
+            let cam = find_camera(&cams, &camera)?;
+            let rec = Recordings::new(&session, cam);
+            let offset = rec.utc_offset_minutes()?;
+            let card = rec.sd_card()?;
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs() as i64)
+                .unwrap_or(0);
+            let today = recordings::day_of(now, offset);
+            let first = recordings::day_of(now - i64::from(days) * 86_400, offset);
+            let dates = rec.dates(&first, &today)?;
+            let day = date
+                .map(|d| d.chars().filter(|c| c.is_ascii_digit()).collect::<String>())
+                .unwrap_or(today.clone());
+            let clips = rec.clips(&day)?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "camera": cam.name,
+                        "utc_offset_minutes": offset,
+                        "sd_card": card,
+                        "dates": dates,
+                        "date": recordings::dash_date(&day),
+                        "clips": clips,
+                    }))?
+                );
+                return Ok(());
+            }
+            let sign = if offset < 0 { '-' } else { '+' };
+            println!(
+                "{} (clock UTC{sign}{:02}:{:02})",
+                cam.name,
+                offset.abs() / 60,
+                offset.abs() % 60
+            );
+            if card.usable() {
+                println!(
+                    "SD card: {} free of {}{}",
+                    human_size(card.free_bytes),
+                    human_size(card.total_bytes),
+                    if card.loop_recording {
+                        ", oldest footage overwritten when full"
+                    } else {
+                        ""
+                    }
+                );
+            } else {
+                println!("SD card: {}", card.state);
+            }
+            if dates.is_empty() {
+                println!("No footage in the last {days} days.");
+            } else {
+                println!(
+                    "Days with footage (last {days}): {}",
+                    dates
+                        .iter()
+                        .map(|d| recordings::dash_date(d))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
+            }
+            println!("Clips on {}:", recordings::dash_date(&day));
+            if clips.is_empty() {
+                println!("  none");
+            }
+            for c in &clips {
+                println!(
+                    "  {}  to {}  ({} min, {})",
+                    recordings::format_time(c.start, offset),
+                    &recordings::format_time(c.end, offset)[11..],
+                    c.seconds() / 60,
+                    match c.video_type {
+                        1 => "continuous",
+                        2 => "event",
+                        _ => "recording",
+                    }
+                );
+            }
+            Ok(())
+        }
+        TapoCommand::Download {
+            camera,
+            from,
+            to,
+            output,
+            ts,
+        } => {
+            use kagaz_core::cameras::tapo::recordings::{self, Recordings};
+            use kagaz_core::cameras::tapo::{download, TsServer};
+            use kagaz_core::extras::go2rtc;
+            let session = load_tapo_session(&path)?;
+            let cams = session.cameras()?;
+            let cam = find_camera(&cams, &camera)?;
+            let rec = Recordings::new(&session, cam);
+            let offset = rec.utc_offset_minutes()?;
+            let start = recordings::parse_time(&from, offset)
+                .ok_or_else(|| anyhow::anyhow!("--from must be \"YYYY-MM-DD HH:MM\""))?;
+            let end = if let Some(mins) = to.trim().strip_prefix('+') {
+                start + mins.trim().parse::<i64>().context("--to +MM")? * 60
+            } else {
+                recordings::parse_time(&to, offset)
+                    .ok_or_else(|| anyhow::anyhow!("--to must be \"YYYY-MM-DD HH:MM\" or +MM"))?
+            };
+            if end <= start {
+                anyhow::bail!("--to must be after --from");
+            }
+            let stamp = recordings::format_time(start, offset)
+                .replace(' ', "-")
+                .replace(':', "");
+            let safe = cam.name.replace(|c: char| !c.is_alphanumeric(), "-");
+            let out = output.unwrap_or_else(|| {
+                PathBuf::from(format!("{safe}-{stamp}.{}", if ts { "ts" } else { "mp4" }))
+            });
+            println!(
+                "{}: {} to {} ({} min)",
+                cam.name,
+                recordings::format_time(start, offset),
+                recordings::format_time(end, offset),
+                (end - start) / 60
+            );
+            let began = std::time::Instant::now();
+            let total = if ts {
+                let mut file = std::fs::File::create(&out)?;
+                let mut last = std::time::Instant::now();
+                let mut total = 0u64;
+                rec.pull(start, end, &mut |chunk| {
+                    total += chunk.len() as u64;
+                    let _ = std::io::Write::write_all(&mut file, chunk);
+                    if last.elapsed().as_secs() >= 2 {
+                        last = std::time::Instant::now();
+                        print!("\r  {} received...", human_size(total));
+                        let _ = std::io::Write::flush(&mut std::io::stdout());
+                    }
+                    true
+                })
+                .map_err(|e| {
+                    if e.is_busy() {
+                        anyhow::anyhow!("the camera is already sending a recording to someone; try again in a moment")
+                    } else {
+                        anyhow::Error::from(e)
+                    }
+                })?
+            } else {
+                let server = TsServer::start(session.clone(), cams.clone(), 0)?;
+                let binary = go2rtc::ensure(&mut |e| match e {
+                    go2rtc::Event::Downloading { bytes } => println!(
+                        "Downloading the video engine go2rtc {} ({})...",
+                        go2rtc::VERSION,
+                        human_size(bytes)
+                    ),
+                    go2rtc::Event::Verified => println!("  checksum matches"),
+                    go2rtc::Event::Ready(_) => {}
+                })?;
+                let engine = go2rtc::Engine::start(&binary, 0, &[])?;
+                server.set_engine_port(engine.api_port);
+                download::save_span(&server, &engine, cam, start, end, &out, &mut |p| {
+                    let download::Progress::Bytes(b) = p;
+                    print!("\r  {} written...", human_size(b));
+                    let _ = std::io::Write::flush(&mut std::io::stdout());
+                    true
+                })?
+            };
+            println!(
+                "\rSaved {} ({}) in {:.0} s",
+                out.display(),
+                human_size(total),
+                began.elapsed().as_secs_f32()
+            );
+            Ok(())
+        }
     }
+}
+
+/// The camera the user named: by device id, exact name, then part of the name.
+fn find_camera<'a>(
+    cams: &'a [kagaz_core::cameras::tapo::Camera],
+    camera: &str,
+) -> Result<&'a kagaz_core::cameras::tapo::Camera> {
+    let needle = camera.to_lowercase();
+    cams.iter()
+        .find(|c| c.device_id.eq_ignore_ascii_case(camera) || c.name.to_lowercase() == needle)
+        .or_else(|| {
+            cams.iter()
+                .find(|c| c.name.to_lowercase().contains(&needle))
+        })
+        .ok_or_else(|| {
+            anyhow::anyhow!("no camera matches \"{camera}\"; `kagaz tapo cameras` lists them")
+        })
 }
 
 fn load_tapo_session(path: &std::path::Path) -> Result<kagaz_core::cameras::tapo::Session> {

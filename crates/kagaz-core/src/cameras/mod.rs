@@ -2,4 +2,7 @@
 //! locations are reached the way the Tapo app reaches them, through
 //! TP-Link's cloud relay, with the account's own login.
 
+pub mod layout;
 pub mod tapo;
+
+pub use layout::{Group, Layout, LayoutError};

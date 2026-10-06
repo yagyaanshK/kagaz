@@ -63,6 +63,33 @@ with the commit that closes them.
       (user, 2026-10-07) with "playback: direct" (go2rtc's MPEG-TS, chunked,
       in a plain <video>, one loopback address per tile). MSE and WebRTC
       flicker in this webview and stay as options only.
+- [x] **Playback and downloads from the SD card** (2026-10-07): the cloud
+      passthrough (`services-sync`), days with footage, one day's clips, the
+      relay's recorded-stream type with the app's playback request (paced,
+      ended by measuring the video's own clock) and its download request
+      (as fast as the camera sends, ends by itself), MP4 through the engine.
+      Verified on the C100 4.0 cameras: one minute of footage as raw TS in
+      7 s and as MP4 (video only) through the engine; the window's paced
+      route through the per-tile proxy ends cleanly. Window UI (date, time,
+      timelines, Play all, Download…) and groups with rearrange are written
+      and await a look in the window.
+- [ ] **First-generation C100 (hardware 2.0, firmware 1.3.x) refuses
+      playback over the relay.** Its component list has `playback` v4 and no
+      `recordDownload` (the 4.0 models have `playback` v6, `recordDownload`
+      v2, `cipcV2Relay`). The app's playback request gets -52402
+      (VOD_INVALID_REQUEST), the download request -51416, and after a few
+      tries -52407 (TOO_MANY_CLIENT) for a long while. Live view and the
+      recording lists work on them. Find the request shape the app uses for
+      playback v4 (`examples/tapo_probe.rs` tries frames one at a time; the
+      component list comes from `getAppComponentList`).
+- [ ] **Audio in downloads.** The camera's download stream carries G.711
+      (MPEG-TS stream type 0x90, TP-Link private); the engine's MP4 keeps
+      only the video. `--ts` keeps everything. Either teach the engine the
+      private type or remux in Kagaz.
+- [ ] **Continuous recording to disk** (asked for 2026-10-07): a `kagaz`
+      command or script for a server PC that keeps pulling each camera's
+      footage into a folder within a storage limit, like a CCTV recorder.
+      The download path above is the building block.
 - [ ] **Stall detection is time-based** (clock not advancing): tune the 2 s /
       15 s thresholds after real use; consider reconnecting automatically after
       a long silence.

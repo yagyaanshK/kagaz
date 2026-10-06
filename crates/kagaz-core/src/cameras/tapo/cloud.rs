@@ -366,6 +366,87 @@ impl Session {
         Ok(parse_things(&data, &self.app_server))
     }
 
+    /// Call device methods through the cloud passthrough (`services-sync`),
+    /// as the app does. Returns one raw response object per request.
+    pub fn device_requests(
+        &self,
+        device_id: &str,
+        app_server: &str,
+        requests: &[Value],
+    ) -> Result<Vec<Value>, CloudError> {
+        let envelope = json!({
+            "inputParams": {
+                "requestData": {
+                    "method": "multipleRequest",
+                    "params": { "requests": requests }
+                }
+            },
+            "serviceId": "passthrough"
+        });
+        let url = format!("https://{app_server}/v1/things/{device_id}/services-sync");
+        let bytes = serde_json::to_vec(&envelope).expect("json");
+        let response = self.cloud_request(agent().post(&url)).send_bytes(&bytes);
+        let (status, response) = match response {
+            Ok(r) => (200u16, r),
+            Err(ureq::Error::Status(401, _)) => return Err(CloudError::Unauthorized),
+            Err(ureq::Error::Status(s, r)) => (s, r),
+            Err(ureq::Error::Transport(t)) => return Err(CloudError::Transport(t.to_string())),
+        };
+        let text = response
+            .into_string()
+            .map_err(|e| CloudError::Transport(e.to_string()))?;
+        let body: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
+        if body.get("code").and_then(Value::as_i64) == Some(401) {
+            return Err(CloudError::Unauthorized);
+        }
+        if status >= 400 {
+            let message = body
+                .get("message")
+                .or_else(|| body.get("msg"))
+                .and_then(Value::as_str)
+                .map(str::to_string)
+                .unwrap_or_else(|| trim(&text));
+            return Err(CloudError::Rejected { status, message });
+        }
+        Ok(body
+            .get("outputParams")
+            .and_then(|o| o.get("responseData"))
+            .and_then(|r| r.get("result"))
+            .and_then(|r| r.get("responses"))
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default())
+    }
+
+    /// One device method; its `result`, or the device's error code.
+    pub fn device_request(
+        &self,
+        device_id: &str,
+        app_server: &str,
+        method: &str,
+        params: Value,
+    ) -> Result<Value, CloudError> {
+        let responses = self.device_requests(
+            device_id,
+            app_server,
+            &[json!({ "method": method, "params": params })],
+        )?;
+        let first = responses
+            .into_iter()
+            .next()
+            .ok_or_else(|| CloudError::Rejected {
+                status: 200,
+                message: format!("{method}: no response"),
+            })?;
+        match first.get("error_code").and_then(Value::as_i64).unwrap_or(0) {
+            0 => Ok(first.get("result").cloned().unwrap_or(Value::Null)),
+            code => Err(CloudError::Rejected {
+                status: 200,
+                message: format!("{method}: device error {code}"),
+            }),
+        }
+    }
+
     // ---- persistence: a 0600 file in the config folder ----
 
     pub fn default_path() -> PathBuf {

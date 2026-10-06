@@ -363,6 +363,144 @@ impl Engine {
     }
 }
 
+impl Engine {
+    /// Add a stream while the engine runs (go2rtc's `PUT /api/streams`).
+    /// The name may hold letters, digits, `_` and `-`.
+    pub fn add_stream(&self, name: &str, url: &str) -> Result<(), ExtraError> {
+        let api = format!(
+            "http://127.0.0.1:{}/api/streams?name={}&src={}",
+            self.api_port,
+            name,
+            url_encode(url)
+        );
+        match ureq::put(&api).call() {
+            Ok(_) => Ok(()),
+            Err(e) => Err(ExtraError::Start(format!("engine refused the stream: {e}"))),
+        }
+    }
+
+    /// Remove a stream added with `add_stream`, ending its source.
+    pub fn remove_stream(&self, name: &str) {
+        let api = format!("http://127.0.0.1:{}/api/streams?src={name}", self.api_port);
+        let _ = ureq::delete(&api).call();
+    }
+
+    /// Read a stream from the engine as fragmented MP4 and hand the bytes to
+    /// `sink` until the source has finished (`done` says so) and the engine
+    /// has gone quiet, or `sink` returns `false`. Returns the bytes written.
+    ///
+    /// Plain HTTP/1.0 by hand: the engine answers only once the source has
+    /// produced its first frames (a relay session takes several seconds),
+    /// and HTTP/1.0 makes it send the body unchunked and close at the end.
+    pub fn save_mp4(
+        &self,
+        name: &str,
+        done: &mut dyn FnMut() -> bool,
+        sink: &mut dyn FnMut(&[u8]) -> bool,
+    ) -> Result<u64, ExtraError> {
+        let err = |e: std::io::Error| ExtraError::Start(format!("engine stream: {e}"));
+        let mut sock = std::net::TcpStream::connect_timeout(
+            &std::net::SocketAddr::from(([127, 0, 0, 1], self.api_port)),
+            Duration::from_secs(5),
+        )
+        .map_err(err)?;
+        sock.write_all(
+            format!(
+                "GET /api/stream.mp4?src={name} HTTP/1.0\r\nHost: 127.0.0.1:{}\r\n\r\n",
+                self.api_port
+            )
+            .as_bytes(),
+        )
+        .map_err(err)?;
+        // The head: up to a minute for the source to start.
+        sock.set_read_timeout(Some(Duration::from_secs(60)))
+            .map_err(err)?;
+        let mut head = Vec::new();
+        let mut byte = [0u8; 1];
+        loop {
+            match sock.read(&mut byte) {
+                Ok(1) => {
+                    head.push(byte[0]);
+                    if head.ends_with(b"\r\n\r\n") {
+                        break;
+                    }
+                    if head.len() > 16 * 1024 {
+                        return Err(ExtraError::Start("engine sent an oversized head".into()));
+                    }
+                }
+                Ok(_) => return Err(ExtraError::Start("engine closed before answering".into())),
+                Err(e) => {
+                    return Err(ExtraError::Start(format!(
+                        "the source produced no video: {e}"
+                    )))
+                }
+            }
+        }
+        let head = String::from_utf8_lossy(&head);
+        let status: u16 = head
+            .split_whitespace()
+            .nth(1)
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0);
+        if status != 200 {
+            return Err(ExtraError::Start(format!(
+                "engine answered {}",
+                head.lines().next().unwrap_or("")
+            )));
+        }
+        // The body: short reads, so the end of the source is noticed quickly.
+        sock.set_read_timeout(Some(Duration::from_secs(2)))
+            .map_err(err)?;
+        let mut buf = vec![0u8; 64 * 1024];
+        let mut total = 0u64;
+        let mut quiet = 0u32;
+        loop {
+            match sock.read(&mut buf) {
+                Ok(0) => return Ok(total),
+                Ok(n) => {
+                    quiet = 0;
+                    total += n as u64;
+                    if !sink(&buf[..n]) {
+                        return Ok(total);
+                    }
+                }
+                Err(e)
+                    if e.kind() == std::io::ErrorKind::WouldBlock
+                        || e.kind() == std::io::ErrorKind::TimedOut =>
+                {
+                    quiet += 1;
+                    if done() {
+                        return Ok(total);
+                    }
+                    if quiet >= 45 {
+                        return Err(ExtraError::Start("no video arrived for 90 s".into()));
+                    }
+                }
+                Err(e) => {
+                    if done() {
+                        return Ok(total);
+                    }
+                    return Err(ExtraError::Start(format!("engine stream ended: {e}")));
+                }
+            }
+        }
+    }
+}
+
+/// Percent-encode a query value.
+pub fn url_encode(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() * 3);
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char)
+            }
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
+}
+
 impl Drop for Engine {
     fn drop(&mut self) {
         let _ = self.child.kill();
