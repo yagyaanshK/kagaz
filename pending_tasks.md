@@ -57,6 +57,24 @@ with the commit that closes them.
 - [x] Illustrations next to each option in the Scan pane and a badge per
       verdict in About (inline SVG, 2026-10-06). Worth a look in the window.
 
+## Cameras (Tapo over TP-Link's cloud)
+
+- [ ] **Window: the Cameras view has not been looked at.** `cargo run -p
+      kagaz-desktop`, press Cameras, Start. Uses go2rtc's player component
+      (MSE, WebRTC, MP4 fallbacks) over its local socket.
+- [ ] **Local ONVIF/RTSP cameras** (the C100 at 198.51.100.103 and any camera
+      on the LAN): discovery is already filtered out of the printer list; add
+      them to the Cameras view as RTSP sources for go2rtc, with the camera
+      account credentials entered once.
+- [ ] **Token refresh and re-login** in the window when the TP-Link session
+      expires (the CLI says "not logged in; run kagaz tapo login").
+- [ ] **Audio**: Tapo carries G.711 on private MPEG-TS stream types; go2rtc may
+      not pass it. Video only for now.
+- [ ] **Resolution choice** per tile (HD/VGA) to save bandwidth with many cameras.
+- [ ] The Tapo APK static analysis and the emulator capture are no longer
+      needed; the protocol came from public sources and works. Keep the tools
+      under installations/tapo-analysis/ in case TP-Link changes the relay.
+
 ## Roadmap, not yet started
 
 - [x] M3 driverless print over IPP: `kagaz print` sends PWG Raster; one test

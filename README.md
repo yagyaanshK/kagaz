@@ -163,6 +163,21 @@ writes only your personal copy in `~/.brscan-skey/` and `--reset` removes
 it so Brother's default applies again. The window has the same under
 "Scan button".
 
+```
+kagaz tapo login
+kagaz cameras
+```
+
+Tapo cameras anywhere in the world, through your own TP-Link account and
+TP-Link's relay, exactly as the Tapo app reaches them, but shown the way
+you want: `kagaz tapo login` once (email code supported), then `kagaz
+cameras` serves every camera on the account and starts the video engine
+(go2rtc, downloaded and checksum-verified on first use, never bundled). The
+window's "Cameras" view shows them side by side, any number, click to
+enlarge. `kagaz tapo record <camera> --seconds 10` saves raw video to prove
+the path. No Tapo Care subscription is needed; only your own cameras are
+reachable.
+
 The desktop window (`cargo run -p kagaz-desktop`) shows the same devices,
 the same plain-words explanation and the same scan options; on Linux it
 needs the webkit2gtk and gtk3 development packages to build.
@@ -189,7 +204,9 @@ needs the webkit2gtk and gtk3 development packages to build.
   WebAssembly module; the base app becomes device-agnostic.
 - **M7 More device classes, each its own module.** Robot vacuums (starting
   with devices on the Tuya/SmartLife platform), IP cameras and doorbells
-  (ONVIF, RTSP), and onward as contributors bring devices.
+  (ONVIF, RTSP), and onward as contributors bring devices. Tapo cameras over
+  the TP-Link cloud are in (pulled forward by need); local ONVIF/RTSP cameras
+  next.
 - **M8 AI assistant module.** Configurable model backends (local servers,
   OpenRouter, OpenAI-compatible and Anthropic endpoints, the Claude Agent SDK
   as the agent runtime), used to draft, test and package a module for a

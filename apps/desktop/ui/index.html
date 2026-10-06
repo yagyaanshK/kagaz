@@ -14,11 +14,32 @@
     </header>
     <p id="search-note" class="muted">Looking for printers and scanners…</p>
     <ul id="devices"></ul>
+    <div id="cameras-entry">
+      <button id="cameras-open" type="button">Cameras</button>
+      <span class="muted" id="cameras-entry-note">Tapo, through your account</span>
+    </div>
   </aside>
 
   <main id="main">
     <section id="empty" class="pane">
       <p class="muted">Pick a device on the left.</p>
+    </section>
+
+    <section id="cameras" class="pane hidden">
+      <div class="cam-head">
+        <h2>Cameras</h2>
+        <div class="actions">
+          <select id="cam-layout">
+            <option value="2">2 across</option>
+            <option value="3" selected>3 across</option>
+            <option value="4">4 across</option>
+          </select>
+          <button id="cam-start" type="button">Start</button>
+          <span id="cam-state" class="muted"></span>
+        </div>
+      </div>
+      <p id="cam-message" class="muted"></p>
+      <div id="cam-grid"></div>
     </section>
 
     <section id="detail" class="pane hidden">
