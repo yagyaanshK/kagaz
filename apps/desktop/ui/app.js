@@ -411,11 +411,13 @@ function loadPlayer(src) {
 async function renderCameraGrid() {
   const grid = $("cam-grid");
   grid.style.setProperty("--cols", $("cam-layout").value);
-  try {
-    await loadPlayer(camStatus.player_script);
-  } catch (e) {
-    $("cam-message").textContent = e.message;
-    return;
+  if ($("cam-mode").value !== "mp4") {
+    try {
+      await loadPlayer(camStatus.player_script);
+    } catch (e) {
+      $("cam-message").textContent = e.message;
+      return;
+    }
   }
   grid.innerHTML = "";
   for (const cam of camStatus.cameras) {
@@ -424,9 +426,20 @@ async function renderCameraGrid() {
     // Small tiles play the camera's low-resolution stream; the enlarged one HD.
     const mount = (big) => {
       tile.querySelector("video-stream")?.remove();
-      const player = document.createElement("video-stream");
-      player.setAttribute("mode", "mse,webrtc,mp4");
-      player.src = big ? cam.ws_url : cam.ws_url_vga;
+      const mode = $("cam-mode").value;
+      let player;
+      if (mode === "mp4") {
+        // Plain progressive fragmented MP4: the most forgiving path in this webview.
+        player = document.createElement("video");
+        player.autoplay = true;
+        player.muted = true;
+        player.playsInline = true;
+        player.src = big ? cam.mp4_url : cam.mp4_url_vga;
+      } else {
+        player = document.createElement("video-stream");
+        player.setAttribute("mode", mode);
+        player.src = big ? cam.ws_url : cam.ws_url_vga;
+      }
       tile.insertBefore(player, tile.firstChild);
     };
     mount(false);
@@ -446,6 +459,7 @@ async function renderCameraGrid() {
 
 $("cameras-open").addEventListener("click", showCameras);
 $("cam-layout").addEventListener("change", () => $("cam-grid").style.setProperty("--cols", $("cam-layout").value));
+$("cam-mode").addEventListener("change", () => { if (camStatus && camStatus.running) renderCameraGrid(); });
 $("cam-start").addEventListener("click", async () => {
   $("cam-start").disabled = true;
   $("cam-state").textContent = "starting…";
