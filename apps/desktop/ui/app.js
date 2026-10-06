@@ -505,6 +505,8 @@ function teardownTile(tile) {
     try { vs.src = ""; } catch (_) {}
   }
   tile.querySelector("video, video-stream")?.remove();
+  tile._audioWanted = !!tile.querySelector("audio");
+  stopAudio(tile);
   if (tile._watch) { clearInterval(tile._watch); tile._watch = null; }
   if (tile._playback) {
     const pb = tile._playback;
@@ -650,6 +652,43 @@ function setState(tile, state, text) {
   o.querySelector(".cam-overlay-text").textContent = text;
   o.querySelector(".cam-reload").classList.toggle("hidden", state !== "lost" && state !== "ended");
   o.classList.toggle("hidden", state === "live");
+  if (state === "live" && tile._audioWanted && !tile.querySelector("audio")) {
+    tile._audioWanted = false;
+    const cam = cameraById(tile.closest(".cam-cell")?.dataset.id);
+    if (cam) toggleAudio(tile, cam);
+  }
+}
+
+// ---- sound: a streamed WAV from the stream server, tapped off the tile's own session ----
+
+function audioBase(cam) {
+  // The stream server on this tile's own loopback host (same host and port as its video).
+  return cam.ts_url.replace(/\/engine\/.*$/, "");
+}
+
+function stopAudio(tile) {
+  const a = tile.querySelector("audio");
+  if (a) {
+    try { a.pause(); a.removeAttribute("src"); a.load(); } catch (_) {}
+    a.remove();
+  }
+  const b = tile.querySelector(".cam-speaker");
+  if (b) { b.textContent = "\u{1F507}"; b.classList.remove("on"); }
+}
+
+function toggleAudio(tile, cam) {
+  if (tile.querySelector("audio")) { stopAudio(tile); return; }
+  // One camera audible at a time.
+  document.querySelectorAll(".cam-tile audio").forEach((a) => stopAudio(a.closest(".cam-tile")));
+  const key = isPlayback() ? (tile._playback && tile._playback.token) : cam.device_id;
+  if (!key) return;
+  const a = document.createElement("audio");
+  a.autoplay = true;
+  a.src = `${audioBase(cam)}/audio/${key}.wav?t=${Date.now()}`;
+  a.addEventListener("error", () => stopAudio(tile));
+  tile.appendChild(a);
+  const b = tile.querySelector(".cam-speaker");
+  if (b) { b.textContent = "\u{1F50A}"; b.classList.add("on"); }
 }
 
 function cameraById(id) {
@@ -693,6 +732,16 @@ function buildTile(cam) {
     if (!isPlayback()) mountTile(tile, cam, tile.classList.contains("big"));
   });
   tile.appendChild(quality);
+  const speaker = document.createElement("button");
+  speaker.type = "button";
+  speaker.className = "cam-speaker";
+  speaker.title = "Hear this camera (one at a time)";
+  speaker.textContent = "\u{1F507}";
+  speaker.addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    toggleAudio(tile, cam);
+  });
+  tile.appendChild(speaker);
   const overlay = document.createElement("div");
   overlay.className = "cam-overlay hidden";
   overlay.innerHTML = '<div class="spinner"></div><button type="button" class="cam-reload" title="Reload this camera">&#x21bb;</button><div class="cam-overlay-text"></div>';

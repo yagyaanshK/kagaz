@@ -189,7 +189,9 @@ own clock); `download` saves a span as MP4 through the video engine (or raw
 MPEG-TS with `--ts`), as fast as the camera sends it. In the window, switch
 "Live" to "Playback": pick a day and a time and press "Play all", or click a
 camera's timeline, and every camera shows the same moment from its card;
-"Download…" under a camera saves a span. Cameras can be arranged into
+"Download…" under a camera saves a span. The speaker badge on a tile plays
+that camera's sound (Kagaz decodes the camera's G.711 itself; no extra
+needed). Cameras can be arranged into
 groups ("rooms"): "Rearrange", "Add group", drag cameras between groups,
 collapse a group, "View" one alone, play one group from a chosen time. The
 layout is kept in `~/.config/kagaz/cameras.toml`.

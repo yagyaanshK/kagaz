@@ -27,6 +27,9 @@ pub struct PlaybackState {
     pub error: String,
 }
 
+/// A listener for one session's raw G.711 bytes.
+type AudioTap = std::sync::mpsc::SyncSender<Vec<u8>>;
+
 /// A requested span of recorded footage.
 #[derive(Debug, Clone)]
 struct Span {
@@ -64,6 +67,9 @@ pub struct TsServer {
     engine_port: Arc<Mutex<Option<u16>>>,
     /// Recording playbacks by token.
     playbacks: Arc<Mutex<HashMap<String, PlaybackState>>>,
+    /// Listeners for the audio of a running session, by device id (live)
+    /// or playback token; each gets the raw G.711 bytes as they arrive.
+    taps: Arc<Mutex<HashMap<String, Vec<AudioTap>>>>,
 }
 
 /// How many extra loopback addresses to try (127.0.0.2 ...).
@@ -97,6 +103,7 @@ impl TsServer {
             cameras: Arc::new(Mutex::new(cameras)),
             engine_port: Arc::new(Mutex::new(None)),
             playbacks: Arc::new(Mutex::new(HashMap::new())),
+            taps: Arc::new(Mutex::new(HashMap::new())),
         });
         for listener in listeners {
             let s = server.clone();
@@ -217,6 +224,72 @@ impl TsServer {
         }
     }
 
+    /// Hand this part of a session's stream to whoever listens for its audio.
+    fn feed_taps(&self, key: &str, demux: &mut super::audio::AudioDemux, part: &[u8]) {
+        let Ok(mut taps) = self.taps.lock() else {
+            return;
+        };
+        let Some(list) = taps.get_mut(key) else {
+            return;
+        };
+        let g711 = demux.push(part);
+        if g711.is_empty() {
+            return;
+        }
+        // A listener that stopped reading is dropped; a slow one loses this part.
+        list.retain(|tx| {
+            !matches!(
+                tx.try_send(g711.clone()),
+                Err(std::sync::mpsc::TrySendError::Disconnected(_))
+            )
+        });
+        if list.is_empty() {
+            taps.remove(key);
+        }
+    }
+
+    /// Stream the audio of the session `key` as WAV until the listener leaves
+    /// or the session ends.
+    fn serve_audio(&self, key: &str, mut client: TcpStream) {
+        use super::audio::{decode, wav_header, Law};
+        let (tx, rx) = std::sync::mpsc::sync_channel::<Vec<u8>>(64);
+        if let Ok(mut taps) = self.taps.lock() {
+            taps.entry(key.to_string()).or_default().push(tx);
+        }
+        if client
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Type: audio/wav\r\nCache-Control: no-store\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n")
+            .is_err()
+        {
+            return;
+        }
+        let mut chunk = |data: &[u8]| -> bool {
+            client
+                .write_all(format!("{:x}\r\n", data.len()).as_bytes())
+                .and_then(|()| client.write_all(data))
+                .and_then(|()| client.write_all(b"\r\n"))
+                .is_ok()
+        };
+        if !chunk(&wav_header()) {
+            return;
+        }
+        log(&format!("audio {key}: listener joined"));
+        // Wait up to a minute for the session to produce sound, then give
+        // up after a minute of silence.
+        let law = Law::ALaw;
+        let mut total = 0u64;
+        while let Ok(g711) = rx.recv_timeout(std::time::Duration::from_secs(60)) {
+            total += g711.len() as u64;
+            if !chunk(&decode(law, &g711)) {
+                break;
+            }
+        }
+        let _ = client.write_all(b"0\r\n\r\n");
+        log(&format!(
+            "audio {key}: listener left after {} s of sound",
+            total / 8000
+        ));
+    }
+
     /// Pipe the engine's `/api/stream.ts?src=<name>` to this client.
     fn proxy_engine(&self, name: &str, mut client: TcpStream) {
         let Some(port) = self.engine_port.lock().ok().and_then(|p| *p) else {
@@ -304,6 +377,14 @@ impl TsServer {
         {
             let name = name.to_string();
             self.proxy_engine(&name, stream);
+            return;
+        }
+        if let Some(key) = path_only
+            .strip_prefix("/audio/")
+            .and_then(|p| p.strip_suffix(".wav"))
+        {
+            let key = key.to_string();
+            self.serve_audio(&key, stream);
             return;
         }
         if let Some(token) = path_only
@@ -436,8 +517,10 @@ impl TsServer {
         let started = Instant::now();
         let mut total = 0u64;
         log(&format!("relay {} {resolution}: start", cam.name));
+        let mut demux = super::audio::AudioDemux::default();
         let result = stream_preview(&relay, &terminal, &track, resolution, &mut |chunk| {
             total += chunk.len() as u64;
+            self.feed_taps(&cam.device_id, &mut demux, chunk);
             stream.write_all(chunk).is_ok()
         });
         log(&format!(
@@ -490,8 +573,10 @@ impl TsServer {
             if fast { " fast" } else { "" }
         ));
         let recordings = Recordings::new(session, cam);
+        let mut demux = super::audio::AudioDemux::default();
         let mut sink = |chunk: &[u8]| {
             total += chunk.len() as u64;
+            self.feed_taps(token, &mut demux, chunk);
             let ok = stream.write_all(chunk).is_ok();
             self.update_playback(token, |st| st.bytes = total);
             ok
