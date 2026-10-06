@@ -61,6 +61,7 @@ pub fn request_relay(
     device_id: &str,
     app_server: &str,
     track_id: &str,
+    resolution: &str,
 ) -> Result<RelayParams, RelayError> {
     let body = json!({
         "cloudType": 2,
@@ -70,7 +71,7 @@ pub fn request_relay(
         "deviceType": "SMART.IPCAMERA",
         "playerId": session.terminal_uuid,
         "preConnection": 0,
-        "resolution": "HD",
+        "resolution": resolution,
         "rootCaVer": "1",
         "streamType": 0,
         "trackId": track_id,
