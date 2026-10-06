@@ -13,5 +13,5 @@ on 2026-10-05, over its hosted scanner service at
 | `brother-dcp-l2540dw.retrieveimage-after-last.response.xml` | RetrieveImage once more on the same job: HTTP 400 with fault `wscn:ClientErrorJobIdNotFound`. This is how the end of a job looks. |
 | `brother-dcp-l2540dw.createscanjob-adf-empty.response.xml` | CreateScanJob on the feeder with no paper in it: after about ten seconds, HTTP 500 with fault `wscn:ServerErrorNotAcceptingJobs`. This is how an empty feeder looks on this model. |
 
-Nothing personal is in these files
-beyond the printer's serial number, which it gives to anyone on the network.
+The printer's serial number, address and the device part of its UUIDs were
+replaced by placeholders of the same length; everything else is as recorded.
