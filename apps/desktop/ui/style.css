@@ -198,3 +198,11 @@ label small { font-size: 12px; min-height: 1.2em; }
 .cam-tile video-stream, .cam-tile video { width: 100%; height: 100%; display: block; object-fit: contain; background: #000; }
 .cam-tile .cam-name { position: absolute; left: 8px; bottom: 6px; color: #fff; font-size: 12px; text-shadow: 0 0 4px #000; }
 .cam-tile.big { grid-column: 1 / -1; aspect-ratio: 16 / 9; }
+
+/* Tile state overlay: shown over the last frame while a stream is not advancing */
+.cam-overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; background: rgba(0,0,0,0.35); color: #fff; font-size: 13px; }
+.cam-overlay .spinner { width: 28px; height: 28px; border: 3px solid rgba(255,255,255,0.35); border-top-color: #fff; border-radius: 50%; animation: spin 0.9s linear infinite; }
+.cam-tile[data-state="lost"] .spinner { display: none; }
+.cam-tile[data-state="connecting"] .cam-reload, .cam-tile[data-state="waiting"] .cam-reload { display: none; }
+.cam-reload { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+@keyframes spin { to { transform: rotate(360deg); } }

@@ -1360,6 +1360,7 @@ fn cameras_serve(port: u16) -> Result<()> {
         })
         .collect();
     let engine = go2rtc::Engine::start(&binary, port, &streams)?;
+    server.set_engine_port(engine.api_port);
     println!(
         "Video engine running; its page lists every camera: {}",
         engine.ui_url()

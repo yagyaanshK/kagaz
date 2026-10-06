@@ -408,6 +408,73 @@ function loadPlayer(src) {
   });
 }
 
+// Release a tile's player and its connection before replacing it.
+function teardownTile(tile) {
+  const v = tile.querySelector("video");
+  if (v) {
+    try { v.pause(); v.removeAttribute("src"); v.load(); } catch (_) {}
+  }
+  const vs = tile.querySelector("video-stream");
+  if (vs) {
+    try { vs.src = ""; } catch (_) {}
+  }
+  tile.querySelector("video, video-stream")?.remove();
+  if (tile._watch) { clearInterval(tile._watch); tile._watch = null; }
+}
+
+function mountTile(tile, cam, big) {
+  teardownTile(tile);
+  const mode = $("cam-mode").value;
+  let player;
+  if (mode === "ts") {
+    // MPEG-TS over HTTP in a plain <video>: measured as the route this
+    // webview decodes at real time (its MP4 input is refused).
+    player = document.createElement("video");
+    player.autoplay = true;
+    player.muted = true;
+    player.playsInline = true;
+    player.src = big ? cam.ts_url : cam.ts_url_vga;
+  } else {
+    player = document.createElement("video-stream");
+    player.setAttribute("mode", mode);
+    player.src = big ? cam.ws_url : cam.ws_url_vga;
+  }
+  tile.insertBefore(player, tile.firstChild);
+  setState(tile, "connecting", "connecting…");
+  // Watch the clock: if it stops advancing, say so over the last frame.
+  let lastT = -1, stalledSince = 0, started = Date.now();
+  tile._watch = setInterval(() => {
+    const v = tile.querySelector("video") || tile.querySelector("video-stream")?.video;
+    if (!v) return;
+    const t = v.currentTime || 0;
+    const now = Date.now();
+    if (v.error) {
+      setState(tile, "lost", "no data from the camera");
+      return;
+    }
+    if (t > lastT + 0.05) {
+      lastT = t; stalledSince = 0;
+      setState(tile, "live", "");
+      return;
+    }
+    if (!stalledSince) stalledSince = now;
+    const quiet = (now - stalledSince) / 1000;
+    const total = (now - started) / 1000;
+    if (lastT < 0 && total > 20) setState(tile, "lost", "no data from the camera");
+    else if (lastT < 0) setState(tile, "connecting", "connecting…");
+    else if (quiet > 15) setState(tile, "lost", "no data from the camera");
+    else if (quiet > 2) setState(tile, "waiting", "waiting for the camera…");
+  }, 1000);
+}
+
+function setState(tile, state, text) {
+  tile.dataset.state = state;
+  const o = tile.querySelector(".cam-overlay");
+  if (!o) return;
+  o.querySelector(".cam-overlay-text").textContent = text;
+  o.classList.toggle("hidden", state === "live");
+}
+
 async function renderCameraGrid() {
   const grid = $("cam-grid");
   grid.style.setProperty("--cols", $("cam-layout").value);
@@ -419,48 +486,39 @@ async function renderCameraGrid() {
       return;
     }
   }
+  grid.querySelectorAll(".cam-tile").forEach(teardownTile);
   grid.innerHTML = "";
   for (const cam of camStatus.cameras) {
     const tile = document.createElement("div");
     tile.className = "cam-tile";
-    // Small tiles play the camera's low-resolution stream; the enlarged one HD.
-    const mount = (big) => {
-      tile.querySelector("video-stream")?.remove();
-      const mode = $("cam-mode").value;
-      let player;
-      if (mode === "ts") {
-        // MPEG-TS over HTTP in a plain <video>: measured as the route this
-        // webview decodes at real time (its MP4 input is refused).
-        player = document.createElement("video");
-        player.autoplay = true;
-        player.muted = true;
-        player.playsInline = true;
-        player.src = big ? cam.ts_url : cam.ts_url_vga;
-      } else {
-        player = document.createElement("video-stream");
-        player.setAttribute("mode", mode);
-        player.src = big ? cam.ws_url : cam.ws_url_vga;
-      }
-      tile.insertBefore(player, tile.firstChild);
-    };
-    mount(false);
     const name = document.createElement("div");
     name.className = "cam-name";
     name.textContent = cam.name;
     tile.appendChild(name);
-    tile.addEventListener("click", () => {
+    const overlay = document.createElement("div");
+    overlay.className = "cam-overlay hidden";
+    overlay.innerHTML = '<div class="spinner"></div><div class="cam-overlay-text"></div><button type="button" class="cam-reload">Reload</button>';
+    overlay.querySelector(".cam-reload").addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      mountTile(tile, cam, tile.classList.contains("big"));
+    });
+    tile.appendChild(overlay);
+    mountTile(tile, cam, false);
+    tile.addEventListener("click", (ev) => {
+      if (ev.target.closest(".cam-reload")) return;
       const big = !tile.classList.contains("big");
       tile.classList.toggle("big", big);
-      mount(big);
+      mountTile(tile, cam, big);
     });
     grid.appendChild(tile);
   }
-  $("cam-state").textContent = `${camStatus.cameras.length} cameras live`;
+  $("cam-state").textContent = `${camStatus.cameras.length} cameras`;
 }
 
 $("cameras-open").addEventListener("click", showCameras);
 $("cam-layout").addEventListener("change", () => $("cam-grid").style.setProperty("--cols", $("cam-layout").value));
 $("cam-mode").addEventListener("change", () => { if (camStatus && camStatus.running) renderCameraGrid(); });
+$("cam-reload-all").addEventListener("click", () => { if (camStatus && camStatus.running) renderCameraGrid(); });
 $("cam-start").addEventListener("click", async () => {
   $("cam-start").disabled = true;
   $("cam-state").textContent = "starting…";
