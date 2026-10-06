@@ -185,13 +185,18 @@ kagaz tapo download <camera> --from "2026-10-06 10:00" --to +10
 
 What is on a camera's SD card, and saving some of it: `recordings` lists
 the card, the days with footage and one day's clips (times on the camera's
-own clock); `download` saves a span as MP4 through the video engine (or raw
-MPEG-TS with `--ts`), as fast as the camera sends it. In the window, switch
+own clock); `download` saves a span as MP4 with sound (AAC, through a
+checksum-pinned ffmpeg fetched once; or raw MPEG-TS with `--ts`), as fast as
+the camera sends it. In the window, switch
 "Live" to "Playback": pick a day and a time and press "Play all", or click a
 camera's timeline, and every camera shows the same moment from its card;
 "Download…" under a camera saves a span. The speaker badge on a tile plays
 that camera's sound (Kagaz decodes the camera's G.711 itself; no extra
-needed). Cameras can be arranged into
+needed). A Tapo camera on the same network as the computer is viewed
+straight from the camera, as the app does on the same Wi-Fi, when the
+account password is kept in the private session file (`kagaz tapo login
+--no-local` to never keep it); the rest goes through the relay. Cameras can
+be arranged into
 groups ("rooms"): "Rearrange", "Add group", drag cameras between groups,
 collapse a group, "View" one alone, play one group from a chosen time. The
 layout is kept in `~/.config/kagaz/cameras.toml`.

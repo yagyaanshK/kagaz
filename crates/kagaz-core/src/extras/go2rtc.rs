@@ -129,7 +129,7 @@ pub fn ensure(on_event: &mut dyn FnMut(Event)) -> Result<PathBuf, ExtraError> {
         source,
     })?;
     if asset.ends_with(".zip") {
-        unzip_single(&bytes, &path)?;
+        super::unzip_member(&bytes, &|name| name.starts_with("go2rtc"), &path)?;
     } else {
         std::fs::File::create(&path)
             .and_then(|mut f| f.write_all(&bytes))
@@ -145,45 +145,6 @@ pub fn ensure(on_event: &mut dyn FnMut(Event)) -> Result<PathBuf, ExtraError> {
     }
     on_event(Event::Ready(path.clone()));
     Ok(path)
-}
-
-/// Extract the first `go2rtc*` file from a zip (stored or deflated).
-fn unzip_single(zip: &[u8], dest: &Path) -> Result<(), ExtraError> {
-    // Minimal zip reader: walk local file headers.
-    let mut pos = 0;
-    while pos + 30 <= zip.len() && &zip[pos..pos + 4] == b"PK\x03\x04" {
-        let method = u16::from_le_bytes([zip[pos + 8], zip[pos + 9]]);
-        let csize = u32::from_le_bytes([zip[pos + 18], zip[pos + 19], zip[pos + 20], zip[pos + 21]])
-            as usize;
-        let name_len = u16::from_le_bytes([zip[pos + 26], zip[pos + 27]]) as usize;
-        let extra_len = u16::from_le_bytes([zip[pos + 28], zip[pos + 29]]) as usize;
-        let name = String::from_utf8_lossy(&zip[pos + 30..pos + 30 + name_len]).to_string();
-        let data_start = pos + 30 + name_len + extra_len;
-        let data = &zip[data_start..(data_start + csize).min(zip.len())];
-        if name.starts_with("go2rtc") {
-            let bytes = match method {
-                0 => data.to_vec(),
-                8 => {
-                    let mut out = Vec::new();
-                    flate2::read::DeflateDecoder::new(data)
-                        .read_to_end(&mut out)
-                        .map_err(|e| ExtraError::Download(format!("zip: {e}")))?;
-                    out
-                }
-                m => {
-                    return Err(ExtraError::Download(format!(
-                        "zip method {m} not supported"
-                    )))
-                }
-            };
-            return std::fs::write(dest, bytes).map_err(|source| ExtraError::Io {
-                path: dest.to_path_buf(),
-                source,
-            });
-        }
-        pos = data_start + csize;
-    }
-    Err(ExtraError::Download("zip without a go2rtc file".into()))
 }
 
 /// One stream for go2rtc: a name and its source URL.

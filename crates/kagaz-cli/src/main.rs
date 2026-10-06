@@ -209,6 +209,9 @@ enum TapoCommand {
         /// Account email
         #[arg(long)]
         email: Option<String>,
+        /// Do not keep the password for viewing cameras on the local network directly
+        #[arg(long)]
+        no_local: bool,
     },
     /// Forget the saved session
     Logout,
@@ -1200,7 +1203,7 @@ fn tapo_command(cmd: TapoCommand) -> Result<()> {
     use kagaz_core::cameras::tapo::{self, CloudError, Session};
     let path = Session::default_path();
     match cmd {
-        TapoCommand::Login { email } => {
+        TapoCommand::Login { email, no_local } => {
             let email = match email {
                 Some(e) => e,
                 None => prompt("TP-Link account email: ")?,
@@ -1238,6 +1241,9 @@ fn tapo_command(cmd: TapoCommand) -> Result<()> {
                     session.submit_mfa(&code, mfa_type)?;
                 }
                 Err(e) => return Err(e.into()),
+            }
+            if !no_local {
+                session.local_password = password.clone();
             }
             session.save(&path)?;
             println!(
@@ -1481,24 +1487,49 @@ fn tapo_command(cmd: TapoCommand) -> Result<()> {
                     }
                 })?
             } else {
-                let server = TsServer::start(session.clone(), cams.clone(), 0)?;
-                let binary = go2rtc::ensure(&mut |e| match e {
+                let mut progress = |p: download::Progress| {
+                    let download::Progress::Bytes(b) = p;
+                    print!("\r  {} received...", human_size(b));
+                    let _ = std::io::Write::flush(&mut std::io::stdout());
+                    true
+                };
+                // Sound needs ffmpeg (an extra, fetched once); without it the
+                // engine writes the picture only.
+                let ffmpeg_binary = kagaz_core::extras::ffmpeg::ensure(&mut |e| match e {
                     go2rtc::Event::Downloading { bytes } => println!(
-                        "Downloading the video engine go2rtc {} ({})...",
-                        go2rtc::VERSION,
+                        "Downloading ffmpeg for the sound ({}), once...",
                         human_size(bytes)
                     ),
                     go2rtc::Event::Verified => println!("  checksum matches"),
                     go2rtc::Event::Ready(_) => {}
-                })?;
-                let engine = go2rtc::Engine::start(&binary, 0, &[])?;
-                server.set_engine_port(engine.api_port);
-                download::save_span(&server, &engine, cam, start, end, &out, &mut |p| {
-                    let download::Progress::Bytes(b) = p;
-                    print!("\r  {} written...", human_size(b));
-                    let _ = std::io::Write::flush(&mut std::io::stdout());
-                    true
-                })?
+                });
+                match ffmpeg_binary {
+                    Ok(ffmpeg_binary) => download::save_span_with_sound(
+                        &session,
+                        cam,
+                        start,
+                        end,
+                        &out,
+                        &ffmpeg_binary,
+                        &mut progress,
+                    )?,
+                    Err(e) => {
+                        eprintln!("No ffmpeg ({e}); saving the picture only.");
+                        let server = TsServer::start(session.clone(), cams.clone(), 0)?;
+                        let binary = go2rtc::ensure(&mut |e| match e {
+                            go2rtc::Event::Downloading { bytes } => println!(
+                                "Downloading the video engine go2rtc {} ({})...",
+                                go2rtc::VERSION,
+                                human_size(bytes)
+                            ),
+                            go2rtc::Event::Verified => println!("  checksum matches"),
+                            go2rtc::Event::Ready(_) => {}
+                        })?;
+                        let engine = go2rtc::Engine::start(&binary, 0, &[])?;
+                        server.set_engine_port(engine.api_port);
+                        download::save_span(&server, &engine, cam, start, end, &out, &mut progress)?
+                    }
+                }
             };
             println!(
                 "\rSaved {} ({}) in {:.0} s",
@@ -1557,22 +1588,14 @@ fn cameras_serve(port: u16) -> Result<()> {
         go2rtc::Event::Verified => println!("  checksum matches"),
         go2rtc::Event::Ready(p) => println!("Video engine: {}", p.display()),
     })?;
-    let streams: Vec<go2rtc::StreamSource> = cameras
-        .iter()
-        .flat_map(|c| {
-            [
-                go2rtc::StreamSource {
-                    name: c.name.clone(),
-                    url: server.url_for(&c.device_id),
-                },
-                go2rtc::StreamSource {
-                    name: format!("{} vga", c.name),
-                    url: server.vga_url_for(&c.device_id),
-                },
-            ]
-        })
-        .collect();
-    let engine = go2rtc::Engine::start(&binary, port, &streams)?;
+    let local = kagaz_core::cameras::tapo::local_sources(&server, &cameras);
+    if !local.local.is_empty() {
+        println!(
+            "{} camera(s) on this network, viewed directly",
+            local.local.len()
+        );
+    }
+    let engine = go2rtc::Engine::start(&binary, port, &local.streams)?;
     server.set_engine_port(engine.api_port);
     println!(
         "Video engine running; its page lists every camera: {}",

@@ -70,6 +70,8 @@ pub struct TsServer {
     /// Listeners for the audio of a running session, by device id (live)
     /// or playback token; each gets the raw G.711 bytes as they arrive.
     taps: Arc<Mutex<HashMap<String, Vec<AudioTap>>>>,
+    /// Cameras with a live relay session running right now.
+    feeding: Arc<Mutex<std::collections::HashSet<String>>>,
 }
 
 /// How many extra loopback addresses to try (127.0.0.2 ...).
@@ -104,6 +106,7 @@ impl TsServer {
             engine_port: Arc::new(Mutex::new(None)),
             playbacks: Arc::new(Mutex::new(HashMap::new())),
             taps: Arc::new(Mutex::new(HashMap::new())),
+            feeding: Arc::new(Mutex::new(std::collections::HashSet::new())),
         });
         for listener in listeners {
             let s = server.clone();
@@ -273,6 +276,17 @@ impl TsServer {
             return;
         }
         log(&format!("audio {key}: listener joined"));
+        // A live key with nothing streaming for it (a tile fed some other
+        // way): open a small relay session of our own just for the sound.
+        let own_session = if self.cameras().iter().any(|c| c.device_id == key) {
+            let server = self.clone_handle();
+            let key = key.to_string();
+            let (stop_tx, stop_rx) = std::sync::mpsc::channel::<()>();
+            std::thread::spawn(move || server.sound_only_session(&key, stop_rx));
+            Some(stop_tx)
+        } else {
+            None
+        };
         // Wait up to a minute for the session to produce sound, then give
         // up after a minute of silence.
         let law = Law::ALaw;
@@ -284,10 +298,85 @@ impl TsServer {
             }
         }
         let _ = client.write_all(b"0\r\n\r\n");
+        drop(own_session);
         log(&format!(
             "audio {key}: listener left after {} s of sound",
             total / 8000
         ));
+    }
+
+    /// A relay session (VGA, the cheapest) kept only to feed the audio taps
+    /// of `device_id` while someone listens; ends when `stop` is dropped or
+    /// when another session for the camera is already feeding the taps.
+    fn sound_only_session(&self, device_id: &str, stop: std::sync::mpsc::Receiver<()>) {
+        // Give a video session a moment to show up before opening our own.
+        std::thread::sleep(std::time::Duration::from_millis(1500));
+        if self
+            .feeding
+            .lock()
+            .map(|f| f.contains(device_id))
+            .unwrap_or(false)
+        {
+            return;
+        }
+        let Some(cam) = self
+            .cameras()
+            .into_iter()
+            .find(|c| c.device_id == device_id)
+        else {
+            return;
+        };
+        let session = self.session();
+        let track = format!("sound-{}-{}", cam.device_id, uuid::Uuid::new_v4().simple());
+        let Ok(relay) = request_relay(&session, &cam.device_id, &cam.app_server, &track, "VGA")
+        else {
+            log(&format!("sound-only {}: relay refused", cam.name));
+            return;
+        };
+        log(&format!("sound-only {}: start", cam.name));
+        let mut demux = super::audio::AudioDemux::default();
+        let result = stream_preview(
+            &relay,
+            &session.terminal_uuid,
+            &track,
+            "VGA",
+            &mut |chunk| {
+                self.feed_taps(device_id, &mut demux, chunk);
+                // Stop when the listener has gone, or when nobody taps any more.
+                let listening = self
+                    .taps
+                    .lock()
+                    .map(|t| t.contains_key(device_id))
+                    .unwrap_or(false);
+                listening
+                    && !matches!(
+                        stop.try_recv(),
+                        Err(std::sync::mpsc::TryRecvError::Disconnected)
+                    )
+            },
+        );
+        log(&format!(
+            "sound-only {}: {}",
+            cam.name,
+            match result {
+                Ok(_) => "ended".to_string(),
+                Err(e) => format!("ended: {e}"),
+            }
+        ));
+    }
+
+    /// A handle to this server for another thread.
+    fn clone_handle(&self) -> Arc<TsServer> {
+        Arc::new(TsServer {
+            port: self.port,
+            hosts: self.hosts.clone(),
+            session: self.session.clone(),
+            cameras: self.cameras.clone(),
+            engine_port: self.engine_port.clone(),
+            playbacks: self.playbacks.clone(),
+            taps: self.taps.clone(),
+            feeding: self.feeding.clone(),
+        })
     }
 
     /// Pipe the engine's `/api/stream.ts?src=<name>` to this client.
@@ -517,12 +606,18 @@ impl TsServer {
         let started = Instant::now();
         let mut total = 0u64;
         log(&format!("relay {} {resolution}: start", cam.name));
+        if let Ok(mut f) = self.feeding.lock() {
+            f.insert(cam.device_id.clone());
+        }
         let mut demux = super::audio::AudioDemux::default();
         let result = stream_preview(&relay, &terminal, &track, resolution, &mut |chunk| {
             total += chunk.len() as u64;
             self.feed_taps(&cam.device_id, &mut demux, chunk);
             stream.write_all(chunk).is_ok()
         });
+        if let Ok(mut f) = self.feeding.lock() {
+            f.remove(&cam.device_id);
+        }
         log(&format!(
             "relay {} {resolution}: {} after {:.1} s, {} KB",
             cam.name,

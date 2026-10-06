@@ -15,14 +15,24 @@ pub enum Law {
 #[derive(Debug, Default)]
 pub struct AudioDemux {
     pmt_pid: Option<u16>,
+    video_pid: Option<u16>,
     audio_pid: Option<u16>,
     law: Option<Law>,
     carry: Vec<u8>,
+    /// First presentation time seen on each track (90 kHz), to line the
+    /// sound up with the picture when they are muxed again.
+    first_video_pts: Option<u64>,
+    first_audio_pts: Option<u64>,
 }
 
 impl AudioDemux {
     pub fn law(&self) -> Option<Law> {
         self.law
+    }
+
+    /// How far the sound starts after the picture, in seconds (negative when before).
+    pub fn audio_offset_seconds(&self) -> Option<f64> {
+        Some((self.first_audio_pts? as f64 - self.first_video_pts? as f64) / 90_000.0)
     }
 
     /// Feed any slice of the stream; returns the raw G.711 bytes found in it.
@@ -87,6 +97,11 @@ impl AudioDemux {
                     let epid = (u16::from(sec[j + 1] & 0x1F) << 8) | u16::from(sec[j + 2]);
                     let es_len = (usize::from(sec[j + 3] & 0x0F) << 8) | usize::from(sec[j + 4]);
                     match stream_type {
+                        0x1B | 0x24 => {
+                            if self.video_pid.is_none() {
+                                self.video_pid = Some(epid);
+                            }
+                        }
                         0x90 => {
                             self.audio_pid = Some(epid);
                             self.law = Some(Law::ALaw);
@@ -102,15 +117,34 @@ impl AudioDemux {
             }
             return;
         }
-        if Some(pid) != self.audio_pid {
+        let is_audio = Some(pid) == self.audio_pid;
+        if !is_audio && Some(pid) != self.video_pid {
             return;
         }
         let mut payload = &p[off..];
         if pusi && payload.len() >= 9 && payload[..3] == [0, 0, 1] {
+            if payload[7] & 0x80 != 0 && payload.len() >= 14 {
+                let q = &payload[9..14];
+                let pts = ((u64::from(q[0]) & 0x0E) << 29)
+                    | (u64::from(q[1]) << 22)
+                    | ((u64::from(q[2]) & 0xFE) << 14)
+                    | (u64::from(q[3]) << 7)
+                    | (u64::from(q[4]) >> 1);
+                let slot = if is_audio {
+                    &mut self.first_audio_pts
+                } else {
+                    &mut self.first_video_pts
+                };
+                if slot.is_none() {
+                    *slot = Some(pts);
+                }
+            }
             let header = 9 + usize::from(payload[8]);
             payload = payload.get(header..).unwrap_or(&[]);
         }
-        out.extend_from_slice(payload);
+        if is_audio {
+            out.extend_from_slice(payload);
+        }
     }
 }
 
@@ -202,7 +236,14 @@ mod tests {
         pes.extend_from_slice(&[0xD5; 20]);
         let audio1 = packet(0x45, true, &pes);
         let audio2 = packet(0x45, false, &[0x55; 10]);
-        let video = packet(0x44, true, &[1, 2, 3]);
+        // Video PES at PTS 90000 (1.0 s); the audio PES below sits at 16384 (0.18 s).
+        let video = packet(
+            0x44,
+            true,
+            &[
+                0, 0, 1, 0xE0, 0, 0, 0x80, 0x80, 5, 0x21, 0x00, 0x05, 0xBF, 0x21, 1, 2, 3,
+            ],
+        );
         let mut all = Vec::new();
         for p in [&pat_packet, &pmt_packet, &video, &audio1, &audio2] {
             all.extend_from_slice(p);
@@ -212,6 +253,8 @@ mod tests {
         let mut out = d.push(&all[..200]);
         out.extend(d.push(&all[200..]));
         assert_eq!(d.law(), Some(Law::ALaw));
+        let off = d.audio_offset_seconds().unwrap();
+        assert!((off + 1.0).abs() < 0.001, "offset {off}");
         assert_eq!(out.len(), 188 - 4 - 14 + 188 - 4);
         assert!(out[..20].iter().all(|&b| b == 0xD5));
     }

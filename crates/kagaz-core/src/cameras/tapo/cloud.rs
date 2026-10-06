@@ -53,6 +53,14 @@ pub struct Camera {
     pub model: String,
     /// The region-correct app server host for this device.
     pub app_server: String,
+    /// Hardware address, lower-case without separators, for finding the
+    /// camera on the local network.
+    #[serde(default)]
+    pub mac: String,
+    #[serde(default)]
+    pub hw_version: String,
+    #[serde(default)]
+    pub firmware: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -64,6 +72,11 @@ pub struct Session {
     pub terminal_uuid: String,
     pub app_server: String,
     pub account_base: String,
+    /// The account password, kept only when the user chose local viewing:
+    /// cameras on the same network take it (hashed) as their local login,
+    /// exactly as the Tapo app does. The file is private (0600).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub local_password: String,
     #[serde(skip)]
     mfa_process_id: String,
 }
@@ -142,6 +155,7 @@ impl Session {
             terminal_uuid: new_terminal_uuid(),
             app_server: DEFAULT_APP_SERVER.to_string(),
             account_base: LOGIN_BASE.to_string(),
+            local_password: String::new(),
             mfa_process_id: String::new(),
         }
     }
@@ -366,6 +380,18 @@ impl Session {
         Ok(parse_things(&data, &self.app_server))
     }
 
+    /// The raw device list, as the cloud returns it.
+    pub fn things_raw(&self) -> Result<Value, CloudError> {
+        let url = format!("https://{}/v2/things", self.app_server);
+        let text = self
+            .cloud_request(agent().get(&url))
+            .call()
+            .map_err(|e| CloudError::Transport(e.to_string()))?
+            .into_string()
+            .map_err(|e| CloudError::Transport(e.to_string()))?;
+        Ok(serde_json::from_str(&text).unwrap_or(Value::Null))
+    }
+
     /// Call device methods through the cloud passthrough (`services-sync`),
     /// as the app does. Returns one raw response object per request.
     pub fn device_requests(
@@ -540,6 +566,24 @@ pub fn parse_things(data: &Value, default_server: &str) -> Vec<Camera> {
                 .unwrap_or("")
                 .to_string(),
             app_server,
+            mac: d
+                .get("mac")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .chars()
+                .filter(|c| c.is_ascii_hexdigit())
+                .collect::<String>()
+                .to_ascii_lowercase(),
+            hw_version: d
+                .get("hwVer")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+            firmware: d
+                .get("fwVer")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
         });
     }
     out

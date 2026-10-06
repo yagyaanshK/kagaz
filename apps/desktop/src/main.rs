@@ -186,6 +186,8 @@ struct CameraEngine {
     _server: std::sync::Arc<kagaz_core::cameras::tapo::TsServer>,
     engine: std::sync::Arc<kagaz_core::extras::go2rtc::Engine>,
     cameras: Vec<kagaz_core::cameras::tapo::Camera>,
+    /// Cameras reached directly on this network (device id → address).
+    local: std::collections::HashMap<String, String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -204,6 +206,8 @@ struct CameraView {
     /// connection limit never applies.
     ts_url: String,
     ts_url_vga: String,
+    /// Set when the live view comes straight from the camera on this network.
+    local_address: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -234,6 +238,7 @@ fn camera_views(e: &CameraEngine) -> Vec<CameraView> {
                 i,
                 &kagaz_core::extras::go2rtc::yaml_key(&format!("{} vga", c.name)),
             ),
+            local_address: e.local.get(&c.device_id).cloned().unwrap_or_default(),
         })
         .collect()
 }
@@ -308,27 +313,19 @@ async fn cameras_start(
             let _ = app.emit("cameras-progress", text);
         })
         .map_err(|e| e.to_string())?;
-        let streams: Vec<go2rtc::StreamSource> = cameras
-            .iter()
-            .flat_map(|c| {
-                [
-                    go2rtc::StreamSource {
-                        name: c.name.clone(),
-                        url: server.url_for(&c.device_id),
-                    },
-                    go2rtc::StreamSource {
-                        name: format!("{} vga", c.name),
-                        url: server.vga_url_for(&c.device_id),
-                    },
-                ]
-            })
-            .collect();
-        let engine = go2rtc::Engine::start(&binary, 0, &streams).map_err(|e| e.to_string())?;
+        let local = kagaz_core::cameras::tapo::local_sources(&server, &cameras);
+        let _ = app.emit(
+            "cameras-progress",
+            format!("{} camera(s) on this network", local.local.len()),
+        );
+        let engine =
+            go2rtc::Engine::start(&binary, 0, &local.streams).map_err(|e| e.to_string())?;
         server.set_engine_port(engine.api_port);
         Ok(CameraEngine {
             _server: server,
             engine: std::sync::Arc::new(engine),
             cameras,
+            local: local.local,
         })
     })
     .await?;
@@ -523,20 +520,55 @@ async fn download_recording(
     let id = device_id.clone();
     let result = blocking(move || {
         let out = PathBuf::from(&path);
-        download::save_span(&e._server, &e.engine, &cam, from, to, &out, &mut |p| {
-            let download::Progress::Bytes(bytes) = p;
+        let report = |bytes: u64, note: &str| {
             let _ = app.emit(
                 "download-progress",
                 DownloadProgress {
                     device_id: id.clone(),
                     bytes,
                     done: false,
-                    error: String::new(),
+                    error: note.to_string(),
                 },
             );
+        };
+        let mut progress = |p: download::Progress| {
+            let download::Progress::Bytes(bytes) = p;
+            report(bytes, "");
             true
-        })
-        .map_err(|e| e.to_string())
+        };
+        // Sound needs ffmpeg, fetched once; without it the engine saves the picture only.
+        let ffmpeg_binary = kagaz_core::extras::ffmpeg::ensure(&mut |ev| {
+            let note = match ev {
+                kagaz_core::extras::go2rtc::Event::Downloading { bytes } => {
+                    format!(
+                        "fetching ffmpeg for the sound, once ({} MB)…",
+                        bytes / 1_000_000
+                    )
+                }
+                kagaz_core::extras::go2rtc::Event::Verified => "ffmpeg verified".to_string(),
+                kagaz_core::extras::go2rtc::Event::Ready(_) => String::new(),
+            };
+            if !note.is_empty() {
+                report(0, &note);
+            }
+        });
+        match ffmpeg_binary {
+            Ok(ffmpeg_binary) => download::save_span_with_sound(
+                &e._server.session(),
+                &cam,
+                from,
+                to,
+                &out,
+                &ffmpeg_binary,
+                &mut progress,
+            )
+            .map_err(|e| e.to_string()),
+            Err(why) => {
+                report(0, &format!("no ffmpeg ({why}); saving the picture only"));
+                download::save_span(&e._server, &e.engine, &cam, from, to, &out, &mut progress)
+                    .map_err(|e| e.to_string())
+            }
+        }
     })
     .await;
     if let Ok(mut busy) = state.downloading.lock() {
@@ -563,6 +595,7 @@ async fn tapo_login(
         let mut session = Session::begin(&email);
         match session.do_login(&password) {
             Ok(()) => {
+                session.local_password = password.clone();
                 session
                     .save(&Session::default_path())
                     .map_err(|e| e.to_string())?;
@@ -577,6 +610,7 @@ async fn tapo_login(
                 session
                     .send_mfa_code(mfa_type, &password)
                     .map_err(|e| e.to_string())?;
+                session.local_password = password.clone();
                 let message = if mfa_type == cloud::MFA_EMAIL {
                     "TP-Link is sending a code to the account's email (check spam too); enter it here.".to_string()
                 } else {

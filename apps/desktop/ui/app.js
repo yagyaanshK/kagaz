@@ -1172,7 +1172,7 @@ function downloadForm(wrap, cam, tile) {
 listen("download-progress", (e) => {
   const p = e.payload;
   document.querySelectorAll(`.pb-form[data-device-id="${p.device_id}"] .pb-dl-note`).forEach((n) => {
-    n.textContent = `saving… ${human(p.bytes)}`;
+    n.textContent = p.error ? p.error : `saving… ${human(p.bytes)}`;
   });
 });
 
