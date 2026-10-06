@@ -46,3 +46,27 @@ pub fn download_dir() -> PathBuf {
 pub fn scans_dir() -> PathBuf {
     home().unwrap_or_else(|| PathBuf::from(".")).join("Scans")
 }
+
+/// The per-user configuration directory: `$XDG_CONFIG_HOME/kagaz` or
+/// `~/.config/kagaz` on Linux, `~/Library/Application Support/kagaz` on
+/// macOS, `%APPDATA%\\kagaz` on Windows.
+pub fn config_dir() -> PathBuf {
+    if cfg!(target_os = "windows") {
+        std::env::var_os("APPDATA")
+            .map(PathBuf::from)
+            .or_else(home)
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join("kagaz")
+    } else if cfg!(target_os = "macos") {
+        home()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join("Library/Application Support/kagaz")
+    } else {
+        std::env::var_os("XDG_CONFIG_HOME")
+            .map(PathBuf::from)
+            .filter(|p| p.is_absolute())
+            .or_else(|| home().map(|h| h.join(".config")))
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join("kagaz")
+    }
+}
