@@ -1340,9 +1340,17 @@ fn cameras_serve(port: u16) -> Result<()> {
     })?;
     let streams: Vec<go2rtc::StreamSource> = cameras
         .iter()
-        .map(|c| go2rtc::StreamSource {
-            name: c.name.clone(),
-            url: server.url_for(&c.device_id),
+        .flat_map(|c| {
+            [
+                go2rtc::StreamSource {
+                    name: c.name.clone(),
+                    url: server.url_for(&c.device_id),
+                },
+                go2rtc::StreamSource {
+                    name: format!("{} vga", c.name),
+                    url: server.vga_url_for(&c.device_id),
+                },
+            ]
         })
         .collect();
     let engine = go2rtc::Engine::start(&binary, port, &streams)?;

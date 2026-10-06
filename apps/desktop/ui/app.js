@@ -421,16 +421,24 @@ async function renderCameraGrid() {
   for (const cam of camStatus.cameras) {
     const tile = document.createElement("div");
     tile.className = "cam-tile";
-    const player = document.createElement("video-stream");
-    player.setAttribute("mode", "mse,webrtc,mp4");
-    player.setAttribute("background", "true");
-    player.src = cam.ws_url;
-    tile.appendChild(player);
+    // Small tiles play the camera's low-resolution stream; the enlarged one HD.
+    const mount = (big) => {
+      tile.querySelector("video-stream")?.remove();
+      const player = document.createElement("video-stream");
+      player.setAttribute("mode", "mse,webrtc,mp4");
+      player.src = big ? cam.ws_url : cam.ws_url_vga;
+      tile.insertBefore(player, tile.firstChild);
+    };
+    mount(false);
     const name = document.createElement("div");
     name.className = "cam-name";
     name.textContent = cam.name;
     tile.appendChild(name);
-    tile.addEventListener("click", () => tile.classList.toggle("big"));
+    tile.addEventListener("click", () => {
+      const big = !tile.classList.contains("big");
+      tile.classList.toggle("big", big);
+      mount(big);
+    });
     grid.appendChild(tile);
   }
   $("cam-state").textContent = `${camStatus.cameras.length} cameras live`;

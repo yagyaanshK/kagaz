@@ -195,7 +195,7 @@ pub struct StreamSource {
 
 /// go2rtc's configuration for the given streams; API on 127.0.0.1 only.
 pub fn config_yaml(api_port: u16, streams: &[StreamSource]) -> String {
-    let mut y = format!("api:\n  listen: \"127.0.0.1:{api_port}\"\n  origin: \"*\"\nrtsp:\n  listen: \"\"\nwebrtc:\n  listen: \"\"\nlog:\n  level: warn\nstreams:\n");
+    let mut y = format!("api:\n  listen: \"127.0.0.1:{api_port}\"\n  origin: \"*\"\nrtsp:\n  listen: \"\"\nwebrtc:\n  listen: \"\"\nlog:\n  level: info\n  format: text\nstreams:\n");
     for s in streams {
         y.push_str(&format!(
             "  {}: \"{}\"\n",
@@ -239,12 +239,21 @@ impl Engine {
                 source,
             }
         })?;
+        let log_path = extras_dir().join("go2rtc.log");
+        let log = std::fs::File::create(&log_path).map_err(|source| ExtraError::Io {
+            path: log_path.clone(),
+            source,
+        })?;
+        let log_err = log.try_clone().map_err(|source| ExtraError::Io {
+            path: log_path.clone(),
+            source,
+        })?;
         let child = Command::new(binary)
             .arg("-c")
             .arg(&config_path)
             .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
+            .stdout(Stdio::from(log))
+            .stderr(Stdio::from(log_err))
             .spawn()
             .map_err(|e| ExtraError::Start(e.to_string()))?;
         // Wait briefly for the API to come up.
