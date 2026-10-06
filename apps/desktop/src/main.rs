@@ -189,8 +189,10 @@ struct CameraView {
     device_id: String,
     /// go2rtc stream name.
     stream: String,
-    /// WebSocket URL for go2rtc's player (MSE/WebRTC).
+    /// WebSocket URL for go2rtc's player (MSE/WebRTC), HD.
     ws_url: String,
+    /// The same for the low-resolution stream, for small tiles.
+    ws_url_vga: String,
     /// Fragmented MP4 over HTTP, for a plain <video>.
     mp4_url: String,
 }
@@ -214,6 +216,7 @@ fn camera_views(e: &CameraEngine) -> Vec<CameraView> {
             device_id: c.device_id.clone(),
             stream: kagaz_core::extras::go2rtc::yaml_key(&c.name),
             ws_url: e.engine.ws_url(&c.name),
+            ws_url_vga: e.engine.ws_url(&format!("{} vga", c.name)),
             mp4_url: e.engine.mp4_url(&c.name),
         })
         .collect()
@@ -279,9 +282,17 @@ async fn cameras_start(
         .map_err(|e| e.to_string())?;
         let streams: Vec<go2rtc::StreamSource> = cameras
             .iter()
-            .map(|c| go2rtc::StreamSource {
-                name: c.name.clone(),
-                url: server.url_for(&c.device_id),
+            .flat_map(|c| {
+                [
+                    go2rtc::StreamSource {
+                        name: c.name.clone(),
+                        url: server.url_for(&c.device_id),
+                    },
+                    go2rtc::StreamSource {
+                        name: format!("{} vga", c.name),
+                        url: server.vga_url_for(&c.device_id),
+                    },
+                ]
             })
             .collect();
         let engine = go2rtc::Engine::start(&binary, 1984, &streams).map_err(|e| e.to_string())?;

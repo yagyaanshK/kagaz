@@ -4,3 +4,6 @@
 /apps/desktop/dist
 *.log
 .DS_Store
+# Camera recordings made with `kagaz tapo record` (private)
+tapo-*.ts
+*.ts.part

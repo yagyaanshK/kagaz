@@ -42,9 +42,14 @@ impl TsServer {
         Ok(server)
     }
 
-    /// The stream URL for a camera.
+    /// The HD stream URL for a camera.
     pub fn url_for(&self, device_id: &str) -> String {
         format!("http://127.0.0.1:{}/tapo/{device_id}.ts", self.port)
+    }
+
+    /// The low-resolution (VGA) stream URL, for small tiles.
+    pub fn vga_url_for(&self, device_id: &str) -> String {
+        format!("http://127.0.0.1:{}/tapo/{device_id}.ts?res=vga", self.port)
     }
 
     pub fn cameras(&self) -> Vec<Camera> {
@@ -77,10 +82,19 @@ impl TsServer {
             }
         }
         let path = request_line.split_whitespace().nth(1).unwrap_or("/");
-        let device_id = path
+        let (path_only, query) = path.split_once('?').unwrap_or((path, ""));
+        let resolution = if query
+            .split('&')
+            .any(|kv| kv.eq_ignore_ascii_case("res=vga"))
+        {
+            "VGA"
+        } else {
+            "HD"
+        };
+        let device_id = path_only
             .strip_prefix("/tapo/")
             .and_then(|p| p.strip_suffix(".ts"))
-            .map(|p| p.split('?').next().unwrap_or(p).to_string());
+            .map(str::to_string);
         let Some(device_id) = device_id else {
             if path == "/" || path == "/index.json" {
                 let cams = self.cameras();
@@ -134,7 +148,7 @@ impl TsServer {
         {
             return;
         }
-        let _ = stream_preview(&relay, &terminal, &track, "HD", &mut |chunk| {
+        let _ = stream_preview(&relay, &terminal, &track, resolution, &mut |chunk| {
             stream.write_all(chunk).is_ok()
         });
     }
