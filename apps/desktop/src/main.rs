@@ -171,6 +171,131 @@ fn button_settings_reset(
     Ok(bs::get_all())
 }
 
+/// The camera engine, kept alive for the window's lifetime once started.
+struct CameraState {
+    engine: std::sync::Mutex<Option<CameraEngine>>,
+}
+
+struct CameraEngine {
+    _server: std::sync::Arc<kagaz_core::cameras::tapo::TsServer>,
+    engine: kagaz_core::extras::go2rtc::Engine,
+    cameras: Vec<kagaz_core::cameras::tapo::Camera>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct CameraView {
+    name: String,
+    model: String,
+    device_id: String,
+    /// go2rtc stream name.
+    stream: String,
+    /// WebSocket URL for go2rtc's player (MSE/WebRTC).
+    ws_url: String,
+    /// Fragmented MP4 over HTTP, for a plain <video>.
+    mp4_url: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct CamerasStatus {
+    logged_in: bool,
+    running: bool,
+    api_port: u16,
+    player_script: String,
+    cameras: Vec<CameraView>,
+    message: String,
+}
+
+fn camera_views(e: &CameraEngine) -> Vec<CameraView> {
+    e.cameras
+        .iter()
+        .map(|c| CameraView {
+            name: c.name.clone(),
+            model: c.model.clone(),
+            device_id: c.device_id.clone(),
+            stream: kagaz_core::extras::go2rtc::yaml_key(&c.name),
+            ws_url: e.engine.ws_url(&c.name),
+            mp4_url: e.engine.mp4_url(&c.name),
+        })
+        .collect()
+}
+
+/// Where the cameras stand: not logged in, ready, or running with its streams.
+#[tauri::command]
+fn cameras_status(state: tauri::State<CameraState>) -> CamerasStatus {
+    use kagaz_core::cameras::tapo::Session;
+    let logged_in = Session::default_path().is_file();
+    let guard = state.engine.lock().unwrap();
+    match guard.as_ref() {
+        Some(e) => CamerasStatus {
+            logged_in,
+            running: true,
+            api_port: e.engine.api_port,
+            player_script: format!("http://127.0.0.1:{}/video-stream.js", e.engine.api_port),
+            cameras: camera_views(e),
+            message: String::new(),
+        },
+        None => CamerasStatus {
+            logged_in,
+            running: false,
+            api_port: 0,
+            player_script: String::new(),
+            cameras: Vec::new(),
+            message: if logged_in {
+                String::new()
+            } else {
+                "Not logged in to TP-Link: run `kagaz tapo login` in a terminal once.".into()
+            },
+        },
+    }
+}
+
+/// Start serving the account's cameras and the video engine (downloaded on first use).
+#[tauri::command]
+async fn cameras_start(
+    app: AppHandle,
+    state: tauri::State<'_, CameraState>,
+) -> Result<CamerasStatus, String> {
+    use kagaz_core::cameras::tapo::{Session, TsServer};
+    use kagaz_core::extras::go2rtc;
+    if state.engine.lock().unwrap().is_some() {
+        return Ok(cameras_status(state));
+    }
+    let built = blocking(move || {
+        let session = Session::load(&Session::default_path()).map_err(|_| {
+            "Not logged in to TP-Link: run `kagaz tapo login` in a terminal once.".to_string()
+        })?;
+        let cameras = session.cameras().map_err(|e| e.to_string())?;
+        let server = TsServer::start(session, cameras.clone(), 0).map_err(|e| e.to_string())?;
+        let binary = go2rtc::ensure(&mut |ev| {
+            let text = match ev {
+                go2rtc::Event::Downloading { bytes } => {
+                    format!("downloading the video engine ({} MB)...", bytes / 1_000_000)
+                }
+                go2rtc::Event::Verified => "video engine verified".to_string(),
+                go2rtc::Event::Ready(_) => "video engine ready".to_string(),
+            };
+            let _ = app.emit("cameras-progress", text);
+        })
+        .map_err(|e| e.to_string())?;
+        let streams: Vec<go2rtc::StreamSource> = cameras
+            .iter()
+            .map(|c| go2rtc::StreamSource {
+                name: c.name.clone(),
+                url: server.url_for(&c.device_id),
+            })
+            .collect();
+        let engine = go2rtc::Engine::start(&binary, 1984, &streams).map_err(|e| e.to_string())?;
+        Ok(CameraEngine {
+            _server: server,
+            engine,
+            cameras,
+        })
+    })
+    .await?;
+    *state.engine.lock().unwrap() = Some(built);
+    Ok(cameras_status(state))
+}
+
 #[tauri::command]
 fn default_scan_name(extension: String) -> String {
     format!(
@@ -182,6 +307,9 @@ fn default_scan_name(extension: String) -> String {
 
 fn main() {
     tauri::Builder::default()
+        .manage(CameraState {
+            engine: std::sync::Mutex::new(None),
+        })
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             discover,
@@ -192,7 +320,9 @@ fn main() {
             default_scan_name,
             button_settings,
             button_settings_set,
-            button_settings_reset
+            button_settings_reset,
+            cameras_status,
+            cameras_start
         ])
         .run(tauri::generate_context!())
         .expect("error while running the Kagaz window");

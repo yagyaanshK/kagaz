@@ -187,3 +187,14 @@ button:disabled { opacity: 0.6; cursor: default; }
 #button-panel h3 { margin-top: 0; }
 
 label small { font-size: 12px; min-height: 1.2em; }
+
+/* Cameras */
+#cameras-entry { padding: 10px 16px 14px; border-top: 1px solid var(--line); display: flex; align-items: center; gap: 10px; }
+#cameras-open { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+.cam-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+#cameras.pane { max-width: none; }
+#cam-grid { display: grid; grid-template-columns: repeat(var(--cols, 3), 1fr); gap: 8px; margin-top: 12px; }
+.cam-tile { background: #000; border-radius: 8px; overflow: hidden; position: relative; aspect-ratio: 16 / 9; cursor: pointer; }
+.cam-tile video-stream, .cam-tile video { width: 100%; height: 100%; display: block; object-fit: contain; background: #000; }
+.cam-tile .cam-name { position: absolute; left: 8px; bottom: 6px; color: #fff; font-size: 12px; text-shadow: 0 0 4px #000; }
+.cam-tile.big { grid-column: 1 / -1; aspect-ratio: 16 / 9; }

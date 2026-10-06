@@ -99,6 +99,7 @@ async function select(i) {
   const d = devices[i];
   renderList();
   $("empty").classList.add("hidden");
+  $("cameras").classList.add("hidden");
   $("detail").classList.remove("hidden");
   $("d-title").textContent = title(d);
   $("d-sub").textContent = [d.manufacturer, d.model, where(d)].filter(Boolean).join(" · ");
@@ -368,6 +369,91 @@ $("scan-form").addEventListener("submit", async (ev) => {
     $("scan-state").textContent = "";
   }
   $("scan-go").disabled = false;
+});
+
+// ---------- cameras (Tapo through the account, go2rtc as the engine) ----------
+
+let camStatus = null;
+
+function showCameras() {
+  current = null;
+  renderList();
+  $("empty").classList.add("hidden");
+  $("detail").classList.add("hidden");
+  $("cameras").classList.remove("hidden");
+  refreshCameras();
+}
+
+async function refreshCameras() {
+  try {
+    camStatus = await invoke("cameras_status");
+  } catch (e) {
+    $("cam-message").textContent = "Could not check the cameras: " + e;
+    return;
+  }
+  $("cam-message").textContent = camStatus.message || "";
+  $("cam-start").classList.toggle("hidden", camStatus.running || !camStatus.logged_in);
+  if (camStatus.running) renderCameraGrid();
+}
+
+function loadPlayer(src) {
+  return new Promise((resolve, reject) => {
+    if (customElements.get("video-stream")) return resolve();
+    const s = document.createElement("script");
+    s.type = "module";
+    s.src = src;
+    s.onload = () => resolve();
+    s.onerror = () => reject(new Error("could not load the player from the video engine"));
+    document.head.appendChild(s);
+  });
+}
+
+async function renderCameraGrid() {
+  const grid = $("cam-grid");
+  grid.style.setProperty("--cols", $("cam-layout").value);
+  try {
+    await loadPlayer(camStatus.player_script);
+  } catch (e) {
+    $("cam-message").textContent = e.message;
+    return;
+  }
+  grid.innerHTML = "";
+  for (const cam of camStatus.cameras) {
+    const tile = document.createElement("div");
+    tile.className = "cam-tile";
+    const player = document.createElement("video-stream");
+    player.setAttribute("mode", "mse,webrtc,mp4");
+    player.setAttribute("background", "true");
+    player.src = cam.ws_url;
+    tile.appendChild(player);
+    const name = document.createElement("div");
+    name.className = "cam-name";
+    name.textContent = cam.name;
+    tile.appendChild(name);
+    tile.addEventListener("click", () => tile.classList.toggle("big"));
+    grid.appendChild(tile);
+  }
+  $("cam-state").textContent = `${camStatus.cameras.length} cameras live`;
+}
+
+$("cameras-open").addEventListener("click", showCameras);
+$("cam-layout").addEventListener("change", () => $("cam-grid").style.setProperty("--cols", $("cam-layout").value));
+$("cam-start").addEventListener("click", async () => {
+  $("cam-start").disabled = true;
+  $("cam-state").textContent = "starting…";
+  try {
+    camStatus = await invoke("cameras_start");
+    $("cam-message").textContent = "";
+    $("cam-start").classList.add("hidden");
+    renderCameraGrid();
+  } catch (e) {
+    $("cam-message").textContent = "Could not start: " + e;
+    $("cam-state").textContent = "";
+  }
+  $("cam-start").disabled = false;
+});
+listen("cameras-progress", (e) => {
+  $("cam-state").textContent = e.payload;
 });
 
 $("rescan").addEventListener("click", rescan);

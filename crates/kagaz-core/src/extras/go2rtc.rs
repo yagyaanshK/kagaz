@@ -195,7 +195,7 @@ pub struct StreamSource {
 
 /// go2rtc's configuration for the given streams; API on 127.0.0.1 only.
 pub fn config_yaml(api_port: u16, streams: &[StreamSource]) -> String {
-    let mut y = format!("api:\n  listen: \"127.0.0.1:{api_port}\"\nrtsp:\n  listen: \"\"\nwebrtc:\n  listen: \"\"\nlog:\n  level: warn\nstreams:\n");
+    let mut y = format!("api:\n  listen: \"127.0.0.1:{api_port}\"\n  origin: \"*\"\nrtsp:\n  listen: \"\"\nwebrtc:\n  listen: \"\"\nlog:\n  level: warn\nstreams:\n");
     for s in streams {
         y.push_str(&format!(
             "  {}: \"{}\"\n",
