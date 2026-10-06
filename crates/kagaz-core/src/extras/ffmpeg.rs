@@ -40,8 +40,8 @@ pub fn asset_for(os: &str, arch: &str) -> Option<(&'static str, &'static str, &'
 
 const SHA_LINUX_AMD64: &str = "28268bf402f1083833ea269331587f60a242848880073be8016501d864bd07a5";
 const SHA_LINUX_ARM64: &str = "7dbd8e2f47bd83de591b9d6ea70e67d32d9aa97e7d47ae402b60c2fe3fd4d0ab";
-const SHA_WINDOWS: &str = "__SHA_WINDOWS__";
-const SHA_MACOS: &str = "__SHA_MACOS__";
+const SHA_WINDOWS: &str = "60f467265b1e312373dbcd92200c2618a74850f98d3d078e94296bb3fa2047ba";
+const SHA_MACOS: &str = "4acc0be580f9b2788029eb7bd4d645ff87968911b0a62aeeb3940d42d54558d5";
 
 /// Where the binary lives once fetched.
 pub fn binary_path() -> PathBuf {
