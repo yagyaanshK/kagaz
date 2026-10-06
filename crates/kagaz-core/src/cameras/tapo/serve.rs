@@ -130,7 +130,13 @@ impl TsServer {
             cam.device_id,
             uuid::Uuid::new_v4().simple()
         );
-        let relay = match request_relay(&session, &cam.device_id, &cam.app_server, &track) {
+        let relay = match request_relay(
+            &session,
+            &cam.device_id,
+            &cam.app_server,
+            &track,
+            resolution,
+        ) {
             Ok(r) => r,
             Err(e) => {
                 let msg = e.to_string();

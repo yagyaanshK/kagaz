@@ -1270,7 +1270,13 @@ fn tapo_command(cmd: TapoCommand) -> Result<()> {
                 })?;
             let track = format!("preview-{}", cam.device_id);
             println!("Asking TP-Link's relay for {}...", cam.name);
-            let relay = tapo::request_relay(&session, &cam.device_id, &cam.app_server, &track)?;
+            let relay = tapo::request_relay(
+                &session,
+                &cam.device_id,
+                &cam.app_server,
+                &track,
+                &resolution,
+            )?;
             let out = output.unwrap_or_else(|| {
                 PathBuf::from(format!(
                     "tapo-{}-{}.ts",
