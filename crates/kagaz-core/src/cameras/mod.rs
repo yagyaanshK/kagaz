@@ -3,6 +3,7 @@
 //! TP-Link's cloud relay, with the account's own login.
 
 pub mod layout;
+pub mod local;
 pub mod tapo;
 
 pub use layout::{Group, Layout, LayoutError};

@@ -89,13 +89,16 @@ with the commit that closes them.
       plays it (one camera at a time). Measured: 17.8 s of sound in 17 s next
       to the video. Audio and video travel separately, so they can sit up to
       a second or two apart; tighten if it shows.
-- [ ] **Audio in downloads** (chosen 2026-10-07: AAC through an ffmpeg
-      extra). go2rtc's MPEG-TS reader only takes H.264, H.265, AAC and its
-      private Opus type, so the engine's MP4 is video only. Plan: download a
-      checksum-pinned static ffmpeg on first use like go2rtc; Kagaz feeds it
-      the camera's MPEG-TS with the audio relabelled, or the raw H.264 and
-      G.711 on two pipes, and ffmpeg writes MP4 with the video copied and
-      the sound as AAC. `--ts` keeps the original.
+- [x] **Audio in downloads** (2026-10-07, AAC through an ffmpeg extra as
+      chosen): `kagaz tapo download` and the window's Download pull the
+      camera's stream straight from the relay, split its G.711 off, and
+      ffmpeg (static build fetched once, checksum pinned: John Van Sickle
+      6.0.1 on Linux, gyan.dev 9.0.2 on Windows, evermeet 9.0.2 on macOS)
+      writes MP4 with the picture copied and the sound as AAC, lined up by
+      the first timestamps. Without ffmpeg the engine saves the picture
+      only. Gaps inside a span (event-only recording) let the sound drift
+      after the gap: the raw G.711 carries no timestamps. `--ts` keeps the
+      original.
 - [ ] **Continuous recording to disk** (asked for 2026-10-07): a `kagaz`
       command or script for a server PC that keeps pulling each camera's
       footage into a folder within a storage limit, like a CCTV recorder.
@@ -104,10 +107,27 @@ with the commit that closes them.
       data" reconnects by itself after 5, 10, 20, 40, 60, 60 s, then stops
       trying and leaves Reload. Thresholds (2 s waiting, 15 s lost) unchanged;
       tune after real use.
-- [ ] **Local ONVIF/RTSP cameras** (the local C100 and any camera
-      on the LAN): discovery is already filtered out of the printer list; add
-      them to the Cameras view as RTSP sources for go2rtc, with the camera
-      account credentials entered once.
+- [x] **Local Tapo camera, local first** (2026-10-07, as chosen): the
+      cloud list carries each camera's hardware address; an ONVIF
+      WS-Discovery probe plus the neighbour table pairs a camera on this
+      network with its cloud entry (`cameras/local.rs`, verified on the
+      C100 here). When the account password is kept (`kagaz tapo login`
+      without `--no-local`, or the window's Log in), that camera's live
+      view is go2rtc's own `tapo://` source on the LAN; everything else
+      (other cameras, playback, downloads, sound) stays on the relay. The
+      sound route opens its own small relay session when no relay video
+      session feeds a camera, so a local tile still has sound. Not yet
+      exercised with a kept password: log in again to try it.
+- [ ] **Xiaomi camera** (Mi Home, model unknown): it answers the miIO hello
+      on the LAN (device id only, no model) and advertises nothing over
+      mDNS or SSDP, so the model and the local token come only from the Mi
+      cloud with the Mi account. Mi Home cameras stream over Xiaomi's own
+      P2P service, not RTSP; which models have a usable path depends on the
+      model. Next: a `kagaz xiaomi login` that lists the account's devices
+      (model, token), then decide per model.
+- [ ] **Windows and macOS ffmpeg checksums** are pinned to the builds
+      downloaded on 2026-10-07; the Windows zip (gyan.dev) and macOS zip
+      (evermeet) extraction paths are untested on those systems.
 - [x] **Token refresh and re-login** (2026-10-07): the window has "Log in"
       (email, password, email code) and "Log out"; an expired token is
       refreshed when the cameras start and when a relay request is refused.
