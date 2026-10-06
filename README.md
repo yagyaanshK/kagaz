@@ -190,6 +190,8 @@ checksum-pinned ffmpeg fetched once; or raw MPEG-TS with `--ts`), as fast as
 the camera sends it. In the window, switch
 "Live" to "Playback": pick a day and a time and press "Play all", or click a
 camera's timeline, and every camera shows the same moment from its card;
+the bar above the grid moves all of them together, and a slider sets the
+speed (0.25x to 8x);
 "Download…" under a camera saves a span. The speaker badge on a tile plays
 that camera's sound (Kagaz decodes the camera's G.711 itself; no extra
 needed). A Tapo camera on the same network as the computer is viewed

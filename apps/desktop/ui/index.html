@@ -33,28 +33,49 @@
             <option value="live" selected>Live</option>
             <option value="playback">Playback</option>
           </select>
-          <span id="pb-controls" class="hidden">
-            <input type="date" id="pb-date" title="Day, on the cameras' own clock">
-            <input type="time" id="pb-time" step="60" title="Time of day, on the cameras' own clock">
-            <button id="pb-play" type="button" title="Play every camera shown from this time">Play all</button>
-          </span>
-          <select id="cam-mode" title="How the window plays the video">
-            <option value="ts" selected>playback: direct</option>
-            <option value="mse">playback: MSE</option>
-            <option value="webrtc">playback: WebRTC</option>
-          </select>
-          <select id="cam-layout">
-            <option value="2">2 across</option>
-            <option value="3" selected>3 across</option>
-            <option value="4">4 across</option>
-          </select>
-          <button id="cam-login" type="button" class="hidden" title="Log in to your TP-Link account">Log in</button>
-          <button id="cam-logout" type="button" class="hidden" title="Forget the saved TP-Link session">Log out</button>
           <button id="cam-start" type="button">Start</button>
-          <button id="cam-reload-all" type="button" title="Reconnect every tile">Reload all</button>
+          <button id="cam-reload-all" type="button" title="Reconnect every tile">&#x21bb; Reload all</button>
           <button id="cam-rearrange" type="button" title="Make groups and drag cameras between them">Rearrange</button>
           <span id="cam-state" class="muted"></span>
+          <div class="cam-menu">
+            <button id="cam-gear" type="button" title="Settings" aria-label="Settings">&#x2699;</button>
+            <div id="cam-settings" class="cam-settings hidden">
+              <label>Playback method
+                <select id="cam-mode" title="How the window plays the video">
+                  <option value="ts" selected>direct</option>
+                  <option value="mse">MSE</option>
+                  <option value="webrtc">WebRTC</option>
+                </select>
+              </label>
+              <label>Tiles per row
+                <select id="cam-layout">
+                  <option value="2">2</option>
+                  <option value="3" selected>3</option>
+                  <option value="4">4</option>
+                </select>
+              </label>
+              <div class="cam-settings-row">
+                <button id="cam-login" type="button" class="hidden" title="Log in to your TP-Link account">Log in</button>
+                <button id="cam-logout" type="button" class="hidden" title="Forget the saved TP-Link session">Log out</button>
+              </div>
+            </div>
+          </div>
         </div>
+      </div>
+      <div id="pb-controls" class="pb-bar-row hidden">
+        <input type="date" id="pb-date" title="Day, on the cameras' own clock">
+        <input type="time" id="pb-time" step="60" title="Time of day, on the cameras' own clock">
+        <button id="pb-play" type="button" title="Play every camera shown from this time">Play all</button>
+        <div id="pb-seek" title="The day's recordings on every camera shown; click or drag to move all of them to that moment">
+          <div id="pb-seek-clips"></div>
+          <div id="pb-seek-pos" class="hidden"></div>
+          <div id="pb-seek-hover" class="hidden"></div>
+        </div>
+        <span id="pb-seek-at" class="muted">—</span>
+        <label id="pb-speed-box" title="Playback speed; sound plays at 1x only">
+          <input type="range" id="pb-speed" min="-2" max="3" step="0.05" value="0">
+          <span id="pb-speed-label">1x</span>
+        </label>
       </div>
       <p id="cam-message" class="muted"></p>
       <div id="cam-login-form" class="hidden">

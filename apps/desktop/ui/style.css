@@ -251,3 +251,20 @@ label small { font-size: 12px; min-height: 1.2em; }
 .cam-tile .cam-speaker { position: absolute; right: 52px; bottom: 6px; font-size: 12px; padding: 1px 6px; background: rgba(0,0,0,0.5); color: #fff; border: 1px solid rgba(255,255,255,0.4); border-radius: 4px; }
 .cam-tile .cam-speaker.on { background: var(--accent); border-color: var(--accent); }
 .cam-tile audio { display: none; }
+
+/* Camera controls: a gear menu for the rarely-changed settings, a playback row */
+.cam-menu { position: relative; }
+#cam-gear { font-size: 16px; padding: 4px 9px; }
+.cam-settings { position: absolute; right: 0; top: 36px; z-index: 5; background: var(--panel, #1e1e1e); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; min-width: 200px; box-shadow: 0 6px 20px rgba(0,0,0,0.35); }
+.cam-settings label { display: flex; justify-content: space-between; align-items: center; gap: 10px; font-size: 13px; }
+.cam-settings-row { display: flex; gap: 6px; }
+.pb-bar-row { display: flex; align-items: center; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+#pb-seek { position: relative; flex: 1 1 260px; height: 22px; background: var(--line); border-radius: 6px; cursor: pointer; overflow: hidden; }
+#pb-seek-clips { position: absolute; inset: 0; }
+#pb-seek-clips .clip { position: absolute; top: 0; bottom: 0; background: var(--accent); opacity: 0.55; }
+#pb-seek-pos { position: absolute; top: 0; bottom: 0; width: 3px; background: #fff; box-shadow: 0 0 4px #000; }
+#pb-seek-hover { position: absolute; top: 0; bottom: 0; width: 1px; background: rgba(255,255,255,0.6); pointer-events: none; }
+#pb-seek-at { min-width: 64px; font-variant-numeric: tabular-nums; }
+#pb-speed-box { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+#pb-speed { width: 120px; }
+#pb-speed-label { min-width: 40px; font-variant-numeric: tabular-nums; }
