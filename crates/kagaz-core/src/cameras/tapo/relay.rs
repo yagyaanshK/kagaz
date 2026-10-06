@@ -196,17 +196,38 @@ pub fn control_error(payload: &[u8]) -> i64 {
         .unwrap_or(0)
 }
 
+/// How many consecutive 12-second read timeouts to tolerate before giving up
+/// on a silent relay (a minute in all).
+const QUIET_READS: u32 = 5;
+
 fn read_line(r: &mut impl BufRead) -> Result<String, RelayError> {
     let mut s = String::new();
-    let n = r
-        .read_line(&mut s)
-        .map_err(|e| RelayError::Transport(e.to_string()))?;
-    if n == 0 {
-        return Err(RelayError::Transport(
-            "the relay closed the connection".into(),
-        ));
+    let mut quiet = 0;
+    loop {
+        match r.read_line(&mut s) {
+            Ok(0) => {
+                return Err(RelayError::Transport(
+                    "the relay closed the connection".into(),
+                ))
+            }
+            Ok(_) => return Ok(s),
+            Err(e)
+                if matches!(
+                    e.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                ) =>
+            {
+                quiet += 1;
+                if quiet >= QUIET_READS {
+                    return Err(RelayError::Transport(format!(
+                        "no data from the relay for {} seconds",
+                        12 * QUIET_READS
+                    )));
+                }
+            }
+            Err(e) => return Err(RelayError::Transport(e.to_string())),
+        }
     }
-    Ok(s)
 }
 
 fn read_headers(r: &mut impl BufRead) -> Result<Vec<(String, String)>, RelayError> {
