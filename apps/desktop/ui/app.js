@@ -600,38 +600,55 @@ async function mountPlayback(tile, cam, from) {
     return;
   }
   tile._playback = { token: handle.token, stream: handle.stream, from };
+  tile._retries = tile._retries || 0;
   const player = document.createElement("video");
   player.autoplay = true;
   player.muted = true;
   player.playsInline = true;
   player.src = handle.ts_url;
   tile.insertBefore(player, tile.firstChild);
-  let finished = false, lastPoll = 0;
+  let finished = null, lastPoll = 0, lostSince = 0;
   const cell = tile.closest(".cam-cell");
   watchTile(tile, (v, t, lastT) => {
     // Position marker and clock on the timeline.
     if (cell) updatePosition(cell, cam, from + t);
+    if (t > 0.05 && t > lastT) tile._retries = 0;
     const now = Date.now();
     if (now - lastPoll > 2000 && tile._playback) {
       lastPoll = now;
       invoke("playback_state", { token: tile._playback.token }).then((st) => {
-        if (st.finished) finished = st.error ? "ended: " + st.error : "end of the recording";
+        if (st.finished) finished = st.error ? { error: st.error } : { done: true };
       }).catch(() => {});
     }
     if (finished && t <= lastT + 0.05) {
-      setState(tile, "lost", finished);
-      tile.querySelector(".cam-reload")?.classList.add("hidden");
+      if (finished.done) {
+        setState(tile, "ended", "end of the recording");
+        return true;
+      }
+      // A refusal or a broken relay: say so, and try again from where it stopped.
+      setState(tile, "lost", "camera: " + finished.error);
+    }
+    if (tile.dataset.state !== "lost") { lostSince = 0; return !!finished; }
+    if (!lostSince) lostSince = now;
+    const wait = Math.min(60, 5 * 2 ** tile._retries);
+    if ((now - lostSince) / 1000 > wait && tile._retries < 6) {
+      tile._retries += 1;
+      mountPlayback(tile, cam, from + Math.floor(t));
       return true;
     }
-    return false;
+    return !!finished;
   });
 }
 
+// States: connecting, waiting (spinner), live (no overlay), lost (error:
+// reload icon, retried by itself), ended (a recording is over: reload icon
+// plays it again, no automatic retry).
 function setState(tile, state, text) {
   tile.dataset.state = state;
   const o = tile.querySelector(".cam-overlay");
   if (!o) return;
   o.querySelector(".cam-overlay-text").textContent = text;
+  o.querySelector(".cam-reload").classList.toggle("hidden", state !== "lost" && state !== "ended");
   o.classList.toggle("hidden", state === "live");
 }
 
@@ -678,7 +695,7 @@ function buildTile(cam) {
   tile.appendChild(quality);
   const overlay = document.createElement("div");
   overlay.className = "cam-overlay hidden";
-  overlay.innerHTML = '<div class="spinner"></div><div class="cam-overlay-text"></div><button type="button" class="cam-reload">Reload</button>';
+  overlay.innerHTML = '<div class="spinner"></div><button type="button" class="cam-reload" title="Reload this camera">&#x21bb;</button><div class="cam-overlay-text"></div>';
   overlay.querySelector(".cam-reload").addEventListener("click", (ev) => {
     ev.stopPropagation();
     remount(tile, cam);
@@ -699,8 +716,11 @@ function remount(tile, cam) {
   const big = tile.classList.contains("big");
   if (isPlayback()) {
     const from = tile._playback ? tile._playback.from : chosenTime();
+    tile._retries = 0;
     if (from !== null) mountPlayback(tile, cam, from);
+    else setState(tile, "lost", "pick a date first");
   } else {
+    tile._retries = 0;
     mountTile(tile, cam, big);
   }
 }
@@ -989,6 +1009,7 @@ async function preparePlayback() {
     } catch (e) {
       pbClips[id] = null;
       setState(tile, "lost", "no recording list: " + e);
+      tile._retries = 0;
     }
     fillTimeline(cell, cam);
   }));
@@ -1021,7 +1042,7 @@ function fillTimeline(cell, cam) {
   if (!bar) return;
   bar.innerHTML = "";
   const clips = pbClips[cam.device_id];
-  if (!clips) { note.textContent = ""; return; }
+  if (!clips) { note.textContent = "no recording list from this camera"; return; }
   for (const c of clips.clips) {
     const seg = document.createElement("div");
     seg.className = "clip" + (c.video_type === 2 ? " event" : "");

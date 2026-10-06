@@ -202,9 +202,10 @@ label small { font-size: 12px; min-height: 1.2em; }
 /* Tile state overlay: shown over the last frame while a stream is not advancing */
 .cam-overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; background: rgba(0,0,0,0.35); color: #fff; font-size: 13px; }
 .cam-overlay .spinner { width: 28px; height: 28px; border: 3px solid rgba(255,255,255,0.35); border-top-color: #fff; border-radius: 50%; animation: spin 0.9s linear infinite; }
-.cam-tile[data-state="lost"] .spinner { display: none; }
-.cam-tile[data-state="connecting"] .cam-reload, .cam-tile[data-state="waiting"] .cam-reload { display: none; }
-.cam-reload { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+.cam-tile[data-state="lost"] .spinner, .cam-tile[data-state="ended"] .spinner { display: none; }
+.cam-reload { width: 56px; height: 56px; border-radius: 50%; font-size: 30px; line-height: 1; padding: 0; background: rgba(255,255,255,0.15); color: #fff; border: 2px solid rgba(255,255,255,0.7); cursor: pointer; }
+.cam-reload:hover { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+.cam-overlay-text { max-width: 90%; text-align: center; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
 /* Groups ("rooms") in the Cameras view */
