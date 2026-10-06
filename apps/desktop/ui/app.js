@@ -538,6 +538,12 @@ listen("cameras-progress", (e) => {
 });
 
 $("rescan").addEventListener("click", rescan);
+invoke("startup_view").then((v) => {
+  if (v === "cameras") {
+    showCameras();
+    setTimeout(() => $("cam-start").click(), 800);
+  }
+}).catch(() => {});
 $("scan-form").addEventListener("change", () => {
   renderResolutions();
   Pictures.update($("scan-form"));
