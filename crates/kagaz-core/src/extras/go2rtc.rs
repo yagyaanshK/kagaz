@@ -195,7 +195,8 @@ pub struct StreamSource {
 
 /// go2rtc's configuration for the given streams; API on 127.0.0.1 only.
 pub fn config_yaml(api_port: u16, streams: &[StreamSource]) -> String {
-    let mut y = format!("api:\n  listen: \"127.0.0.1:{api_port}\"\n  origin: \"*\"\nrtsp:\n  listen: \"\"\nwebrtc:\n  listen: \"\"\nlog:\n  level: info\n  format: text\nstreams:\n");
+    let level = std::env::var("KAGAZ_GO2RTC_LOG").unwrap_or_else(|_| "info".into());
+    let mut y = format!("api:\n  listen: \"127.0.0.1:{api_port}\"\n  origin: \"*\"\nrtsp:\n  listen: \"\"\nwebrtc:\n  listen: \"\"\nlog:\n  level: {level}\n  format: text\nstreams:\n");
     for s in streams {
         y.push_str(&format!(
             "  {}: \"{}\"\n",
@@ -232,6 +233,10 @@ pub struct Engine {
     child: Child,
     pub api_port: u16,
     pub config_path: PathBuf,
+    /// Keeps the spawning thread alive for as long as the engine runs: on
+    /// Linux the parent-death signal is tied to the spawning *thread*, and a
+    /// pool thread that retires would take the engine down with it.
+    keeper: Option<std::sync::mpsc::Sender<()>>,
 }
 
 impl Engine {
@@ -281,8 +286,22 @@ impl Engine {
                 });
             }
         }
-        let mut child = command
-            .spawn()
+        // Spawn from a dedicated thread that stays alive until the engine is
+        // dropped (see `keeper`), then hand the child back.
+        let (child_tx, child_rx) = std::sync::mpsc::channel();
+        let (keeper_tx, keeper_rx) = std::sync::mpsc::channel::<()>();
+        std::thread::Builder::new()
+            .name("kagaz-engine-keeper".into())
+            .spawn(move || {
+                let spawned = command.spawn();
+                let _ = child_tx.send(spawned);
+                // Block until the engine is dropped; only then may this thread end.
+                let _ = keeper_rx.recv();
+            })
+            .map_err(|e| ExtraError::Start(e.to_string()))?;
+        let mut child = child_rx
+            .recv()
+            .map_err(|_| ExtraError::Start("engine thread died".into()))?
             .map_err(|e| ExtraError::Start(e.to_string()))?;
         // Ready when the port opens while our child is still alive.
         let deadline = std::time::Instant::now() + Duration::from_secs(8);
@@ -302,6 +321,7 @@ impl Engine {
                     child,
                     api_port,
                     config_path,
+                    keeper: Some(keeper_tx),
                 });
             }
             std::thread::sleep(Duration::from_millis(200));
@@ -347,6 +367,8 @@ impl Drop for Engine {
     fn drop(&mut self) {
         let _ = self.child.kill();
         let _ = self.child.wait();
+        // Release the keeper thread now that the engine is gone.
+        self.keeper.take();
     }
 }
 

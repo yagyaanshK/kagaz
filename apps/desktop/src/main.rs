@@ -318,6 +318,12 @@ async fn cameras_start(
     Ok(cameras_status(state))
 }
 
+/// `KAGAZ_OPEN=cameras` opens the window on the camera grid and starts it.
+#[tauri::command]
+fn startup_view() -> String {
+    std::env::var("KAGAZ_OPEN").unwrap_or_default()
+}
+
 #[tauri::command]
 fn default_scan_name(extension: String) -> String {
     format!(
@@ -344,7 +350,8 @@ fn main() {
             button_settings_set,
             button_settings_reset,
             cameras_status,
-            cameras_start
+            cameras_start,
+            startup_view
         ])
         .build(tauri::generate_context!())
         .expect("error while building the Kagaz window")

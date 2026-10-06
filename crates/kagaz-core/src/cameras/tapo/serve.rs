@@ -9,6 +9,21 @@ use super::relay::{request_relay, stream_preview};
 use std::io::{BufRead, BufReader, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
+
+/// Append one line to `<cache>/cameras.log` with a timestamp, for diagnosis.
+pub fn log(line: &str) {
+    let t = crate::localtime::now();
+    let text = format!("{:02}:{:02}:{:02} {line}\n", t.hour, t.minute, t.second);
+    let path = crate::paths::cache_dir().join("cameras.log");
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+    {
+        let _ = f.write_all(text.as_bytes());
+    }
+}
 
 pub struct TsServer {
     pub port: u16,
@@ -136,8 +151,40 @@ impl TsServer {
         }
         // Forward the engine's response verbatim (its transfer encoding is
         // what tells the player this is a live stream), then the body.
+        let started = Instant::now();
+        let peer = client
+            .peer_addr()
+            .map(|a| a.to_string())
+            .unwrap_or_default();
+        log(&format!("proxy {name} -> {peer}: start"));
         let mut upstream = upstream;
-        let _ = std::io::copy(&mut upstream, &mut client);
+        let mut buf = vec![0u8; 64 * 1024];
+        let mut total = 0u64;
+        let ended = loop {
+            match std::io::Read::read(&mut upstream, &mut buf) {
+                Ok(0) => break "engine closed",
+                Ok(n) => {
+                    if client.write_all(&buf[..n]).is_err() {
+                        break "player closed";
+                    }
+                    total += n as u64;
+                }
+                Err(e) => {
+                    break if e.kind() == std::io::ErrorKind::WouldBlock
+                        || e.kind() == std::io::ErrorKind::TimedOut
+                    {
+                        "engine read timed out"
+                    } else {
+                        "engine read error"
+                    }
+                }
+            }
+        };
+        log(&format!(
+            "proxy {name} -> {peer}: {ended} after {:.1} s, {} KB",
+            started.elapsed().as_secs_f32(),
+            total / 1000
+        ));
     }
 
     fn handle(&self, mut stream: TcpStream) {
@@ -240,8 +287,22 @@ impl TsServer {
         {
             return;
         }
-        let _ = stream_preview(&relay, &terminal, &track, resolution, &mut |chunk| {
+        let started = Instant::now();
+        let mut total = 0u64;
+        log(&format!("relay {} {resolution}: start", cam.name));
+        let result = stream_preview(&relay, &terminal, &track, resolution, &mut |chunk| {
+            total += chunk.len() as u64;
             stream.write_all(chunk).is_ok()
         });
+        log(&format!(
+            "relay {} {resolution}: {} after {:.1} s, {} KB",
+            cam.name,
+            match &result {
+                Ok(_) => "reader closed".to_string(),
+                Err(e) => format!("ended: {e}"),
+            },
+            started.elapsed().as_secs_f32(),
+            total / 1000
+        ));
     }
 }
