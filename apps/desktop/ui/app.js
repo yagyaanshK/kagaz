@@ -733,6 +733,40 @@ function buildPlaceholder(cam) {
   return cell;
 }
 
+function draggingGroup() { return !!document.querySelector(".cam-group.dragging"); }
+function clearDropMarks() {
+  document.querySelectorAll(".cam-group.drop-before, .cam-group.drop-after").forEach((b) => b.classList.remove("drop-before", "drop-after"));
+}
+
+// Where a camera dragged over `inner` would be inserted: the cell it goes
+// before (null = at the end) and the place for the vertical marker, in the
+// grid's own coordinates.
+function dropPosition(inner, x, y) {
+  const base = inner.getBoundingClientRect();
+  const cells = [...inner.querySelectorAll(".cam-cell")].filter((c) => !c.querySelector(".dragging"));
+  if (!cells.length) return { beforeId: null, x: 0, top: 0, height: base.height };
+  // Cells on the row under the cursor; otherwise the nearest row.
+  let row = cells.filter((c) => { const r = c.getBoundingClientRect(); return y >= r.top && y <= r.bottom; });
+  if (!row.length) {
+    const last = cells[cells.length - 1].getBoundingClientRect();
+    if (y > last.bottom) row = cells.filter((c) => c.getBoundingClientRect().top === last.top);
+    else {
+      const first = cells[0].getBoundingClientRect();
+      row = cells.filter((c) => c.getBoundingClientRect().top === first.top);
+    }
+  }
+  for (const c of row) {
+    const r = c.getBoundingClientRect();
+    if (x < r.left + r.width / 2) {
+      return { beforeId: c.dataset.id, x: r.left - base.left - 4, top: r.top - base.top, height: r.height };
+    }
+  }
+  const last = row[row.length - 1];
+  const r = last.getBoundingClientRect();
+  const next = cells[cells.indexOf(last) + 1];
+  return { beforeId: next ? next.dataset.id : null, x: r.right - base.left, top: r.top - base.top, height: r.height };
+}
+
 function moveCamera(id, toKey, beforeId) {
   for (const g of layout.groups) g.cameras = g.cameras.filter((x) => x !== id);
   layout.ungrouped = layout.ungrouped.filter((x) => x !== id);
@@ -747,6 +781,19 @@ function buildGroup(g) {
   box.dataset.key = g.key;
   const head = document.createElement("div");
   head.className = "cam-group-head";
+  if (rearranging && g.key !== -1) {
+    head.draggable = true;
+    head.title = "Drag to move this group above or below another";
+    head.addEventListener("dragstart", (ev) => {
+      ev.dataTransfer.setData("text/plain", "group:" + g.key);
+      ev.dataTransfer.effectAllowed = "move";
+      box.classList.add("dragging");
+    });
+    head.addEventListener("dragend", () => {
+      box.classList.remove("dragging");
+      clearDropMarks();
+    });
+  }
   const collapse = document.createElement("button");
   collapse.className = "collapse";
   collapse.type = "button";
@@ -796,15 +843,60 @@ function buildGroup(g) {
   const inner = document.createElement("div");
   inner.className = "cam-grid-inner";
   if (rearranging) {
-    inner.addEventListener("dragover", (ev) => { ev.preventDefault(); ev.dataTransfer.dropEffect = "move"; inner.classList.add("drop-target"); });
-    inner.addEventListener("dragleave", () => inner.classList.remove("drop-target"));
-    inner.addEventListener("drop", (ev) => {
+    // A dragged group lands above or below this group (by cursor half).
+    box.addEventListener("dragover", (ev) => {
+      if (!draggingGroup() || g.key === -1) return;
       ev.preventDefault();
+      ev.dataTransfer.dropEffect = "move";
+      const r = box.getBoundingClientRect();
+      const after = ev.clientY > r.top + r.height / 2;
+      clearDropMarks();
+      box.classList.add(after ? "drop-after" : "drop-before");
+    });
+    box.addEventListener("drop", (ev) => {
+      const data = ev.dataTransfer.getData("text/plain");
+      if (!data.startsWith("group:")) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      const from = Number(data.slice(6));
+      const after = box.classList.contains("drop-after");
+      clearDropMarks();
+      if (g.key === -1 || from === g.key) return;
+      const [moved] = layout.groups.splice(from, 1);
+      const to = g.key > from ? g.key - 1 : g.key;
+      layout.groups.splice(after ? to + 1 : to, 0, moved);
+      saveLayout();
+      renderCameraGrid();
+    });
+    // A dragged camera: show where it will land, then put it there.
+    const line = document.createElement("div");
+    line.className = "drop-line hidden";
+    inner.appendChild(line);
+    inner.addEventListener("dragover", (ev) => {
+      if (draggingGroup()) return;
+      ev.preventDefault();
+      ev.dataTransfer.dropEffect = "move";
+      inner.classList.add("drop-target");
+      const at = dropPosition(inner, ev.clientX, ev.clientY);
+      inner._beforeId = at.beforeId;
+      line.classList.remove("hidden");
+      line.style.left = `${at.x}px`;
+      line.style.top = `${at.top}px`;
+      line.style.height = `${at.height}px`;
+    });
+    inner.addEventListener("dragleave", (ev) => {
+      if (ev.relatedTarget && inner.contains(ev.relatedTarget)) return;
       inner.classList.remove("drop-target");
+      line.classList.add("hidden");
+    });
+    inner.addEventListener("drop", (ev) => {
       const id = ev.dataTransfer.getData("text/plain");
-      if (!id) return;
-      const over = ev.target.closest(".cam-cell");
-      moveCamera(id, g.key, over && over.dataset.id !== id ? over.dataset.id : null);
+      if (!id || id.startsWith("group:")) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      inner.classList.remove("drop-target");
+      line.classList.add("hidden");
+      moveCamera(id, g.key, inner._beforeId || null);
       saveLayout();
       renderCameraGrid();
     });
