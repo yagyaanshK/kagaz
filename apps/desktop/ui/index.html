@@ -63,8 +63,13 @@
         </div>
       </div>
       <div id="pb-controls" class="pb-bar-row hidden">
-        <input type="date" id="pb-date" title="Day, on the cameras' own clock">
-        <input type="time" id="pb-time" step="60" title="Time of day, on the cameras' own clock">
+        <span class="pb-pick" title="Day, on the cameras' own clock (dd/mm/yyyy); a dot marks days with footage">
+          <select id="pb-dd"></select><span class="sep">/</span><select id="pb-mm"></select><span class="sep">/</span><select id="pb-yy"></select>
+        </span>
+        <span class="pb-pick" title="Time of day, on the cameras' own clock">
+          <select id="pb-h"></select><span class="sep">:</span><select id="pb-m"></select><span class="sep">:</span><select id="pb-s"></select>
+        </span>
+        <input type="hidden" id="pb-date"><input type="hidden" id="pb-time">
         <button id="pb-play" type="button" title="Play every camera shown from this time">Play all</button>
         <div id="pb-seek" title="The day's recordings on every camera shown; click or drag to move all of them to that moment">
           <div id="pb-seek-clips"></div>

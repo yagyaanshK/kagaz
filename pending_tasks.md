@@ -127,6 +127,14 @@ with the commit that closes them.
       fast delivery; measured steady at 4x and 0.5x. Sound plays at 1x
       only. When the camera's fast delivery is slower than the chosen
       speed the tile shows "waiting" now and then.
+- [x] **Gaps in a camera's day** (2026-10-07): a shared playback clock runs
+      at the chosen speed from the last seek; once a second each camera is
+      checked against its recording list. With nothing recorded for that
+      moment it freezes on its last frame under a dark veil ("no recording
+      for this time; resumes at hh:mm:ss"), its camera slot is freed, and it
+      starts again by itself when the clock reaches its next recording.
+      Day and time are dropdowns (dd/mm/yyyy, hh:mm:ss; a dot marks days
+      with footage on the first camera).
 - [ ] **Engine crash under a burst of stream additions**: go2rtc 1.9.14
       died with "concurrent map writes" when seven playbacks were added at
       once; additions and removals now go one at a time. If it recurs, the

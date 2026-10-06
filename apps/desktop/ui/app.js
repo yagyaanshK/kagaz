@@ -616,7 +616,7 @@ async function mountPlayback(tile, cam, from) {
     // Position marker and clock on the timeline (the stream's clock runs at 1/speed).
     const at = from + Math.floor(t * speed);
     if (cell) updatePosition(cell, cam, at);
-    if (cell && cell === $("cam-grid").querySelector(".cam-cell") || !$("cam-grid").querySelector(".cam-tile[data-state=\"live\"] video")) updateSeekBar(at);
+    if (!pbMaster) updateSeekBar(at);
     if (t > 0.05 && t > lastT) tile._retries = 0;
     const now = Date.now();
     if (now - lastPoll > 2000 && tile._playback) {
@@ -1000,7 +1000,7 @@ async function renderCameraGrid() {
   $("cam-viewing").classList.toggle("hidden", viewGroup === null);
   $("cam-rearrange").classList.toggle("hidden", rearranging);
   $("pb-controls").classList.toggle("hidden", !isPlayback());
-  if (!isPlayback()) updateSeekBar();
+  if (!isPlayback()) { pbMaster = null; updateSeekBar(); }
   $("cam-reload-all").classList.toggle("hidden", isPlayback());
   for (const g of visibleGroups()) grid.appendChild(buildGroup(g));
   if (!rearranging) {
@@ -1073,15 +1073,59 @@ function updateSeekBar(at) {
 }
 
 // Move every visible camera to `at` (restarting its playback there).
+// The shared clock: where every camera is meant to be, running at the
+// chosen speed from the last seek; a camera with no recording for that
+// moment waits on its last frame and comes back when its next one starts.
+let pbMaster = null;
+function startMaster(at) { pbMaster = { at, wall: Date.now(), speed: speedValue() }; }
+function masterNow() { return pbMaster ? pbMaster.at + Math.floor(((Date.now() - pbMaster.wall) / 1000) * pbMaster.speed) : null; }
+
 function seekAll(at) {
-  const [hh, mm] = [Math.floor(((at + pbOffset * 60) % 86400 + 86400) % 86400 / 3600), Math.floor(((at + pbOffset * 60) % 3600 + 3600) % 3600 / 60)];
-  $("pb-time").value = `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
+  setPickerTime(clockText(at));
+  startMaster(at);
   $("cam-grid").querySelectorAll(".cam-cell").forEach((cell) => {
     const cam = cameraById(cell.dataset.id);
-    mountPlayback(cell.querySelector(".cam-tile"), cam, at);
+    const tile = cell.querySelector(".cam-tile");
+    tile._gap = false;
+    mountPlayback(tile, cam, at);
   });
   updateSeekBar(at);
 }
+
+// Once a second: move the shared bar, and hold or resume each camera
+// according to whether it has a recording for the moment being played.
+setInterval(() => {
+  if (!isPlayback() || !pbMaster) return;
+  const clock = masterNow();
+  updateSeekBar(clock);
+  $("cam-grid").querySelectorAll(".cam-cell").forEach((cell) => {
+    const clips = pbClips[cell.dataset.id];
+    if (!clips) return;
+    const tile = cell.querySelector(".cam-tile");
+    const cam = cameraById(cell.dataset.id);
+    const covered = clips.clips.some((c) => c.start <= clock && clock < c.end);
+    if (!covered) {
+      const next = clips.clips.find((c) => c.start > clock);
+      if (!tile._gap) {
+        tile._gap = true;
+        // Freeze the last frame: pause, keep the element, free the camera's slot.
+        const v = tile.querySelector("video");
+        if (v) { try { v.pause(); } catch (_) {} }
+        if (tile._watch) { clearInterval(tile._watch); tile._watch = null; }
+        if (tile._playback) {
+          const pb = tile._playback; tile._playback = null;
+          invoke("playback_stop", { token: pb.token, stream: pb.stream }).catch(() => {});
+        }
+        stopAudio(tile);
+      }
+      setState(tile, "gap", next ? `no recording for this time; resumes at ${clockText(next.start)}` : "no recording for the rest of the day");
+      updatePosition(cell, cam, clock);
+    } else if (tile._gap || (tile.dataset.state === "ended" && (!tile._playback || clock > tile._playback.from + 5))) {
+      tile._gap = false;
+      mountPlayback(tile, cam, clock);
+    }
+  });
+}, 1000);
 
 (function wireSeekBar() {
   const bar = $("pb-seek");
@@ -1107,6 +1151,7 @@ function seekAll(at) {
 
 $("pb-speed").addEventListener("input", () => { $("pb-speed-label").textContent = speedText(speedValue()); });
 $("pb-speed").addEventListener("change", () => {
+  if (pbMaster) startMaster(masterNow());
   // Apply the new speed to whatever is playing, from where it is.
   $("cam-grid").querySelectorAll(".cam-tile").forEach((tile) => {
     if (!tile._playback) return;
@@ -1123,11 +1168,11 @@ document.addEventListener("click", (ev) => { if (!ev.target.closest(".cam-menu")
 
 // The chosen date and time as a unix time on the cameras' clock, or null.
 function chosenTime() {
-  const d = $("pb-date").value, t = $("pb-time").value || "00:00";
+  const d = $("pb-date").value, t = $("pb-time").value || "00:00:00";
   if (!d) return null;
   const [y, m, day] = d.split("-").map(Number);
-  const [hh, mm] = t.split(":").map(Number);
-  return Date.UTC(y, m - 1, day, hh, mm) / 1000 - pbOffset * 60;
+  const [hh, mm, ss] = t.split(":").map(Number);
+  return Date.UTC(y, m - 1, day, hh, mm, ss || 0) / 1000 - pbOffset * 60;
 }
 
 function clockText(unix) {
@@ -1136,23 +1181,95 @@ function clockText(unix) {
   return `${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}`;
 }
 
+// "2026-10-01" → "01/10/2026".
+function ddmmyyyy(iso) {
+  const [y, m, d] = iso.split("-");
+  return `${d}/${m}/${y}`;
+}
+
+const pad2 = (n) => String(n).padStart(2, "0");
+
+// The day and time pickers: plain dropdowns, dd/mm/yyyy and hh:mm:ss.
+function fillSelect(id, values, labels, current) {
+  const sel = $(id);
+  const keep = current !== undefined ? current : sel.value;
+  sel.innerHTML = "";
+  values.forEach((v, i) => {
+    const o = document.createElement("option");
+    o.value = v; o.textContent = labels ? labels[i] : v;
+    sel.appendChild(o);
+  });
+  if ([...sel.options].some((o) => o.value === keep)) sel.value = keep;
+}
+
+let pbDatesWithFootage = [];
+function daysInMonth(y, m) { return new Date(Date.UTC(y, m, 0)).getUTCDate(); }
+
+function buildPickers(todayIso) {
+  const [ty, tm] = todayIso.split("-").map(Number);
+  const years = []; for (let y = ty - 2; y <= ty; y++) years.push(String(y));
+  fillSelect("pb-yy", years, null, String(ty));
+  const months = []; for (let m = 1; m <= 12; m++) months.push(pad2(m));
+  fillSelect("pb-mm", months, null, pad2(tm));
+  refreshDays();
+  const hours = [], minutes = [];
+  for (let h = 0; h < 24; h++) hours.push(pad2(h));
+  for (let m = 0; m < 60; m++) minutes.push(pad2(m));
+  fillSelect("pb-h", hours, null, "10");
+  fillSelect("pb-m", minutes, null, "00");
+  fillSelect("pb-s", minutes, null, "00");
+}
+
+function refreshDays() {
+  const y = Number($("pb-yy").value), m = Number($("pb-mm").value);
+  const n = daysInMonth(y, m);
+  const days = [], labels = [];
+  for (let d = 1; d <= n; d++) {
+    const iso = `${y}-${pad2(m)}-${pad2(d)}`;
+    days.push(pad2(d));
+    labels.push(pad2(d) + (pbDatesWithFootage.includes(iso) ? " •" : ""));
+  }
+  fillSelect("pb-dd", days, labels);
+}
+
+function setPickerDate(iso) {
+  const [y, m, d] = iso.split("-");
+  $("pb-yy").value = y; $("pb-mm").value = m; refreshDays(); $("pb-dd").value = d;
+  $("pb-date").value = iso;
+}
+
+function setPickerTime(hms) {
+  const [h, m, s] = hms.split(":");
+  $("pb-h").value = h; $("pb-m").value = m; $("pb-s").value = s || "00";
+  $("pb-time").value = `${h}:${m}:${s || "00"}`;
+}
+
+function readPickers() {
+  $("pb-date").value = `${$("pb-yy").value}-${$("pb-mm").value}-${$("pb-dd").value}`;
+  $("pb-time").value = `${$("pb-h").value}:${$("pb-m").value}:${$("pb-s").value}`;
+}
+
+["pb-yy", "pb-mm"].forEach((id) => $(id).addEventListener("change", () => { refreshDays(); readPickers(); if (camStatus && camStatus.running) renderCameraGrid(); }));
+$("pb-dd").addEventListener("change", () => { readPickers(); if (camStatus && camStatus.running) renderCameraGrid(); });
+["pb-h", "pb-m", "pb-s"].forEach((id) => $(id).addEventListener("change", readPickers));
+
 // Ask every visible camera for the chosen day's clips; fill the timelines.
 async function preparePlayback() {
   const cells = [...$("cam-grid").querySelectorAll(".cam-cell")];
   if (!cells.length) return;
   if (!$("pb-date").value) {
     try {
-      const first = await invoke("recording_days", { deviceId: cells[0].dataset.id, days: 30 });
+      const first = await invoke("recording_days", { deviceId: cells[0].dataset.id, days: 60 });
       pbOffset = first.utc_offset_minutes;
-      $("pb-date").value = first.dates.length ? first.dates[first.dates.length - 1] : first.today;
-      $("pb-date").max = first.today;
-      $("pb-date").title = `Day, on the cameras' own clock. Days with footage on the first camera: ${first.dates.join(", ") || "none in the last 30 days"}`;
+      pbDatesWithFootage = first.dates;
+      buildPickers(first.today);
+      setPickerDate(first.dates.length ? first.dates[first.dates.length - 1] : first.today);
+      setPickerTime("10:00:00");
     } catch (e) {
       $("cam-message").textContent = "Could not ask the camera for its recordings: " + e;
       return;
     }
   }
-  if (!$("pb-time").value) $("pb-time").value = "10:00";
   const date = $("pb-date").value;
   for (const cell of cells) {
     const tile = cell.querySelector(".cam-tile");
@@ -1197,6 +1314,7 @@ function buildTimeline(cam, tile) {
     if (!clips) return;
     const r = bar.getBoundingClientRect();
     const at = clips.day_start + Math.floor(((ev.clientX - r.left) / r.width) * 86400);
+    tile._gap = false;
     mountPlayback(tile, cam, at);
   });
   wrap.appendChild(bar);
@@ -1247,6 +1365,8 @@ function updatePosition(cell, cam, at) {
 function playAll(root) {
   const from = chosenTime();
   if (from === null) { $("cam-message").textContent = "Pick a date first."; return; }
+  if (root === $("cam-grid")) startMaster(from);
+  root.querySelectorAll(".cam-tile").forEach((t) => { t._gap = false; });
   root.querySelectorAll(".cam-cell").forEach((cell) => {
     const cam = cameraById(cell.dataset.id);
     mountPlayback(cell.querySelector(".cam-tile"), cam, from);
@@ -1262,13 +1382,13 @@ function downloadForm(wrap, cam, tile) {
   form = document.createElement("div");
   form.className = "pb-form";
   const at = tile._playback ? tile._playback.from : chosenTime();
-  const start = at !== null ? clockText(at).slice(0, 5) : ($("pb-time").value || "10:00");
-  form.innerHTML = `from <input type="time" class="pb-from" value="${start}" step="60"> for <input type="number" class="pb-mins" value="10" min="1" max="720"> min <button type="button" class="pb-save">Save as MP4…</button><span class="muted pb-dl-note"></span>`;
+  const start = at !== null ? clockText(at) : ($("pb-time").value || "10:00:00");
+  form.innerHTML = `from <input type="time" class="pb-from" value="${start}" step="1"> for <input type="number" class="pb-mins" value="10" min="1" max="720"> min <button type="button" class="pb-save">Save as MP4…</button><span class="muted pb-dl-note"></span>`;
   form.querySelector(".pb-save").addEventListener("click", async () => {
     const clips = pbClips[cam.device_id];
     if (!clips) return;
-    const [hh, mm] = form.querySelector(".pb-from").value.split(":").map(Number);
-    const from = clips.day_start + hh * 3600 + mm * 60;
+    const [hh, mm, ss] = form.querySelector(".pb-from").value.split(":").map(Number);
+    const from = clips.day_start + hh * 3600 + mm * 60 + (ss || 0);
     const mins = Number(form.querySelector(".pb-mins").value) || 10;
     const to = from + mins * 60;
     const stamp = `${$("pb-date").value}-${String(hh).padStart(2, "0")}${String(mm).padStart(2, "0")}`;
@@ -1307,7 +1427,6 @@ $("cam-layout").addEventListener("change", () => $("cam-grid").style.setProperty
 $("cam-mode").addEventListener("change", () => { if (camStatus && camStatus.running) renderCameraGrid(); });
 $("cam-reload-all").addEventListener("click", () => { if (camStatus && camStatus.running) renderCameraGrid(); });
 $("cam-when").addEventListener("change", () => { if (camStatus && camStatus.running) renderCameraGrid(); });
-$("pb-date").addEventListener("change", () => { if (camStatus && camStatus.running) renderCameraGrid(); });
 $("pb-play").addEventListener("click", () => playAll($("cam-grid")));
 $("cam-rearrange").addEventListener("click", () => { rearranging = true; viewGroup = null; renderCameraGrid(); });
 $("cam-rearrange-done").addEventListener("click", () => { rearranging = false; renderCameraGrid(); });
