@@ -248,3 +248,6 @@ label small { font-size: 12px; min-height: 1.2em; }
 .cam-group.dragging { opacity: 0.5; }
 .cam-group.drop-before { box-shadow: 0 -3px 0 0 var(--accent); }
 .cam-group.drop-after { box-shadow: 0 3px 0 0 var(--accent); }
+.cam-tile .cam-speaker { position: absolute; right: 52px; bottom: 6px; font-size: 12px; padding: 1px 6px; background: rgba(0,0,0,0.5); color: #fff; border: 1px solid rgba(255,255,255,0.4); border-radius: 4px; }
+.cam-tile .cam-speaker.on { background: var(--accent); border-color: var(--accent); }
+.cam-tile audio { display: none; }

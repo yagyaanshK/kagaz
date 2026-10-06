@@ -2,6 +2,7 @@
 //! video via the relay. See `cloud` for the account side and `relay` for
 //! the media side; `tls` trusts TP-Link's private certificate authority.
 
+pub mod audio;
 pub mod cloud;
 pub mod download;
 pub mod recordings;

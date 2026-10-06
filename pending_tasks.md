@@ -82,12 +82,20 @@ with the commit that closes them.
       recording lists work on them. Find the request shape the app uses for
       playback v4 (`examples/tapo_probe.rs` tries frames one at a time; the
       component list comes from `getAppComponentList`).
-- [ ] **Audio in downloads.** The camera's download stream carries G.711
-      (MPEG-TS stream type 0x90, TP-Link private); go2rtc's MPEG-TS reader
-      (`pkg/mpegts/producer.go`) only takes H.264, H.265, AAC and its private
-      Opus type from an HTTP source, so the engine's MP4 keeps only the
-      video. `--ts` keeps everything. Fix: remux in Kagaz (TS → MP4 with
-      G.711 as `alaw`/`ulaw`), or a go2rtc change upstream.
+- [x] **Sound in the window** (2026-10-07): the stream server pulls the
+      G.711 A-law out of the session it is already relaying (live or
+      playback), decodes it and serves a streamed WAV on
+      `/audio/<device-id or playback token>.wav`; the speaker badge on a tile
+      plays it (one camera at a time). Measured: 17.8 s of sound in 17 s next
+      to the video. Audio and video travel separately, so they can sit up to
+      a second or two apart; tighten if it shows.
+- [ ] **Audio in downloads** (chosen 2026-10-07: AAC through an ffmpeg
+      extra). go2rtc's MPEG-TS reader only takes H.264, H.265, AAC and its
+      private Opus type, so the engine's MP4 is video only. Plan: download a
+      checksum-pinned static ffmpeg on first use like go2rtc; Kagaz feeds it
+      the camera's MPEG-TS with the audio relabelled, or the raw H.264 and
+      G.711 on two pipes, and ffmpeg writes MP4 with the video copied and
+      the sound as AAC. `--ts` keeps the original.
 - [ ] **Continuous recording to disk** (asked for 2026-10-07): a `kagaz`
       command or script for a server PC that keeps pulling each camera's
       footage into a folder within a storage limit, like a CCTV recorder.
