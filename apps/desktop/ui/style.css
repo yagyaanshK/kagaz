@@ -206,3 +206,33 @@ label small { font-size: 12px; min-height: 1.2em; }
 .cam-tile[data-state="connecting"] .cam-reload, .cam-tile[data-state="waiting"] .cam-reload { display: none; }
 .cam-reload { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* Groups ("rooms") in the Cameras view */
+#cam-grid { display: block; }
+.cam-group { margin-top: 10px; }
+.cam-group-head { display: flex; align-items: center; gap: 8px; margin: 6px 0; font-size: 14px; font-weight: 600; }
+.cam-group-head .collapse { background: none; border: none; padding: 0 4px; font-size: 14px; cursor: pointer; }
+.cam-group-head .cam-group-tools { display: flex; gap: 6px; margin-left: auto; }
+.cam-group-head button.small { padding: 2px 8px; font-size: 12px; }
+.cam-group.collapsed .cam-grid-inner { display: none; }
+.cam-grid-inner { display: grid; grid-template-columns: repeat(var(--cols, 3), 1fr); gap: 8px; min-height: 24px; }
+.cam-grid-inner.drop-target { outline: 2px dashed var(--accent); outline-offset: 4px; border-radius: 8px; }
+.cam-tile.placeholder { aspect-ratio: 16 / 5; display: flex; align-items: center; justify-content: center; color: #fff; cursor: grab; background: #333; }
+.cam-tile.placeholder.dragging { opacity: 0.4; }
+#cam-rearrange-bar, #cam-viewing { margin-top: 10px; display: flex; align-items: center; gap: 8px; }
+#pb-controls { display: inline-flex; gap: 6px; align-items: center; }
+#pb-controls input { padding: 4px 6px; }
+
+/* Playback timeline under a tile */
+.cam-cell { display: flex; flex-direction: column; gap: 4px; }
+.pb-bar { position: relative; height: 14px; background: var(--line); border-radius: 4px; cursor: pointer; overflow: hidden; }
+.pb-bar .clip { position: absolute; top: 0; bottom: 0; background: var(--accent); opacity: 0.8; }
+.pb-bar .clip.event { background: #d9822b; }
+.pb-bar .pos { position: absolute; top: 0; bottom: 0; width: 2px; background: #fff; mix-blend-mode: difference; }
+.pb-row { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+.pb-row .pb-at { min-width: 70px; }
+.pb-row button { padding: 2px 8px; font-size: 12px; }
+.pb-row .muted { margin-left: auto; }
+.pb-form { display: flex; gap: 6px; align-items: center; font-size: 12px; flex-wrap: wrap; }
+.pb-form input { width: 6em; padding: 2px 4px; }
+.cam-cell.big { grid-column: 1 / -1; }

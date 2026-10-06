@@ -81,6 +81,7 @@ async fn choose_save_path(
             "pdf" => "PDF document",
             "jpg" => "JPEG image",
             "png" => "PNG image",
+            "mp4" => "MP4 video",
             _ => "File",
         };
         let picked = app
@@ -174,11 +175,14 @@ fn button_settings_reset(
 /// The camera engine, kept alive for the window's lifetime once started.
 struct CameraState {
     engine: std::sync::Mutex<Option<CameraEngine>>,
+    /// Cameras with a download in progress (a camera serves one at a time).
+    downloading: std::sync::Mutex<std::collections::HashSet<String>>,
 }
 
+#[derive(Clone)]
 struct CameraEngine {
     _server: std::sync::Arc<kagaz_core::cameras::tapo::TsServer>,
-    engine: kagaz_core::extras::go2rtc::Engine,
+    engine: std::sync::Arc<kagaz_core::extras::go2rtc::Engine>,
     cameras: Vec<kagaz_core::cameras::tapo::Camera>,
 }
 
@@ -309,13 +313,251 @@ async fn cameras_start(
         server.set_engine_port(engine.api_port);
         Ok(CameraEngine {
             _server: server,
-            engine,
+            engine: std::sync::Arc::new(engine),
             cameras,
         })
     })
     .await?;
     *state.engine.lock().unwrap() = Some(built);
     Ok(cameras_status(state))
+}
+
+/// The running camera engine, or why there is none.
+fn running(state: &tauri::State<'_, CameraState>) -> Result<CameraEngine, String> {
+    state
+        .engine
+        .lock()
+        .map_err(|_| "camera state poisoned".to_string())?
+        .as_ref()
+        .cloned()
+        .ok_or_else(|| "the cameras are not running".to_string())
+}
+
+fn camera_of(
+    e: &CameraEngine,
+    device_id: &str,
+) -> Result<(usize, kagaz_core::cameras::tapo::Camera), String> {
+    e.cameras
+        .iter()
+        .position(|c| c.device_id == device_id)
+        .map(|i| (i, e.cameras[i].clone()))
+        .ok_or_else(|| "no such camera".to_string())
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct RecordingDays {
+    utc_offset_minutes: i32,
+    /// "YYYY-MM-DD", camera-local.
+    dates: Vec<String>,
+    today: String,
+}
+
+/// Days with footage on this camera's card over the last `days`.
+#[tauri::command]
+async fn recording_days(
+    state: tauri::State<'_, CameraState>,
+    device_id: String,
+    days: u32,
+) -> Result<RecordingDays, String> {
+    use kagaz_core::cameras::tapo::recordings::{self, Recordings};
+    let e = running(&state)?;
+    let (_, cam) = camera_of(&e, &device_id)?;
+    blocking(move || {
+        let session = e._server.session();
+        let rec = Recordings::new(&session, &cam);
+        let offset = rec.utc_offset_minutes().map_err(|e| e.to_string())?;
+        let now = unix_now();
+        let today = recordings::day_of(now, offset);
+        let first = recordings::day_of(now - i64::from(days) * 86_400, offset);
+        let dates = rec
+            .dates(&first, &today)
+            .map_err(|e| e.to_string())?
+            .iter()
+            .map(|d| recordings::dash_date(d))
+            .collect();
+        Ok(RecordingDays {
+            utc_offset_minutes: offset,
+            dates,
+            today: recordings::dash_date(&today),
+        })
+    })
+    .await
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct RecordingClips {
+    utc_offset_minutes: i32,
+    sd_card: kagaz_core::cameras::tapo::SdCard,
+    clips: Vec<kagaz_core::cameras::tapo::Clip>,
+    /// Unix time at which the day starts on the camera's clock.
+    day_start: i64,
+}
+
+/// The clips of one camera-local day ("YYYY-MM-DD").
+#[tauri::command]
+async fn recording_clips(
+    state: tauri::State<'_, CameraState>,
+    device_id: String,
+    date: String,
+) -> Result<RecordingClips, String> {
+    use kagaz_core::cameras::tapo::recordings::{self, Recordings};
+    let e = running(&state)?;
+    let (_, cam) = camera_of(&e, &device_id)?;
+    blocking(move || {
+        let session = e._server.session();
+        let rec = Recordings::new(&session, &cam);
+        let offset = rec.utc_offset_minutes().map_err(|e| e.to_string())?;
+        let day: String = date.chars().filter(|c| c.is_ascii_digit()).collect();
+        let day_start = recordings::day_start(&day, offset).ok_or("bad date")?;
+        Ok(RecordingClips {
+            utc_offset_minutes: offset,
+            sd_card: rec.sd_card().map_err(|e| e.to_string())?,
+            clips: rec.clips(&day).map_err(|e| e.to_string())?,
+            day_start,
+        })
+    })
+    .await
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct PlaybackHandle {
+    token: String,
+    stream: String,
+    /// MPEG-TS from the engine on this camera's own loopback host.
+    ts_url: String,
+}
+
+/// Start playing recorded footage between two unix times through the engine.
+#[tauri::command]
+async fn playback_start(
+    state: tauri::State<'_, CameraState>,
+    device_id: String,
+    from: i64,
+    to: i64,
+) -> Result<PlaybackHandle, String> {
+    let e = running(&state)?;
+    let (index, cam) = camera_of(&e, &device_id)?;
+    blocking(move || {
+        let (token, url) = e._server.playback_url(&cam.device_id, from, to, false);
+        let stream = format!("playback-{token}");
+        e.engine
+            .add_stream(&stream, &url)
+            .map_err(|e| e.to_string())?;
+        Ok(PlaybackHandle {
+            ts_url: e._server.tile_url(index, &stream),
+            token,
+            stream,
+        })
+    })
+    .await
+}
+
+#[tauri::command]
+fn playback_state(
+    state: tauri::State<'_, CameraState>,
+    token: String,
+) -> Result<kagaz_core::cameras::tapo::PlaybackState, String> {
+    let e = running(&state)?;
+    e._server
+        .playback_state(&token)
+        .ok_or_else(|| "unknown playback".to_string())
+}
+
+/// End a playback: the engine drops its source and the camera frees its slot.
+#[tauri::command]
+async fn playback_stop(
+    state: tauri::State<'_, CameraState>,
+    token: String,
+    stream: String,
+) -> Result<(), String> {
+    let e = running(&state)?;
+    blocking(move || {
+        e.engine.remove_stream(&stream);
+        e._server.forget_playback(&token);
+        Ok(())
+    })
+    .await
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct DownloadProgress {
+    device_id: String,
+    bytes: u64,
+    done: bool,
+    error: String,
+}
+
+/// Save footage between two unix times as MP4; progress on `download-progress`.
+#[tauri::command]
+async fn download_recording(
+    app: AppHandle,
+    state: tauri::State<'_, CameraState>,
+    device_id: String,
+    from: i64,
+    to: i64,
+    path: String,
+) -> Result<u64, String> {
+    use kagaz_core::cameras::tapo::download;
+    let e = running(&state)?;
+    let (_, cam) = camera_of(&e, &device_id)?;
+    {
+        let mut busy = state.downloading.lock().map_err(|_| "state poisoned")?;
+        if !busy.insert(device_id.clone()) {
+            return Err("this camera is already sending a download; wait for it".into());
+        }
+    }
+    let id = device_id.clone();
+    let result = blocking(move || {
+        let out = PathBuf::from(&path);
+        download::save_span(&e._server, &e.engine, &cam, from, to, &out, &mut |p| {
+            let download::Progress::Bytes(bytes) = p;
+            let _ = app.emit(
+                "download-progress",
+                DownloadProgress {
+                    device_id: id.clone(),
+                    bytes,
+                    done: false,
+                    error: String::new(),
+                },
+            );
+            true
+        })
+        .map_err(|e| e.to_string())
+    })
+    .await;
+    if let Ok(mut busy) = state.downloading.lock() {
+        busy.remove(&device_id);
+    }
+    result
+}
+
+/// The saved groups, with every current camera placed exactly once.
+#[tauri::command]
+fn camera_layout(
+    state: tauri::State<'_, CameraState>,
+) -> Result<kagaz_core::cameras::Layout, String> {
+    use kagaz_core::cameras::Layout;
+    let mut layout = Layout::load(&Layout::default_path()).map_err(|e| e.to_string())?;
+    if let Ok(e) = running(&state) {
+        let ids: Vec<String> = e.cameras.iter().map(|c| c.device_id.clone()).collect();
+        layout.reconcile(&ids);
+    }
+    Ok(layout)
+}
+
+#[tauri::command]
+fn save_camera_layout(layout: kagaz_core::cameras::Layout) -> Result<(), String> {
+    use kagaz_core::cameras::Layout;
+    layout
+        .save(&Layout::default_path())
+        .map_err(|e| e.to_string())
+}
+
+fn unix_now() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
 }
 
 /// `KAGAZ_OPEN=cameras` opens the window on the camera grid and starts it.
@@ -337,6 +579,7 @@ fn main() {
     tauri::Builder::default()
         .manage(CameraState {
             engine: std::sync::Mutex::new(None),
+            downloading: std::sync::Mutex::new(std::collections::HashSet::new()),
         })
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
@@ -351,6 +594,14 @@ fn main() {
             button_settings_reset,
             cameras_status,
             cameras_start,
+            recording_days,
+            recording_clips,
+            playback_start,
+            playback_state,
+            playback_stop,
+            download_recording,
+            camera_layout,
+            save_camera_layout,
             startup_view
         ])
         .build(tauri::generate_context!())

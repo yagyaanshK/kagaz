@@ -5,11 +5,37 @@
 //! viewers of one camera cost the camera nothing extra.
 
 use super::cloud::{Camera, Session};
+use super::recordings::Recordings;
 use super::relay::{request_relay, stream_preview};
+use serde::Serialize;
+use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
+
+/// Where one recording playback stands. A playback is one-shot: its token
+/// serves once, so an engine that reconnects after the footage ends gets
+/// "gone" instead of the same footage again.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct PlaybackState {
+    pub started: bool,
+    pub finished: bool,
+    pub bytes: u64,
+    /// Why it ended early, if it did.
+    pub error: String,
+}
+
+/// A requested span of recorded footage.
+#[derive(Debug, Clone)]
+struct Span {
+    from: i64,
+    to: i64,
+    /// One-shot token from `playback_url`.
+    token: String,
+    /// As fast as the camera sends it (saving) rather than paced (watching).
+    fast: bool,
+}
 
 /// Append one line to `<cache>/cameras.log` with a timestamp, for diagnosis.
 pub fn log(line: &str) {
@@ -35,6 +61,8 @@ pub struct TsServer {
     cameras: Arc<Mutex<Vec<Camera>>>,
     /// The video engine's API port, once it runs, for the `/engine/` proxy.
     engine_port: Arc<Mutex<Option<u16>>>,
+    /// Recording playbacks by token.
+    playbacks: Arc<Mutex<HashMap<String, PlaybackState>>>,
 }
 
 /// How many extra loopback addresses to try (127.0.0.2 ...).
@@ -67,6 +95,7 @@ impl TsServer {
             session: Arc::new(Mutex::new(session)),
             cameras: Arc::new(Mutex::new(cameras)),
             engine_port: Arc::new(Mutex::new(None)),
+            playbacks: Arc::new(Mutex::new(HashMap::new())),
         });
         for listener in listeners {
             let s = server.clone();
@@ -117,6 +146,56 @@ impl TsServer {
         format!("http://127.0.0.1:{}/tapo/{device_id}.ts?res=vga", self.port)
     }
 
+    /// Register a recording playback and return the one-shot URL that
+    /// streams the footage between two unix times, paced at real time for
+    /// watching, or as fast as the camera sends it (`fast`) for saving.
+    pub fn playback_url(
+        &self,
+        device_id: &str,
+        from: i64,
+        to: i64,
+        fast: bool,
+    ) -> (String, String) {
+        let token = uuid::Uuid::new_v4().simple().to_string();
+        if let Ok(mut p) = self.playbacks.lock() {
+            p.insert(token.clone(), PlaybackState::default());
+        }
+        let url = format!(
+            "http://127.0.0.1:{}/tapo/{device_id}.ts?from={from}&to={to}&once={token}{}",
+            self.port,
+            if fast { "&mode=download" } else { "" }
+        );
+        (token, url)
+    }
+
+    /// Where a playback stands (None for an unknown token).
+    pub fn playback_state(&self, token: &str) -> Option<PlaybackState> {
+        self.playbacks.lock().ok()?.get(token).cloned()
+    }
+
+    fn update_playback(&self, token: &str, f: impl FnOnce(&mut PlaybackState)) {
+        if let Ok(mut p) = self.playbacks.lock() {
+            if let Some(state) = p.get_mut(token) {
+                f(state);
+            }
+        }
+    }
+
+    /// Forget a finished playback.
+    pub fn forget_playback(&self, token: &str) {
+        if let Ok(mut p) = self.playbacks.lock() {
+            p.remove(token);
+        }
+    }
+
+    /// A copy of the session the server uses.
+    pub fn session(&self) -> Session {
+        self.session
+            .lock()
+            .map(|s| s.clone())
+            .unwrap_or_else(|p| p.into_inner().clone())
+    }
+
     pub fn cameras(&self) -> Vec<Camera> {
         self.cameras.lock().map(|c| c.clone()).unwrap_or_default()
     }
@@ -141,7 +220,7 @@ impl TsServer {
         };
         let safe: String = name
             .chars()
-            .filter(|c| c.is_ascii_alphanumeric() || *c == '_')
+            .filter(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-')
             .collect();
         if upstream
             .write_all(format!("GET /api/stream.ts?src={safe} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n").as_bytes())
@@ -216,13 +295,51 @@ impl TsServer {
             self.proxy_engine(&name, stream);
             return;
         }
-        let resolution = if query
-            .split('&')
-            .any(|kv| kv.eq_ignore_ascii_case("res=vga"))
+        if let Some(token) = path_only
+            .strip_prefix("/playback/")
+            .and_then(|p| p.strip_suffix(".json"))
         {
+            let body = self
+                .playback_state(token)
+                .map(|st| serde_json::to_string(&st).unwrap_or_else(|_| "{}".into()));
+            match body {
+                Some(body) => {
+                    let _ = write!(
+                        stream,
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                        body.len()
+                    );
+                }
+                None => {
+                    let _ = stream.write_all(
+                        b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                    );
+                }
+            }
+            return;
+        }
+        let param = |key: &str| {
+            query
+                .split('&')
+                .find_map(|kv| kv.strip_prefix(key).and_then(|v| v.strip_prefix('=')))
+                .map(str::to_string)
+        };
+        let resolution = if param("res").is_some_and(|v| v.eq_ignore_ascii_case("vga")) {
             "VGA"
         } else {
             "HD"
+        };
+        let span = match (
+            param("from").and_then(|v| v.parse::<i64>().ok()),
+            param("to").and_then(|v| v.parse::<i64>().ok()),
+        ) {
+            (Some(from), Some(to)) => Some(Span {
+                from,
+                to,
+                token: param("once").unwrap_or_default(),
+                fast: param("mode").is_some_and(|m| m == "download"),
+            }),
+            _ => None,
         };
         let device_id = path_only
             .strip_prefix("/tapo/")
@@ -258,6 +375,10 @@ impl TsServer {
             Ok(s) => (s.clone(), s.terminal_uuid.clone()),
             Err(_) => return,
         };
+        if let Some(span) = span {
+            self.serve_playback(stream, &session, &cam, &span);
+            return;
+        }
         let track = format!(
             "preview-{}-{}",
             cam.device_id,
@@ -304,5 +425,73 @@ impl TsServer {
             started.elapsed().as_secs_f32(),
             total / 1000
         ));
+    }
+
+    /// Stream recorded footage once per token; a reused token is "gone".
+    fn serve_playback(&self, mut stream: TcpStream, session: &Session, cam: &Camera, span: &Span) {
+        let Span {
+            from,
+            to,
+            token,
+            fast,
+        } = span;
+        let (from, to, fast) = (*from, *to, *fast);
+        let fresh = match self.playbacks.lock() {
+            Ok(mut p) => match p.get_mut(token) {
+                Some(st) if !st.started => {
+                    st.started = true;
+                    true
+                }
+                _ => false,
+            },
+            Err(_) => false,
+        };
+        if !fresh {
+            let _ = stream
+                .write_all(b"HTTP/1.1 410 Gone\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+            return;
+        }
+        if stream
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Type: video/mp2t\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n")
+            .is_err()
+        {
+            return;
+        }
+        let started = Instant::now();
+        let mut total = 0u64;
+        log(&format!(
+            "playback {} {from}-{to}{}: start",
+            cam.name,
+            if fast { " fast" } else { "" }
+        ));
+        let recordings = Recordings::new(session, cam);
+        let mut sink = |chunk: &[u8]| {
+            total += chunk.len() as u64;
+            let ok = stream.write_all(chunk).is_ok();
+            self.update_playback(token, |st| st.bytes = total);
+            ok
+        };
+        let result = if fast {
+            recordings.pull(from, to, &mut sink)
+        } else {
+            recordings.play(from, to, &mut sink)
+        };
+        let outcome = match &result {
+            Ok(_) => "finished".to_string(),
+            Err(e) => format!("ended: {e}"),
+        };
+        log(&format!(
+            "playback {} {from}-{to}: {outcome} after {:.1} s, {} KB",
+            cam.name,
+            started.elapsed().as_secs_f32(),
+            total / 1000
+        ));
+        self.update_playback(token, |st| {
+            st.finished = true;
+            st.bytes = total;
+            if let Err(e) = &result {
+                st.error = e.to_string();
+            }
+        });
     }
 }

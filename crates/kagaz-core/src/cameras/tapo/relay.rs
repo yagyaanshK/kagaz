@@ -56,12 +56,36 @@ pub fn cipc_host_for(app_server: &str) -> String {
 }
 
 /// Ask the cloud for a relay session to the camera's live stream.
+/// Live view.
+pub const STREAM_PREVIEW: u32 = 0;
+/// Recorded footage from the SD card.
+pub const STREAM_PLAYBACK: u32 = 1;
+
 pub fn request_relay(
     session: &Session,
     device_id: &str,
     app_server: &str,
     track_id: &str,
     resolution: &str,
+) -> Result<RelayParams, RelayError> {
+    request_relay_for(
+        session,
+        device_id,
+        app_server,
+        track_id,
+        resolution,
+        STREAM_PREVIEW,
+    )
+}
+
+/// Ask the cloud for a relay session of the given stream type.
+pub fn request_relay_for(
+    session: &Session,
+    device_id: &str,
+    app_server: &str,
+    track_id: &str,
+    resolution: &str,
+    stream_type: u32,
 ) -> Result<RelayParams, RelayError> {
     let body = json!({
         "cloudType": 2,
@@ -73,7 +97,7 @@ pub fn request_relay(
         "preConnection": 0,
         "resolution": resolution,
         "rootCaVer": "1",
-        "streamType": 0,
+        "streamType": stream_type,
         "trackId": track_id,
     });
     let bytes = serde_json::to_vec(&body).expect("json");
@@ -182,6 +206,35 @@ pub fn preview_request(resolution: &str) -> String {
     )
 }
 
+/// The control frame that asks for recorded footage between two unix times.
+pub fn playback_request(seq: u32, client_id: u64, start: i64, end: i64) -> String {
+    format!(
+        "{{\"type\":\"request\",\"seq\":{seq},\"params\":{{\"playback\":{{\"client_id\":{client_id},\"channels\":[0,1],\"scale\":\"1/1\",\"start_time\":\"{start}\",\"end_time\":\"{end}\",\"event_type\":[1,2]}},\"method\":\"get\"}}}}"
+    )
+}
+
+/// The control frame that asks for recorded footage as a download.
+pub fn download_request(seq: u32, client_id: u64, player_id: &str, start: i64, end: i64) -> String {
+    format!(
+        "{{\"type\":\"request\",\"seq\":{seq},\"params\":{{\"download\":{{\"client_id\":{client_id},\"channels\":[0],\"media_type\":0,\"start_time\":\"{start}\",\"end_time\":\"{end}\",\"player_id\":\"{player_id}\"}},\"method\":\"get\"}}}}"
+    )
+}
+
+/// The frame that ends a playback session so the camera frees its slot.
+pub fn playback_stop(seq: u32, client_id: u64) -> String {
+    format!(
+        "{{\"type\":\"request\",\"seq\":{seq},\"params\":{{\"playback\":{{\"client_id\":{client_id},\"channels\":[0,1]}},\"method\":\"stop\"}}}}"
+    )
+}
+
+/// Does a control notification say the recording has finished?
+pub fn is_end_notification(payload: &[u8]) -> bool {
+    let s = String::from_utf8_lossy(payload);
+    (s.contains("stream_status") && s.contains("finished"))
+        || s.contains("playback_done")
+        || s.contains("playfinished")
+}
+
 /// The `error_code` of a control response, 0 when it is not one.
 pub fn control_error(payload: &[u8]) -> i64 {
     let Ok(v) = serde_json::from_slice::<Value>(payload) else {
@@ -244,6 +297,28 @@ fn read_headers(r: &mut impl BufRead) -> Result<Vec<(String, String)>, RelayErro
     }
 }
 
+/// What a relay media session should ask for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Request<'a> {
+    /// Live view at this profile ("HD" or "VGA").
+    Preview(&'a str),
+    /// Recorded footage between two unix times, paced at real time, as
+    /// device user `client_id`. The camera does not stop at `end`; the
+    /// reader does, by measuring the video's own clock.
+    Playback {
+        client_id: u64,
+        start: i64,
+        end: i64,
+    },
+    /// The same footage as fast as the link allows (what the app sends when
+    /// you tap download); the camera stops by itself at `end`.
+    Download {
+        client_id: u64,
+        start: i64,
+        end: i64,
+    },
+}
+
 /// Open the camera's live stream over the relay and hand every MPEG-TS part
 /// to `sink` until it returns `false` or the relay stops.
 pub fn stream_preview(
@@ -251,6 +326,127 @@ pub fn stream_preview(
     terminal_uuid: &str,
     track_id: &str,
     resolution: &str,
+    sink: &mut dyn FnMut(&[u8]) -> bool,
+) -> Result<u64, RelayError> {
+    stream(
+        relay,
+        terminal_uuid,
+        track_id,
+        Request::Preview(resolution),
+        sink,
+    )
+}
+
+/// Pull recorded footage between `start` and `end` (unix seconds) over the
+/// relay, handing every MPEG-TS part to `sink`. Ends when the camera says
+/// the span is finished, the relay goes quiet, or `sink` returns `false`.
+pub fn stream_playback(
+    relay: &RelayParams,
+    terminal_uuid: &str,
+    track_id: &str,
+    client_id: u64,
+    start: i64,
+    end: i64,
+    sink: &mut dyn FnMut(&[u8]) -> bool,
+) -> Result<u64, RelayError> {
+    stream(
+        relay,
+        terminal_uuid,
+        track_id,
+        Request::Playback {
+            client_id,
+            start,
+            end,
+        },
+        sink,
+    )
+}
+
+/// Pull recorded footage between `start` and `end` as fast as the camera
+/// sends it; ends when the camera reports the download finished.
+pub fn stream_download(
+    relay: &RelayParams,
+    terminal_uuid: &str,
+    track_id: &str,
+    client_id: u64,
+    start: i64,
+    end: i64,
+    sink: &mut dyn FnMut(&[u8]) -> bool,
+) -> Result<u64, RelayError> {
+    stream(
+        relay,
+        terminal_uuid,
+        track_id,
+        Request::Download {
+            client_id,
+            start,
+            end,
+        },
+        sink,
+    )
+}
+
+/// Elapsed media time from the PTS values in MPEG-TS packets (90 kHz), so
+/// a real-time playback can stop once the requested span has arrived.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct PtsTracker {
+    first: u64,
+    last: u64,
+    have: bool,
+}
+
+impl PtsTracker {
+    pub fn update(&mut self, buf: &[u8]) {
+        let n = buf.len();
+        let mut i = 0;
+        while i + 188 <= n {
+            if buf[i] != 0x47 {
+                i += 1;
+                continue;
+            }
+            let packet = &buf[i..i + 188];
+            i += 188;
+            if packet[1] & 0x40 == 0 {
+                continue;
+            }
+            let mut off = 4;
+            if (packet[3] >> 4) & 0x3 >= 2 {
+                off += 1 + packet[4] as usize;
+            }
+            if off + 14 > 188 || packet[off..off + 3] != [0, 0, 1] || packet[off + 7] & 0x80 == 0 {
+                continue;
+            }
+            let p = &packet[off + 9..off + 14];
+            let pts = ((u64::from(p[0]) & 0x0E) << 29)
+                | (u64::from(p[1]) << 22)
+                | ((u64::from(p[2]) & 0xFE) << 14)
+                | (u64::from(p[3]) << 7)
+                | (u64::from(p[4]) >> 1);
+            if !self.have {
+                self.first = pts;
+                self.last = pts;
+                self.have = true;
+            } else if pts > self.last {
+                self.last = pts;
+            }
+        }
+    }
+
+    /// Seconds of video seen so far.
+    pub fn seconds(&self) -> f64 {
+        if self.have {
+            (self.last - self.first) as f64 / 90_000.0
+        } else {
+            0.0
+        }
+    }
+}
+
+fn stream(
+    relay: &RelayParams,
+    terminal_uuid: &str,
+    track_id: &str,
+    request: Request<'_>,
     sink: &mut dyn FnMut(&[u8]) -> bool,
 ) -> Result<u64, RelayError> {
     let (host, path) = split_relay_url(&relay.relay_url)
@@ -265,8 +461,27 @@ pub fn stream_preview(
     tls.sock
         .set_read_timeout(Some(Duration::from_secs(12)))
         .map_err(|e| RelayError::Transport(e.to_string()))?;
+    let first = match request {
+        Request::Preview(resolution) => preview_request(resolution),
+        Request::Playback {
+            client_id,
+            start,
+            end,
+        } => playback_request(1, client_id, start, end),
+        Request::Download {
+            client_id,
+            start,
+            end,
+        } => download_request(1, client_id, terminal_uuid, start, end),
+    };
+    let recorded = !matches!(request, Request::Preview(_));
+    let want_seconds = match request {
+        Request::Playback { start, end, .. } => Some((end - start).max(1) as f64),
+        _ => None,
+    };
+    let mut pts = PtsTracker::default();
     tls.write_all(relay_head(relay, terminal_uuid, track_id, &host, &path).as_bytes())
-        .and_then(|()| tls.write_all(&control_frame(&preview_request(resolution))))
+        .and_then(|()| tls.write_all(&control_frame(&first)))
         .and_then(|()| tls.flush())
         .map_err(|e| RelayError::Transport(e.to_string()))?;
 
@@ -283,12 +498,15 @@ pub fn stream_preview(
     }
 
     let mut total = 0u64;
-    loop {
+    let outcome = 'parts: loop {
         // Skip to the next device boundary.
         loop {
-            let line = read_line(&mut reader)?;
-            if line.contains(DEVICE_BOUNDARY) {
-                break;
+            match read_line(&mut reader) {
+                Ok(line) if line.contains(DEVICE_BOUNDARY) => break,
+                Ok(_) => {}
+                // A recording simply ends when the camera closes the stream.
+                Err(RelayError::Transport(_)) if recorded => break 'parts Ok(total),
+                Err(e) => return Err(e),
             }
         }
         let headers = read_headers(&mut reader)?;
@@ -312,15 +530,32 @@ pub fn stream_preview(
         if content_type.contains("video/mp2t") {
             total += length as u64;
             if !sink(&payload) {
-                return Ok(total);
+                break Ok(total);
+            }
+            if let Some(want) = want_seconds {
+                pts.update(&payload);
+                if pts.seconds() >= want {
+                    break Ok(total);
+                }
             }
         } else if content_type.contains("application/json") {
             let code = control_error(&payload);
             if code != 0 {
-                return Err(RelayError::Refused(code));
+                break Err(RelayError::Refused(code));
+            }
+            if recorded && is_end_notification(&payload) {
+                break Ok(total);
             }
         }
+    };
+    if let Request::Playback { client_id, .. } | Request::Download { client_id, .. } = request {
+        // Free the camera's playback slot; best effort, the relay may be gone.
+        let tls = reader.get_mut();
+        let _ = tls
+            .write_all(&control_frame(&playback_stop(2, client_id)))
+            .and_then(|()| tls.flush());
     }
+    outcome
 }
 
 #[cfg(test)]
