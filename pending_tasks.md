@@ -83,25 +83,33 @@ with the commit that closes them.
       playback v4 (`examples/tapo_probe.rs` tries frames one at a time; the
       component list comes from `getAppComponentList`).
 - [ ] **Audio in downloads.** The camera's download stream carries G.711
-      (MPEG-TS stream type 0x90, TP-Link private); the engine's MP4 keeps
-      only the video. `--ts` keeps everything. Either teach the engine the
-      private type or remux in Kagaz.
+      (MPEG-TS stream type 0x90, TP-Link private); go2rtc's MPEG-TS reader
+      (`pkg/mpegts/producer.go`) only takes H.264, H.265, AAC and its private
+      Opus type from an HTTP source, so the engine's MP4 keeps only the
+      video. `--ts` keeps everything. Fix: remux in Kagaz (TS → MP4 with
+      G.711 as `alaw`/`ulaw`), or a go2rtc change upstream.
 - [ ] **Continuous recording to disk** (asked for 2026-10-07): a `kagaz`
       command or script for a server PC that keeps pulling each camera's
       footage into a folder within a storage limit, like a CCTV recorder.
       The download path above is the building block.
-- [ ] **Stall detection is time-based** (clock not advancing): tune the 2 s /
-      15 s thresholds after real use; consider reconnecting automatically after
-      a long silence.
+- [x] **Automatic reconnection** (2026-10-07): a tile that has shown "no
+      data" reconnects by itself after 5, 10, 20, 40, 60, 60 s, then stops
+      trying and leaves Reload. Thresholds (2 s waiting, 15 s lost) unchanged;
+      tune after real use.
 - [ ] **Local ONVIF/RTSP cameras** (the local C100 and any camera
       on the LAN): discovery is already filtered out of the printer list; add
       them to the Cameras view as RTSP sources for go2rtc, with the camera
       account credentials entered once.
-- [ ] **Token refresh and re-login** in the window when the TP-Link session
-      expires (the CLI says "not logged in; run kagaz tapo login").
+- [x] **Token refresh and re-login** (2026-10-07): the window has "Log in"
+      (email, password, email code) and "Log out"; an expired token is
+      refreshed when the cameras start and when a relay request is refused.
+      Refresh and the window login are written from the CLI flow and not
+      yet exercised against an expired token.
 - [ ] **Audio**: Tapo carries G.711 on private MPEG-TS stream types; go2rtc may
       not pass it. Video only for now.
-- [ ] **Resolution choice** per tile (HD/VGA) to save bandwidth with many cameras.
+- [x] **Resolution choice** per tile (2026-10-07): the HD/VGA badge on a
+      tile toggles it for that camera and is kept in the layout file;
+      enlarged tiles are always HD.
 - [ ] The Tapo APK static analysis and the emulator capture are no longer
       needed; the protocol came from public sources and works. Keep the tools
       under installations/tapo-analysis/ in case TP-Link changes the relay.

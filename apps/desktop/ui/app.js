@@ -402,11 +402,65 @@ async function refreshCameras() {
   }
   $("cam-message").textContent = camStatus.message || "";
   $("cam-start").classList.toggle("hidden", camStatus.running || !camStatus.logged_in);
+  $("cam-login").classList.toggle("hidden", camStatus.logged_in);
+  $("cam-logout").classList.toggle("hidden", !camStatus.logged_in || camStatus.running);
   if (camStatus.running) {
     await loadLayout();
     renderCameraGrid();
   }
 }
+
+// ---- TP-Link account: log in from the window, the same steps as the CLI ----
+
+function showLogin(show, note) {
+  $("cam-login-form").classList.toggle("hidden", !show);
+  $("cam-login-note").textContent = note || "";
+  $("cam-login-code-row").classList.add("hidden");
+}
+
+$("cam-login").addEventListener("click", () => showLogin(true, ""));
+$("cam-login-cancel").addEventListener("click", () => showLogin(false, ""));
+$("cam-login-go").addEventListener("click", async () => {
+  const email = $("cam-login-email").value.trim();
+  const password = $("cam-login-password").value;
+  if (!email || !password) { $("cam-login-note").textContent = "Email and password, please."; return; }
+  $("cam-login-go").disabled = true;
+  $("cam-login-note").textContent = "asking TP-Link…";
+  try {
+    const r = await invoke("tapo_login", { email, password });
+    if (r.code_needed) {
+      $("cam-login-note").textContent = r.message;
+      $("cam-login-code-row").classList.remove("hidden");
+      $("cam-login-code").focus();
+    } else {
+      showLogin(false, "");
+      $("cam-login-password").value = "";
+      refreshCameras();
+    }
+  } catch (e) {
+    $("cam-login-note").textContent = "" + e;
+  }
+  $("cam-login-go").disabled = false;
+});
+$("cam-login-code-go").addEventListener("click", async () => {
+  const code = $("cam-login-code").value.trim();
+  if (!code) return;
+  $("cam-login-code-go").disabled = true;
+  try {
+    await invoke("tapo_login_code", { code });
+    showLogin(false, "");
+    $("cam-login-password").value = "";
+    $("cam-login-code").value = "";
+    refreshCameras();
+  } catch (e) {
+    $("cam-login-note").textContent = "" + e;
+  }
+  $("cam-login-code-go").disabled = false;
+});
+$("cam-logout").addEventListener("click", async () => {
+  try { await invoke("tapo_logout"); } catch (e) { $("cam-message").textContent = "" + e; }
+  refreshCameras();
+});
 
 async function loadLayout() {
   try {
@@ -487,9 +541,15 @@ function watchTile(tile, onTick) {
   }, 1000);
 }
 
+// HD for an enlarged tile, or when the user asked for HD on that camera.
+function wantsHd(tile, cam) {
+  return tile.classList.contains("big") || (layout.hd || []).includes(cam.device_id);
+}
+
 function mountTile(tile, cam, big) {
   teardownTile(tile);
   const mode = $("cam-mode").value;
+  const hd = big || wantsHd(tile, cam);
   let player;
   if (mode === "ts") {
     // MPEG-TS over HTTP in a plain <video>: measured as the route this
@@ -498,15 +558,31 @@ function mountTile(tile, cam, big) {
     player.autoplay = true;
     player.muted = true;
     player.playsInline = true;
-    player.src = big ? cam.ts_url : cam.ts_url_vga;
+    player.src = hd ? cam.ts_url : cam.ts_url_vga;
   } else {
     player = document.createElement("video-stream");
     player.setAttribute("mode", mode);
-    player.src = big ? cam.ws_url : cam.ws_url_vga;
+    player.src = hd ? cam.ws_url : cam.ws_url_vga;
   }
   tile.insertBefore(player, tile.firstChild);
+  const q = tile.querySelector(".cam-quality");
+  if (q) q.textContent = hd ? "HD" : "VGA";
   setState(tile, "connecting", "connecting…");
-  watchTile(tile, null);
+  // After a long silence, reconnect by itself: a few times, spaced out.
+  let lostSince = 0;
+  tile._retries = tile._retries || 0;
+  watchTile(tile, (v, t, lastT) => {
+    const lost = tile.dataset.state === "lost";
+    if (!lost) { lostSince = 0; if (t > 0.05 && t > lastT) tile._retries = 0; return false; }
+    if (!lostSince) lostSince = Date.now();
+    const wait = Math.min(60, 5 * 2 ** tile._retries);
+    if ((Date.now() - lostSince) / 1000 > wait && tile._retries < 6) {
+      tile._retries += 1;
+      mountTile(tile, cam, big);
+      return true;
+    }
+    return false;
+  });
 }
 
 // Play recorded footage from `from` (unix) to the end of that camera-day.
@@ -586,6 +662,20 @@ function buildTile(cam) {
   name.className = "cam-name";
   name.textContent = cam.name;
   tile.appendChild(name);
+  const quality = document.createElement("button");
+  quality.type = "button";
+  quality.className = "cam-quality";
+  quality.title = "HD or VGA for this camera (enlarged tiles are always HD)";
+  quality.textContent = "VGA";
+  quality.addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    layout.hd = layout.hd || [];
+    const i = layout.hd.indexOf(cam.device_id);
+    if (i >= 0) layout.hd.splice(i, 1); else layout.hd.push(cam.device_id);
+    saveLayout();
+    if (!isPlayback()) mountTile(tile, cam, tile.classList.contains("big"));
+  });
+  tile.appendChild(quality);
   const overlay = document.createElement("div");
   overlay.className = "cam-overlay hidden";
   overlay.innerHTML = '<div class="spinner"></div><div class="cam-overlay-text"></div><button type="button" class="cam-reload">Reload</button>';

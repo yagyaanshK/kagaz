@@ -23,6 +23,9 @@ pub struct Layout {
     pub ungrouped: Vec<String>,
     #[serde(default)]
     pub ungrouped_collapsed: bool,
+    /// Cameras shown in HD even as small tiles.
+    #[serde(default)]
+    pub hd: Vec<String>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -101,6 +104,7 @@ mod tests {
             }],
             ungrouped: vec!["b".into(), "a".into()],
             ungrouped_collapsed: false,
+            hd: vec!["a".into()],
         };
         let text = toml::to_string_pretty(&l).unwrap();
         assert_eq!(Layout::parse(&text).unwrap(), l);
