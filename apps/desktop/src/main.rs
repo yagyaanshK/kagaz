@@ -9,7 +9,7 @@ use kagaz_core::{explain, open_ports, Device, DiscoverOptions, Explanation, Host
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::time::Duration;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_dialog::DialogExt;
 
 /// Run a blocking core call off the UI thread.
@@ -297,7 +297,7 @@ async fn cameras_start(
                 ]
             })
             .collect();
-        let engine = go2rtc::Engine::start(&binary, 1984, &streams).map_err(|e| e.to_string())?;
+        let engine = go2rtc::Engine::start(&binary, 0, &streams).map_err(|e| e.to_string())?;
         Ok(CameraEngine {
             _server: server,
             engine,
@@ -337,6 +337,16 @@ fn main() {
             cameras_status,
             cameras_start
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running the Kagaz window");
+        .build(tauri::generate_context!())
+        .expect("error while building the Kagaz window")
+        .run(|app, event| {
+            // Stop the camera engine when the window goes away.
+            if let tauri::RunEvent::Exit = event {
+                if let Some(state) = app.try_state::<CameraState>() {
+                    if let Ok(mut guard) = state.engine.lock() {
+                        guard.take();
+                    }
+                }
+            }
+        });
 }
