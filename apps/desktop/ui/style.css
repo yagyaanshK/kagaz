@@ -241,3 +241,9 @@ label small { font-size: 12px; min-height: 1.2em; }
 #cam-login-form { margin-top: 10px; padding: 10px; border: 1px solid var(--line); border-radius: 8px; }
 .cam-login-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-top: 6px; }
 .cam-login-row input { padding: 4px 6px; min-width: 14em; }
+.cam-grid-inner { position: relative; }
+.cam-grid-inner .drop-line { position: absolute; width: 4px; background: var(--accent); border-radius: 2px; pointer-events: none; box-shadow: 0 0 6px var(--accent); }
+.cam-group-head[draggable="true"] { cursor: grab; }
+.cam-group.dragging { opacity: 0.5; }
+.cam-group.drop-before { box-shadow: 0 -3px 0 0 var(--accent); }
+.cam-group.drop-after { box-shadow: 0 3px 0 0 var(--accent); }
