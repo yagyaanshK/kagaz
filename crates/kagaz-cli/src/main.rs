@@ -1173,20 +1173,30 @@ fn tapo_command(cmd: TapoCommand) -> Result<()> {
             match session.do_login(&password) {
                 Ok(()) => {}
                 Err(CloudError::MfaRequired { types, .. }) => {
+                    let names = |t: &u32| match t {
+                        1 => "push to the Tapo app",
+                        2 => "email",
+                        _ => "unknown",
+                    };
+                    println!(
+                        "This account asks for a second factor; it supports: {}.",
+                        types
+                            .iter()
+                            .map(|t| format!("{t} ({})", names(t)))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    );
                     let mfa_type = if types.contains(&tapo::cloud::MFA_EMAIL) || types.is_empty() {
                         tapo::cloud::MFA_EMAIL
                     } else {
                         types[0]
                     };
-                    session.send_mfa_code(mfa_type)?;
-                    println!(
-                        "TP-Link sent a verification code{}.",
-                        if mfa_type == tapo::cloud::MFA_EMAIL {
-                            " to your email"
-                        } else {
-                            ""
-                        }
-                    );
+                    let used = session.send_mfa_code(mfa_type, &password)?;
+                    if mfa_type == tapo::cloud::MFA_EMAIL {
+                        println!("TP-Link accepted the request on {used}; the code should arrive by email (check spam too). If instead the Tapo app on your phone shows a code or an approval, use that.");
+                    } else {
+                        println!("TP-Link accepted the request on {used}; check the Tapo app on your phone for the code.");
+                    }
                     let code = prompt("Code: ")?;
                     session.submit_mfa(&code, mfa_type)?;
                 }
