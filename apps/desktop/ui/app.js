@@ -411,7 +411,7 @@ function loadPlayer(src) {
 async function renderCameraGrid() {
   const grid = $("cam-grid");
   grid.style.setProperty("--cols", $("cam-layout").value);
-  if ($("cam-mode").value !== "mp4") {
+  if ($("cam-mode").value !== "ts") {
     try {
       await loadPlayer(camStatus.player_script);
     } catch (e) {
@@ -428,13 +428,14 @@ async function renderCameraGrid() {
       tile.querySelector("video-stream")?.remove();
       const mode = $("cam-mode").value;
       let player;
-      if (mode === "mp4") {
-        // Plain progressive fragmented MP4: the most forgiving path in this webview.
+      if (mode === "ts") {
+        // MPEG-TS over HTTP in a plain <video>: measured as the route this
+        // webview decodes at real time (its MP4 input is refused).
         player = document.createElement("video");
         player.autoplay = true;
         player.muted = true;
         player.playsInline = true;
-        player.src = big ? cam.mp4_url : cam.mp4_url_vga;
+        player.src = big ? cam.ts_url : cam.ts_url_vga;
       } else {
         player = document.createElement("video-stream");
         player.setAttribute("mode", mode);
