@@ -59,9 +59,14 @@ with the commit that closes them.
 
 ## Cameras (Tapo over TP-Link's cloud)
 
-- [ ] **Window: the Cameras view has not been looked at.** `cargo run -p
-      kagaz-desktop`, press Cameras, Start. Uses go2rtc's player component
-      (MSE, WebRTC, MP4 fallbacks) over its local socket.
+- [x] Window Cameras view: live tiles verified by the user (2026-10-07), with
+      the playback route measured in a real WebKitGTK view: go2rtc's MPEG-TS
+      over HTTP in a plain <video>, chunked, each camera on its own loopback
+      address (WebKit allows six connections per host). Stall overlay and
+      Reload per tile and for all.
+- [ ] **Stall detection is time-based** (clock not advancing): tune the 2 s /
+      15 s thresholds after real use; consider reconnecting automatically after
+      a long silence.
 - [ ] **Local ONVIF/RTSP cameras** (the local C100 and any camera
       on the LAN): discovery is already filtered out of the printer list; add
       them to the Cameras view as RTSP sources for go2rtc, with the camera

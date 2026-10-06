@@ -193,7 +193,9 @@ struct CameraView {
     ws_url: String,
     /// The same for the low-resolution stream, for small tiles.
     ws_url_vga: String,
-    /// MPEG-TS over HTTP, for a plain <video> (the route WebKit plays).
+    /// MPEG-TS over HTTP, for a plain <video> (the route WebKit plays),
+    /// each camera on its own loopback host so the webview's per-host
+    /// connection limit never applies.
     ts_url: String,
     ts_url_vga: String,
 }
@@ -211,15 +213,21 @@ struct CamerasStatus {
 fn camera_views(e: &CameraEngine) -> Vec<CameraView> {
     e.cameras
         .iter()
-        .map(|c| CameraView {
+        .enumerate()
+        .map(|(i, c)| CameraView {
             name: c.name.clone(),
             model: c.model.clone(),
             device_id: c.device_id.clone(),
             stream: kagaz_core::extras::go2rtc::yaml_key(&c.name),
             ws_url: e.engine.ws_url(&c.name),
             ws_url_vga: e.engine.ws_url(&format!("{} vga", c.name)),
-            ts_url: e.engine.ts_url(&c.name),
-            ts_url_vga: e.engine.ts_url(&format!("{} vga", c.name)),
+            ts_url: e
+                ._server
+                .tile_url(i, &kagaz_core::extras::go2rtc::yaml_key(&c.name)),
+            ts_url_vga: e._server.tile_url(
+                i,
+                &kagaz_core::extras::go2rtc::yaml_key(&format!("{} vga", c.name)),
+            ),
         })
         .collect()
 }
@@ -298,6 +306,7 @@ async fn cameras_start(
             })
             .collect();
         let engine = go2rtc::Engine::start(&binary, 0, &streams).map_err(|e| e.to_string())?;
+        server.set_engine_port(engine.api_port);
         Ok(CameraEngine {
             _server: server,
             engine,

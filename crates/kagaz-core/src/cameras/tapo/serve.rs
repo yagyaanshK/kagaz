@@ -12,34 +12,84 @@ use std::sync::{Arc, Mutex};
 
 pub struct TsServer {
     pub port: u16,
+    /// Loopback addresses this server answers on (127.0.0.1 first). A
+    /// webview allows only a few connections per host, so each camera tile
+    /// can be given its own address.
+    pub hosts: Vec<String>,
     session: Arc<Mutex<Session>>,
     cameras: Arc<Mutex<Vec<Camera>>>,
+    /// The video engine's API port, once it runs, for the `/engine/` proxy.
+    engine_port: Arc<Mutex<Option<u16>>>,
 }
 
+/// How many extra loopback addresses to try (127.0.0.2 ...).
+const ALIASES: u8 = 24;
+
 impl TsServer {
-    /// Bind on 127.0.0.1 (a free port when `port` is 0) and serve in the background.
+    /// Bind on 127.0.0.1 (a free port when `port` is 0) and, where the
+    /// system allows, on 127.0.0.2 onwards too; serve in the background.
     pub fn start(
         session: Session,
         cameras: Vec<Camera>,
         port: u16,
     ) -> std::io::Result<Arc<TsServer>> {
-        let listener = TcpListener::bind(("127.0.0.1", port))?;
-        let port = listener.local_addr()?.port();
+        let first = TcpListener::bind(("127.0.0.1", port))?;
+        let port = first.local_addr()?.port();
+        let mut listeners = vec![first];
+        let mut hosts = vec!["127.0.0.1".to_string()];
+        for n in 2..(2 + ALIASES) {
+            let host = format!("127.0.0.{n}");
+            if let Ok(l) = TcpListener::bind((host.as_str(), port)) {
+                listeners.push(l);
+                hosts.push(host);
+            } else {
+                break;
+            }
+        }
         let server = Arc::new(TsServer {
             port,
+            hosts,
             session: Arc::new(Mutex::new(session)),
             cameras: Arc::new(Mutex::new(cameras)),
+            engine_port: Arc::new(Mutex::new(None)),
         });
-        let s = server.clone();
-        std::thread::Builder::new()
-            .name("kagaz-ts-server".into())
-            .spawn(move || {
-                for stream in listener.incoming().flatten() {
-                    let s = s.clone();
-                    std::thread::spawn(move || s.handle(stream));
-                }
-            })?;
+        for listener in listeners {
+            let s = server.clone();
+            std::thread::Builder::new()
+                .name("kagaz-ts-server".into())
+                .spawn(move || {
+                    for stream in listener.incoming().flatten() {
+                        let s = s.clone();
+                        std::thread::spawn(move || s.handle(stream));
+                    }
+                })?;
+        }
         Ok(server)
+    }
+
+    /// Tell the server where the video engine listens, enabling `/engine/<stream>.ts`.
+    pub fn set_engine_port(&self, port: u16) {
+        if let Ok(mut p) = self.engine_port.lock() {
+            *p = Some(port);
+        }
+    }
+
+    /// The i-th camera's own host (wraps around when there are more cameras than addresses).
+    pub fn host_for(&self, index: usize) -> &str {
+        if self.hosts.len() > 1 {
+            &self.hosts[1 + index % (self.hosts.len() - 1)]
+        } else {
+            &self.hosts[0]
+        }
+    }
+
+    /// The engine's MPEG-TS output for `stream`, proxied on the i-th camera's own host.
+    pub fn tile_url(&self, index: usize, stream: &str) -> String {
+        format!(
+            "http://{}:{}/engine/{stream}.ts",
+            self.host_for(index),
+            self.port
+        )
     }
 
     /// The HD stream URL for a camera.
@@ -60,6 +110,34 @@ impl TsServer {
         if let Ok(mut c) = self.cameras.lock() {
             *c = cameras;
         }
+    }
+
+    /// Pipe the engine's `/api/stream.ts?src=<name>` to this client.
+    fn proxy_engine(&self, name: &str, mut client: TcpStream) {
+        let Some(port) = self.engine_port.lock().ok().and_then(|p| *p) else {
+            let _ = client.write_all(b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+            return;
+        };
+        let Ok(mut upstream) = TcpStream::connect(("127.0.0.1", port)) else {
+            let _ = client.write_all(
+                b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+            );
+            return;
+        };
+        let safe: String = name
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric() || *c == '_')
+            .collect();
+        if upstream
+            .write_all(format!("GET /api/stream.ts?src={safe} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n").as_bytes())
+            .is_err()
+        {
+            return;
+        }
+        // Forward the engine's response verbatim (its transfer encoding is
+        // what tells the player this is a live stream), then the body.
+        let mut upstream = upstream;
+        let _ = std::io::copy(&mut upstream, &mut client);
     }
 
     fn handle(&self, mut stream: TcpStream) {
@@ -83,6 +161,14 @@ impl TsServer {
         }
         let path = request_line.split_whitespace().nth(1).unwrap_or("/");
         let (path_only, query) = path.split_once('?').unwrap_or((path, ""));
+        if let Some(name) = path_only
+            .strip_prefix("/engine/")
+            .and_then(|p| p.strip_suffix(".ts"))
+        {
+            let name = name.to_string();
+            self.proxy_engine(&name, stream);
+            return;
+        }
         let resolution = if query
             .split('&')
             .any(|kv| kv.eq_ignore_ascii_case("res=vga"))
