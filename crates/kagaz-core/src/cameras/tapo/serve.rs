@@ -4,8 +4,9 @@
 //! session; the relay fans the camera's live stream out, so several
 //! viewers of one camera cost the camera nothing extra.
 
-use super::cloud::{Camera, Session};
+use super::cloud::{Camera, CloudError, Session};
 use super::recordings::Recordings;
+use super::relay::RelayError;
 use super::relay::{request_relay, stream_preview};
 use serde::Serialize;
 use std::collections::HashMap;
@@ -186,6 +187,16 @@ impl TsServer {
         if let Ok(mut p) = self.playbacks.lock() {
             p.remove(token);
         }
+    }
+
+    /// Exchange the refresh token for a new session token, keep it in the
+    /// server and in the session file, and return it.
+    pub fn refresh_session(&self) -> Result<Session, CloudError> {
+        let mut guard = self.session.lock().unwrap_or_else(|p| p.into_inner());
+        guard.refresh()?;
+        let _ = guard.save(&Session::default_path());
+        log("session: token refreshed");
+        Ok(guard.clone())
     }
 
     /// A copy of the session the server uses.
@@ -390,7 +401,21 @@ impl TsServer {
             &cam.app_server,
             &track,
             resolution,
-        ) {
+        )
+        .or_else(|e| match e {
+            // The token expired while the window was open: refresh and try once more.
+            RelayError::Cloud(CloudError::Unauthorized) => {
+                let session = self.refresh_session()?;
+                request_relay(
+                    &session,
+                    &cam.device_id,
+                    &cam.app_server,
+                    &track,
+                    resolution,
+                )
+            }
+            other => Err(other),
+        }) {
             Ok(r) => r,
             Err(e) => {
                 let msg = e.to_string();

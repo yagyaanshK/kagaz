@@ -48,6 +48,8 @@
             <option value="3" selected>3 across</option>
             <option value="4">4 across</option>
           </select>
+          <button id="cam-login" type="button" class="hidden" title="Log in to your TP-Link account">Log in</button>
+          <button id="cam-logout" type="button" class="hidden" title="Forget the saved TP-Link session">Log out</button>
           <button id="cam-start" type="button">Start</button>
           <button id="cam-reload-all" type="button" title="Reconnect every tile">Reload all</button>
           <button id="cam-rearrange" type="button" title="Make groups and drag cameras between them">Rearrange</button>
@@ -55,6 +57,20 @@
         </div>
       </div>
       <p id="cam-message" class="muted"></p>
+      <div id="cam-login-form" class="hidden">
+        <p class="muted">Your TP-Link (Tapo) account. The password is sent to TP-Link only, the same way the Tapo app does; Kagaz keeps the session token in a private file, never the password.</p>
+        <div class="cam-login-row">
+          <input type="email" id="cam-login-email" placeholder="email" autocomplete="username">
+          <input type="password" id="cam-login-password" placeholder="password" autocomplete="current-password">
+          <button id="cam-login-go" type="button">Log in</button>
+          <button id="cam-login-cancel" type="button">Cancel</button>
+        </div>
+        <div class="cam-login-row hidden" id="cam-login-code-row">
+          <input type="text" id="cam-login-code" placeholder="code from the email" inputmode="numeric" autocomplete="one-time-code">
+          <button id="cam-login-code-go" type="button">Confirm</button>
+        </div>
+        <p id="cam-login-note" class="muted"></p>
+      </div>
       <div id="cam-rearrange-bar" class="hidden">
         <span class="muted">Drag a camera onto a group. </span>
         <button id="cam-add-group" type="button">Add group</button>

@@ -236,3 +236,8 @@ label small { font-size: 12px; min-height: 1.2em; }
 .pb-form { display: flex; gap: 6px; align-items: center; font-size: 12px; flex-wrap: wrap; }
 .pb-form input { width: 6em; padding: 2px 4px; }
 .cam-cell.big { grid-column: 1 / -1; }
+.cam-tile .cam-quality { position: absolute; right: 8px; bottom: 6px; font-size: 11px; padding: 1px 6px; background: rgba(0,0,0,0.5); color: #fff; border: 1px solid rgba(255,255,255,0.4); border-radius: 4px; }
+.cam-tile .cam-quality:hover { background: rgba(0,0,0,0.8); }
+#cam-login-form { margin-top: 10px; padding: 10px; border: 1px solid var(--line); border-radius: 8px; }
+.cam-login-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-top: 6px; }
+.cam-login-row input { padding: 4px 6px; min-width: 14em; }

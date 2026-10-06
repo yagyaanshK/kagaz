@@ -177,6 +177,8 @@ struct CameraState {
     engine: std::sync::Mutex<Option<CameraEngine>>,
     /// Cameras with a download in progress (a camera serves one at a time).
     downloading: std::sync::Mutex<std::collections::HashSet<String>>,
+    /// A login waiting for its second-factor code: the session and the code type.
+    pending_login: std::sync::Mutex<Option<(kagaz_core::cameras::tapo::Session, u32)>>,
 }
 
 #[derive(Clone)]
@@ -278,10 +280,22 @@ async fn cameras_start(
         return Ok(cameras_status(state));
     }
     let built = blocking(move || {
-        let session = Session::load(&Session::default_path()).map_err(|_| {
-            "Not logged in to TP-Link: run `kagaz tapo login` in a terminal once.".to_string()
+        let mut session = Session::load(&Session::default_path()).map_err(|_| {
+            "Not logged in to TP-Link: use \"Log in\" here or `kagaz tapo login` in a terminal."
+                .to_string()
         })?;
-        let cameras = session.cameras().map_err(|e| e.to_string())?;
+        let cameras = match session.cameras() {
+            Ok(c) => c,
+            // An old token: refresh it once, then ask again.
+            Err(kagaz_core::cameras::tapo::CloudError::Unauthorized) => {
+                session
+                    .refresh()
+                    .map_err(|_| "The TP-Link session has expired: log in again.".to_string())?;
+                let _ = session.save(&Session::default_path());
+                session.cameras().map_err(|e| e.to_string())?
+            }
+            Err(e) => return Err(e.to_string()),
+        };
         let server = TsServer::start(session, cameras.clone(), 0).map_err(|e| e.to_string())?;
         let binary = go2rtc::ensure(&mut |ev| {
             let text = match ev {
@@ -531,6 +545,92 @@ async fn download_recording(
     result
 }
 
+#[derive(Debug, Clone, Serialize)]
+struct LoginStep {
+    code_needed: bool,
+    message: String,
+}
+
+/// Log in to the TP-Link account; may ask for the emailed code next.
+#[tauri::command]
+async fn tapo_login(
+    state: tauri::State<'_, CameraState>,
+    email: String,
+    password: String,
+) -> Result<LoginStep, String> {
+    use kagaz_core::cameras::tapo::{cloud, CloudError, Session};
+    let step = blocking(move || {
+        let mut session = Session::begin(&email);
+        match session.do_login(&password) {
+            Ok(()) => {
+                session
+                    .save(&Session::default_path())
+                    .map_err(|e| e.to_string())?;
+                Ok((None, LoginStep { code_needed: false, message: String::new() }))
+            }
+            Err(CloudError::MfaRequired { types, .. }) => {
+                let mfa_type = if types.contains(&cloud::MFA_EMAIL) || types.is_empty() {
+                    cloud::MFA_EMAIL
+                } else {
+                    types[0]
+                };
+                session
+                    .send_mfa_code(mfa_type, &password)
+                    .map_err(|e| e.to_string())?;
+                let message = if mfa_type == cloud::MFA_EMAIL {
+                    "TP-Link is sending a code to the account's email (check spam too); enter it here.".to_string()
+                } else {
+                    "Check the Tapo app on your phone for the code and enter it here.".to_string()
+                };
+                Ok((Some((session, mfa_type)), LoginStep { code_needed: true, message }))
+            }
+            Err(e) => Err(e.to_string()),
+        }
+    })
+    .await?;
+    let (pending, step) = step;
+    *state.pending_login.lock().map_err(|_| "state poisoned")? = pending;
+    Ok(step)
+}
+
+/// Finish a login with the second-factor code.
+#[tauri::command]
+async fn tapo_login_code(state: tauri::State<'_, CameraState>, code: String) -> Result<(), String> {
+    use kagaz_core::cameras::tapo::Session;
+    let pending = state
+        .pending_login
+        .lock()
+        .map_err(|_| "state poisoned")?
+        .clone()
+        .ok_or("no login is waiting for a code; start again")?;
+    let (mut session, mfa_type) = pending;
+    blocking(move || {
+        session
+            .submit_mfa(&code, mfa_type)
+            .map_err(|e| e.to_string())?;
+        session
+            .save(&Session::default_path())
+            .map_err(|e| e.to_string())
+    })
+    .await?;
+    *state.pending_login.lock().map_err(|_| "state poisoned")? = None;
+    Ok(())
+}
+
+/// Forget the saved session (the cameras must not be running).
+#[tauri::command]
+fn tapo_logout(state: tauri::State<'_, CameraState>) -> Result<(), String> {
+    use kagaz_core::cameras::tapo::Session;
+    if running(&state).is_ok() {
+        return Err("stop the cameras first (close and reopen the window)".into());
+    }
+    match std::fs::remove_file(Session::default_path()) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
 /// The saved groups, with every current camera placed exactly once.
 #[tauri::command]
 fn camera_layout(
@@ -580,6 +680,7 @@ fn main() {
         .manage(CameraState {
             engine: std::sync::Mutex::new(None),
             downloading: std::sync::Mutex::new(std::collections::HashSet::new()),
+            pending_login: std::sync::Mutex::new(None),
         })
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
@@ -602,6 +703,9 @@ fn main() {
             download_recording,
             camera_layout,
             save_camera_layout,
+            tapo_login,
+            tapo_login_code,
+            tapo_logout,
             startup_view
         ])
         .build(tauri::generate_context!())
