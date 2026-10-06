@@ -595,13 +595,14 @@ async function mountPlayback(tile, cam, from) {
   if (from >= to) { setState(tile, "lost", "that time is after the end of the day"); return; }
   setState(tile, "connecting", "asking the camera for its recording…");
   let handle;
+  const speed = speedValue();
   try {
-    handle = await invoke("playback_start", { deviceId: cam.device_id, from, to });
+    handle = await invoke("playback_start", { deviceId: cam.device_id, from, to, speed });
   } catch (e) {
     setState(tile, "lost", "could not start: " + e);
     return;
   }
-  tile._playback = { token: handle.token, stream: handle.stream, from };
+  tile._playback = { token: handle.token, stream: handle.stream, from, speed };
   tile._retries = tile._retries || 0;
   const player = document.createElement("video");
   player.autoplay = true;
@@ -612,8 +613,10 @@ async function mountPlayback(tile, cam, from) {
   let finished = null, lastPoll = 0, lostSince = 0;
   const cell = tile.closest(".cam-cell");
   watchTile(tile, (v, t, lastT) => {
-    // Position marker and clock on the timeline.
-    if (cell) updatePosition(cell, cam, from + t);
+    // Position marker and clock on the timeline (the stream's clock runs at 1/speed).
+    const at = from + Math.floor(t * speed);
+    if (cell) updatePosition(cell, cam, at);
+    if (cell && cell === $("cam-grid").querySelector(".cam-cell") || !$("cam-grid").querySelector(".cam-tile[data-state=\"live\"] video")) updateSeekBar(at);
     if (t > 0.05 && t > lastT) tile._retries = 0;
     const now = Date.now();
     if (now - lastPoll > 2000 && tile._playback) {
@@ -635,7 +638,7 @@ async function mountPlayback(tile, cam, from) {
     const wait = Math.min(60, 5 * 2 ** tile._retries);
     if ((now - lostSince) / 1000 > wait && tile._retries < 6) {
       tile._retries += 1;
-      mountPlayback(tile, cam, from + Math.floor(t));
+      mountPlayback(tile, cam, from + Math.floor(t * speed));
       return true;
     }
     return !!finished;
@@ -682,6 +685,7 @@ function toggleAudio(tile, cam) {
   document.querySelectorAll(".cam-tile audio").forEach((a) => stopAudio(a.closest(".cam-tile")));
   const key = isPlayback() ? (tile._playback && tile._playback.token) : cam.device_id;
   if (!key) return;
+  if (isPlayback() && tile._playback.speed !== 1) { $("cam-message").textContent = "Sound plays at 1x only."; return; }
   const a = document.createElement("audio");
   a.autoplay = true;
   a.src = `${audioBase(cam)}/audio/${key}.wav?t=${Date.now()}`;
@@ -996,6 +1000,7 @@ async function renderCameraGrid() {
   $("cam-viewing").classList.toggle("hidden", viewGroup === null);
   $("cam-rearrange").classList.toggle("hidden", rearranging);
   $("pb-controls").classList.toggle("hidden", !isPlayback());
+  if (!isPlayback()) updateSeekBar();
   $("cam-reload-all").classList.toggle("hidden", isPlayback());
   for (const g of visibleGroups()) grid.appendChild(buildGroup(g));
   if (!rearranging) {
@@ -1012,6 +1017,109 @@ async function renderCameraGrid() {
 }
 
 // ---- playback ----
+
+// The speed slider is logarithmic: -2 → 0.25x, 0 → 1x, 3 → 8x.
+function speedValue() {
+  const v = Math.pow(2, Number($("pb-speed").value));
+  return Math.round(v * 20) / 20;
+}
+function speedText(v) {
+  return (v >= 1 ? v.toFixed(v % 1 ? 1 : 0) : v.toFixed(2).replace(/0+$/, "")) + "x";
+}
+
+// The shared bar: every visible camera's recordings for the day, one
+// position marker for the moment being played.
+function fillSeekBar() {
+  const clipsBox = $("pb-seek-clips");
+  clipsBox.innerHTML = "";
+  let dayStart = null;
+  for (const cell of $("cam-grid").querySelectorAll(".cam-cell")) {
+    const c = pbClips[cell.dataset.id];
+    if (!c) continue;
+    dayStart = c.day_start;
+    for (const clip of c.clips) {
+      const seg = document.createElement("div");
+      seg.className = "clip";
+      seg.style.left = `${((clip.start - c.day_start) / 86400) * 100}%`;
+      seg.style.width = `${Math.max(0.15, ((clip.end - clip.start) / 86400) * 100)}%`;
+      clipsBox.appendChild(seg);
+    }
+  }
+  $("pb-seek").dataset.dayStart = dayStart === null ? "" : String(dayStart);
+}
+
+function seekDayStart() {
+  const v = $("pb-seek").dataset.dayStart;
+  if (v) return Number(v);
+  const t = chosenTime();
+  if (t === null) return null;
+  return t - ((t + pbOffset * 60) % 86400 + 86400) % 86400;
+}
+
+function seekTimeAt(clientX) {
+  const r = $("pb-seek").getBoundingClientRect();
+  const frac = Math.min(1, Math.max(0, (clientX - r.left) / r.width));
+  const day = seekDayStart();
+  return day === null ? null : day + Math.floor(frac * 86400);
+}
+
+function updateSeekBar(at) {
+  const day = seekDayStart();
+  const pos = $("pb-seek-pos");
+  if (at === undefined || day === null) { pos.classList.add("hidden"); $("pb-seek-at").textContent = "—"; return; }
+  pos.classList.remove("hidden");
+  pos.style.left = `${((at - day) / 86400) * 100}%`;
+  $("pb-seek-at").textContent = clockText(at);
+}
+
+// Move every visible camera to `at` (restarting its playback there).
+function seekAll(at) {
+  const [hh, mm] = [Math.floor(((at + pbOffset * 60) % 86400 + 86400) % 86400 / 3600), Math.floor(((at + pbOffset * 60) % 3600 + 3600) % 3600 / 60)];
+  $("pb-time").value = `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
+  $("cam-grid").querySelectorAll(".cam-cell").forEach((cell) => {
+    const cam = cameraById(cell.dataset.id);
+    mountPlayback(cell.querySelector(".cam-tile"), cam, at);
+  });
+  updateSeekBar(at);
+}
+
+(function wireSeekBar() {
+  const bar = $("pb-seek");
+  let dragging = false;
+  const hover = $("pb-seek-hover");
+  bar.addEventListener("mousemove", (ev) => {
+    const r = bar.getBoundingClientRect();
+    hover.classList.remove("hidden");
+    hover.style.left = `${ev.clientX - r.left}px`;
+    const t = seekTimeAt(ev.clientX);
+    bar.title = t === null ? "" : clockText(t);
+    if (dragging) updateSeekBar(t);
+  });
+  bar.addEventListener("mouseleave", () => hover.classList.add("hidden"));
+  bar.addEventListener("mousedown", (ev) => { dragging = true; ev.preventDefault(); });
+  window.addEventListener("mouseup", (ev) => {
+    if (!dragging) return;
+    dragging = false;
+    const t = seekTimeAt(ev.clientX);
+    if (t !== null) seekAll(t);
+  });
+})();
+
+$("pb-speed").addEventListener("input", () => { $("pb-speed-label").textContent = speedText(speedValue()); });
+$("pb-speed").addEventListener("change", () => {
+  // Apply the new speed to whatever is playing, from where it is.
+  $("cam-grid").querySelectorAll(".cam-tile").forEach((tile) => {
+    if (!tile._playback) return;
+    const v = tile.querySelector("video");
+    const at = tile._playback.from + Math.floor((v && v.currentTime || 0) * tile._playback.speed);
+    const cam = cameraById(tile.closest(".cam-cell").dataset.id);
+    mountPlayback(tile, cam, at);
+  });
+});
+
+// The gear menu.
+$("cam-gear").addEventListener("click", (ev) => { ev.stopPropagation(); $("cam-settings").classList.toggle("hidden"); });
+document.addEventListener("click", (ev) => { if (!ev.target.closest(".cam-menu")) $("cam-settings").classList.add("hidden"); });
 
 // The chosen date and time as a unix time on the cameras' clock, or null.
 function chosenTime() {
@@ -1046,22 +1154,37 @@ async function preparePlayback() {
   }
   if (!$("pb-time").value) $("pb-time").value = "10:00";
   const date = $("pb-date").value;
-  await Promise.all(cells.map(async (cell) => {
-    const id = cell.dataset.id;
-    const cam = cameraById(id);
+  for (const cell of cells) {
     const tile = cell.querySelector(".cam-tile");
     setState(tile, "lost", "pick a time and press Play, or click the timeline");
     tile.querySelector(".cam-reload")?.classList.add("hidden");
-    try {
-      pbClips[id] = await invoke("recording_clips", { deviceId: id, date });
-      pbOffset = pbClips[id].utc_offset_minutes;
-    } catch (e) {
-      pbClips[id] = null;
-      setState(tile, "lost", "no recording list: " + e);
+  }
+  // One camera at a time (TP-Link's cloud drops some of a burst), a second try each.
+  for (const cell of cells) {
+    const id = cell.dataset.id;
+    const cam = cameraById(id);
+    const note = cell.querySelector(".pb-note");
+    if (note) note.textContent = "asking the camera for its recordings…";
+    let lastError = null;
+    for (let attempt = 0; attempt < 2 && !pbClips[id]; attempt++) {
+      try {
+        pbClips[id] = await invoke("recording_clips", { deviceId: id, date });
+        pbOffset = pbClips[id].utc_offset_minutes;
+      } catch (e) {
+        lastError = e;
+        pbClips[id] = null;
+      }
+    }
+    if (!pbClips[id]) {
+      const tile = cell.querySelector(".cam-tile");
+      setState(tile, "lost", "no recording list: " + lastError);
       tile._retries = 0;
     }
     fillTimeline(cell, cam);
-  }));
+    if (!pbClips[id] && note) note.textContent = "no recording list: " + lastError;
+  }
+  fillSeekBar();
+  updateSeekBar();
 }
 
 function buildTimeline(cam, tile) {
@@ -1128,6 +1251,7 @@ function playAll(root) {
     const cam = cameraById(cell.dataset.id);
     mountPlayback(cell.querySelector(".cam-tile"), cam, from);
   });
+  updateSeekBar(from);
 }
 
 function playGroup(box) { playAll(box); }

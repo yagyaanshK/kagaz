@@ -198,6 +198,9 @@ pub struct Engine {
     /// Linux the parent-death signal is tied to the spawning *thread*, and a
     /// pool thread that retires would take the engine down with it.
     keeper: Option<std::sync::mpsc::Sender<()>>,
+    /// Stream additions and removals go one at a time: go2rtc 1.9.14 can
+    /// crash ("concurrent map writes") when several arrive together.
+    api_lock: std::sync::Mutex<()>,
 }
 
 impl Engine {
@@ -283,6 +286,7 @@ impl Engine {
                     api_port,
                     config_path,
                     keeper: Some(keeper_tx),
+                    api_lock: std::sync::Mutex::new(()),
                 });
             }
             std::thread::sleep(Duration::from_millis(200));
@@ -334,15 +338,22 @@ impl Engine {
             name,
             url_encode(url)
         );
+        let _one_at_a_time = self.api_lock.lock().unwrap_or_else(|p| p.into_inner());
         match ureq::put(&api).call() {
             Ok(_) => Ok(()),
             Err(e) => Err(ExtraError::Start(format!("engine refused the stream: {e}"))),
         }
     }
 
+    /// Is the engine process still running?
+    pub fn alive(&mut self) -> bool {
+        matches!(self.child.try_wait(), Ok(None))
+    }
+
     /// Remove a stream added with `add_stream`, ending its source.
     pub fn remove_stream(&self, name: &str) {
         let api = format!("http://127.0.0.1:{}/api/streams?src={name}", self.api_port);
+        let _one_at_a_time = self.api_lock.lock().unwrap_or_else(|p| p.into_inner());
         let _ = ureq::delete(&api).call();
     }
 

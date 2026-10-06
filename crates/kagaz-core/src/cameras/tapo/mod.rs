@@ -7,6 +7,7 @@ pub mod cloud;
 pub mod download;
 pub mod recordings;
 pub mod relay;
+pub mod retime;
 pub mod serve;
 pub mod tls;
 

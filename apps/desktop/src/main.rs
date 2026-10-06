@@ -445,11 +445,15 @@ async fn playback_start(
     device_id: String,
     from: i64,
     to: i64,
+    speed: Option<f64>,
 ) -> Result<PlaybackHandle, String> {
     let e = running(&state)?;
     let (index, cam) = camera_of(&e, &device_id)?;
+    let speed = speed.unwrap_or(1.0).clamp(0.25, 8.0);
     blocking(move || {
-        let (token, url) = e._server.playback_url(&cam.device_id, from, to, false);
+        let (token, url) = e
+            ._server
+            .playback_url_at(&cam.device_id, from, to, false, speed);
         let stream = format!("playback-{token}");
         e.engine
             .add_stream(&stream, &url)

@@ -118,6 +118,22 @@ with the commit that closes them.
       sound route opens its own small relay session when no relay video
       session feeds a camera, so a local tile still has sound. Not yet
       exercised with a kept password: log in again to try it.
+- [x] **Shared seek bar and playback speed** (2026-10-07): a bar above the
+      grid shows every visible camera's recordings for the day; click or
+      drag moves all of them to that moment. Speed is a continuous slider
+      (0.25x to 8x). The webview ignores a playback rate on the streamed
+      video (measured), so Kagaz rescales the stream's timestamps (PTS,
+      DTS, PCR) on the way through and, above 1x, asks the camera for its
+      fast delivery; measured steady at 4x and 0.5x. Sound plays at 1x
+      only. When the camera's fast delivery is slower than the chosen
+      speed the tile shows "waiting" now and then.
+- [ ] **Engine crash under a burst of stream additions**: go2rtc 1.9.14
+      died with "concurrent map writes" when seven playbacks were added at
+      once; additions and removals now go one at a time. If it recurs, the
+      window should notice a dead engine (`Engine::alive`) and restart it.
+- [ ] **Recording lists in a burst**: asking seven cameras at once made two
+      answer with a device error (-71101); the window now asks one at a
+      time with a second try.
 - [ ] **Xiaomi camera** (Mi Home, model unknown): it answers the miIO hello
       on the LAN (device id only, no model) and advertises nothing over
       mDNS or SSDP, so the model and the local token come only from the Mi

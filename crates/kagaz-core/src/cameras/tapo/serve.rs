@@ -39,6 +39,8 @@ struct Span {
     token: String,
     /// As fast as the camera sends it (saving) rather than paced (watching).
     fast: bool,
+    /// Playback speed; timestamps are rescaled so the player shows it.
+    speed: f64,
 }
 
 /// Append one line to `<cache>/cameras.log` with a timestamp, for diagnosis.
@@ -167,15 +169,34 @@ impl TsServer {
         to: i64,
         fast: bool,
     ) -> (String, String) {
+        self.playback_url_at(device_id, from, to, fast, 1.0)
+    }
+
+    /// The same at a playback speed: above 1 the camera's fast delivery
+    /// feeds the player and the timestamps are rescaled; at or below 1 the
+    /// paced stream is enough.
+    pub fn playback_url_at(
+        &self,
+        device_id: &str,
+        from: i64,
+        to: i64,
+        fast: bool,
+        speed: f64,
+    ) -> (String, String) {
         let token = uuid::Uuid::new_v4().simple().to_string();
         if let Ok(mut p) = self.playbacks.lock() {
             p.insert(token.clone(), PlaybackState::default());
         }
-        let url = format!(
-            "http://127.0.0.1:{}/tapo/{device_id}.ts?from={from}&to={to}&once={token}{}",
-            self.port,
-            if fast { "&mode=download" } else { "" }
+        let mut url = format!(
+            "http://127.0.0.1:{}/tapo/{device_id}.ts?from={from}&to={to}&once={token}",
+            self.port
         );
+        if fast || speed > 1.0 {
+            url.push_str("&mode=download");
+        }
+        if (speed - 1.0).abs() > 1e-6 {
+            url.push_str(&format!("&speed={speed:.3}"));
+        }
         (token, url)
     }
 
@@ -519,6 +540,10 @@ impl TsServer {
                 to,
                 token: param("once").unwrap_or_default(),
                 fast: param("mode").is_some_and(|m| m == "download"),
+                speed: param("speed")
+                    .and_then(|v| v.parse::<f64>().ok())
+                    .filter(|v| v.is_finite() && *v > 0.0)
+                    .unwrap_or(1.0),
             }),
             _ => None,
         };
@@ -637,8 +662,9 @@ impl TsServer {
             to,
             token,
             fast,
+            speed,
         } = span;
-        let (from, to, fast) = (*from, *to, *fast);
+        let (from, to, fast, speed) = (*from, *to, *fast, *speed);
         let fresh = match self.playbacks.lock() {
             Ok(mut p) => match p.get_mut(token) {
                 Some(st) if !st.started => {
@@ -669,9 +695,17 @@ impl TsServer {
         ));
         let recordings = Recordings::new(session, cam);
         let mut demux = super::audio::AudioDemux::default();
+        let mut retimer = super::retime::Retimer::new(speed);
         let mut sink = |chunk: &[u8]| {
             total += chunk.len() as u64;
             self.feed_taps(token, &mut demux, chunk);
+            let retimed;
+            let chunk: &[u8] = if (speed - 1.0).abs() > 1e-6 {
+                retimed = retimer.push(chunk);
+                &retimed
+            } else {
+                chunk
+            };
             let ok = stream.write_all(chunk).is_ok();
             self.update_playback(token, |st| st.bytes = total);
             ok
