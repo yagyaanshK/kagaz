@@ -195,6 +195,7 @@ struct CameraView {
     ws_url_vga: String,
     /// Fragmented MP4 over HTTP, for a plain <video>.
     mp4_url: String,
+    mp4_url_vga: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -218,6 +219,7 @@ fn camera_views(e: &CameraEngine) -> Vec<CameraView> {
             ws_url: e.engine.ws_url(&c.name),
             ws_url_vga: e.engine.ws_url(&format!("{} vga", c.name)),
             mp4_url: e.engine.mp4_url(&c.name),
+            mp4_url_vga: e.engine.mp4_url(&format!("{} vga", c.name)),
         })
         .collect()
 }
