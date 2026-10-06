@@ -59,11 +59,10 @@ with the commit that closes them.
 
 ## Cameras (Tapo over TP-Link's cloud)
 
-- [x] Window Cameras view: live tiles verified by the user (2026-10-07), with
-      the playback route measured in a real WebKitGTK view: go2rtc's MPEG-TS
-      over HTTP in a plain <video>, chunked, each camera on its own loopback
-      address (WebKit allows six connections per host). Stall overlay and
-      Reload per tile and for all.
+- [x] Window Cameras view: all seven tiles live and smooth for minutes
+      (user, 2026-10-07) with "playback: direct" (go2rtc's MPEG-TS, chunked,
+      in a plain <video>, one loopback address per tile). MSE and WebRTC
+      flicker in this webview and stay as options only.
 - [ ] **Stall detection is time-based** (clock not advancing): tune the 2 s /
       15 s thresholds after real use; consider reconnecting automatically after
       a long silence.
