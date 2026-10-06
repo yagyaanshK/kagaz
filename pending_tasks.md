@@ -19,7 +19,7 @@ with the commit that closes them.
       class (7/1/2) with the IEEE 1284 ID read from sysfs. Record the ID as a
       fixture under `tests/fixtures/usb/` and point the test in
       `discovery/usb.rs` at it.
-- [ ] **Windows run.** On the PC at 198.51.100.57: `kagaz discover`,
+- [ ] **Windows run.** On the Windows PC: `kagaz discover`,
       `kagaz explain`, `kagaz scan` against the Brother. Known gap: the IEEE
       1284 ID of USB printers is not read on Windows (usbprint.sys owns the
       device); the USB product string is used instead.
@@ -62,7 +62,7 @@ with the commit that closes them.
 - [ ] **Window: the Cameras view has not been looked at.** `cargo run -p
       kagaz-desktop`, press Cameras, Start. Uses go2rtc's player component
       (MSE, WebRTC, MP4 fallbacks) over its local socket.
-- [ ] **Local ONVIF/RTSP cameras** (the C100 at 198.51.100.103 and any camera
+- [ ] **Local ONVIF/RTSP cameras** (the local C100 and any camera
       on the LAN): discovery is already filtered out of the printer list; add
       them to the Cameras view as RTSP sources for go2rtc, with the camera
       account credentials entered once.

@@ -10,4 +10,5 @@ Brother DCP-L2540DW at `ipp://198.51.100.167:631/ipp/print` on 2026-10-05.
 | `brother-dcp-l2540dw.get-jobs.request.bin` | Get-Jobs (0x000A), which-jobs `not-completed`, requested-attributes `all` |
 | `brother-dcp-l2540dw.get-jobs.response.bin` | Its reply with an empty queue: only the operation attributes group |
 
-Nothing personal is in these files beyond the printer's hostname and UUID.
+The printer's hostname, address and the device part of its UUID were
+replaced by placeholders of the same length; everything else is as recorded.
