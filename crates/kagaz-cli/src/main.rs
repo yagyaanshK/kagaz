@@ -186,6 +186,12 @@ enum Command {
     /// Tapo cameras through your TP-Link account, the way the Tapo app reaches them
     #[command(subcommand)]
     Tapo(TapoCommand),
+    /// Cameras: serve every camera for viewing (Tapo through your account) and start the video engine
+    Cameras {
+        /// Port for the video engine's local API and player (127.0.0.1 only)
+        #[arg(long, default_value_t = 1984)]
+        port: u16,
+    },
     /// Make a printer flash its display so you know which one it is
     Identify {
         /// Its number in `kagaz discover`, an IP address, hostname, or part of its name
@@ -824,6 +830,7 @@ fn main() -> Result<()> {
             Ok(())
         }
         Command::Tapo(cmd) => tapo_command(cmd),
+        Command::Cameras { port } => cameras_serve(port),
         Command::Identify { device, timeout } => {
             let devices = discover(&DiscoverOptions {
                 timeout: Duration::from_secs(timeout),
@@ -1305,6 +1312,51 @@ fn tapo_command(cmd: TapoCommand) -> Result<()> {
 fn load_tapo_session(path: &std::path::Path) -> Result<kagaz_core::cameras::tapo::Session> {
     kagaz_core::cameras::tapo::Session::load(path)
         .map_err(|_| anyhow::anyhow!("not logged in; run `kagaz tapo login` first"))
+}
+
+fn cameras_serve(port: u16) -> Result<()> {
+    use kagaz_core::cameras::tapo::{Session, TsServer};
+    use kagaz_core::extras::go2rtc;
+    let session = load_tapo_session(&Session::default_path())?;
+    let cameras = session.cameras()?;
+    if cameras.is_empty() {
+        anyhow::bail!("no cameras on the account");
+    }
+    let server = TsServer::start(session, cameras.clone(), 0)?;
+    println!(
+        "Serving {} camera{} on 127.0.0.1:{}",
+        cameras.len(),
+        if cameras.len() == 1 { "" } else { "s" },
+        server.port
+    );
+    let binary = go2rtc::ensure(&mut |e| match e {
+        go2rtc::Event::Downloading { bytes } => println!(
+            "Downloading the video engine go2rtc {} ({})...",
+            go2rtc::VERSION,
+            human_size(bytes)
+        ),
+        go2rtc::Event::Verified => println!("  checksum matches"),
+        go2rtc::Event::Ready(p) => println!("Video engine: {}", p.display()),
+    })?;
+    let streams: Vec<go2rtc::StreamSource> = cameras
+        .iter()
+        .map(|c| go2rtc::StreamSource {
+            name: c.name.clone(),
+            url: server.url_for(&c.device_id),
+        })
+        .collect();
+    let engine = go2rtc::Engine::start(&binary, port, &streams)?;
+    println!(
+        "Video engine running; its page lists every camera: {}",
+        engine.ui_url()
+    );
+    for c in &cameras {
+        println!("  {:<16} {}", c.name, engine.mp4_url(&c.name));
+    }
+    println!("Press Ctrl-C to stop.");
+    loop {
+        std::thread::sleep(std::time::Duration::from_secs(3600));
+    }
 }
 
 /// Pick one device by what the user typed, or explain why that failed.
