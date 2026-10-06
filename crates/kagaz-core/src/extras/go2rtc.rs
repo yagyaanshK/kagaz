@@ -219,6 +219,14 @@ pub fn yaml_key(name: &str) -> String {
     }
 }
 
+/// A free TCP port on 127.0.0.1, so a stale engine from an earlier run can
+/// never be mistaken for ours.
+pub fn free_port() -> std::io::Result<u16> {
+    Ok(std::net::TcpListener::bind(("127.0.0.1", 0))?
+        .local_addr()?
+        .port())
+}
+
 /// A running go2rtc, stopped when dropped.
 pub struct Engine {
     child: Child,
@@ -227,12 +235,18 @@ pub struct Engine {
 }
 
 impl Engine {
+    /// Start the engine on `api_port` (0 = pick a free one) with these streams.
     pub fn start(
         binary: &Path,
         api_port: u16,
         streams: &[StreamSource],
     ) -> Result<Engine, ExtraError> {
-        let config_path = extras_dir().join("go2rtc.yaml");
+        let api_port = if api_port == 0 {
+            free_port().map_err(|e| ExtraError::Start(e.to_string()))?
+        } else {
+            api_port
+        };
+        let config_path = extras_dir().join(format!("go2rtc-{api_port}.yaml"));
         std::fs::write(&config_path, config_yaml(api_port, streams)).map_err(|source| {
             ExtraError::Io {
                 path: config_path.clone(),
@@ -248,17 +262,36 @@ impl Engine {
             path: log_path.clone(),
             source,
         })?;
-        let child = Command::new(binary)
+        let mut command = Command::new(binary);
+        command
             .arg("-c")
             .arg(&config_path)
             .stdin(Stdio::null())
             .stdout(Stdio::from(log))
-            .stderr(Stdio::from(log_err))
+            .stderr(Stdio::from(log_err));
+        #[cfg(target_os = "linux")]
+        {
+            use std::os::unix::process::CommandExt;
+            // If Kagaz dies without cleaning up, the engine goes with it.
+            // SAFETY: prctl only changes this child's own death signal.
+            unsafe {
+                command.pre_exec(|| {
+                    libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM);
+                    Ok(())
+                });
+            }
+        }
+        let mut child = command
             .spawn()
             .map_err(|e| ExtraError::Start(e.to_string()))?;
-        // Wait briefly for the API to come up.
+        // Ready when the port opens while our child is still alive.
         let deadline = std::time::Instant::now() + Duration::from_secs(8);
         while std::time::Instant::now() < deadline {
+            if let Ok(Some(status)) = child.try_wait() {
+                let tail = std::fs::read_to_string(&log_path).unwrap_or_default();
+                let tail: String = tail.lines().rev().take(3).collect::<Vec<_>>().join(" | ");
+                return Err(ExtraError::Start(format!("exited with {status}: {tail}")));
+            }
             if std::net::TcpStream::connect_timeout(
                 &std::net::SocketAddr::from(([127, 0, 0, 1], api_port)),
                 Duration::from_millis(200),
@@ -273,7 +306,6 @@ impl Engine {
             }
             std::thread::sleep(Duration::from_millis(200));
         }
-        let mut child = child;
         let _ = child.kill();
         Err(ExtraError::Start(format!("port {api_port} did not open")))
     }
