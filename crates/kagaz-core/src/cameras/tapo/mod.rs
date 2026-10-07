@@ -3,6 +3,7 @@
 //! the media side; `tls` trusts TP-Link's private certificate authority.
 
 pub mod audio;
+pub mod cache;
 pub mod cloud;
 pub mod download;
 pub mod recordings;

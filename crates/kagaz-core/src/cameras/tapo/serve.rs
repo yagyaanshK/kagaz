@@ -74,6 +74,8 @@ pub struct TsServer {
     taps: Arc<Mutex<HashMap<String, Vec<AudioTap>>>>,
     /// Cameras with a live relay session running right now.
     feeding: Arc<Mutex<std::collections::HashSet<String>>>,
+    /// Each camera's UTC offset in minutes, asked once (for the cache's day folders).
+    offsets: Arc<Mutex<HashMap<String, i32>>>,
 }
 
 /// How many extra loopback addresses to try (127.0.0.2 ...).
@@ -109,6 +111,7 @@ impl TsServer {
             playbacks: Arc::new(Mutex::new(HashMap::new())),
             taps: Arc::new(Mutex::new(HashMap::new())),
             feeding: Arc::new(Mutex::new(std::collections::HashSet::new())),
+            offsets: Arc::new(Mutex::new(HashMap::new())),
         });
         for listener in listeners {
             let s = server.clone();
@@ -386,6 +389,19 @@ impl TsServer {
         ));
     }
 
+    /// The camera's UTC offset, asked once and remembered.
+    fn utc_offset(&self, recordings: &Recordings) -> i32 {
+        let id = recordings.camera.device_id.clone();
+        if let Some(o) = self.offsets.lock().ok().and_then(|m| m.get(&id).copied()) {
+            return o;
+        }
+        let o = recordings.utc_offset_minutes().unwrap_or(0);
+        if let Ok(mut m) = self.offsets.lock() {
+            m.insert(id, o);
+        }
+        o
+    }
+
     /// A handle to this server for another thread.
     fn clone_handle(&self) -> Arc<TsServer> {
         Arc::new(TsServer {
@@ -397,6 +413,7 @@ impl TsServer {
             playbacks: self.playbacks.clone(),
             taps: self.taps.clone(),
             feeding: self.feeding.clone(),
+            offsets: self.offsets.clone(),
         })
     }
 
@@ -694,10 +711,26 @@ impl TsServer {
             if fast { " fast" } else { "" }
         ));
         let recordings = Recordings::new(session, cam);
+        let root = crate::paths::recordings_dir();
+        // Already on disk: play it from there, never from the camera again.
+        let cached = super::cache::find(&root, &cam.device_id, from);
+        // Otherwise keep what the camera sends, for next time.
+        let mut keep = if cached.is_none() {
+            let offset = self.utc_offset(&recordings);
+            let day = super::recordings::dash_date(&super::recordings::day_of(from, offset));
+            super::cache::Writer::create(&root, &cam.device_id, &day, from, to, false).ok()
+        } else {
+            None
+        };
         let mut demux = super::audio::AudioDemux::default();
         let mut retimer = super::retime::Retimer::new(speed);
         let mut sink = |chunk: &[u8]| {
             total += chunk.len() as u64;
+            if let Some(w) = keep.as_mut() {
+                if w.write(chunk).is_err() {
+                    keep = None;
+                }
+            }
             self.feed_taps(token, &mut demux, chunk);
             let retimed;
             let chunk: &[u8] = if (speed - 1.0).abs() > 1e-6 {
@@ -710,11 +743,37 @@ impl TsServer {
             self.update_playback(token, |st| st.bytes = total);
             ok
         };
-        let result = if fast {
+        let result = if let Some(entry) = &cached {
+            log(&format!(
+                "playback {} {from}-{to}: from the cache",
+                cam.name
+            ));
+            let until = to.min(entry.covered_end());
+            let pace = if fast && speed <= 1.0 {
+                None
+            } else {
+                Some(speed)
+            };
+            super::cache::play_file(entry, from, until, pace, &mut sink).map_err(|e| {
+                super::recordings::PullError::Relay(super::relay::RelayError::Transport(
+                    e.to_string(),
+                ))
+            })
+        } else if fast {
             recordings.pull(from, to, &mut sink)
         } else {
             recordings.play(from, to, &mut sink)
         };
+        if let Some(w) = keep {
+            match w.finish(result.is_ok()) {
+                Ok(Some(e)) => log(&format!(
+                    "playback {} {from}-{to}: kept {:.0} s in the cache",
+                    cam.name, e.seconds
+                )),
+                Ok(None) => {}
+                Err(e) => log(&format!("playback {}: cache write failed: {e}", cam.name)),
+            }
+        }
         let outcome = match &result {
             Ok(_) => "finished".to_string(),
             Err(e) => format!("ended: {e}"),

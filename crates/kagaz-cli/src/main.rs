@@ -247,6 +247,23 @@ enum TapoCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Copy cameras' recordings of one day into the local recordings folder (whole clips, as the camera sent them), skipping what is already there
+    Fetch {
+        /// Cameras (name, part of it, or device id); none means every camera on the account
+        cameras: Vec<String>,
+        /// Leave out these cameras
+        #[arg(long)]
+        except: Vec<String>,
+        /// The day, YYYY-MM-DD on the cameras' own clock
+        #[arg(long)]
+        date: String,
+        /// Only clips overlapping from this time of day (HH:MM)
+        #[arg(long)]
+        from: Option<String>,
+        /// ... until this time of day (HH:MM)
+        #[arg(long)]
+        to: Option<String>,
+    },
     /// Save recorded footage from a camera's SD card as an MP4 file (through the video engine)
     Download {
         /// Camera name, or part of it, or its device id
@@ -1424,6 +1441,20 @@ fn tapo_command(cmd: TapoCommand) -> Result<()> {
             }
             Ok(())
         }
+        TapoCommand::Fetch {
+            cameras,
+            except,
+            date,
+            from,
+            to,
+        } => fetch_recordings(
+            &path,
+            &cameras,
+            &except,
+            &date,
+            from.as_deref(),
+            to.as_deref(),
+        ),
         TapoCommand::Download {
             camera,
             from,
@@ -1540,6 +1571,181 @@ fn tapo_command(cmd: TapoCommand) -> Result<()> {
             Ok(())
         }
     }
+}
+
+/// `kagaz tapo fetch`: whole clips of one day into the recordings folder,
+/// one worker per camera (a camera sends one recording at a time).
+fn fetch_recordings(
+    session_path: &std::path::Path,
+    wanted: &[String],
+    except: &[String],
+    date: &str,
+    from: Option<&str>,
+    to: Option<&str>,
+) -> Result<()> {
+    use kagaz_core::cameras::tapo::cache;
+    use kagaz_core::cameras::tapo::recordings::{self, Recordings};
+    let session = load_tapo_session(session_path)?;
+    let all = session.cameras()?;
+    let mut cams: Vec<kagaz_core::cameras::tapo::Camera> = if wanted.is_empty() {
+        all.clone()
+    } else {
+        wanted
+            .iter()
+            .map(|w| find_camera(&all, w).cloned())
+            .collect::<Result<_>>()?
+    };
+    for x in except {
+        let skip = find_camera(&all, x)?.device_id.clone();
+        cams.retain(|c| c.device_id != skip);
+    }
+    let day: String = date.chars().filter(|c| c.is_ascii_digit()).collect();
+    if day.len() != 8 {
+        anyhow::bail!("--date must be YYYY-MM-DD");
+    }
+    let dashed = recordings::dash_date(&day);
+    let root = kagaz_core::paths::recordings_dir();
+    println!("Recordings folder: {}", root.display());
+    let clock = |t: Option<&str>, default: i64| -> Result<i64> {
+        Ok(match t {
+            None => default,
+            Some(t) => {
+                let (h, m) = t
+                    .split_once(':')
+                    .ok_or_else(|| anyhow::anyhow!("times are HH:MM"))?;
+                h.trim().parse::<i64>()? * 3600 + m.trim().parse::<i64>()? * 60
+            }
+        })
+    };
+    let (from_s, to_s) = (clock(from, 0)?, clock(to, 86_400)?);
+    let started = std::time::Instant::now();
+    let mut workers = Vec::new();
+    for cam in cams {
+        let session = session.clone();
+        let root = root.clone();
+        let (day, dashed) = (day.clone(), dashed.clone());
+        workers.push(std::thread::spawn(
+            move || -> (String, u64, usize, usize, Vec<String>) {
+                let rec = Recordings::new(&session, &cam);
+                let say = |m: &str| println!("[{}] {m}", cam.name);
+                let mut problems = Vec::new();
+                let attempt =
+                    |what: &str, f: &mut dyn FnMut() -> std::result::Result<(), String>| {
+                        let mut last = String::new();
+                        for n in 0..6u64 {
+                            if n > 0 {
+                                std::thread::sleep(std::time::Duration::from_secs(5 * n));
+                            }
+                            match f() {
+                                Ok(()) => return Ok(()),
+                                Err(e) => last = e,
+                            }
+                        }
+                        Err(format!("{what}: {last}"))
+                    };
+                let mut offset = 0;
+                let mut clips = Vec::new();
+                if let Err(e) = attempt("recording list", &mut || {
+                    offset = rec.utc_offset_minutes().map_err(|e| e.to_string())?;
+                    clips = rec.clips(&day).map_err(|e| e.to_string())?;
+                    Ok(())
+                }) {
+                    say(&e);
+                    return (cam.name.clone(), 0, 0, 0, vec![e]);
+                }
+                let day_start = recordings::day_start(&day, offset).unwrap_or(0);
+                let wanted: Vec<_> = clips
+                    .into_iter()
+                    .filter(|c| c.end > day_start + from_s && c.start < day_start + to_s)
+                    .collect();
+                say(&format!("{} clips to fetch", wanted.len()));
+                let (mut bytes, mut fetched, mut skipped) = (0u64, 0usize, 0usize);
+                for c in &wanted {
+                    if cache::has_span(&root, &cam.device_id, c.start, c.end) {
+                        skipped += 1;
+                        continue;
+                    }
+                    let label = format!(
+                        "{} to {}",
+                        recordings::format_time(c.start, offset),
+                        &recordings::format_time(c.end, offset)[11..]
+                    );
+                    let mut got = 0u64;
+                    let r = attempt(&label, &mut || {
+                        let mut w = cache::Writer::create(
+                            &root,
+                            &cam.device_id,
+                            &dashed,
+                            c.start,
+                            c.end,
+                            true,
+                        )
+                        .map_err(|e| e.to_string())?;
+                        let mut werr = None;
+                        let pulled = rec.pull(c.start, c.end, &mut |chunk| {
+                            if let Err(e) = w.write(chunk) {
+                                werr = Some(e.to_string());
+                                return false;
+                            }
+                            true
+                        });
+                        if let Some(e) = werr {
+                            return Err(e);
+                        }
+                        let n = pulled.map_err(|e| {
+                            if e.is_busy() {
+                                "the camera is busy sending a recording to someone else".to_string()
+                            } else {
+                                e.to_string()
+                            }
+                        })?;
+                        match w.finish(false).map_err(|e| e.to_string())? {
+                            Some(entry) if entry.complete => {
+                                got = n;
+                                Ok(())
+                            }
+                            Some(entry) => Err(format!(
+                                "incomplete: {:.0} of {} s",
+                                entry.seconds,
+                                c.end - c.start
+                            )),
+                            None => Err("nothing arrived".into()),
+                        }
+                    });
+                    match r {
+                        Ok(()) => {
+                            bytes += got;
+                            fetched += 1;
+                            say(&format!("{label}: {}", human_size(got)));
+                        }
+                        Err(e) => {
+                            say(&e);
+                            problems.push(e);
+                        }
+                    }
+                }
+                (cam.name.clone(), bytes, fetched, skipped, problems)
+            },
+        ));
+    }
+    println!();
+    let mut total = 0;
+    for w in workers {
+        if let Ok((name, bytes, fetched, skipped, problems)) = w.join() {
+            total += bytes;
+            println!(
+                "{name}: {fetched} fetched ({}), {skipped} already here, {} failed",
+                human_size(bytes),
+                problems.len()
+            );
+        }
+    }
+    println!(
+        "Done in {:.0} min, {} in all.",
+        started.elapsed().as_secs_f32() / 60.0,
+        human_size(total)
+    );
+    Ok(())
 }
 
 /// The camera the user named: by device id, exact name, then part of the name.
