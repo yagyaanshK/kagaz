@@ -689,8 +689,8 @@ async function mountPlayback(tile, cam, from, opts = {}) {
     failPlayback(tile, cam, "could not start: " + e, from);
     return;
   }
-  if (tile._mountId !== mountId) {
-    // Another seek came in meanwhile: drop this one.
+  if (tile._mountId !== mountId || !tile.isConnected) {
+    // Another seek came in meanwhile, or the grid was redrawn: drop this one.
     invoke("playback_stop", { token: handle.token, stream: handle.stream }).catch(() => {});
     return;
   }
@@ -1210,12 +1210,12 @@ function fillSeekBar() {
   $("pb-seek").dataset.dayStart = dayStart === null ? "" : String(dayStart);
 }
 
+// The start of the day picked, on the cameras' clock.
 function seekDayStart() {
-  const v = $("pb-seek").dataset.dayStart;
-  if (v) return Number(v);
-  const t = chosenTime();
-  if (t === null) return null;
-  return t - ((t + pbOffset * 60) % 86400 + 86400) % 86400;
+  const d = $("pb-date").value;
+  if (!d) return null;
+  const [y, m, dd] = d.split("-").map(Number);
+  return Date.UTC(y, m - 1, dd) / 1000 - pbOffset * 60;
 }
 
 function seekTimeAt(clientX) {
@@ -1262,7 +1262,9 @@ setInterval(() => {
     if (clock === null) return;
     const cam = cameraById(cell.dataset.id);
     updatePosition(cell, cam, clock);
-    if (!pbClips[cell.dataset.id] || tile._paused || tile.dataset.state === "lost") return;
+    const list = pbClips[cell.dataset.id];
+    if (!list || list.date !== $("pb-date").value || tile._paused || tile.dataset.state === "lost") return;
+    if (clock < list.day_start || clock >= list.day_start + 86400) return;
     const span = spanAt(cam.device_id, clock);
     if (!span) {
       if (!tile._gap) enterGap(tile, cam, clock);
@@ -1411,6 +1413,7 @@ $("pb-dd").addEventListener("change", () => { readPickers(); if (camStatus && ca
 ["pb-h", "pb-m", "pb-s", "pb-ap"].forEach((id) => $(id).addEventListener("change", readPickers));
 
 // Ask every visible camera for the chosen day's clips; fill the timelines.
+let pbRound = 0;
 async function preparePlayback() {
   const cells = [...$("cam-grid").querySelectorAll(".cam-cell")];
   if (!cells.length) return;
@@ -1428,6 +1431,9 @@ async function preparePlayback() {
     }
   }
   const date = $("pb-date").value;
+  // A newer round (another date picked meanwhile) makes this one stop and
+  // never write: a list must always belong to the day on screen.
+  const round = ++pbRound;
   pbClips = {};
   pbMaster = null;
   updateSeekBar();
@@ -1446,14 +1452,19 @@ async function preparePlayback() {
     const note = cell.querySelector(".pb-note");
     if (note) note.textContent = "asking the camera for its recordings…";
     let lastError = null;
-    for (let attempt = 0; attempt < 2 && !pbClips[id]; attempt++) {
+    let list = null;
+    for (let attempt = 0; attempt < 2 && !list; attempt++) {
       try {
-        pbClips[id] = await invoke("recording_clips", { deviceId: id, date });
-        pbOffset = pbClips[id].utc_offset_minutes;
+        list = await invoke("recording_clips", { deviceId: id, date });
       } catch (e) {
         lastError = e;
-        pbClips[id] = null;
       }
+      if (round !== pbRound) return;
+    }
+    if (list) {
+      list.date = date;
+      pbClips[id] = list;
+      pbOffset = list.utc_offset_minutes;
     }
     if (!pbClips[id]) {
       const tile = cell.querySelector(".cam-tile");
@@ -1463,6 +1474,7 @@ async function preparePlayback() {
     fillTimeline(cell, cam);
     if (!pbClips[id] && note) note.textContent = "no recording list: " + lastError;
   }
+  if (round !== pbRound) return;
   fillSeekBar();
   updateSeekBar();
 }
