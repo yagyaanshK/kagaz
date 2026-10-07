@@ -205,6 +205,9 @@ groups ("rooms"): "Rearrange", "Add group", drag cameras between groups,
 collapse a group, "View" one alone, play one group from a chosen time. The
 layout is kept in `~/.config/kagaz/cameras.toml`.
 
+`scripts/install-desktop-entry.sh` puts a build from this checkout in the
+Linux app list and dock with Kagaz's icon (`--remove` takes it out).
+
 The desktop window (`cargo run -p kagaz-desktop`) shows the same devices,
 the same plain-words explanation and the same scan options; on Linux it
 needs the webkit2gtk and gtk3 development packages to build.
