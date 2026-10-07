@@ -289,3 +289,14 @@ label small { font-size: 12px; min-height: 1.2em; }
 .cam-tile:hover .cam-size, .cam-tile.big .cam-size { opacity: 1; }
 .cam-tile .cam-size:hover { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
 .cam-tile.placeholder .cam-size { display: none; }
+/* Pause and speed for a camera, and a group's playback row */
+.pb-row .tile-pause, .grp-controls .grp-pause { padding: 2px 8px; font-size: 13px; }
+.pb-row .tile-speed { width: 70px; accent-color: var(--accent); }
+.pb-row .tile-speed-label, .grp-speed-label { min-width: 34px; font-size: 12px; font-variant-numeric: tabular-nums; }
+.grp-controls { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; }
+.grp-bar { position: relative; flex: 1 1 200px; height: 14px; background: var(--line); border-radius: 4px; cursor: pointer; overflow: hidden; }
+.grp-bar .grp-clips { position: absolute; inset: 0; }
+.grp-bar .clip { position: absolute; top: 0; bottom: 0; background: var(--accent); opacity: 0.55; }
+.grp-bar .grp-pos { position: absolute; top: 0; bottom: 0; width: 3px; background: #fff; box-shadow: 0 0 3px #000; }
+.grp-at { min-width: 92px; font-size: 12px; font-variant-numeric: tabular-nums; }
+.grp-controls .grp-speed { width: 90px; accent-color: var(--accent); }
