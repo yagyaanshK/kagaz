@@ -1026,12 +1026,12 @@ function moveCamera(id, toKey, beforeId) {
   if (at >= 0) list.splice(at, 0, id); else list.push(id);
 }
 
-// A group's own playback row: pause, a 24-hour bar for its cameras, speed.
+// A group's own playback row: pause, a bar for its cameras, speed.
 function buildGroupControls(box) {
   const row = document.createElement("div");
   row.className = "grp-controls";
   row.innerHTML = '<button type="button" class="grp-pause" title="Pause or resume this group">\u23F8</button>'
-    + '<div class="grp-bar" title="This group\'s recordings for the day; click to move its cameras together"><div class="grp-clips"></div><div class="grp-pos hidden"></div></div>'
+    + '<div class="grp-tl" title="This group: recordings and detections. Click or drag to move its cameras together; scroll to zoom"></div>'
     + '<span class="grp-at muted">—</span>'
     + '<input type="range" class="grp-speed" min="-2" max="3" step="0.05" value="0" title="Speed for this group">'
     + '<span class="grp-speed-label">1x</span>';
@@ -1039,51 +1039,28 @@ function buildGroupControls(box) {
   const sl = row.querySelector(".grp-speed");
   sl.addEventListener("input", () => { row.querySelector(".grp-speed-label").textContent = speedText(sliderSpeed(sl.value)); });
   sl.addEventListener("change", () => speedCells(cellsOf(box), sliderSpeed(sl.value)));
-  const bar = row.querySelector(".grp-bar");
-  const timeAt = (x) => {
-    const day = seekDayStart();
-    if (day === null) return null;
-    const r = bar.getBoundingClientRect();
-    return day + Math.floor(Math.min(1, Math.max(0, (x - r.left) / r.width)) * 86400);
-  };
-  bar.addEventListener("mousemove", (ev) => { const t = timeAt(ev.clientX); bar.title = t === null ? "" : clockText(t); });
-  bar.addEventListener("click", (ev) => {
-    const t = timeAt(ev.clientX);
-    if (t === null) return;
-    const first = cellsOf(box).map((c) => c.querySelector(".cam-tile")).find((x) => x._sync);
-    startSynced(cellsOf(box), t, first ? first._sync.speed : speedValue());
+  box._tl = makeTimeline(row.querySelector(".grp-tl"), {
+    dayStart: () => seekDayStart(),
+    spans: () => tlSpans(cellIds(box)),
+    detections: () => tlDetections(cellIds(box)),
+    dataKey: () => tlKey(cellIds(box)),
+    cursor: () => cellsNow(cellsOf(box)),
+    onSeek: (t) => {
+      const first = cellsOf(box).map((c) => c.querySelector(".cam-tile")).find((x) => x._sync);
+      startSynced(cellsOf(box), t, first ? first._sync.speed : speedValue());
+    },
+    clock: (t) => clockText(t),
   });
   return row;
 }
 
-// Draw a group's recordings (once per day) and where its cameras are.
+// Redraw a group's bar and say where its cameras are.
 function drawGroupBar(box) {
-  const bar = box.querySelector(".grp-bar");
-  if (!bar) return;
-  const day = seekDayStart();
-  if (day === null) return;
-  const cells = cellsOf(box);
-  const key = `${day}:${cells.map((c) => (pbClips[c.dataset.id] ? 1 : 0)).join("")}`;
-  if (bar.dataset.key !== key) {
-    bar.dataset.key = key;
-    const clipsBox = bar.querySelector(".grp-clips");
-    clipsBox.innerHTML = "";
-    for (const cell of cells) {
-      for (const sp of spansOf(cell.dataset.id) || []) {
-        const seg = document.createElement("div");
-        seg.className = "clip";
-        seg.style.left = `${((sp.start - day) / 86400) * 100}%`;
-        seg.style.width = `${Math.max(0.15, ((sp.end - sp.start) / 86400) * 100)}%`;
-        clipsBox.appendChild(seg);
-      }
-    }
-  }
-  const at = cellsNow(cells);
-  const pos = bar.querySelector(".grp-pos");
-  if (at === null) { pos.classList.add("hidden"); return; }
-  pos.classList.remove("hidden");
-  pos.style.left = `${((at - day) / 86400) * 100}%`;
-  box.querySelector(".grp-at").textContent = clockText(Math.floor(at));
+  if (!box._tl) return;
+  box._tl.draw();
+  const at = cellsNow(cellsOf(box));
+  const label = box.querySelector(".grp-at");
+  if (label) label.textContent = at === null ? "—" : clockText(Math.floor(at));
 }
 
 function buildGroup(g) {
@@ -1267,26 +1244,34 @@ function speedText(v) {
   return (v >= 1 ? v.toFixed(v % 1 ? 1 : 0) : v.toFixed(2).replace(/0+$/, "")) + "x";
 }
 
-// The shared bar: every visible camera's recordings for the day, one
-// position marker for the moment being played.
-function fillSeekBar() {
-  const clipsBox = $("pb-seek-clips");
-  clipsBox.innerHTML = "";
-  let dayStart = null;
-  for (const cell of $("cam-grid").querySelectorAll(".cam-cell")) {
-    const c = pbClips[cell.dataset.id];
-    if (!c) continue;
-    dayStart = c.day_start;
-    for (const clip of c.clips) {
-      const seg = document.createElement("div");
-      seg.className = "clip";
-      seg.style.left = `${((clip.start - c.day_start) / 86400) * 100}%`;
-      seg.style.width = `${Math.max(0.15, ((clip.end - clip.start) / 86400) * 100)}%`;
-      clipsBox.appendChild(seg);
-    }
-  }
-  $("pb-seek").dataset.dayStart = dayStart === null ? "" : String(dayStart);
+// What a camera's bar shows: its recordings (event recordings marked) and
+// what it detected that day.
+function tlSpans(ids) {
+  return ids.flatMap((id) => (pbClips[id] ? pbClips[id].clips.map((c) => ({ start: c.start, end: c.end, event: c.video_type === 2 })) : []));
 }
+function tlDetections(ids) {
+  return ids.flatMap((id) => {
+    const list = pbClips[id];
+    if (!list || !list.detections) return [];
+    const name = ids.length > 1 ? (cameraById(id)?.name || "") : "";
+    return list.detections.map((d) => ({ ...d, camera: name }));
+  });
+}
+function tlKey(ids) { return ids.map((id) => (pbClips[id] ? pbClips[id].date + pbClips[id].clips.length : "-")).join(","); }
+const cellIds = (root) => cellsOf(root).map((c) => c.dataset.id);
+
+// The top bar: every camera shown.
+let topAt = null;
+const topTimeline = makeTimeline($("pb-seek"), {
+  dayStart: () => seekDayStart(),
+  spans: () => tlSpans(cellIds($("cam-grid"))),
+  detections: () => tlDetections(cellIds($("cam-grid"))),
+  dataKey: () => tlKey(cellIds($("cam-grid"))),
+  cursor: () => topAt,
+  onSeek: (t) => seekAll(t),
+  clock: (t) => clockText(t),
+});
+function fillSeekBar() { topTimeline.draw(); }
 
 // The start of the day picked, on the cameras' clock.
 function seekDayStart() {
@@ -1296,20 +1281,10 @@ function seekDayStart() {
   return Date.UTC(y, m - 1, dd) / 1000 - pbOffset * 60;
 }
 
-function seekTimeAt(clientX) {
-  const r = $("pb-seek").getBoundingClientRect();
-  const frac = Math.min(1, Math.max(0, (clientX - r.left) / r.width));
-  const day = seekDayStart();
-  return day === null ? null : day + Math.floor(frac * 86400);
-}
-
 function updateSeekBar(at) {
-  const day = seekDayStart();
-  const pos = $("pb-seek-pos");
-  if (at === undefined || day === null) { pos.classList.add("hidden"); $("pb-seek-at").textContent = "—"; return; }
-  pos.classList.remove("hidden");
-  pos.style.left = `${((at - day) / 86400) * 100}%`;
-  $("pb-seek-at").textContent = clockText(at);
+  topAt = at === undefined ? null : at;
+  $("pb-seek-at").textContent = topAt === null ? "—" : clockText(Math.floor(topAt));
+  topTimeline.draw();
 }
 
 // ---- playback clocks ----
@@ -1520,28 +1495,6 @@ setInterval(() => {
   });
 }, 1000);
 
-(function wireSeekBar() {
-  const bar = $("pb-seek");
-  let dragging = false;
-  const hover = $("pb-seek-hover");
-  bar.addEventListener("mousemove", (ev) => {
-    const r = bar.getBoundingClientRect();
-    hover.classList.remove("hidden");
-    hover.style.left = `${ev.clientX - r.left}px`;
-    const t = seekTimeAt(ev.clientX);
-    bar.title = t === null ? "" : clockText(t);
-    if (dragging) updateSeekBar(t);
-  });
-  bar.addEventListener("mouseleave", () => hover.classList.add("hidden"));
-  bar.addEventListener("mousedown", (ev) => { dragging = true; ev.preventDefault(); });
-  window.addEventListener("mouseup", (ev) => {
-    if (!dragging) return;
-    dragging = false;
-    const t = seekTimeAt(ev.clientX);
-    if (t !== null) seekAll(t);
-  });
-})();
-
 // The top row's speed and pause: every camera, together.
 $("pb-speed").addEventListener("input", () => { $("pb-speed-label").textContent = speedText(speedValue()); });
 $("pb-speed").addEventListener("change", () => speedCells(cellsOf($("cam-grid")), speedValue()));
@@ -1749,41 +1702,22 @@ async function preparePlayback() {
   updateSeekBar();
 }
 
-const WINDOW = 12 * 3600;
-
-// The 12 hours a camera's bar shows: centred on its clock, kept inside the day.
-function windowStart(id, clock) {
-  const c = pbClips[id];
-  const day = c ? c.day_start : seekDayStart();
-  if (day === null) return null;
-  const at = clock !== null && clock !== undefined ? clock : (chosenTime() ?? day + 12 * 3600);
-  const start = Math.round((at - WINDOW / 2) / 600) * 600; // move in 10-minute steps
-  return Math.min(day + 86400 - WINDOW, Math.max(day, start));
-}
-
 function buildTimeline(cam, tile) {
   const wrap = document.createElement("div");
   const bar = document.createElement("div");
-  bar.className = "pb-bar";
-  bar.title = "This camera's recordings, 12 hours around where it is; click to move this camera only";
-  bar.addEventListener("mousemove", (ev) => {
-    const ws = Number(bar.dataset.ws);
-    if (!bar.dataset.ws) return;
-    const r = bar.getBoundingClientRect();
-    bar.title = clockText(ws + Math.floor(((ev.clientX - r.left) / r.width) * WINDOW));
-  });
-  bar.addEventListener("click", (ev) => {
-    if (!bar.dataset.ws) return;
-    const r = bar.getBoundingClientRect();
-    const at = Number(bar.dataset.ws) + Math.floor(((ev.clientX - r.left) / r.width) * WINDOW);
-    // This camera only: it gets a clock of its own.
-    startSynced([tile.closest(".cam-cell")], at, tile._sync ? tile._sync.speed : speedValue());
-  });
+  bar.className = "pb-tl";
+  bar.title = "This camera: recordings and detections. Click or drag to move this camera only; scroll to zoom";
   wrap.appendChild(bar);
-  const ends = document.createElement("div");
-  ends.className = "pb-ends";
-  ends.innerHTML = '<span class="pb-ws"></span><span class="pb-we"></span>';
-  wrap.appendChild(ends);
+  bar._tl = makeTimeline(bar, {
+    dayStart: () => seekDayStart(),
+    spans: () => tlSpans([cam.device_id]),
+    detections: () => tlDetections([cam.device_id]),
+    dataKey: () => tlKey([cam.device_id]),
+    cursor: () => tileNow(tile),
+    // This camera only: it gets a clock of its own.
+    onSeek: (at) => startSynced([tile.closest(".cam-cell")], at, tile._sync ? tile._sync.speed : speedValue()),
+    clock: (t) => clockText(t),
+  });
   const row = document.createElement("div");
   row.className = "pb-row";
   row.innerHTML = '<span class="pb-at">—</span>'
@@ -1801,58 +1735,30 @@ function buildTimeline(cam, tile) {
   return wrap;
 }
 
-// Draw the camera's recordings inside its bar's 12-hour window, and the cursor.
-function drawBar(cell, cam, clock) {
-  const bar = cell.querySelector(".pb-bar");
-  if (!bar) return;
-  const ws = windowStart(cam.device_id, clock);
-  if (ws === null) return;
-  if (bar.dataset.ws !== String(ws)) {
-    bar.dataset.ws = String(ws);
-    bar.innerHTML = "";
-    const c = pbClips[cam.device_id];
-    for (const clip of c ? c.clips : []) {
-      if (clip.end <= ws || clip.start >= ws + WINDOW) continue;
-      const a = Math.max(clip.start, ws), b = Math.min(clip.end, ws + WINDOW);
-      const seg = document.createElement("div");
-      seg.className = "clip" + (clip.video_type === 2 ? " event" : "");
-      seg.style.left = `${((a - ws) / WINDOW) * 100}%`;
-      seg.style.width = `${Math.max(0.15, ((b - a) / WINDOW) * 100)}%`;
-      seg.title = `${clockText(clip.start)} – ${clockText(clip.end)}`;
-      bar.appendChild(seg);
-    }
-    const pos = document.createElement("div");
-    pos.className = "pos hidden";
-    bar.appendChild(pos);
-    cell.querySelector(".pb-ws").textContent = clockText(ws).replace(/:\d\d (AM|PM)$/, " $1");
-    cell.querySelector(".pb-we").textContent = clockText(ws + WINDOW).replace(/:\d\d (AM|PM)$/, " $1");
-  }
-  const pos = bar.querySelector(".pos");
-  if (pos && clock !== null && clock !== undefined && clock >= ws && clock <= ws + WINDOW) {
-    pos.classList.remove("hidden");
-    pos.style.left = `${((clock - ws) / WINDOW) * 100}%`;
-  } else if (pos) {
-    pos.classList.add("hidden");
-  }
+// Redraw a camera's bar.
+function drawBar(cell) {
+  const bar = cell.querySelector(".pb-tl");
+  if (bar && bar._tl) bar._tl.draw();
 }
 
 function fillTimeline(cell, cam) {
-  const bar = cell.querySelector(".pb-bar");
   const note = cell.querySelector(".pb-note");
-  if (!bar) return;
-  delete bar.dataset.ws;
-  drawBar(cell, cam, tileNow(cell.querySelector(".cam-tile")));
+  drawBar(cell);
+  if (!note) return;
   const clips = pbClips[cam.device_id];
   if (!clips) { note.textContent = "no recording list from this camera"; return; }
   const total = clips.clips.reduce((a, c) => a + (c.end - c.start), 0);
   const card = clips.sd_card;
+  const det = clips.detections || [];
+  const people = det.filter((d) => d.label === "person").length;
+  const motion = det.filter((d) => d.label === "motion").length;
   note.textContent = clips.clips.length
-    ? `${clips.clips.length} recordings, ${Math.round(total / 60)} min` + (card.state !== "normal" ? `; card ${card.state}` : "")
+    ? `${clips.clips.length} recordings, ${Math.round(total / 60)} min; ${motion} motion, ${people} person` + (card.state !== "normal" ? `; card ${card.state}` : "")
     : (card.state === "normal" ? "nothing recorded that day" : `SD card ${card.state}`);
 }
 
 function updatePosition(cell, cam, at) {
-  drawBar(cell, cam, at);
+  drawBar(cell);
   const label = cell.querySelector(".pb-at");
   if (label) label.textContent = clockText(Math.floor(at));
 }

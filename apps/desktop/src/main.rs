@@ -400,8 +400,18 @@ struct RecordingClips {
     utc_offset_minutes: i32,
     sd_card: kagaz_core::cameras::tapo::SdCard,
     clips: Vec<kagaz_core::cameras::tapo::Clip>,
+    /// What the camera detected that day (motion, person), for the timeline.
+    detections: Vec<DetectionView>,
     /// Unix time at which the day starts on the camera's clock.
     day_start: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct DetectionView {
+    start: i64,
+    end: i64,
+    kind: u32,
+    label: &'static str,
 }
 
 /// The clips of one camera-local day ("YYYY-MM-DD").
@@ -424,6 +434,18 @@ async fn recording_clips(
             utc_offset_minutes: offset,
             sd_card: rec.sd_card().map_err(|e| e.to_string())?,
             clips: rec.clips(&day).map_err(|e| e.to_string())?,
+            // Detections are a nicety: a refusal leaves the timeline without them.
+            detections: rec
+                .detections(day_start, day_start + 86_400)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|d| DetectionView {
+                    start: d.start,
+                    end: d.end,
+                    kind: d.kind,
+                    label: d.label(),
+                })
+                .collect(),
             day_start,
         })
     })
