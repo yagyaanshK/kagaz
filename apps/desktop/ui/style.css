@@ -193,7 +193,7 @@ label small { font-size: 12px; min-height: 1.2em; }
 #cameras-open { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
 .cam-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 #cameras.pane { max-width: none; }
-#cam-grid { display: grid; grid-template-columns: repeat(var(--cols, 3), 1fr); gap: 8px; margin-top: 12px; }
+#cam-grid { display: grid; grid-template-columns: repeat(var(--cols, 3), minmax(0, 1fr)); gap: 8px; margin-top: 12px; }
 .cam-tile { background: #000; border-radius: 8px; overflow: hidden; position: relative; aspect-ratio: 16 / 9; cursor: pointer; }
 .cam-tile video-stream, .cam-tile video { width: 100%; height: 100%; display: block; object-fit: contain; background: #000; }
 .cam-tile .cam-name { position: absolute; left: 8px; bottom: 6px; color: #fff; font-size: 12px; text-shadow: 0 0 4px #000; }
@@ -216,7 +216,10 @@ label small { font-size: 12px; min-height: 1.2em; }
 .cam-group-head .cam-group-tools { display: flex; gap: 6px; margin-left: auto; }
 .cam-group-head button.small { padding: 2px 8px; font-size: 12px; }
 .cam-group.collapsed .cam-grid-inner { display: none; }
-.cam-grid-inner { display: grid; grid-template-columns: repeat(var(--cols, 3), 1fr); gap: 8px; min-height: 24px; }
+/* minmax(0, 1fr): a column never grows to fit an HD picture's natural width,
+   so an enlarged tile shrinks back to its column (measured in WebKitGTK). */
+.cam-grid-inner { display: grid; grid-template-columns: repeat(var(--cols, 3), minmax(0, 1fr)); gap: 8px; min-height: 24px; }
+.cam-cell, .cam-tile { min-width: 0; }
 .cam-grid-inner.drop-target { outline: 2px dashed var(--accent); outline-offset: 4px; border-radius: 8px; }
 .cam-tile.placeholder { aspect-ratio: 16 / 5; display: flex; align-items: center; justify-content: center; color: #fff; cursor: grab; background: #333; }
 .cam-tile.placeholder.dragging { opacity: 0.4; }
