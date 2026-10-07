@@ -228,6 +228,14 @@ fn packet_info(p: &[u8]) -> Packet {
                 | (u64::from(q[3]) << 7)
                 | (u64::from(q[4]) >> 1),
         );
+        // The camera does not flag its full frames; find them in the H.264
+        // data instead: a sequence header (SPS, 7) or an IDR slice (5).
+        let body = off + 9 + usize::from(p[off + 8]);
+        if body < TS {
+            random_access |= p[body..]
+                .windows(4)
+                .any(|w| w[..3] == [0, 0, 1] && matches!(w[3] & 0x1F, 5 | 7));
+        }
     }
     Packet {
         pid,
@@ -235,6 +243,21 @@ fn packet_info(p: &[u8]) -> Packet {
         random_access,
         pts,
     }
+}
+
+/// Where a table section starts in a packet: past any adaptation field and
+/// the pointer field. The camera pads its tables with an adaptation field.
+fn section_start(p: &[u8]) -> Option<usize> {
+    let afc = (p[3] >> 4) & 0x3;
+    let mut off = 4;
+    if afc >= 2 {
+        off += 1 + usize::from(p[4]);
+    }
+    if afc == 2 || off >= TS {
+        return None;
+    }
+    let at = off + 1 + usize::from(p[off]);
+    (at < TS).then_some(at)
 }
 
 /// The program tables (PAT, PMT) and the video PID, from the file's start.
@@ -252,16 +275,21 @@ fn tables(file: &mut std::fs::File) -> std::io::Result<(Vec<u8>, u16)> {
             continue;
         }
         let info = packet_info(p);
+        let Some(sec_at) = section_start(p) else {
+            continue;
+        };
         if info.pid == 0 && info.pusi && out.is_empty() {
             out.extend_from_slice(p);
-            let off = 5 + usize::from(p[4]);
-            if off + 12 <= TS {
-                pmt_pid = Some((u16::from(p[off + 10] & 0x1F) << 8) | u16::from(p[off + 11]));
+            let sec = &p[sec_at..];
+            if sec.len() >= 12 {
+                pmt_pid = Some((u16::from(sec[10] & 0x1F) << 8) | u16::from(sec[11]));
             }
         } else if Some(info.pid) == pmt_pid && info.pusi && out.len() == TS {
             out.extend_from_slice(p);
-            let off = 5 + usize::from(p[4]);
-            let sec = &p[off..];
+            let sec = &p[sec_at..];
+            if sec.len() < 12 {
+                continue;
+            }
             let info_len = (usize::from(sec[10] & 0x0F) << 8) | usize::from(sec[11]);
             let mut j = 12 + info_len;
             let end = ((usize::from(sec[1] & 0x0F) << 8) | usize::from(sec[2])) + 3 - 4;
