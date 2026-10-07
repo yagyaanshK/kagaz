@@ -498,9 +498,23 @@ fn stream(
     }
 
     let mut total = 0u64;
+    // A recording that stops sending video while the connection stays up
+    // (the camera can keep it alive with small messages) must not hang.
+    let mut last_video = std::time::Instant::now();
+    let stalled = |since: std::time::Instant| recorded && since.elapsed() > Duration::from_secs(60);
     let outcome = 'parts: loop {
+        if stalled(last_video) {
+            break Err(RelayError::Transport(
+                "the camera stopped sending video for a minute".into(),
+            ));
+        }
         // Skip to the next device boundary.
         loop {
+            if stalled(last_video) {
+                break 'parts Err(RelayError::Transport(
+                    "the camera stopped sending video for a minute".into(),
+                ));
+            }
             match read_line(&mut reader) {
                 Ok(line) if line.contains(DEVICE_BOUNDARY) => break,
                 Ok(_) => {}
@@ -529,6 +543,7 @@ fn stream(
             .map_err(|e| RelayError::Transport(e.to_string()))?;
         if content_type.contains("video/mp2t") {
             total += length as u64;
+            last_video = std::time::Instant::now();
             if !sink(&payload) {
                 break Ok(total);
             }

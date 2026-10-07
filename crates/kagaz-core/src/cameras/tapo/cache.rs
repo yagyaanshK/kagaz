@@ -103,11 +103,32 @@ pub fn find(root: &Path, device_id: &str, t: i64) -> Option<Entry> {
     hits.into_iter().next()
 }
 
-/// Is this whole span already on disk?
+/// How far from `start` the span is on disk, across all pieces: `start`
+/// itself when nothing is, `end` (or more) when all of it is.
+pub fn covered_until(root: &Path, device_id: &str, start: i64, end: i64) -> i64 {
+    let entries = list(root, device_id);
+    let mut at = start;
+    // Pieces may overlap a little; keep extending while one starts at or before `at`.
+    loop {
+        let next = entries
+            .iter()
+            .filter(|e| e.start <= at && e.covered_end() > at)
+            .map(|e| e.covered_end())
+            .max();
+        match next {
+            Some(t) if t > at => at = t,
+            _ => break,
+        }
+        if at >= end {
+            break;
+        }
+    }
+    at
+}
+
+/// Is this whole span already on disk (in one piece or several)?
 pub fn has_span(root: &Path, device_id: &str, start: i64, end: i64) -> bool {
-    list(root, device_id)
-        .iter()
-        .any(|e| e.start <= start && e.covered_end() >= end - 1)
+    covered_until(root, device_id, start, end) >= end - 1
 }
 
 /// Writes one span to disk as it arrives; `finish` makes it visible.
@@ -494,6 +515,8 @@ mod tests {
         assert_eq!(e.seconds, 60.0);
         assert!(has_span(&root, "DEV1", 1000, 1060));
         assert!(!has_span(&root, "DEV1", 1000, 1200));
+        assert_eq!(covered_until(&root, "DEV1", 1000, 1200), 1060);
+        assert_eq!(covered_until(&root, "DEV1", 900, 1200), 900);
         assert_eq!(find(&root, "DEV1", 1030).unwrap().start, 1000);
         assert!(find(&root, "DEV1", 1060).is_none());
         let _ = std::fs::remove_dir_all(&root);
