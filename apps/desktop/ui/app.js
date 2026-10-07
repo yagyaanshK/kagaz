@@ -619,9 +619,9 @@ function nextSpan(id, t) { const sp = spansOf(id); return sp ? sp.find((x) => x.
 // Each tile keeps its own playback clock: where it is in the camera's day,
 // running at the chosen speed. The video sets it while it plays; through a
 // gap it runs on by itself.
-function setClock(tile, at) { tile._clock = { at, wall: Date.now(), speed: speedValue() }; }
+function setClock(tile, at) { tile._clock = { at, wall: Date.now(), speed: tile._sync ? tile._sync.speed : speedValue() }; }
 function tileNow(tile) {
-  if (tile._synced && pbMaster) return masterNow();
+  if (tile._sync) return clockNow(tile._sync);
   const c = tile._clock;
   return c ? c.at + ((Date.now() - c.wall) / 1000) * c.speed : null;
 }
@@ -690,7 +690,7 @@ async function mountPlayback(tile, cam, from, opts = {}) {
   tile._clock = { at: from, wall: Date.now(), speed: 0 };
   setState(tile, "connecting", "asking the camera for its recording…");
   let handle;
-  const speed = speedValue();
+  const speed = tile._sync ? tile._sync.speed : speedValue();
   const mountId = (tile._mountId = (tile._mountId || 0) + 1);
   try {
     handle = await invoke("playback_start", { deviceId: cam.device_id, from, to, speed });
@@ -722,7 +722,7 @@ async function mountPlayback(tile, cam, from, opts = {}) {
         // How long this camera takes from asking to picture, to start it early next time.
         tile._delay = (Date.now() - tile._playback.asked) / 1000;
         // Synchronised: wait on this first frame until the shared clock gets here.
-        if (tile._synced && pbMaster) { try { v.pause(); } catch (_) {} tile._held = true; }
+        if (tile._sync) { try { v.pause(); } catch (_) {} tile._held = true; }
       }
     }
     const now = Date.now();
@@ -1026,6 +1026,66 @@ function moveCamera(id, toKey, beforeId) {
   if (at >= 0) list.splice(at, 0, id); else list.push(id);
 }
 
+// A group's own playback row: pause, a 24-hour bar for its cameras, speed.
+function buildGroupControls(box) {
+  const row = document.createElement("div");
+  row.className = "grp-controls";
+  row.innerHTML = '<button type="button" class="grp-pause" title="Pause or resume this group">\u23F8</button>'
+    + '<div class="grp-bar" title="This group\'s recordings for the day; click to move its cameras together"><div class="grp-clips"></div><div class="grp-pos hidden"></div></div>'
+    + '<span class="grp-at muted">—</span>'
+    + '<input type="range" class="grp-speed" min="-2" max="3" step="0.05" value="0" title="Speed for this group">'
+    + '<span class="grp-speed-label">1x</span>';
+  row.querySelector(".grp-pause").addEventListener("click", () => togglePause(cellsOf(box)));
+  const sl = row.querySelector(".grp-speed");
+  sl.addEventListener("input", () => { row.querySelector(".grp-speed-label").textContent = speedText(sliderSpeed(sl.value)); });
+  sl.addEventListener("change", () => speedCells(cellsOf(box), sliderSpeed(sl.value)));
+  const bar = row.querySelector(".grp-bar");
+  const timeAt = (x) => {
+    const day = seekDayStart();
+    if (day === null) return null;
+    const r = bar.getBoundingClientRect();
+    return day + Math.floor(Math.min(1, Math.max(0, (x - r.left) / r.width)) * 86400);
+  };
+  bar.addEventListener("mousemove", (ev) => { const t = timeAt(ev.clientX); bar.title = t === null ? "" : clockText(t); });
+  bar.addEventListener("click", (ev) => {
+    const t = timeAt(ev.clientX);
+    if (t === null) return;
+    const first = cellsOf(box).map((c) => c.querySelector(".cam-tile")).find((x) => x._sync);
+    startSynced(cellsOf(box), t, first ? first._sync.speed : speedValue());
+  });
+  return row;
+}
+
+// Draw a group's recordings (once per day) and where its cameras are.
+function drawGroupBar(box) {
+  const bar = box.querySelector(".grp-bar");
+  if (!bar) return;
+  const day = seekDayStart();
+  if (day === null) return;
+  const cells = cellsOf(box);
+  const key = `${day}:${cells.map((c) => (pbClips[c.dataset.id] ? 1 : 0)).join("")}`;
+  if (bar.dataset.key !== key) {
+    bar.dataset.key = key;
+    const clipsBox = bar.querySelector(".grp-clips");
+    clipsBox.innerHTML = "";
+    for (const cell of cells) {
+      for (const sp of spansOf(cell.dataset.id) || []) {
+        const seg = document.createElement("div");
+        seg.className = "clip";
+        seg.style.left = `${((sp.start - day) / 86400) * 100}%`;
+        seg.style.width = `${Math.max(0.15, ((sp.end - sp.start) / 86400) * 100)}%`;
+        clipsBox.appendChild(seg);
+      }
+    }
+  }
+  const at = cellsNow(cells);
+  const pos = bar.querySelector(".grp-pos");
+  if (at === null) { pos.classList.add("hidden"); return; }
+  pos.classList.remove("hidden");
+  pos.style.left = `${((at - day) / 86400) * 100}%`;
+  box.querySelector(".grp-at").textContent = clockText(Math.floor(at));
+}
+
 function buildGroup(g) {
   const box = document.createElement("div");
   box.className = "cam-group" + (g.collapsed ? " collapsed" : "");
@@ -1091,6 +1151,7 @@ function buildGroup(g) {
   }
   head.appendChild(tools);
   box.appendChild(head);
+  if (isPlayback() && !rearranging) box.appendChild(buildGroupControls(box));
   const inner = document.createElement("div");
   inner.className = "cam-grid-inner";
   if (rearranging) {
@@ -1178,7 +1239,7 @@ async function renderCameraGrid() {
   $("cam-viewing").classList.toggle("hidden", viewGroup === null);
   $("cam-rearrange").classList.toggle("hidden", rearranging);
   $("pb-controls").classList.toggle("hidden", !isPlayback());
-  if (!isPlayback()) { pbMaster = null; updateSeekBar(); }
+  if (!isPlayback()) { pbMaster = null; updateSeekBar(); allTiles().forEach((t) => { t._sync = null; }); }
   $("cam-reload-all").classList.toggle("hidden", isPlayback());
   for (const g of visibleGroups()) grid.appendChild(buildGroup(g));
   if (!rearranging) {
@@ -1251,89 +1312,183 @@ function updateSeekBar(at) {
   $("pb-seek-at").textContent = clockText(at);
 }
 
-// The top bar's cursor: the moment last chosen for all cameras, running on
-// at the chosen speed. Each camera keeps its own clock (its bar may have
-// moved it elsewhere).
-// The shared clock. It does not run until every camera in it has its first
-// picture (or 15 s have passed), so they all start from the same instant.
-let pbMaster = null;
-function startMaster(at) {
-  pbMaster = { at, wall: Date.now(), speed: speedValue(), running: false, since: Date.now() };
+// ---- playback clocks ----
+// A clock carries a moment of the day forward at a speed. Every playing
+// camera follows one: the whole grid's, its group's, or its own. A new
+// clock waits until all its cameras have their first picture (or 15 s),
+// so they start from the same instant; it can be paused and resumed.
+let pbMaster = null; // the clock the top bar shows (set by Play all / the top bar)
+
+function newClock(at, speed) {
+  return { at, wall: Date.now(), speed, running: false, since: Date.now(), paused: false, pausedSince: 0 };
 }
-function masterNow() {
-  if (!pbMaster) return null;
-  if (!pbMaster.running) return pbMaster.at;
-  return pbMaster.at + ((Date.now() - pbMaster.wall) / 1000) * pbMaster.speed;
+function clockNow(c) {
+  if (!c) return null;
+  if (!c.running || c.paused) return c.at;
+  return c.at + ((Date.now() - c.wall) / 1000) * c.speed;
 }
-function runMaster() {
-  if (!pbMaster || pbMaster.running) return;
-  pbMaster.running = true;
-  pbMaster.wall = Date.now();
+function runClock(c) { if (!c.running) { c.running = true; c.wall = Date.now(); } }
+function masterNow() { return clockNow(pbMaster); }
+function allTiles() { return [...$("cam-grid").querySelectorAll(".cam-tile:not(.placeholder)")]; }
+function tilesOn(c) { return allTiles().filter((t) => t._sync === c); }
+function cellsOf(root) { return [...root.querySelectorAll(".cam-cell")]; }
+function camOf(tile) { return cameraById(tile.closest(".cam-cell").dataset.id); }
+
+// Put these cameras on one new clock at `at` and start them together.
+function startSynced(cells, at, speed) {
+  const c = newClock(Math.floor(at), speed ?? speedValue());
+  for (const cell of cells) {
+    const tile = cell.querySelector(".cam-tile");
+    tile._sync = c;
+    tile._behind = 0;
+    tile._frozen = false;
+    mountPlayback(tile, cameraById(cell.dataset.id), c.at);
+  }
+  refreshPlaybackControls();
+  return c;
 }
 
-// Put these cells' cameras on the shared clock at `at` and start them together.
-function startSynced(cells, at) {
-  startMaster(at);
-  cells.forEach((cell) => {
-    const tile = cell.querySelector(".cam-tile");
-    tile._synced = true;
-    tile._behind = 0;
-    mountPlayback(tile, cameraById(cell.dataset.id), at);
-  });
+// Move every visible camera to `at`, together, on the grid's clock.
+function seekAll(at) {
+  setPickerTime(clock24(at));
+  pbMaster = startSynced(cellsOf($("cam-grid")), at, speedValue());
   updateSeekBar(at);
 }
 
-// Move every visible camera to `at`, together.
-function seekAll(at) {
-  setPickerTime(clock24(at));
-  startSynced([...$("cam-grid").querySelectorAll(".cam-cell")], at);
+// The clocks these cameras follow; a clock shared with cameras outside the
+// set is split off first (same moment, same speed), so only these change.
+function ownClocks(cells) {
+  const tiles = cells.map((c) => c.querySelector(".cam-tile")).filter((t) => t._sync);
+  const clocks = new Set();
+  for (const c of new Set(tiles.map((t) => t._sync))) {
+    const inside = tiles.filter((t) => t._sync === c);
+    if (tilesOn(c).length === inside.length) { clocks.add(c); continue; }
+    const split = { ...c, at: clockNow(c), wall: Date.now() };
+    inside.forEach((t) => { t._sync = split; });
+    clocks.add(split);
+  }
+  return [...clocks];
 }
 
-// Four times a second: keep every synchronised camera on the shared clock.
-setInterval(() => {
-  if (!isPlayback() || !pbMaster) return;
-  const tiles = [...$("cam-grid").querySelectorAll(".cam-tile")].filter((t) => t._synced);
-  if (!pbMaster.running) {
-    // Start when each camera has its first picture, is in a gap, or has failed.
-    const waiting = tiles.filter((t) => !(t._held || t._gap || t.dataset.state === "lost" || t._paused || !pbClips[t.closest(".cam-cell").dataset.id] && t.dataset.state === "live"));
-    if (waiting.length === 0 || Date.now() - pbMaster.since > 15000) runMaster();
-    else return;
+function pauseClock(c) {
+  if (c.paused) return;
+  c.at = clockNow(c);
+  c.paused = true;
+  c.pausedSince = Date.now();
+  for (const t of tilesOn(c)) {
+    const v = t.querySelector("video");
+    if (v && !v.paused) { try { v.pause(); } catch (_) {} }
+    t._held = true;
+    stopAudio(t);
   }
-  const m = masterNow();
-  for (const tile of tiles) {
-    const v = tile.querySelector("video");
-    const pb = tile._playback;
-    if (!v || !pb || !pb.firstFrame || tile._gap) continue;
-    const pos = pb.from + v.currentTime * pb.speed;
-    const diff = pos - m;
-    if (diff > 0.6) {
-      // Ahead: wait for the clock.
-      if (!v.paused) { try { v.pause(); } catch (_) {} }
-      tile._held = true;
-      tile._behind = 0;
-    } else if (tile._held && diff <= 0.15) {
-      tile._held = false;
-      v.play().catch(() => {});
-      if (tile.dataset.state === "gap") setState(tile, "live", "");
-    } else if (diff < -2.5 && !tile._held) {
-      // Behind (a slow start or a stall): ask again a little ahead and wait there.
-      tile._behind = (tile._behind || 0) + 1;
-      if (tile._behind >= 8) {
-        tile._behind = 0;
-        const lead = Math.min(20, (tile._delay || 6) + 2);
-        mountPlayback(tile, cameraById(tile.closest(".cam-cell").dataset.id), m + lead);
+}
+function resumeClock(c) {
+  if (!c.paused) return;
+  c.paused = false;
+  const frozen = tilesOn(c).filter((t) => t._frozen);
+  if (frozen.length) {
+    // Their connections were let go during a long pause: fetch again, start together.
+    c.running = false;
+    c.since = Date.now();
+    frozen.forEach((t) => { t._frozen = false; mountPlayback(t, camOf(t), c.at); });
+  } else {
+    c.wall = Date.now();
+  }
+}
+function pauseCells(cells) { ownClocks(cells).forEach(pauseClock); refreshPlaybackControls(); }
+function resumeCells(cells) { ownClocks(cells).forEach(resumeClock); refreshPlaybackControls(); }
+function cellsPaused(cells) {
+  const tiles = cells.map((c) => c.querySelector(".cam-tile")).filter((t) => t._sync);
+  return tiles.length > 0 && tiles.every((t) => t._sync.paused);
+}
+function togglePause(cells) { if (cellsPaused(cells)) resumeCells(cells); else pauseCells(cells); }
+
+// The moment these cameras are at (the first one that has a clock).
+function cellsNow(cells) {
+  for (const cell of cells) {
+    const t = tileNow(cell.querySelector(".cam-tile"));
+    if (t !== null) return t;
+  }
+  return null;
+}
+
+// A new speed for these cameras: they restart together from where they are.
+function speedCells(cells, speed) {
+  const at = cellsNow(cells);
+  if (at === null) return;
+  const c = startSynced(cells, at, speed);
+  if (cells.length === cellsOf($("cam-grid")).length) pbMaster = c;
+}
+
+// Let a long-paused camera's connection go, keeping its last frame.
+function freezeTile(tile) {
+  if (tile._watch) { clearInterval(tile._watch); tile._watch = null; }
+  if (tile._playback) {
+    const pb = tile._playback; tile._playback = null;
+    invoke("playback_stop", { token: pb.token, stream: pb.stream }).catch(() => {});
+  }
+  tile._frozen = true;
+}
+
+// Four times a second: keep every camera on its clock.
+setInterval(() => {
+  if (!isPlayback()) return;
+  const tiles = allTiles().filter((t) => t._sync);
+  for (const c of new Set(tiles.map((t) => t._sync))) {
+    const mine = tiles.filter((t) => t._sync === c);
+    if (c.paused) {
+      for (const t of mine) {
+        const v = t.querySelector("video");
+        if (v && !v.paused) { try { v.pause(); } catch (_) {} }
+        t._held = true;
       }
-    } else {
-      tile._behind = 0;
+      if (Date.now() - c.pausedSince > 20000) mine.forEach((t) => { if (t._playback) freezeTile(t); });
+      continue;
+    }
+    if (!c.running) {
+      // Start when each camera has its first picture, is in a gap, or has failed.
+      const waiting = mine.filter((t) => !(t._held || t._gap || t.dataset.state === "lost" || t._paused));
+      if (waiting.length === 0 || Date.now() - c.since > 15000) runClock(c);
+      else continue;
+    }
+    const m = clockNow(c);
+    for (const tile of mine) {
+      const v = tile.querySelector("video");
+      const pb = tile._playback;
+      if (!v || !pb || !pb.firstFrame || tile._gap) continue;
+      const diff = pb.from + v.currentTime * pb.speed - m;
+      if (diff > 0.6) {
+        // Ahead: wait for the clock.
+        if (!v.paused) { try { v.pause(); } catch (_) {} }
+        tile._held = true;
+        tile._behind = 0;
+      } else if (tile._held && diff <= 0.15) {
+        tile._held = false;
+        v.play().catch(() => {});
+        if (tile.dataset.state === "gap") setState(tile, "live", "");
+      } else if (diff < -2.5 && !tile._held) {
+        // Behind (a slow start or a stall): fetch again a little ahead and wait there.
+        tile._behind = (tile._behind || 0) + 1;
+        if (tile._behind >= 8) {
+          tile._behind = 0;
+          const lead = Math.min(20, (tile._delay || 6) + 2);
+          mountPlayback(tile, camOf(tile), m + lead);
+        }
+      } else {
+        tile._behind = 0;
+      }
     }
   }
 }, 250);
 
 // Once a second: move the cursors, and hold or resume each camera by its
-// own clock against its recording spans.
+// clock against its recording spans.
 setInterval(() => {
   if (!isPlayback()) return;
-  if (pbMaster) updateSeekBar(masterNow());
+  const top = pbMaster && tilesOn(pbMaster).length ? masterNow() : cellsNow(cellsOf($("cam-grid")));
+  if (top !== null) updateSeekBar(top);
+  document.querySelectorAll(".cam-group").forEach((box) => drawGroupBar(box));
+  refreshPlaybackControls();
   $("cam-grid").querySelectorAll(".cam-cell").forEach((cell) => {
     const tile = cell.querySelector(".cam-tile");
     const clock = tileNow(tile);
@@ -1342,28 +1497,25 @@ setInterval(() => {
     updatePosition(cell, cam, clock);
     const list = pbClips[cell.dataset.id];
     if (!list || list.date !== $("pb-date").value || tile._paused || tile.dataset.state === "lost") return;
+    if (tile._sync && tile._sync.paused) return;
     if (clock < list.day_start || clock >= list.day_start + 86400) return;
+    const running = tile._sync && tile._sync.running;
+    const lead = Math.min(20, (tile._delay || 6) + 2);
     const span = spanAt(cam.device_id, clock);
     if (!span) {
       // A recording already fetched ahead for the end of this gap: keep it, keep the veil.
       const pending = tile._prefetching || (tile._playback && tile._playback.from > clock);
       if (!pending && !tile._gap) enterGap(tile, cam, clock);
       gapText(tile, cam, clock);
-      // On the shared clock: fetch the next recording from its exact start a
-      // little before the clock gets there, and hold it until then.
+      // Fetch the next recording from its exact start a little before the
+      // clock gets there, and hold it until then.
       const next = nextSpan(cam.device_id, clock);
-      const lead = Math.min(20, (tile._delay || 6) + 2);
-      if (tile._synced && pbMaster && pbMaster.running && next && clock >= next.start - lead && !pending) {
+      if (running && next && clock >= next.start - lead && !pending) {
         tile._prefetching = true;
         mountPlayback(tile, cam, next.start).finally(() => { tile._prefetching = false; });
       }
     } else if (tile._gap || (tile._ended && clock < span.end - 2)) {
-      if (tile._synced && pbMaster && pbMaster.running) {
-        const lead = Math.min(20, (tile._delay || 6) + 2);
-        mountPlayback(tile, cam, Math.min(span.end - 1, clock + lead));
-      } else {
-        mountPlayback(tile, cam, clock);
-      }
+      mountPlayback(tile, cam, running ? Math.min(span.end - 1, clock + lead) : clock);
     }
   });
 }, 1000);
@@ -1390,20 +1542,40 @@ setInterval(() => {
   });
 })();
 
+// The top row's speed and pause: every camera, together.
 $("pb-speed").addEventListener("input", () => { $("pb-speed-label").textContent = speedText(speedValue()); });
-$("pb-speed").addEventListener("change", () => {
-  // Cameras on the shared clock restart together at the new speed.
-  const synced = [...$("cam-grid").querySelectorAll(".cam-cell")].filter((c) => c.querySelector(".cam-tile")._synced);
-  if (pbMaster && synced.length) startSynced(synced, Math.floor(masterNow()));
-  // The others, each from where it is.
-  $("cam-grid").querySelectorAll(".cam-tile").forEach((tile) => {
-    if (tile._synced) return;
-    const at = tileNow(tile);
-    if (at === null) return;
-    if (tile._gap) { setClock(tile, at); return; }
-    mountPlayback(tile, cameraById(tile.closest(".cam-cell").dataset.id), at);
+$("pb-speed").addEventListener("change", () => speedCells(cellsOf($("cam-grid")), speedValue()));
+$("pb-pause").addEventListener("click", () => togglePause(cellsOf($("cam-grid"))));
+
+// Speed sliders run from 0.25x to 8x on a log scale.
+function sliderSpeed(v) { return Math.round(Math.pow(2, Number(v)) * 20) / 20; }
+function speedSlider(speed) { return String(Math.log2(speed || 1)); }
+
+// Pause buttons and speed sliders say what their cameras are doing.
+function refreshPlaybackControls() {
+  const gp = $("pb-pause");
+  if (gp) gp.textContent = cellsPaused(cellsOf($("cam-grid"))) ? "▶ Resume all" : "⏸ Pause all";
+  document.querySelectorAll(".cam-group").forEach((box) => {
+    const b = box.querySelector(".grp-pause");
+    if (b) b.textContent = cellsPaused(cellsOf(box)) ? "▶" : "⏸";
+    const sl = box.querySelector(".grp-speed");
+    const first = cellsOf(box).map((c) => c.querySelector(".cam-tile")).find((t) => t._sync);
+    if (sl && first && document.activeElement !== sl) {
+      sl.value = speedSlider(first._sync.speed);
+      box.querySelector(".grp-speed-label").textContent = speedText(first._sync.speed);
+    }
   });
-});
+  allTiles().forEach((tile) => {
+    const cell = tile.closest(".cam-cell");
+    const b = cell.querySelector(".tile-pause");
+    if (b) b.textContent = tile._sync && tile._sync.paused ? "▶" : "⏸";
+    const sl = cell.querySelector(".tile-speed");
+    if (sl && tile._sync && document.activeElement !== sl) {
+      sl.value = speedSlider(tile._sync.speed);
+      cell.querySelector(".tile-speed-label").textContent = speedText(tile._sync.speed);
+    }
+  });
+}
 
 // The gear menu.
 $("cam-gear").addEventListener("click", (ev) => { ev.stopPropagation(); $("cam-settings").classList.toggle("hidden"); });
@@ -1538,7 +1710,7 @@ async function preparePlayback() {
     tile._gap = false;
     tile._clock = null;
     tile._ended = false;
-    tile._synced = false;
+    tile._sync = null;
     tile._held = false;
     setState(tile, "lost", "pick a time and press Play, or click the timeline");
     tile.querySelector(".cam-reload")?.classList.add("hidden");
@@ -1604,10 +1776,8 @@ function buildTimeline(cam, tile) {
     if (!bar.dataset.ws) return;
     const r = bar.getBoundingClientRect();
     const at = Number(bar.dataset.ws) + Math.floor(((ev.clientX - r.left) / r.width) * WINDOW);
-    // This camera only: it leaves the shared clock.
-    tile._synced = false;
-    tile._held = false;
-    mountPlayback(tile, cam, at);
+    // This camera only: it gets a clock of its own.
+    startSynced([tile.closest(".cam-cell")], at, tile._sync ? tile._sync.speed : speedValue());
   });
   wrap.appendChild(bar);
   const ends = document.createElement("div");
@@ -1616,7 +1786,16 @@ function buildTimeline(cam, tile) {
   wrap.appendChild(ends);
   const row = document.createElement("div");
   row.className = "pb-row";
-  row.innerHTML = '<span class="pb-at">—</span><button type="button" class="pb-download">Download…</button><span class="muted pb-note"></span>';
+  row.innerHTML = '<span class="pb-at">—</span>'
+    + '<button type="button" class="tile-pause" title="Pause or resume this camera">\u23F8</button>'
+    + '<input type="range" class="tile-speed" min="-2" max="3" step="0.05" value="0" title="Speed for this camera">'
+    + '<span class="tile-speed-label">1x</span>'
+    + '<button type="button" class="pb-download">Download…</button><span class="muted pb-note"></span>';
+  const cellOf = () => tile.closest(".cam-cell");
+  row.querySelector(".tile-pause").addEventListener("click", () => togglePause([cellOf()]));
+  const tsl = row.querySelector(".tile-speed");
+  tsl.addEventListener("input", () => { row.querySelector(".tile-speed-label").textContent = speedText(sliderSpeed(tsl.value)); });
+  tsl.addEventListener("change", () => speedCells([cellOf()], sliderSpeed(tsl.value)));
   row.querySelector(".pb-download").addEventListener("click", () => downloadForm(wrap, cam, tile));
   wrap.appendChild(row);
   return wrap;
@@ -1681,11 +1860,8 @@ function updatePosition(cell, cam, at) {
 function playAll(root) {
   const from = chosenTime();
   if (from === null) { $("cam-message").textContent = "Pick a date first."; return; }
-  // Cameras outside this group leave the shared clock and keep their own.
-  $("cam-grid").querySelectorAll(".cam-tile").forEach((t) => {
-    if (t._synced && !root.contains(t)) { setClock(t, tileNow(t) ?? from); t._synced = false; }
-  });
-  startSynced([...root.querySelectorAll(".cam-cell")], from);
+  const c = startSynced(cellsOf(root), from, speedValue());
+  if (root === $("cam-grid")) { pbMaster = c; updateSeekBar(from); }
 }
 
 function playGroup(box) { playAll(box); }

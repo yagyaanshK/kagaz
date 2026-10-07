@@ -144,6 +144,20 @@ with the commit that closes them.
       a real 60 s gap: the stream stopped at the gap's start. The camera
       user id is now asked once per camera and retried on -71101, which
       had left a camera without its recording list.
+- [ ] **Playback clocks for the grid, each group and each camera**
+      (2026-10-08, written, not yet tried in the window): Play all and the
+      top bar start every camera from the same instant (each waits on its
+      first frame); ahead cameras pause for their clock, behind ones are
+      fetched again a little ahead. Pause and speed on every camera, a
+      group row (pause, 24-hour bar, speed), Pause all. A pause over 20 s
+      lets the cameras' connections go and resumes them together.
+- [ ] **Recordings cache and kagaz tapo fetch** (2026-10-08): written and
+      checked on a real minute of footage (seek to the full frame before,
+      paced at real time). The first full run of 1 October collided with
+      the window's playback: a camera sends one recording at a time and the
+      relay gives it to the newest request, so a fetch and window playback
+      of the same camera cut each other off. Run fetches while the window
+      is not playing back those cameras.
 - [ ] **Engine crash under a burst of stream additions**: go2rtc 1.9.14
       died with "concurrent map writes" when seven playbacks were added at
       once; additions and removals now go one at a time. If it recurs, the
