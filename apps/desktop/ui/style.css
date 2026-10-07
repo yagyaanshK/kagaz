@@ -269,7 +269,7 @@ label small { font-size: 12px; min-height: 1.2em; }
 #pb-speed { width: 120px; }
 #pb-speed-label { min-width: 40px; font-variant-numeric: tabular-nums; }
 .pb-pick { display: inline-flex; align-items: center; gap: 2px; }
-.pb-pick select { padding: 4px 2px; min-width: 0; }
+.pb-pick select { padding: 4px 22px 4px 7px; min-width: 0; background-position: calc(100% - 12px) 55%, calc(100% - 7px) 55%; }
 .pb-pick .sep { color: var(--muted, #888); }
 /* A camera with nothing recorded for the moment being played: last frame under a dark veil */
 .cam-tile[data-state="gap"] .cam-overlay { background: rgba(0,0,0,0.7); }
