@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/logo.svg" alt="Kagaz" width="96" height="96"></p>
+
 # Kagaz
 
 **Devices that just work. Any OS, any device, any connection.**
