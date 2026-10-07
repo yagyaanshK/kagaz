@@ -274,3 +274,5 @@ label small { font-size: 12px; min-height: 1.2em; }
 /* A camera with nothing recorded for the moment being played: last frame under a dark veil */
 .cam-tile[data-state="gap"] .cam-overlay { background: rgba(0,0,0,0.7); }
 .cam-tile[data-state="gap"] .spinner, .cam-tile[data-state="gap"] .cam-reload { display: none; }
+.pb-ends { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); margin-top: 1px; }
+.pb-bar .pos { width: 3px; background: #fff; box-shadow: 0 0 3px #000; mix-blend-mode: normal; }

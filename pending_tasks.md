@@ -135,6 +135,15 @@ with the commit that closes them.
       starts again by itself when the clock reaches its next recording.
       Day and time are dropdowns (dd/mm/yyyy, hh:mm:ss; a dot marks days
       with footage on the first camera).
+- [x] **Per-camera clocks and bars; playback bounded by recording spans**
+      (2026-10-07): each camera keeps its own playback clock; its bar shows
+      12 hours around it with a cursor and seeks only that camera, the top
+      bar shows 24 hours and moves all. A camera's stream skips its own
+      gaps, so each playback is asked only to the end of the current
+      recording span (clips with seams of 2 s or less joined); verified on
+      a real 60 s gap: the stream stopped at the gap's start. The camera
+      user id is now asked once per camera and retried on -71101, which
+      had left a camera without its recording list.
 - [ ] **Engine crash under a burst of stream additions**: go2rtc 1.9.14
       died with "concurrent map writes" when seven playbacks were added at
       once; additions and removals now go one at a time. If it recurs, the

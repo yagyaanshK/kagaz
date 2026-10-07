@@ -77,12 +77,45 @@ impl<'a> Recordings<'a> {
     }
 
     /// The device-side user id that `searchVideoOfDay` and playback need.
+    /// It is stable, so it is asked for once per camera and remembered;
+    /// the camera sometimes refuses the question (-71101) when asked often,
+    /// so a refusal is retried a few times.
     pub fn user_id(&self) -> Result<u64, CloudError> {
-        let result = self.call("getUserID", json!({ "system": { "get_user_id": "null" } }))?;
-        parse_user_id(&result).ok_or_else(|| CloudError::Rejected {
-            status: 200,
-            message: "getUserID returned no user_id".into(),
-        })
+        if let Some(id) = user_ids()
+            .lock()
+            .ok()
+            .and_then(|m| m.get(&self.camera.device_id).copied())
+        {
+            return Ok(id);
+        }
+        let mut last = None;
+        for attempt in 0..4u64 {
+            if attempt > 0 {
+                std::thread::sleep(std::time::Duration::from_millis(700 * attempt));
+            }
+            match self.call("getUserID", json!({ "system": { "get_user_id": "null" } })) {
+                Ok(result) => {
+                    let id = parse_user_id(&result).ok_or_else(|| CloudError::Rejected {
+                        status: 200,
+                        message: "getUserID returned no user_id".into(),
+                    })?;
+                    if let Ok(mut m) = user_ids().lock() {
+                        m.insert(self.camera.device_id.clone(), id);
+                    }
+                    return Ok(id);
+                }
+                Err(e @ CloudError::Rejected { .. }) => last = Some(e),
+                Err(e) => return Err(e),
+            }
+        }
+        Err(last.expect("at least one attempt"))
+    }
+
+    /// Forget the remembered user id (the camera said it is no longer valid).
+    pub fn forget_user_id(&self) {
+        if let Ok(mut m) = user_ids().lock() {
+            m.remove(&self.camera.device_id);
+        }
     }
 
     /// The camera's UTC offset in minutes (its clock decides the recording days).
@@ -107,12 +140,22 @@ impl<'a> Recordings<'a> {
 
     /// The clips of one camera-local day (`YYYYMMDD`), oldest first.
     pub fn clips(&self, date: &str) -> Result<Vec<Clip>, CloudError> {
-        let uid = self.user_id()?;
-        let result = self.call(
-            "searchVideoOfDay",
-            json!({ "playback": { "search_video_utility": {
-                "channel": 0, "date": date, "end_index": 999_999_999, "id": uid, "start_index": 0 } } }),
-        )?;
+        let ask = |uid: u64| {
+            self.call(
+                "searchVideoOfDay",
+                json!({ "playback": { "search_video_utility": {
+                    "channel": 0, "date": date, "end_index": 999_999_999, "id": uid, "start_index": 0 } } }),
+            )
+        };
+        let result = match ask(self.user_id()?) {
+            Ok(r) => r,
+            // A stale user id: ask for a fresh one and try once more.
+            Err(CloudError::Rejected { message, .. }) if message.contains("-7110") => {
+                self.forget_user_id();
+                ask(self.user_id()?)?
+            }
+            Err(e) => return Err(e),
+        };
         Ok(parse_clips(&result))
     }
 
@@ -191,6 +234,12 @@ impl PullError {
     pub fn is_busy(&self) -> bool {
         matches!(self, PullError::Relay(RelayError::Refused(-52405)))
     }
+}
+
+fn user_ids() -> &'static std::sync::Mutex<std::collections::HashMap<String, u64>> {
+    static IDS: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, u64>>> =
+        std::sync::OnceLock::new();
+    IDS.get_or_init(Default::default)
 }
 
 /// The track id the app uses for a recording download.
