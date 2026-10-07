@@ -8,6 +8,13 @@ fn main() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../drivers");
     let mut files: Vec<PathBuf> = Vec::new();
     collect(&root, &mut files);
+    // An empty database would build fine and ship without any driver; a
+    // folder that could not be read (a shared drive blinking) must not.
+    assert!(
+        !files.is_empty(),
+        "no driver files found under {}; is the drivers folder readable?",
+        root.display()
+    );
     files.sort();
     let mut out = String::from("/// (relative path, contents) of every drivers/*.toml at build time.\npub static EMBEDDED: &[(&str, &str)] = &[\n");
     for f in &files {
@@ -31,9 +38,8 @@ fn main() {
 }
 
 fn collect(dir: &Path, out: &mut Vec<PathBuf>) {
-    let Ok(entries) = fs::read_dir(dir) else {
-        return;
-    };
+    let entries = fs::read_dir(dir)
+        .unwrap_or_else(|e| panic!("cannot read {}: {e}", dir.display()));
     for e in entries.flatten() {
         let p = e.path();
         if p.is_dir() {
