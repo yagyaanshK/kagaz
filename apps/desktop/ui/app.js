@@ -1100,7 +1100,7 @@ setInterval(() => {
   updateSeekBar(clock);
   $("cam-grid").querySelectorAll(".cam-cell").forEach((cell) => {
     const clips = pbClips[cell.dataset.id];
-    if (!clips) return;
+    if (!clips || clock < clips.day_start || clock >= clips.day_start + 86400) return;
     const tile = cell.querySelector(".cam-tile");
     const cam = cameraById(cell.dataset.id);
     const covered = clips.clips.some((c) => c.start <= clock && clock < c.end);
@@ -1283,8 +1283,12 @@ async function preparePlayback() {
     }
   }
   const date = $("pb-date").value;
+  pbClips = {};
+  pbMaster = null;
+  updateSeekBar();
   for (const cell of cells) {
     const tile = cell.querySelector(".cam-tile");
+    tile._gap = false;
     setState(tile, "lost", "pick a time and press Play, or click the timeline");
     tile.querySelector(".cam-reload")?.classList.add("hidden");
   }
@@ -1320,14 +1324,14 @@ function buildTimeline(cam, tile) {
   const wrap = document.createElement("div");
   const bar = document.createElement("div");
   bar.className = "pb-bar";
-  bar.title = "The day's recordings; click to play from there";
+  bar.title = "This camera's recordings for the day; click to move every camera to that moment";
   bar.addEventListener("click", (ev) => {
     const clips = pbClips[cam.device_id];
     if (!clips) return;
     const r = bar.getBoundingClientRect();
     const at = clips.day_start + Math.floor(((ev.clientX - r.left) / r.width) * 86400);
-    tile._gap = false;
-    mountPlayback(tile, cam, at);
+    // One clock for all: a click on any camera's bar moves every camera.
+    seekAll(at);
   });
   wrap.appendChild(bar);
   const row = document.createElement("div");
@@ -1377,7 +1381,7 @@ function updatePosition(cell, cam, at) {
 function playAll(root) {
   const from = chosenTime();
   if (from === null) { $("cam-message").textContent = "Pick a date first."; return; }
-  if (root === $("cam-grid")) startMaster(from);
+  startMaster(from);
   root.querySelectorAll(".cam-tile").forEach((t) => { t._gap = false; });
   root.querySelectorAll(".cam-cell").forEach((cell) => {
     const cam = cameraById(cell.dataset.id);
