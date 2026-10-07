@@ -47,6 +47,26 @@ impl Clip {
     }
 }
 
+/// Something the camera noticed, unix seconds.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Detection {
+    pub start: i64,
+    pub end: i64,
+    /// The camera's alarm type: 2 motion, 6 person (others as the camera reports).
+    pub kind: u32,
+}
+
+impl Detection {
+    /// A word for the kind, as the Tapo app labels its timeline.
+    pub fn label(&self) -> &'static str {
+        match self.kind {
+            2 => "motion",
+            6 => "person",
+            _ => "detection",
+        }
+    }
+}
+
 /// A camera's recordings reached through one session.
 pub struct Recordings<'a> {
     pub session: &'a Session,
@@ -170,6 +190,32 @@ impl<'a> Recordings<'a> {
             Err(e) => return Err(e),
         };
         Ok(parse_clips(&result))
+    }
+
+    /// What the camera detected between two unix times (motion, person, ...),
+    /// oldest first. Read-only; asked in pages of a thousand.
+    pub fn detections(&self, start: i64, end: i64) -> Result<Vec<Detection>, CloudError> {
+        const PAGE: i64 = 999;
+        let mut out = Vec::new();
+        let mut index = 0i64;
+        loop {
+            let result = self.call(
+                "searchDetectionList",
+                json!({ "playback": { "search_detection_list": {
+                    "start_index": index, "channel": 0, "start_time": start,
+                    "end_time": end, "end_index": index + PAGE } } }),
+            )?;
+            let page = parse_detections(&result);
+            let got = page.len() as i64;
+            out.extend(page);
+            if got <= PAGE {
+                break;
+            }
+            index += PAGE + 1;
+        }
+        out.sort_by_key(|d| d.start);
+        out.dedup();
+        Ok(out)
     }
 
     /// Pull the footage between two unix times through the relay as fast as
@@ -419,6 +465,29 @@ fn bytes_from_text(s: &str) -> u64 {
     (number * factor) as u64
 }
 
+fn parse_detections(result: &Value) -> Vec<Detection> {
+    result
+        .pointer("/playback/search_detection_list")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|e| {
+            let num = |k: &str| {
+                e.get(k).and_then(|v| {
+                    v.as_i64()
+                        .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
+                })
+            };
+            let (start, end) = (num("start_time")?, num("end_time")?);
+            (end >= start).then_some(Detection {
+                start,
+                end,
+                kind: num("alarm_type").unwrap_or(0) as u32,
+            })
+        })
+        .collect()
+}
+
 fn parse_user_id(result: &Value) -> Option<u64> {
     let v = result
         .get("user_id")
@@ -602,5 +671,19 @@ mod tests {
         );
         assert_eq!(parse_time("2026-07-01 24:00", 0), None);
         assert_eq!(dash_date("20260701"), "2026-07-01");
+        let d = parse_detections(&json!({ "playback": { "search_detection_list": [
+            { "alarm_type": 6, "start_time": 100, "end_time": 280 },
+            { "alarm_type": "2", "start_time": "300", "end_time": "310" },
+            { "alarm_type": 2, "start_time": 500, "end_time": 400 } ] } }));
+        assert_eq!(d.len(), 2);
+        assert_eq!(d[0].label(), "person");
+        assert_eq!(
+            d[1],
+            Detection {
+                start: 300,
+                end: 310,
+                kind: 2
+            }
+        );
     }
 }

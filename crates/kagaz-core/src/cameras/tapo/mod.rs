@@ -13,7 +13,7 @@ pub mod serve;
 pub mod tls;
 
 pub use cloud::{Camera, CloudError, Session};
-pub use recordings::{Clip, Recordings, SdCard};
+pub use recordings::{Clip, Detection, Recordings, SdCard};
 pub use relay::{
     request_relay, request_relay_for, stream_download, stream_playback, stream_preview, RelayError,
     RelayParams, STREAM_PLAYBACK, STREAM_PREVIEW,

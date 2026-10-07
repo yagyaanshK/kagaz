@@ -300,3 +300,31 @@ label small { font-size: 12px; min-height: 1.2em; }
 .grp-bar .grp-pos { position: absolute; top: 0; bottom: 0; width: 3px; background: #fff; box-shadow: 0 0 3px #000; }
 .grp-at { min-width: 92px; font-size: 12px; font-variant-numeric: tabular-nums; }
 .grp-controls .grp-speed { width: 90px; accent-color: var(--accent); }
+
+/* Seek bars (timeline.js): detections lane, recordings track, time scale */
+.tl { position: relative; user-select: none; }
+.tl-events { position: relative; height: 7px; margin-bottom: 2px; }
+.tl-det { position: absolute; top: 0; bottom: 0; border-radius: 2px; cursor: pointer; }
+.tl-motion { background: #e8892f; }
+.tl-person { background: #3d8bfd; }
+.tl-detection { background: #b48ce0; }
+.tl-det:hover { outline: 1px solid #fff; z-index: 2; }
+.tl-track { position: relative; height: 16px; background: var(--line); border-radius: 4px; cursor: crosshair; overflow: visible; }
+.tl-spans { position: absolute; inset: 0; overflow: hidden; border-radius: 4px; }
+.tl-span { position: absolute; top: 0; bottom: 0; background: var(--accent); opacity: 0.6; }
+.tl-span.tl-event-rec { background: #e8892f; opacity: 0.45; }
+.tl-pos { position: absolute; top: -3px; bottom: -3px; width: 3px; margin-left: -1px; background: #fff; box-shadow: 0 0 3px #000; border-radius: 2px; pointer-events: none; z-index: 3; }
+.tl-ghost { position: absolute; top: -4px; bottom: -4px; width: 1px; background: rgba(255,255,255,0.75); pointer-events: none; z-index: 4; }
+.tl-ghost.tl-drag { width: 3px; margin-left: -1px; background: #ffd24a; box-shadow: 0 0 4px #000; }
+.tl-tip { position: absolute; bottom: calc(100% + 4px); left: 50%; transform: translateX(-50%); white-space: nowrap; font-size: 11px; padding: 1px 6px; border-radius: 4px; background: #000; color: #fff; }
+.tl-scale { position: relative; height: 15px; font-size: 10px; color: var(--muted); }
+.tl-tick { position: absolute; top: 2px; transform: translateX(-50%); white-space: nowrap; }
+.tl-tick::before { content: ""; position: absolute; left: 50%; top: -3px; width: 1px; height: 3px; background: var(--muted); }
+#pb-seek { flex: 1 1 320px; }
+.grp-tl { flex: 1 1 220px; }
+.pb-tl { margin-top: 2px; }
+.tl-legend { font-size: 11px; color: var(--muted); display: inline-flex; align-items: center; gap: 4px; }
+.tl-key { display: inline-block; width: 10px; height: 8px; border-radius: 2px; margin-left: 6px; }
+.tl-key-rec { background: var(--accent); }
+.tl-key-motion { background: #e8892f; }
+.tl-key-person { background: #3d8bfd; }
