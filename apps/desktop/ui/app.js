@@ -1081,7 +1081,7 @@ function startMaster(at) { pbMaster = { at, wall: Date.now(), speed: speedValue(
 function masterNow() { return pbMaster ? pbMaster.at + Math.floor(((Date.now() - pbMaster.wall) / 1000) * pbMaster.speed) : null; }
 
 function seekAll(at) {
-  setPickerTime(clockText(at));
+  setPickerTime(clock24(at));
   startMaster(at);
   $("cam-grid").querySelectorAll(".cam-cell").forEach((cell) => {
     const cam = cameraById(cell.dataset.id);
@@ -1175,7 +1175,15 @@ function chosenTime() {
   return Date.UTC(y, m - 1, day, hh, mm, ss || 0) / 1000 - pbOffset * 60;
 }
 
+// hh:mm:ss on a 12-hour clock with AM/PM.
 function clockText(unix) {
+  const d = new Date((unix + pbOffset * 60) * 1000);
+  const p = (n) => String(n).padStart(2, "0");
+  const h = d.getUTCHours();
+  return `${p(h % 12 || 12)}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())} ${h < 12 ? "AM" : "PM"}`;
+}
+// hh:mm:ss on the 24-hour clock, for the download form's time field.
+function clock24(unix) {
   const d = new Date((unix + pbOffset * 60) * 1000);
   const p = (n) => String(n).padStart(2, "0");
   return `${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}`;
@@ -1215,7 +1223,7 @@ function buildPickers(todayIso) {
   const hours = [], minutes = [];
   for (let h = 0; h < 24; h++) hours.push(pad2(h));
   for (let m = 0; m < 60; m++) minutes.push(pad2(m));
-  fillSelect("pb-h", hours, null, "10");
+  fillSelect("pb-h", hours.slice(1, 13), null, "10");
   fillSelect("pb-m", minutes, null, "00");
   fillSelect("pb-s", minutes, null, "00");
 }
@@ -1238,20 +1246,24 @@ function setPickerDate(iso) {
   $("pb-date").value = iso;
 }
 
+// Set the time dropdowns from a 24-hour "hh:mm:ss".
 function setPickerTime(hms) {
-  const [h, m, s] = hms.split(":");
-  $("pb-h").value = h; $("pb-m").value = m; $("pb-s").value = s || "00";
-  $("pb-time").value = `${h}:${m}:${s || "00"}`;
+  const [h, m, s] = hms.split(":").map(Number);
+  $("pb-h").value = pad2(h % 12 || 12); $("pb-m").value = pad2(m); $("pb-s").value = pad2(s || 0);
+  $("pb-ap").value = h < 12 ? "AM" : "PM";
+  $("pb-time").value = `${pad2(h)}:${pad2(m)}:${pad2(s || 0)}`;
 }
 
 function readPickers() {
   $("pb-date").value = `${$("pb-yy").value}-${$("pb-mm").value}-${$("pb-dd").value}`;
-  $("pb-time").value = `${$("pb-h").value}:${$("pb-m").value}:${$("pb-s").value}`;
+  let h = Number($("pb-h").value) % 12;
+  if ($("pb-ap").value === "PM") h += 12;
+  $("pb-time").value = `${pad2(h)}:${$("pb-m").value}:${$("pb-s").value}`;
 }
 
 ["pb-yy", "pb-mm"].forEach((id) => $(id).addEventListener("change", () => { refreshDays(); readPickers(); if (camStatus && camStatus.running) renderCameraGrid(); }));
 $("pb-dd").addEventListener("change", () => { readPickers(); if (camStatus && camStatus.running) renderCameraGrid(); });
-["pb-h", "pb-m", "pb-s"].forEach((id) => $(id).addEventListener("change", readPickers));
+["pb-h", "pb-m", "pb-s", "pb-ap"].forEach((id) => $(id).addEventListener("change", readPickers));
 
 // Ask every visible camera for the chosen day's clips; fill the timelines.
 async function preparePlayback() {
@@ -1382,7 +1394,7 @@ function downloadForm(wrap, cam, tile) {
   form = document.createElement("div");
   form.className = "pb-form";
   const at = tile._playback ? tile._playback.from : chosenTime();
-  const start = at !== null ? clockText(at) : ($("pb-time").value || "10:00:00");
+  const start = at !== null ? clock24(at) : ($("pb-time").value || "10:00:00");
   form.innerHTML = `from <input type="time" class="pb-from" value="${start}" step="1"> for <input type="number" class="pb-mins" value="10" min="1" max="720"> min <button type="button" class="pb-save">Save as MP4…</button><span class="muted pb-dl-note"></span>`;
   form.querySelector(".pb-save").addEventListener("click", async () => {
     const clips = pbClips[cam.device_id];
