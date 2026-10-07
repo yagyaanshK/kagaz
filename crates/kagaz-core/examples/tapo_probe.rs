@@ -84,6 +84,7 @@ fn main() {
         }
         let mut ct = String::new();
         let mut len = 0usize;
+        let mut head = Vec::new();
         loop {
             line.clear();
             r.read_line(&mut line).unwrap();
@@ -91,6 +92,7 @@ fn main() {
             if t.is_empty() {
                 break;
             }
+            head.push(t.to_string());
             let (k, v) = t.split_once(':').unwrap_or((t, ""));
             if k.eq_ignore_ascii_case("content-type") {
                 ct = v.trim().to_string();
@@ -102,6 +104,10 @@ fn main() {
         let mut payload = vec![0u8; len];
         r.read_exact(&mut payload).unwrap();
         parts += 1;
+        // PROBE_HEADERS=1 prints the first parts' header lines.
+        if std::env::var("PROBE_HEADERS").is_ok() && parts <= 4 {
+            println!("  part {parts} headers: {}", head.join(" | "));
+        }
         if ct.contains("mp2t") {
             video += len as u64;
             if parts % 50 == 0 {

@@ -70,3 +70,25 @@ pub fn config_dir() -> PathBuf {
             .join("kagaz")
     }
 }
+
+/// Where fetched camera recordings are kept: `KAGAZ_RECORDINGS_DIR`, else
+/// `recordings_dir` in `<config>/settings.toml`, else `<cache>/recordings`.
+pub fn recordings_dir() -> PathBuf {
+    if let Some(dir) = std::env::var_os("KAGAZ_RECORDINGS_DIR").filter(|d| !d.is_empty()) {
+        return PathBuf::from(dir);
+    }
+    setting("recordings_dir")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| cache_dir().join("recordings"))
+}
+
+/// One string value from `<config>/settings.toml`, if set.
+pub fn setting(key: &str) -> Option<String> {
+    let text = std::fs::read_to_string(config_dir().join("settings.toml")).ok()?;
+    let table: toml::Table = toml::from_str(&text).ok()?;
+    table
+        .get(key)
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+}

@@ -77,19 +77,17 @@ impl<'a> Recordings<'a> {
     }
 
     /// The device-side user id that `searchVideoOfDay` and playback need.
-    /// It is stable, so it is asked for once per camera and remembered;
-    /// the camera sometimes refuses the question (-71101) when asked often,
-    /// so a refusal is retried a few times.
+    /// A camera honours one id at a time and refuses to hand out new ones
+    /// when asked often (-71101), so the id is kept (in memory and in
+    /// `<config>/tapo-user-ids.json`) and reused until the camera calls it
+    /// invalid. When it will not give one, the valid id is found by trying
+    /// the small numbers it hands out with a read-only search.
     pub fn user_id(&self) -> Result<u64, CloudError> {
-        if let Some(id) = user_ids()
-            .lock()
-            .ok()
-            .and_then(|m| m.get(&self.camera.device_id).copied())
-        {
+        if let Some(id) = remembered_user_id(&self.camera.device_id) {
             return Ok(id);
         }
         let mut last = None;
-        for attempt in 0..4u64 {
+        for attempt in 0..3u64 {
             if attempt > 0 {
                 std::thread::sleep(std::time::Duration::from_millis(700 * attempt));
             }
@@ -99,23 +97,38 @@ impl<'a> Recordings<'a> {
                         status: 200,
                         message: "getUserID returned no user_id".into(),
                     })?;
-                    if let Ok(mut m) = user_ids().lock() {
-                        m.insert(self.camera.device_id.clone(), id);
-                    }
+                    remember_user_id(&self.camera.device_id, Some(id));
                     return Ok(id);
                 }
                 Err(e @ CloudError::Rejected { .. }) => last = Some(e),
                 Err(e) => return Err(e),
             }
         }
+        if let Some(id) = self.find_valid_user_id() {
+            remember_user_id(&self.camera.device_id, Some(id));
+            return Ok(id);
+        }
         Err(last.expect("at least one attempt"))
+    }
+
+    /// Try the small ids the camera hands out with a search that changes nothing.
+    fn find_valid_user_id(&self) -> Option<u64> {
+        (1..=16u64).find(|&id| {
+            match self.call(
+                "searchVideoOfDay",
+                json!({ "playback": { "search_video_utility": {
+                    "channel": 0, "date": "20000101", "end_index": 0, "id": id, "start_index": 0 } } }),
+            ) {
+                Ok(_) => true,
+                Err(CloudError::Rejected { message, .. }) => !message.contains("-71103"),
+                Err(_) => false,
+            }
+        })
     }
 
     /// Forget the remembered user id (the camera said it is no longer valid).
     pub fn forget_user_id(&self) {
-        if let Ok(mut m) = user_ids().lock() {
-            m.remove(&self.camera.device_id);
-        }
+        remember_user_id(&self.camera.device_id, None);
     }
 
     /// The camera's UTC offset in minutes (its clock decides the recording days).
@@ -239,7 +252,39 @@ impl PullError {
 fn user_ids() -> &'static std::sync::Mutex<std::collections::HashMap<String, u64>> {
     static IDS: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, u64>>> =
         std::sync::OnceLock::new();
-    IDS.get_or_init(Default::default)
+    IDS.get_or_init(|| {
+        let saved = std::fs::read_to_string(user_ids_path())
+            .ok()
+            .and_then(|t| serde_json::from_str(&t).ok())
+            .unwrap_or_default();
+        std::sync::Mutex::new(saved)
+    })
+}
+
+fn user_ids_path() -> std::path::PathBuf {
+    crate::paths::config_dir().join("tapo-user-ids.json")
+}
+
+fn remembered_user_id(device_id: &str) -> Option<u64> {
+    user_ids().lock().ok()?.get(device_id).copied()
+}
+
+/// Remember (or with `None` forget) a camera's user id, on disk too.
+fn remember_user_id(device_id: &str, id: Option<u64>) {
+    let Ok(mut m) = user_ids().lock() else {
+        return;
+    };
+    match id {
+        Some(id) => m.insert(device_id.to_string(), id),
+        None => m.remove(device_id),
+    };
+    if let Ok(text) = serde_json::to_string_pretty(&*m) {
+        let path = user_ids_path();
+        if let Some(dir) = path.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let _ = std::fs::write(path, text);
+    }
 }
 
 /// The track id the app uses for a recording download.
