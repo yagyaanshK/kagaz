@@ -1672,17 +1672,24 @@ fn fetch_recordings(
                     );
                     let mut got = 0u64;
                     let r = attempt(&label, &mut || {
+                        // Resume after whatever earlier attempts already brought
+                        // (two seconds back, so the camera's start frame overlaps).
+                        let done = cache::covered_until(&root, &cam.device_id, c.start, c.end);
+                        if done >= c.end - 1 {
+                            return Ok(());
+                        }
+                        let from = if done > c.start { done - 2 } else { c.start };
                         let mut w = cache::Writer::create(
                             &root,
                             &cam.device_id,
                             &dashed,
-                            c.start,
+                            from,
                             c.end,
-                            true,
+                            from == c.start,
                         )
                         .map_err(|e| e.to_string())?;
                         let mut werr = None;
-                        let pulled = rec.pull(c.start, c.end, &mut |chunk| {
+                        let pulled = rec.pull(from, c.end, &mut |chunk| {
                             if let Err(e) = w.write(chunk) {
                                 werr = Some(e.to_string());
                                 return false;
@@ -1692,23 +1699,34 @@ fn fetch_recordings(
                         if let Some(e) = werr {
                             return Err(e);
                         }
-                        let n = pulled.map_err(|e| {
-                            if e.is_busy() {
-                                "the camera is busy sending a recording to someone else".to_string()
-                            } else {
-                                e.to_string()
+                        // Keep what arrived even when the attempt failed: the next one resumes after it.
+                        let n = match pulled {
+                            Ok(n) => n,
+                            Err(e) => {
+                                if let Ok(Some(entry)) = w.finish(false) {
+                                    got += entry.bytes;
+                                }
+                                return Err(if e.is_busy() {
+                                    "the camera is busy sending a recording to someone else"
+                                        .to_string()
+                                } else {
+                                    format!("{e}; resuming")
+                                });
                             }
-                        })?;
+                        };
                         match w.finish(false).map_err(|e| e.to_string())? {
                             Some(entry) if entry.complete => {
-                                got = n;
+                                got += n;
                                 Ok(())
                             }
-                            Some(entry) => Err(format!(
-                                "incomplete: {:.0} of {} s",
-                                entry.seconds,
-                                c.end - c.start
-                            )),
+                            Some(entry) => {
+                                got += entry.bytes;
+                                Err(format!(
+                                    "stopped after {:.0} of {} s; resuming",
+                                    entry.seconds,
+                                    entry.end - entry.start
+                                ))
+                            }
                             None => Err("nothing arrived".into()),
                         }
                     });
