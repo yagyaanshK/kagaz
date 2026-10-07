@@ -713,7 +713,63 @@ fn default_scan_name(extension: String) -> String {
     )
 }
 
+/// GNOME (and other systemd desktops) decide which app a window belongs to
+/// from the systemd unit its process runs in. Started from a terminal,
+/// Kagaz sits in the terminal's unit and the dock files its window under
+/// the terminal (or an editor) with that app's icon. Move this process into
+/// its own `app-kagaz-desktop-<pid>.scope`, the name a desktop launcher
+/// would give it, so the dock matches it to Kagaz's entry. Best effort:
+/// nothing happens without systemd, or when a launcher already did this.
+#[cfg(target_os = "linux")]
+fn own_app_scope() {
+    let pid = std::process::id();
+    let current = std::fs::read_to_string("/proc/self/cgroup").unwrap_or_default();
+    if current.contains("kagaz") || !current.contains("user@") {
+        return;
+    }
+    // The unit name escapes the desktop id's dash, as the XDG scope naming asks.
+    let unit = format!("app-kagaz\\x2ddesktop-{pid}.scope");
+    let moved = std::process::Command::new("busctl")
+        .args([
+            "--user",
+            "call",
+            "org.freedesktop.systemd1",
+            "/org/freedesktop/systemd1",
+            "org.freedesktop.systemd1.Manager",
+            "StartTransientUnit",
+            "ssa(sv)a(sa(sv))",
+            &unit,
+            "fail",
+            "1",
+            "PIDs",
+            "au",
+            "1",
+            &pid.to_string(),
+            "0",
+        ])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    if !moved {
+        return;
+    }
+    // The move is a systemd job; wait briefly so the window opens in the new scope.
+    for _ in 0..20 {
+        if std::fs::read_to_string("/proc/self/cgroup")
+            .unwrap_or_default()
+            .contains("kagaz")
+        {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
 fn main() {
+    #[cfg(target_os = "linux")]
+    own_app_scope();
     tauri::Builder::default()
         .manage(CameraState {
             engine: std::sync::Mutex::new(None),
