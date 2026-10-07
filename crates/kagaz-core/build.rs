@@ -38,8 +38,8 @@ fn main() {
 }
 
 fn collect(dir: &Path, out: &mut Vec<PathBuf>) {
-    let entries = fs::read_dir(dir)
-        .unwrap_or_else(|e| panic!("cannot read {}: {e}", dir.display()));
+    let entries =
+        fs::read_dir(dir).unwrap_or_else(|e| panic!("cannot read {}: {e}", dir.display()));
     for e in entries.flatten() {
         let p = e.path();
         if p.is_dir() {

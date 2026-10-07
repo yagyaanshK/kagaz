@@ -26,6 +26,9 @@ pub struct Layout {
     /// Cameras shown in HD even as small tiles.
     #[serde(default)]
     pub hd: Vec<String>,
+    /// Sound volume per camera, 0 to 100 (absent: 100).
+    #[serde(default)]
+    pub volume: std::collections::BTreeMap<String, u8>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -87,6 +90,8 @@ impl Layout {
                 self.ungrouped.push(id.clone());
             }
         }
+        self.hd.retain(|id| known.contains(id));
+        self.volume.retain(|id, _| known.contains(id));
     }
 }
 
@@ -105,12 +110,15 @@ mod tests {
             ungrouped: vec!["b".into(), "a".into()],
             ungrouped_collapsed: false,
             hd: vec!["a".into()],
+            volume: [("a".to_string(), 40u8), ("gone".to_string(), 10u8)].into(),
         };
         let text = toml::to_string_pretty(&l).unwrap();
         assert_eq!(Layout::parse(&text).unwrap(), l);
         l.reconcile(&["a".into(), "b".into(), "c".into()]);
         assert_eq!(l.groups[0].cameras, vec!["a"]);
         assert_eq!(l.ungrouped, vec!["b", "c"]);
+        assert_eq!(l.volume.get("a"), Some(&40));
+        assert!(!l.volume.contains_key("gone"));
         assert_eq!(Layout::parse("").unwrap(), Layout::default());
     }
 }

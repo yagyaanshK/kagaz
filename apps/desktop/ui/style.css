@@ -276,3 +276,13 @@ label small { font-size: 12px; min-height: 1.2em; }
 .cam-tile[data-state="gap"] .spinner, .cam-tile[data-state="gap"] .cam-reload { display: none; }
 .pb-ends { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); margin-top: 1px; }
 .pb-bar .pos { width: 3px; background: #fff; box-shadow: 0 0 3px #000; mix-blend-mode: normal; }
+.cam-tile[data-state="lost"] .cam-overlay, .cam-tile[data-state="ended"] .cam-overlay { cursor: pointer; }
+/* Per-camera volume: shown while the camera's sound is on, or on hover */
+.cam-tile .cam-volume { position: absolute; right: 92px; bottom: 9px; width: 80px; display: none; accent-color: var(--accent); }
+.cam-tile.sound-on .cam-volume, .cam-tile:hover .cam-volume { display: block; }
+.cam-tile.placeholder .cam-volume { display: none; }
+/* Enlarge / back-to-grid control, top right of every tile */
+.cam-tile .cam-size { position: absolute; top: 6px; right: 8px; z-index: 2; font-size: 16px; line-height: 1; padding: 4px 8px; background: rgba(0,0,0,0.55); color: #fff; border: 1px solid rgba(255,255,255,0.5); border-radius: 6px; opacity: 0; transition: opacity 0.15s; }
+.cam-tile:hover .cam-size, .cam-tile.big .cam-size { opacity: 1; }
+.cam-tile .cam-size:hover { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+.cam-tile.placeholder .cam-size { display: none; }
