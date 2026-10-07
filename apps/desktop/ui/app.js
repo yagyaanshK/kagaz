@@ -508,6 +508,7 @@ function teardownTile(tile) {
   tile._audioWanted = !!tile.querySelector("audio");
   stopAudio(tile);
   if (tile._watch) { clearInterval(tile._watch); tile._watch = null; }
+  if (tile._retryTimer) { clearTimeout(tile._retryTimer); tile._retryTimer = null; }
   if (tile._playback) {
     const pb = tile._playback;
     tile._playback = null;
@@ -635,9 +636,31 @@ function gapText(tile, cam, clock) {
   setState(tile, "gap", next ? `no recording for this time; resumes at ${clockText(next.start)}` : "no recording for the rest of the day");
 }
 
-async function mountPlayback(tile, cam, from) {
+// Playback failures in a row for one camera. Each one is retried after a
+// growing wait; after ten the tile stops and waits for a click.
+const MAX_FAILS = 10;
+function failPlayback(tile, cam, reason, at) {
+  teardownTile(tile);
+  tile._fails = (tile._fails || 0) + 1;
+  tile._clock = { at, wall: Date.now(), speed: 0 }; // hold the clock where it failed
+  if (tile._fails >= MAX_FAILS) {
+    tile._paused = true;
+    setState(tile, "lost", `${reason}. Stopped after ${MAX_FAILS} failed tries in a row; click to try again.`);
+    return;
+  }
+  const wait = Math.min(30, 3 * 2 ** (tile._fails - 1));
+  setState(tile, "lost", `${reason}. Trying again in ${wait} s (try ${tile._fails + 1} of ${MAX_FAILS}); click to try now.`);
+  tile._retryTimer = setTimeout(() => {
+    tile._retryTimer = null;
+    mountPlayback(tile, cam, at, { retry: true });
+  }, wait * 1000);
+}
+
+async function mountPlayback(tile, cam, from, opts = {}) {
   from = Math.floor(from);
   teardownTile(tile);
+  // Anything but an automatic retry is a fresh start: the count begins again.
+  if (!opts.retry) { tile._fails = 0; tile._paused = false; }
   tile._gap = false;
   tile._ended = false;
   setClock(tile, from);
@@ -663,7 +686,7 @@ async function mountPlayback(tile, cam, from) {
     handle = await invoke("playback_start", { deviceId: cam.device_id, from, to, speed });
   } catch (e) {
     if (tile._mountId !== mountId) return;
-    setState(tile, "lost", "could not start: " + e);
+    failPlayback(tile, cam, "could not start: " + e, from);
     return;
   }
   if (tile._mountId !== mountId) {
@@ -672,19 +695,18 @@ async function mountPlayback(tile, cam, from) {
     return;
   }
   tile._playback = { token: handle.token, stream: handle.stream, from, to, speed };
-  tile._retries = tile._retries || 0;
   const player = document.createElement("video");
   player.autoplay = true;
   player.muted = true;
   player.playsInline = true;
   player.src = handle.ts_url;
   tile.insertBefore(player, tile.firstChild);
-  let finished = null, lastPoll = 0, lostSince = 0;
+  let finished = null, lastPoll = 0;
   watchTile(tile, (v, t, lastT) => {
     // The stream's clock runs at 1/speed of the camera's.
     if (t > lastT + 0.05) {
       tile._clock = { at: from + t * speed, wall: Date.now(), speed };
-      tile._retries = 0;
+      tile._fails = 0;
     }
     const now = Date.now();
     if (now - lastPoll > 2000 && tile._playback) {
@@ -701,14 +723,12 @@ async function mountPlayback(tile, cam, from) {
         if (!pbClips[cam.device_id]) setState(tile, "ended", "end of the recording");
         return true;
       }
-      setState(tile, "lost", "camera: " + finished.error);
+      failPlayback(tile, cam, "camera: " + finished.error, Math.floor(tileNow(tile)));
+      return true;
     }
-    if (tile.dataset.state !== "lost") { lostSince = 0; return !!finished; }
-    if (!lostSince) lostSince = now;
-    const wait = Math.min(60, 5 * 2 ** tile._retries);
-    if ((now - lostSince) / 1000 > wait && tile._retries < 6) {
-      tile._retries += 1;
-      mountPlayback(tile, cam, tileNow(tile));
+    // No picture for too long (the watcher has said "no data").
+    if (tile.dataset.state === "lost") {
+      failPlayback(tile, cam, "no data from the camera", Math.floor(tileNow(tile)));
       return true;
     }
     return !!finished;
@@ -728,7 +748,7 @@ function setState(tile, state, text) {
   if (state === "live" && tile._audioWanted && !tile.querySelector("audio")) {
     tile._audioWanted = false;
     const cam = cameraById(tile.closest(".cam-cell")?.dataset.id);
-    if (cam) toggleAudio(tile, cam);
+    if (cam) { startAudio(tile, cam); refreshSoundAll(); }
   }
 }
 
@@ -747,22 +767,43 @@ function stopAudio(tile) {
   }
   const b = tile.querySelector(".cam-speaker");
   if (b) { b.textContent = "\u{1F507}"; b.classList.remove("on"); }
+  tile.classList.remove("sound-on");
 }
 
-function toggleAudio(tile, cam) {
-  if (tile.querySelector("audio")) { stopAudio(tile); return; }
-  // One camera audible at a time.
-  document.querySelectorAll(".cam-tile audio").forEach((a) => stopAudio(a.closest(".cam-tile")));
+function volumeOf(cam) {
+  const v = layout.volume && layout.volume[cam.device_id];
+  return typeof v === "number" ? v : 100;
+}
+
+// Sound for one camera; any number of cameras can be heard at once.
+function startAudio(tile, cam) {
+  if (tile.querySelector("audio")) return true;
   const key = isPlayback() ? (tile._playback && tile._playback.token) : cam.device_id;
-  if (!key) return;
-  if (isPlayback() && tile._playback.speed !== 1) { $("cam-message").textContent = "Sound plays at 1x only."; return; }
+  if (!key) return false;
+  if (isPlayback() && tile._playback.speed !== 1) { $("cam-message").textContent = "Sound plays at 1x only."; return false; }
   const a = document.createElement("audio");
   a.autoplay = true;
+  a.volume = volumeOf(cam) / 100;
   a.src = `${audioBase(cam)}/audio/${key}.wav?t=${Date.now()}`;
   a.addEventListener("error", () => stopAudio(tile));
   tile.appendChild(a);
   const b = tile.querySelector(".cam-speaker");
   if (b) { b.textContent = "\u{1F50A}"; b.classList.add("on"); }
+  tile.classList.add("sound-on");
+  return true;
+}
+
+function toggleAudio(tile, cam) {
+  if (tile.querySelector("audio")) { stopAudio(tile); tile._audioWanted = false; }
+  else startAudio(tile, cam);
+  refreshSoundAll();
+}
+
+// The top row's button: sound on every camera shown, or off on all.
+function refreshSoundAll() {
+  const tiles = [...$("cam-grid").querySelectorAll(".cam-tile:not(.placeholder)")];
+  const anyOff = tiles.some((t) => !t.querySelector("audio"));
+  $("cam-sound-all").textContent = anyOff ? "\u{1F50A} Sound on all" : "\u{1F507} Mute all";
 }
 
 function cameraById(id) {
@@ -816,6 +857,26 @@ function buildTile(cam) {
     toggleAudio(tile, cam);
   });
   tile.appendChild(speaker);
+  const volume = document.createElement("input");
+  volume.type = "range";
+  volume.className = "cam-volume";
+  volume.min = "0"; volume.max = "100"; volume.step = "1";
+  volume.value = String(volumeOf(cam));
+  volume.title = `Volume for ${cam.name}`;
+  let saveTimer = null;
+  volume.addEventListener("input", (ev) => {
+    ev.stopPropagation();
+    const v = Number(volume.value);
+    const a = tile.querySelector("audio");
+    if (a) a.volume = v / 100;
+    layout.volume = layout.volume || {};
+    layout.volume[cam.device_id] = v;
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(saveLayout, 600);
+  });
+  volume.addEventListener("click", (ev) => ev.stopPropagation());
+  volume.addEventListener("mousedown", (ev) => ev.stopPropagation());
+  tile.appendChild(volume);
   const overlay = document.createElement("div");
   overlay.className = "cam-overlay hidden";
   overlay.innerHTML = '<div class="spinner"></div><button type="button" class="cam-reload" title="Reload this camera">&#x21bb;</button><div class="cam-overlay-text"></div>';
@@ -823,17 +884,47 @@ function buildTile(cam) {
     ev.stopPropagation();
     remount(tile, cam);
   });
+  // A failed or finished tile: a click anywhere on it reloads (not enlarges).
+  overlay.addEventListener("click", (ev) => {
+    if (tile.dataset.state !== "lost" && tile.dataset.state !== "ended") return;
+    ev.stopPropagation();
+    remount(tile, cam);
+  });
   tile.appendChild(overlay);
+  const size = document.createElement("button");
+  size.type = "button";
+  size.className = "cam-size";
+  size.title = "Enlarge";
+  size.innerHTML = "&#x2922;";
+  size.addEventListener("click", (ev) => { ev.stopPropagation(); setBig(tile, cam, !tile.classList.contains("big")); });
+  tile.appendChild(size);
   tile.addEventListener("click", (ev) => {
     if (ev.target.closest(".cam-reload")) return;
-    const cell = tile.closest(".cam-cell");
-    const big = !cell.classList.contains("big");
-    cell.classList.toggle("big", big);
-    tile.classList.toggle("big", big);
-    if (!isPlayback()) mountTile(tile, cam, big);
+    setBig(tile, cam, !tile.classList.contains("big"));
   });
   return tile;
 }
+
+// Enlarge a tile to the full width (HD), or bring it back (its own quality).
+function setBig(tile, cam, big) {
+  const cell = tile.closest(".cam-cell");
+  if (!cell) return;
+  cell.classList.toggle("big", big);
+  tile.classList.toggle("big", big);
+  const size = tile.querySelector(".cam-size");
+  if (size) { size.innerHTML = big ? "&#x2921;" : "&#x2922;"; size.title = big ? "Back to the grid (Esc)" : "Enlarge"; }
+  if (!isPlayback()) mountTile(tile, cam, big);
+  if (big) cell.scrollIntoView({ block: "nearest", behavior: "smooth" });
+}
+
+// Esc shrinks every enlarged tile.
+document.addEventListener("keydown", (ev) => {
+  if (ev.key !== "Escape") return;
+  document.querySelectorAll(".cam-tile.big").forEach((tile) => {
+    const cam = cameraById(tile.closest(".cam-cell")?.dataset.id);
+    if (cam) setBig(tile, cam, false);
+  });
+});
 
 function remount(tile, cam) {
   const big = tile.classList.contains("big");
@@ -1084,6 +1175,7 @@ async function renderCameraGrid() {
     }
   }
   $("cam-state").textContent = `${camStatus.cameras.length} cameras`;
+  refreshSoundAll();
 }
 
 // ---- playback ----
@@ -1170,7 +1262,7 @@ setInterval(() => {
     if (clock === null) return;
     const cam = cameraById(cell.dataset.id);
     updatePosition(cell, cam, clock);
-    if (!pbClips[cell.dataset.id]) return;
+    if (!pbClips[cell.dataset.id] || tile._paused || tile.dataset.state === "lost") return;
     const span = spanAt(cam.device_id, clock);
     if (!span) {
       if (!tile._gap) enterGap(tile, cam, clock);
@@ -1548,6 +1640,15 @@ $("cam-add-group").addEventListener("click", () => {
   renderCameraGrid();
 });
 $("cam-show-all").addEventListener("click", () => { viewGroup = null; renderCameraGrid(); });
+$("cam-sound-all").addEventListener("click", () => {
+  const tiles = [...$("cam-grid").querySelectorAll(".cam-cell")].map((c) => [c.querySelector(".cam-tile"), cameraById(c.dataset.id)]);
+  const anyOff = tiles.some(([t]) => !t.querySelector("audio"));
+  for (const [t, cam] of tiles) {
+    if (anyOff) startAudio(t, cam); else { stopAudio(t); t._audioWanted = false; }
+  }
+  refreshSoundAll();
+});
+
 $("cam-start").addEventListener("click", async () => {
   $("cam-start").disabled = true;
   $("cam-state").textContent = "starting…";
