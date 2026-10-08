@@ -186,6 +186,13 @@ pub fn decode(law: Law, bytes: &[u8]) -> Vec<u8> {
 /// A WAV head for an endless 8 kHz mono 16-bit stream (sizes set to the
 /// maximum, as streaming players expect).
 pub fn wav_header() -> [u8; 44] {
+    wav_header_at(8000)
+}
+
+/// The same for a stream played faster or slower: the 8 kHz sound labelled
+/// at `rate` samples a second plays at `rate / 8000` times the speed (and
+/// pitch), in step with sped-up video.
+pub fn wav_header_at(rate: u32) -> [u8; 44] {
     let mut h = [0u8; 44];
     h[..4].copy_from_slice(b"RIFF");
     h[4..8].copy_from_slice(&0x7FFF_FFF6u32.to_le_bytes());
@@ -193,8 +200,8 @@ pub fn wav_header() -> [u8; 44] {
     h[16..20].copy_from_slice(&16u32.to_le_bytes());
     h[20..22].copy_from_slice(&1u16.to_le_bytes()); // PCM
     h[22..24].copy_from_slice(&1u16.to_le_bytes()); // mono
-    h[24..28].copy_from_slice(&8000u32.to_le_bytes());
-    h[28..32].copy_from_slice(&16000u32.to_le_bytes());
+    h[24..28].copy_from_slice(&rate.to_le_bytes());
+    h[28..32].copy_from_slice(&(rate * 2).to_le_bytes());
     h[32..34].copy_from_slice(&2u16.to_le_bytes());
     h[34..36].copy_from_slice(&16u16.to_le_bytes());
     h[36..40].copy_from_slice(b"data");

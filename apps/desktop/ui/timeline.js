@@ -36,7 +36,7 @@ function makeTimeline(el, opts) {
   const scale = el.querySelector(".tl-scale");
 
   // The window, relative to the day's start: [from, from + len).
-  const view = { from: 8 * 3600, len: 12 * 3600, day: null, key: "", follow: true };
+  const view = { from: 8 * 3600, len: 12 * 3600, day: null, key: "", follow: true, touched: 0 };
   let dragging = false;
 
   const fmt = opts.clock || ((t) => String(t));
@@ -112,6 +112,8 @@ function makeTimeline(el, opts) {
     if (key !== view.key) { view.key = key; drawScale(); drawData(); }
     const at = opts.cursor();
     if (at === null || at === undefined) { pos.classList.add("hidden"); return; }
+    // Back to following the playing time 15 s after the last scroll.
+    if (!view.follow && Date.now() - view.touched > 15000) view.follow = true;
     // Keep a playing cursor in sight, unless the user is looking elsewhere.
     if (view.follow && !dragging && (at < view.day + view.from || at > view.day + view.from + view.len)) {
       view.from = at - view.day - view.len * 0.2;
@@ -168,7 +170,8 @@ function makeTimeline(el, opts) {
       view.from = at - f * view.len;
     }
     clampView();
-    view.follow = false; // the user is looking somewhere on purpose
+    view.follow = false; // the user is looking somewhere on purpose (for a while)
+    view.touched = Date.now();
     view.key = "";
     draw();
     showGhost(ev.clientX);

@@ -807,7 +807,7 @@ function startAudio(tile, cam) {
   if (tile.querySelector("audio")) return true;
   const key = isPlayback() ? (tile._playback && tile._playback.token) : cam.device_id;
   if (!key) return false;
-  if (isPlayback() && tile._playback.speed !== 1) { $("cam-message").textContent = "Sound plays at 1x only."; return false; }
+
   const a = document.createElement("audio");
   a.autoplay = true;
   a.volume = volumeOf(cam) / 100;
