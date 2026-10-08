@@ -328,3 +328,6 @@ label small { font-size: 12px; min-height: 1.2em; }
 .tl-key-rec { background: var(--accent); }
 .tl-key-motion { background: #e8892f; }
 .tl-key-person { background: #3d8bfd; }
+/* The camera's controls wrap; its summary line sits on its own row under them. */
+.pb-row { flex-wrap: wrap; row-gap: 2px; }
+.pb-row .pb-note { flex-basis: 100%; margin-left: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

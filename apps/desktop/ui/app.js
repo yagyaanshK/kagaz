@@ -651,6 +651,13 @@ function failPlayback(tile, cam, reason, at) {
   teardownTile(tile);
   tile._fails = (tile._fails || 0) + 1;
   tile._clock = { at, wall: Date.now(), speed: 0 }; // hold the clock where it failed
+  // A camera that refuses recorded playback outright (first-generation
+  // C100s answer -52402 to every request) will not change its mind.
+  if (/-52402/.test(String(reason))) {
+    tile._paused = true;
+    setState(tile, "lost", "This camera does not allow playing its recordings over the internet (it refuses every request). Click to try again.");
+    return;
+  }
   if (tile._fails >= MAX_FAILS) {
     tile._paused = true;
     setState(tile, "lost", `${reason}. Stopped after ${MAX_FAILS} failed tries in a row; click to try again.`);
@@ -716,7 +723,9 @@ async function mountPlayback(tile, cam, from, opts = {}) {
     // The stream's clock runs at 1/speed of the camera's.
     if (t > lastT + 0.05) {
       tile._clock = { at: from + t * speed, wall: Date.now(), speed };
-      tile._fails = 0;
+      // Only real playback counts as success: a few frames before the relay
+      // drops the stream must not reset the count of failed tries.
+      if (t >= 5) tile._fails = 0;
       if (tile._playback && !tile._playback.firstFrame) {
         tile._playback.firstFrame = true;
         // How long this camera takes from asking to picture, to start it early next time.
