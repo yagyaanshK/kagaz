@@ -106,6 +106,16 @@ impl<'a> Recordings<'a> {
         if let Some(id) = remembered_user_id(&self.camera.device_id) {
             return Ok(id);
         }
+        // A camera whose user slots are full (-71101) is left alone for two
+        // minutes: asking again only keeps it busy.
+        if let Some(wait) = backing_off(&self.camera.device_id) {
+            return Err(CloudError::Rejected {
+                status: 200,
+                message: format!(
+                    "getUserID: the camera's user slots are full (-71101); not asking again for {wait} s"
+                ),
+            });
+        }
         let mut last = None;
         for attempt in 0..3u64 {
             if attempt > 0 {
@@ -124,11 +134,19 @@ impl<'a> Recordings<'a> {
                 Err(e) => return Err(e),
             }
         }
-        if let Some(id) = self.find_valid_user_id() {
-            remember_user_id(&self.camera.device_id, Some(id));
-            return Ok(id);
+        // Slots full means one is already ours or someone's: look for a valid
+        // one, but at most once every ten minutes.
+        if probe_allowed(&self.camera.device_id) {
+            if let Some(id) = self.find_valid_user_id() {
+                remember_user_id(&self.camera.device_id, Some(id));
+                return Ok(id);
+            }
         }
-        Err(last.expect("at least one attempt"))
+        let last = last.expect("at least one attempt");
+        if matches!(&last, CloudError::Rejected { message, .. } if message.contains("-71101")) {
+            back_off(&self.camera.device_id, 120);
+        }
+        Err(last)
     }
 
     /// Try the small ids the camera hands out with a search that changes nothing.
@@ -305,6 +323,51 @@ fn user_ids() -> &'static std::sync::Mutex<std::collections::HashMap<String, u64
             .unwrap_or_default();
         std::sync::Mutex::new(saved)
     })
+}
+
+/// Per camera: until when not to ask for a user id, and when its ids were last searched.
+type Pauses = std::collections::HashMap<String, (std::time::Instant, Option<std::time::Instant>)>;
+
+fn pauses() -> &'static std::sync::Mutex<Pauses> {
+    static P: std::sync::OnceLock<std::sync::Mutex<Pauses>> = std::sync::OnceLock::new();
+    P.get_or_init(Default::default)
+}
+
+/// Seconds left before this camera may be asked again, if it is resting.
+fn backing_off(device_id: &str) -> Option<u64> {
+    let m = pauses().lock().ok()?;
+    let (until, _) = m.get(device_id)?;
+    let now = std::time::Instant::now();
+    (*until > now).then(|| (*until - now).as_secs().max(1))
+}
+
+fn back_off(device_id: &str, seconds: u64) {
+    if let Ok(mut m) = pauses().lock() {
+        let probed = m.get(device_id).and_then(|(_, p)| *p);
+        m.insert(
+            device_id.to_string(),
+            (
+                std::time::Instant::now() + std::time::Duration::from_secs(seconds),
+                probed,
+            ),
+        );
+    }
+}
+
+/// May this camera's ids be searched now (once every ten minutes)? Marks it searched.
+fn probe_allowed(device_id: &str) -> bool {
+    let Ok(mut m) = pauses().lock() else {
+        return false;
+    };
+    let now = std::time::Instant::now();
+    let entry = m.entry(device_id.to_string()).or_insert((now, None));
+    match entry.1 {
+        Some(at) if now.duration_since(at) < std::time::Duration::from_secs(600) => false,
+        _ => {
+            entry.1 = Some(now);
+            true
+        }
+    }
 }
 
 fn user_ids_path() -> std::path::PathBuf {
