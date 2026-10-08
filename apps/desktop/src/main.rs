@@ -456,6 +456,8 @@ async fn recording_clips(
 struct PlaybackHandle {
     token: String,
     stream: String,
+    /// The footage is on disk: it plays from there, not from the camera.
+    cached: bool,
     /// MPEG-TS from the engine on this camera's own loopback host.
     ts_url: String,
 }
@@ -480,10 +482,17 @@ async fn playback_start(
         e.engine
             .add_stream(&stream, &url)
             .map_err(|e| e.to_string())?;
+        let cached = kagaz_core::cameras::tapo::cache::find(
+            &kagaz_core::paths::recordings_dir(),
+            &cam.device_id,
+            from,
+        )
+        .is_some();
         Ok(PlaybackHandle {
             ts_url: e._server.tile_url(index, &stream),
             token,
             stream,
+            cached,
         })
     })
     .await

@@ -695,7 +695,7 @@ async function mountPlayback(tile, cam, from, opts = {}) {
   if (from >= to) { setState(tile, "lost", "that time is after the end of the day"); return; }
   // Hold the clock until the picture moves, so the cursor does not run ahead while connecting.
   tile._clock = { at: from, wall: Date.now(), speed: 0 };
-  setState(tile, "connecting", "asking the camera for its recording…");
+  setState(tile, "connecting", "loading the recording…");
   let handle;
   const speed = tile._sync ? tile._sync.speed : speedValue();
   const mountId = (tile._mountId = (tile._mountId || 0) + 1);
@@ -712,6 +712,7 @@ async function mountPlayback(tile, cam, from, opts = {}) {
     return;
   }
   tile._playback = { token: handle.token, stream: handle.stream, from, to, speed, asked: tile._askedAt || Date.now(), firstFrame: false };
+  setState(tile, "connecting", handle.cached ? "loading from your disk…" : "asking the camera for its recording…");
   const player = document.createElement("video");
   player.autoplay = true;
   player.muted = true;
@@ -1436,26 +1437,29 @@ setInterval(() => {
       else continue;
     }
     const m = clockNow(c);
+    // The limits are in seconds of footage, so they scale with the speed:
+    // at 5x half a second of real time is 2.5 seconds of footage.
+    const sp = c.speed || 1;
     for (const tile of mine) {
       const v = tile.querySelector("video");
       const pb = tile._playback;
       if (!v || !pb || !pb.firstFrame || tile._gap) continue;
       const diff = pb.from + v.currentTime * pb.speed - m;
-      if (diff > 0.6) {
+      if (diff > 0.6 * sp) {
         // Ahead: wait for the clock.
         if (!v.paused) { try { v.pause(); } catch (_) {} }
         tile._held = true;
         tile._behind = 0;
-      } else if (tile._held && diff <= 0.15) {
+      } else if (tile._held && diff <= 0.15 * sp) {
         tile._held = false;
         v.play().catch(() => {});
         if (tile.dataset.state === "gap") setState(tile, "live", "");
-      } else if (diff < -2.5 && !tile._held) {
+      } else if (diff < -2.5 * sp && !tile._held) {
         // Behind (a slow start or a stall): fetch again a little ahead and wait there.
         tile._behind = (tile._behind || 0) + 1;
         if (tile._behind >= 8) {
           tile._behind = 0;
-          const lead = Math.min(20, (tile._delay || 6) + 2);
+          const lead = Math.min(20, (tile._delay || 6) + 2) * sp;
           mountPlayback(tile, camOf(tile), m + lead);
         }
       } else {
@@ -1484,7 +1488,8 @@ setInterval(() => {
     if (tile._sync && tile._sync.paused) return;
     if (clock < list.day_start || clock >= list.day_start + 86400) return;
     const running = tile._sync && tile._sync.running;
-    const lead = Math.min(20, (tile._delay || 6) + 2);
+    // A head start in seconds of footage: real seconds times the speed.
+    const lead = Math.min(20, (tile._delay || 6) + 2) * (tile._sync ? tile._sync.speed : 1);
     const span = spanAt(cam.device_id, clock);
     if (!span) {
       // A recording already fetched ahead for the end of this gap: keep it, keep the veil.
