@@ -392,6 +392,38 @@ impl Session {
         Ok(serde_json::from_str(&text).unwrap_or(Value::Null))
     }
 
+    /// Send one raw `requestData` through the cloud passthrough and return the
+    /// whole answer, for requests that are not plain methods (`"method":"do"`).
+    pub fn passthrough_raw(
+        &self,
+        device_id: &str,
+        app_server: &str,
+        request_data: Value,
+    ) -> Result<Value, CloudError> {
+        let envelope = json!({
+            "inputParams": { "requestData": request_data },
+            "serviceId": "passthrough"
+        });
+        let url = format!("https://{app_server}/v1/things/{device_id}/services-sync");
+        let bytes = serde_json::to_vec(&envelope).expect("json");
+        let (status, response) = match self.cloud_request(agent().post(&url)).send_bytes(&bytes) {
+            Ok(r) => (200u16, r),
+            Err(ureq::Error::Status(401, _)) => return Err(CloudError::Unauthorized),
+            Err(ureq::Error::Status(s, r)) => (s, r),
+            Err(ureq::Error::Transport(t)) => return Err(CloudError::Transport(t.to_string())),
+        };
+        let text = response
+            .into_string()
+            .map_err(|e| CloudError::Transport(e.to_string()))?;
+        if status >= 400 {
+            return Err(CloudError::Rejected {
+                status,
+                message: trim(&text),
+            });
+        }
+        Ok(serde_json::from_str(&text).unwrap_or(Value::Null))
+    }
+
     /// Call device methods through the cloud passthrough (`services-sync`),
     /// as the app does. Returns one raw response object per request.
     pub fn device_requests(

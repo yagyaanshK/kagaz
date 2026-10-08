@@ -189,15 +189,36 @@ pub fn relay_head(
 }
 
 /// One multipart control frame carrying a JSON request.
+/// How many numbered parts the camera may send before it waits for an
+/// acknowledgement (first-generation firmware waits; newer ones do not).
+pub const DATA_WINDOW: u64 = 200;
+
 pub fn control_frame(payload: &str) -> Vec<u8> {
     let mut v = format!(
-        "--{CLIENT_BOUNDARY}\r\nContent-Type: application/json\r\nX-Data-Window-Size: 40\r\nContent-Length: {}\r\n\r\n",
+        "--{CLIENT_BOUNDARY}\r\nContent-Type: application/json\r\nX-Data-Window-Size: {DATA_WINDOW}\r\nContent-Length: {}\r\n\r\n",
         payload.len()
     )
     .into_bytes();
     v.extend_from_slice(payload.as_bytes());
     v.extend_from_slice(b"\r\n");
     v
+}
+
+/// The acknowledgement for a full window of numbered parts, as the app
+/// sends it: without it a first-generation camera stops after one window.
+pub fn window_ack(session: &str, sequence: u64) -> Option<Vec<u8>> {
+    if sequence == 0 || !sequence.is_multiple_of(DATA_WINDOW) {
+        return None;
+    }
+    let payload = r#"{"type":"notification","params":{"event_type":"stream_sequence"}}"#;
+    let mut v = format!(
+        "--{CLIENT_BOUNDARY}\r\nContent-Type: application/json\r\nX-Session-Id: {session}\r\nX-Data-Received: {sequence}\r\nContent-Length: {}\r\n\r\n",
+        payload.len()
+    )
+    .into_bytes();
+    v.extend_from_slice(payload.as_bytes());
+    v.extend_from_slice(b"\r\n");
+    Some(v)
 }
 
 pub fn preview_request(resolution: &str) -> String {
@@ -541,6 +562,23 @@ fn stream(
         reader
             .read_exact(&mut payload)
             .map_err(|e| RelayError::Transport(e.to_string()))?;
+        let header = |name: &str| {
+            headers
+                .iter()
+                .find(|(k, _)| k == name)
+                .map(|(_, v)| v.as_str())
+        };
+        if let (Some(session), Some(sequence)) = (
+            header("x-session-id"),
+            header("x-data-sequence").and_then(|v| v.parse().ok()),
+        ) {
+            if let Some(ack) = window_ack(session, sequence) {
+                let tls = reader.get_mut();
+                tls.write_all(&ack)
+                    .and_then(|()| tls.flush())
+                    .map_err(|e| RelayError::Transport(e.to_string()))?;
+            }
+        }
         if content_type.contains("video/mp2t") {
             total += length as u64;
             last_video = std::time::Instant::now();
@@ -622,5 +660,19 @@ mod tests {
             -52405
         );
         assert_eq!(control_error(br#"{"type":"notification"}"#), 0);
+    }
+
+    #[test]
+    fn full_windows_are_acknowledged() {
+        assert!(window_ack("3", 0).is_none());
+        assert!(window_ack("3", DATA_WINDOW - 1).is_none());
+        let ack = String::from_utf8(window_ack("3", 2 * DATA_WINDOW).unwrap()).unwrap();
+        assert!(ack.starts_with("----client-stream-boundary--\r\n"));
+        assert!(ack.contains(&format!(
+            "X-Session-Id: 3\r\nX-Data-Received: {}\r\n",
+            2 * DATA_WINDOW
+        )));
+        assert!(ack.contains("\"event_type\":\"stream_sequence\""));
+        assert!(ack.ends_with("}\r\n"));
     }
 }

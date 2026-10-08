@@ -149,9 +149,10 @@ impl<'a> Recordings<'a> {
         Err(last)
     }
 
-    /// Try the small ids the camera hands out with a search that changes nothing.
+    /// Try the small ids the camera hands out with a search that changes nothing
+    /// (seen above 20).
     fn find_valid_user_id(&self) -> Option<u64> {
-        (1..=16u64).find(|&id| {
+        (1..=32u64).find(|&id| {
             match self.call(
                 "searchVideoOfDay",
                 json!({ "playback": { "search_video_utility": {
@@ -246,7 +247,8 @@ impl<'a> Recordings<'a> {
         end: i64,
         sink: &mut dyn FnMut(&[u8]) -> bool,
     ) -> Result<u64, PullError> {
-        self.session_with(start, |relay, track, uid| {
+        let mut delivered = false;
+        let result = self.session_with(start, |relay, track, uid| {
             stream_download(
                 relay,
                 &self.session.terminal_uuid,
@@ -254,9 +256,21 @@ impl<'a> Recordings<'a> {
                 uid,
                 start,
                 end,
-                sink,
+                &mut |chunk| {
+                    delivered = true;
+                    sink(chunk)
+                },
             )
-        })
+        });
+        match result {
+            // Older firmware has no download method: take the paced playback
+            // instead, after a pause (the relay answers 500 to an immediate retry).
+            Err(PullError::Relay(RelayError::Refused(-51416))) if !delivered => {
+                std::thread::sleep(std::time::Duration::from_secs(5));
+                self.play(start, end, sink)
+            }
+            other => other,
+        }
     }
 
     /// The same footage paced at real time, for watching as it arrives.
@@ -316,13 +330,14 @@ impl PullError {
 fn user_ids() -> &'static std::sync::Mutex<std::collections::HashMap<String, u64>> {
     static IDS: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, u64>>> =
         std::sync::OnceLock::new();
-    IDS.get_or_init(|| {
-        let saved = std::fs::read_to_string(user_ids_path())
-            .ok()
-            .and_then(|t| serde_json::from_str(&t).ok())
-            .unwrap_or_default();
-        std::sync::Mutex::new(saved)
-    })
+    IDS.get_or_init(|| std::sync::Mutex::new(saved_user_ids()))
+}
+
+fn saved_user_ids() -> std::collections::HashMap<String, u64> {
+    std::fs::read_to_string(user_ids_path())
+        .ok()
+        .and_then(|t| serde_json::from_str(&t).ok())
+        .unwrap_or_default()
 }
 
 /// Per camera: until when not to ask for a user id, and when its ids were last searched.
@@ -375,7 +390,14 @@ fn user_ids_path() -> std::path::PathBuf {
 }
 
 fn remembered_user_id(device_id: &str) -> Option<u64> {
-    user_ids().lock().ok()?.get(device_id).copied()
+    let mut m = user_ids().lock().ok()?;
+    if let Some(id) = m.get(device_id) {
+        return Some(*id);
+    }
+    // Another Kagaz may have found it since this one started.
+    let id = *saved_user_ids().get(device_id)?;
+    m.insert(device_id.to_string(), id);
+    Some(id)
 }
 
 /// Remember (or with `None` forget) a camera's user id, on disk too.
@@ -387,8 +409,15 @@ fn remember_user_id(device_id: &str, id: Option<u64>) {
         Some(id) => m.insert(device_id.to_string(), id),
         None => m.remove(device_id),
     };
-    if let Ok(text) = serde_json::to_string_pretty(&*m) {
-        let path = user_ids_path();
+    // Change only this camera in the saved file: another Kagaz (the window
+    // and the command line) may have saved ids since this one started.
+    let path = user_ids_path();
+    let mut saved = saved_user_ids();
+    match id {
+        Some(id) => saved.insert(device_id.to_string(), id),
+        None => saved.remove(device_id),
+    };
+    if let Ok(text) = serde_json::to_string_pretty(&saved) {
         if let Some(dir) = path.parent() {
             let _ = std::fs::create_dir_all(dir);
         }

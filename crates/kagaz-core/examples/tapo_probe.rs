@@ -3,7 +3,8 @@
 //! answer, for working out what a camera accepts.
 //!
 //! `cargo run -p kagaz-core --example tapo_probe -- <device-id> <stream-type> '<frame json>' [track-id] ['<stop frame json>']`
-//! `PROBE_SECS` bounds how long it listens (default 25).
+//! `PROBE_SECS` bounds how long it listens (default 25), `PROBE_READ_SECS` how
+//! long one read may wait (default 12).
 use kagaz_core::cameras::tapo::relay::{
     control_frame, relay_head, request_relay_for, split_relay_url,
 };
@@ -43,7 +44,12 @@ fn main() {
     };
     let mut tls = tls_stream(&dial, 443, &host, Duration::from_secs(15)).expect("tls");
     tls.sock
-        .set_read_timeout(Some(Duration::from_secs(12)))
+        .set_read_timeout(Some(Duration::from_secs(
+            std::env::var("PROBE_READ_SECS")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(12),
+        )))
         .unwrap();
     tls.write_all(relay_head(&relay, &session.terminal_uuid, &track, &host, &path).as_bytes())
         .unwrap();
