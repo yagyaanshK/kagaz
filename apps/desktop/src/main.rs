@@ -592,6 +592,53 @@ async fn playback_start(
     .await
 }
 
+#[derive(Debug, Clone, Serialize)]
+struct ClipView {
+    /// The clip's MP4 on the tile's own loopback address.
+    url: String,
+    /// Unix time of the clip's first frame (when `exact`), and where it ends.
+    start: i64,
+    end: i64,
+    exact: bool,
+}
+
+/// The downloaded clip holding moment `at`, as an MP4 the window can play,
+/// seek and speed up itself (made the first time, which takes a few
+/// seconds). None when that moment is not on disk.
+#[tauri::command]
+async fn playback_clip(
+    app: AppHandle,
+    state: tauri::State<'_, CameraState>,
+    device_id: String,
+    at: i64,
+) -> Result<Option<ClipView>, String> {
+    use kagaz_core::cameras::tapo::cache;
+    let e = running(&state)?;
+    let (index, cam) = camera_of(&e, &device_id)?;
+    blocking(move || {
+        let Some(entry) = cache::find(&kagaz_core::paths::recordings_dir(), &cam.device_id, at)
+        else {
+            return Ok(None);
+        };
+        if !cache::mp4_path(&entry).is_file() {
+            let _ = app.emit("clip-preparing", &cam.device_id);
+        }
+        let ffmpeg = kagaz_core::extras::ffmpeg::ensure(&mut |_| {}).map_err(|e| e.to_string())?;
+        cache::ensure_mp4(&entry, &ffmpeg).map_err(|e| e.to_string())?;
+        let url = e
+            ._server
+            .clip_url(index, &entry)
+            .ok_or("clip outside the recordings folder")?;
+        Ok(Some(ClipView {
+            url,
+            start: entry.start,
+            end: entry.covered_end(),
+            exact: entry.exact_start,
+        }))
+    })
+    .await
+}
+
 #[tauri::command]
 fn playback_state(
     state: tauri::State<'_, CameraState>,
@@ -917,6 +964,7 @@ fn main() {
             recording_days,
             recording_clips,
             playback_start,
+            playback_clip,
             playback_state,
             playback_stop,
             download_recording,

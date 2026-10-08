@@ -501,13 +501,14 @@ impl TsServer {
         if reader.read_line(&mut request_line).is_err() {
             return;
         }
-        // Drain the headers.
+        // Read the headers (a player asking for an MP4 sends Range).
+        let mut request_headers = Vec::new();
         loop {
             let mut line = String::new();
             match reader.read_line(&mut line) {
                 Ok(0) => return,
                 Ok(_) if line.trim().is_empty() => break,
-                Ok(_) => {}
+                Ok(_) => request_headers.push(line.trim().to_string()),
                 Err(_) => return,
             }
         }
@@ -527,6 +528,10 @@ impl TsServer {
         {
             let key = key.to_string();
             self.serve_audio(&key, stream);
+            return;
+        }
+        if let Some(rest) = path_only.strip_prefix("/clip/") {
+            self.serve_clip(rest, &request_headers, stream);
             return;
         }
         if let Some(token) = path_only
@@ -688,6 +693,108 @@ impl TsServer {
     }
 
     /// Stream recorded footage once per token; a reused token is "gone".
+    /// A cached clip's MP4 (`/clip/<device-id>/<YYYY-MM-DD>/<start>-<end>.mp4`),
+    /// with byte ranges, which a player needs to play, seek and speed it up.
+    /// Only files inside the recordings folder, named the way the cache names them.
+    fn serve_clip(&self, rest: &str, headers: &[String], mut client: TcpStream) {
+        use std::io::{Read, Seek, SeekFrom};
+        let not_found = |c: &mut TcpStream| {
+            let _ = c.write_all(
+                b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+            );
+        };
+        let parts: Vec<&str> = rest.split('/').collect();
+        let ok_name = |s: &str, extra: &str| {
+            !s.is_empty()
+                && s.chars()
+                    .all(|c| c.is_ascii_alphanumeric() || extra.contains(c))
+        };
+        if parts.len() != 3
+            || !ok_name(parts[0], "-_")
+            || !ok_name(parts[1], "-")
+            || !parts[2].ends_with(".mp4")
+            || !ok_name(parts[2].trim_end_matches(".mp4"), "-")
+        {
+            return not_found(&mut client);
+        }
+        let path = crate::paths::recordings_dir()
+            .join(parts[0])
+            .join(parts[1])
+            .join(parts[2]);
+        let Ok(mut file) = std::fs::File::open(&path) else {
+            return not_found(&mut client);
+        };
+        let size = file.metadata().map(|m| m.len()).unwrap_or(0);
+        if size == 0 {
+            return not_found(&mut client);
+        }
+        let range = headers
+            .iter()
+            .find_map(|h| {
+                let (k, v) = h.split_once(':')?;
+                k.trim()
+                    .eq_ignore_ascii_case("range")
+                    .then(|| v.trim().to_string())
+            })
+            .and_then(|v| {
+                let v = v.strip_prefix("bytes=")?;
+                let (a, b) = v.split_once('-')?;
+                let start: u64 = if a.is_empty() { 0 } else { a.parse().ok()? };
+                let end: u64 = if b.is_empty() {
+                    size - 1
+                } else {
+                    b.parse().ok()?
+                };
+                (start <= end && end < size).then_some((start, end))
+            });
+        let (start, end) = range.unwrap_or((0, size - 1));
+        let head = if range.is_some() {
+            format!(
+                "HTTP/1.1 206 Partial Content\r\nContent-Type: video/mp4\r\nAccept-Ranges: bytes\r\nContent-Range: bytes {start}-{end}/{size}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                end - start + 1
+            )
+        } else {
+            format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: video/mp4\r\nAccept-Ranges: bytes\r\nContent-Length: {size}\r\nConnection: close\r\n\r\n"
+            )
+        };
+        if client.write_all(head.as_bytes()).is_err() || file.seek(SeekFrom::Start(start)).is_err()
+        {
+            return;
+        }
+        let mut left = end - start + 1;
+        let mut buf = vec![0u8; 1 << 16];
+        while left > 0 {
+            let want = (left as usize).min(buf.len());
+            match file.read(&mut buf[..want]) {
+                Ok(0) | Err(_) => break,
+                Ok(n) => {
+                    if client.write_all(&buf[..n]).is_err() {
+                        break;
+                    }
+                    left -= n as u64;
+                }
+            }
+        }
+    }
+
+    /// The URL of a cached clip's MP4 on a tile's own loopback address.
+    pub fn clip_url(&self, index: usize, entry: &super::cache::Entry) -> Option<String> {
+        let mp4 = super::cache::mp4_path(entry);
+        let root = crate::paths::recordings_dir();
+        let rel = mp4.strip_prefix(&root).ok()?;
+        let rel: Vec<String> = rel
+            .iter()
+            .map(|c| c.to_string_lossy().to_string())
+            .collect();
+        Some(format!(
+            "http://{}:{}/clip/{}",
+            self.host_for(index),
+            self.port,
+            rel.join("/")
+        ))
+    }
+
     fn serve_playback(&self, mut stream: TcpStream, session: &Session, cam: &Camera, span: &Span) {
         let Span {
             from,

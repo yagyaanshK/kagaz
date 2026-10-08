@@ -1735,6 +1735,15 @@ fn fetch_recordings(
                             bytes += got;
                             fetched += 1;
                             say(&format!("{label}: {}", human_size(got)));
+                            // Ready to play in the window at once (an MP4 beside it).
+                            if let Ok(ffmpeg) = kagaz_core::extras::ffmpeg::ensure(&mut |_| {}) {
+                                for e in cache::list(&root, &cam.device_id)
+                                    .into_iter()
+                                    .filter(|e| e.start < c.end && e.covered_end() > c.start)
+                                {
+                                    let _ = cache::ensure_mp4(&e, &ffmpeg);
+                                }
+                            }
                         }
                         Err(e) => {
                             say(&e);

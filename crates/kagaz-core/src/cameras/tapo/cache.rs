@@ -172,6 +172,61 @@ pub fn coverage(root: &Path, device_id: &str, start: i64, end: i64) -> Vec<(i64,
     out
 }
 
+/// The MP4 kept beside a cached span (same name, `.mp4`).
+pub fn mp4_path(entry: &Entry) -> PathBuf {
+    entry.path.with_extension("mp4")
+}
+
+/// Make (once) an MP4 of a cached span that a web player can play, seek
+/// and speed up: the picture copied as it is, the sound as AAC. Returns its
+/// path. The camera's MPEG-TS is not something this webview plays reliably
+/// (it ignores timestamps there); an ordinary MP4 it does.
+pub fn ensure_mp4(
+    entry: &Entry,
+    ffmpeg: &Path,
+) -> Result<PathBuf, crate::extras::go2rtc::ExtraError> {
+    use crate::extras::go2rtc::ExtraError;
+    use std::io::Read;
+    let out = mp4_path(entry);
+    if out.is_file() {
+        return Ok(out);
+    }
+    let io = |e: std::io::Error| ExtraError::Io {
+        path: entry.path.clone(),
+        source: e,
+    };
+    // Pull the camera's G.711 sound out of the recording.
+    let alaw = entry.path.with_extension("alaw.part");
+    let mut demux = super::audio::AudioDemux::default();
+    {
+        let mut src = std::fs::File::open(&entry.path).map_err(io)?;
+        let mut dst = std::fs::File::create(&alaw).map_err(io)?;
+        let mut buf = vec![0u8; TS * 4096];
+        loop {
+            let n = src.read(&mut buf).map_err(io)?;
+            if n == 0 {
+                break;
+            }
+            let g711 = demux.push(&buf[..n]);
+            std::io::Write::write_all(&mut dst, &g711).map_err(io)?;
+        }
+    }
+    let has_sound = std::fs::metadata(&alaw)
+        .map(|m| m.len() > 0)
+        .unwrap_or(false);
+    let part = entry.path.with_extension("mp4.part");
+    let result = crate::extras::ffmpeg::mux_mp4(
+        ffmpeg,
+        &entry.path,
+        has_sound.then(|| (alaw.as_path(), demux.audio_offset_seconds().unwrap_or(0.0))),
+        &part,
+    );
+    let _ = std::fs::remove_file(&alaw);
+    result?;
+    std::fs::rename(&part, &out).map_err(io)?;
+    Ok(out)
+}
+
 /// Writes one span to disk as it arrives; `finish` makes it visible.
 pub struct Writer {
     entry: Entry,
