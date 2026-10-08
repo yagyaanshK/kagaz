@@ -1630,6 +1630,7 @@ fn fetch_recordings(
     }
     let root = kagaz_core::paths::recordings_dir();
     println!("Recordings folder: {}", root.display());
+    report_salvage(&root);
     let (from_s, to_s) = (
         from.map(time_of_day).transpose()?.unwrap_or(0),
         to.map(time_of_day).transpose()?.unwrap_or(86_400),
@@ -1687,6 +1688,18 @@ fn chosen_cameras(
         cams.retain(|c| c.device_id != skip);
     }
     Ok(cams)
+}
+
+/// Keep what downloads cut off last time had brought, and say so.
+fn report_salvage(root: &std::path::Path) {
+    for e in kagaz_core::cameras::tapo::cache::salvage(root) {
+        println!(
+            "Kept {:.0} s ({}) of an unfinished download from {}",
+            e.seconds,
+            human_size(e.bytes),
+            e.path.display()
+        );
+    }
 }
 
 /// "HH:MM" as seconds into the day ("24:00" is the day's end).
@@ -1889,6 +1902,7 @@ fn nightly(
     };
     let cams = chosen_cameras(&session, wanted, except)?;
     let root = kagaz_core::paths::recordings_dir();
+    report_salvage(&root);
     let stamp = || {
         let t = kagaz_core::localtime::now();
         format!(
