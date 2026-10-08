@@ -653,6 +653,13 @@ function failPlayback(tile, cam, reason, at) {
   tile._clock = { at, wall: Date.now(), speed: 0 }; // hold the clock where it failed
   // A camera that refuses recorded playback outright (first-generation
   // C100s answer -52402 to every request) will not change its mind.
+  // The camera's user slots are full (it is busy): wait long, not short.
+  if (/-71101/.test(String(reason)) && tile._fails < MAX_FAILS) {
+    const wait = 120;
+    setState(tile, "lost", `The camera is busy (no free playback slots). Trying again in ${wait / 60} min; click to try now.`);
+    tile._retryTimer = setTimeout(() => { tile._retryTimer = null; mountPlayback(tile, cam, at, { retry: true }); }, wait * 1000);
+    return;
+  }
   if (/-52402/.test(String(reason))) {
     tile._paused = true;
     setState(tile, "lost", "This camera does not allow playing its recordings over the internet (it refuses every request). Click to try again.");
