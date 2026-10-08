@@ -505,14 +505,14 @@ function teardownTile(tile) {
     try { vs.src = ""; } catch (_) {}
   }
   tile.querySelector("video, video-stream")?.remove();
-  tile._audioWanted = !!tile.querySelector("audio");
+  tile._audioWanted = !!tile.querySelector("audio") || !!tile._fileSound;
   stopAudio(tile);
   if (tile._watch) { clearInterval(tile._watch); tile._watch = null; }
   if (tile._retryTimer) { clearTimeout(tile._retryTimer); tile._retryTimer = null; }
   if (tile._playback) {
     const pb = tile._playback;
     tile._playback = null;
-    invoke("playback_stop", { token: pb.token, stream: pb.stream }).catch(() => {});
+    if (pb.token) invoke("playback_stop", { token: pb.token, stream: pb.stream }).catch(() => {});
   }
 }
 
@@ -700,6 +700,12 @@ async function mountPlayback(tile, cam, from, opts = {}) {
   let handle;
   const speed = tile._sync ? tile._sync.speed : speedValue();
   const mountId = (tile._mountId = (tile._mountId || 0) + 1);
+  // Downloaded footage plays as an MP4 file: the player's own speed, seek,
+  // pause and sound all work on it (they do not on the camera's stream).
+  let clip = null;
+  try { clip = await invoke("playback_clip", { deviceId: cam.device_id, at: from }); } catch (_) { clip = null; }
+  if (tile._mountId !== mountId || !tile.isConnected) return;
+  if (clip) { mountFile(tile, cam, from, clip, speed); return; }
   try {
     handle = await invoke("playback_start", { deviceId: cam.device_id, from, to, speed });
   } catch (e) {
@@ -765,6 +771,45 @@ async function mountPlayback(tile, cam, from, opts = {}) {
   });
 }
 
+// Play a downloaded clip's MP4 from moment `from`. The position is exact:
+// the clip's first-frame time plus the player's own position.
+function mountFile(tile, cam, from, clip, speed) {
+  const player = document.createElement("video");
+  player.muted = true;
+  player.playsInline = true;
+  player.preload = "auto";
+  player.src = clip.url;
+  tile.insertBefore(player, tile.firstChild);
+  setState(tile, "connecting", "loading from your disk…");
+  tile._playback = { kind: "file", from, clipStart: clip.start, clipEnd: clip.end, speed, asked: tile._askedAt || Date.now(), firstFrame: false };
+  const pb = tile._playback;
+  player.addEventListener("loadedmetadata", () => {
+    player.currentTime = Math.max(0, from - clip.start);
+    player.playbackRate = speed;
+  }, { once: true });
+  player.addEventListener("seeked", () => {
+    if (pb.firstFrame) return;
+    pb.firstFrame = true;
+    tile._delay = (Date.now() - pb.asked) / 1000;
+    tile._fails = 0;
+    setState(tile, "live", "");
+    // On a shared clock: wait on this frame until the clock gets here.
+    if (tile._sync) { tile._held = true; }
+    else { player.play().catch(() => {}); }
+  }, { once: true });
+  player.addEventListener("error", () => {
+    if (tile._playback === pb) failPlayback(tile, cam, "could not play the downloaded clip", Math.floor(tileNow(tile) ?? from));
+  });
+  // The clip is over: the once-a-second check moves on to the next one (or a gap).
+  player.addEventListener("ended", () => { tile._ended = true; });
+  watchTile(tile, (v, t, lastT) => {
+    if (!tile._sync && t > lastT + 0.05) tile._clock = { at: clip.start + t, wall: Date.now(), speed: v.playbackRate || speed };
+    if (clip.start + t >= clip.end - 0.5) tile._ended = true;
+    // A file does not stall like a stream: only report a real error.
+    return true;
+  });
+}
+
 // States: connecting, waiting (spinner), live (no overlay), lost (error:
 // reload icon, retried by itself), ended (a recording is over: reload icon
 // plays it again, no automatic retry).
@@ -790,6 +835,11 @@ function audioBase(cam) {
 }
 
 function stopAudio(tile) {
+  if (tile._fileSound) {
+    const fv = tile.querySelector("video");
+    if (fv) fv.muted = true;
+    tile._fileSound = false;
+  }
   const a = tile.querySelector("audio");
   if (a) {
     try { a.pause(); a.removeAttribute("src"); a.load(); } catch (_) {}
@@ -807,6 +857,17 @@ function volumeOf(cam) {
 
 // Sound for one camera; any number of cameras can be heard at once.
 function startAudio(tile, cam) {
+  // A downloaded clip carries its sound: just turn it up (in step at any speed).
+  const fv = tile._playback && tile._playback.kind === "file" ? tile.querySelector("video") : null;
+  if (fv) {
+    fv.muted = false;
+    fv.volume = volumeOf(cam) / 100;
+    tile._fileSound = true;
+    const b = tile.querySelector(".cam-speaker");
+    if (b) { b.textContent = "\u{1F50A}"; b.classList.add("on"); }
+    tile.classList.add("sound-on");
+    return true;
+  }
   if (tile.querySelector("audio")) return true;
   const key = isPlayback() ? (tile._playback && tile._playback.token) : cam.device_id;
   if (!key) return false;
@@ -824,7 +885,7 @@ function startAudio(tile, cam) {
 }
 
 function toggleAudio(tile, cam) {
-  if (tile.querySelector("audio")) { stopAudio(tile); tile._audioWanted = false; }
+  if (tile.querySelector("audio") || tile._fileSound) { stopAudio(tile); tile._audioWanted = false; }
   else startAudio(tile, cam);
   refreshSoundAll();
 }
@@ -832,7 +893,7 @@ function toggleAudio(tile, cam) {
 // The top row's button: sound on every camera shown, or off on all.
 function refreshSoundAll() {
   const tiles = [...$("cam-grid").querySelectorAll(".cam-tile:not(.placeholder)")];
-  const anyOff = tiles.some((t) => !t.querySelector("audio"));
+  const anyOff = tiles.some((t) => !t.querySelector("audio") && !t._fileSound);
   $("cam-sound-all").textContent = anyOff ? "\u{1F50A} Sound on all" : "\u{1F507} Mute all";
 }
 
@@ -899,6 +960,7 @@ function buildTile(cam) {
     const v = Number(volume.value);
     const a = tile.querySelector("audio");
     if (a) a.volume = v / 100;
+    if (tile._fileSound) { const fv = tile.querySelector("video"); if (fv) fv.volume = v / 100; }
     layout.volume = layout.volume || {};
     layout.volume[cam.device_id] = v;
     clearTimeout(saveTimer);
@@ -1430,7 +1492,7 @@ setInterval(() => {
         if (v && !v.paused) { try { v.pause(); } catch (_) {} }
         t._held = true;
       }
-      if (Date.now() - c.pausedSince > 20000) mine.forEach((t) => { if (t._playback) freezeTile(t); });
+      if (Date.now() - c.pausedSince > 20000) mine.forEach((t) => { if (t._playback && t._playback.kind !== "file") freezeTile(t); });
       continue;
     }
     if (!c.running) {
@@ -1447,6 +1509,21 @@ setInterval(() => {
       const v = tile.querySelector("video");
       const pb = tile._playback;
       if (!v || !pb || !pb.firstFrame || tile._gap) continue;
+      if (pb.kind === "file") {
+        // Exact position; a jump fixes any drift at once (no re-fetch).
+        if (v.playbackRate !== sp) v.playbackRate = sp;
+        const fd = pb.clipStart + v.currentTime - m;
+        if (Math.abs(fd) > Math.max(1, 0.5 * sp) && !v.seeking) {
+          const target = m - pb.clipStart;
+          if (target >= 0 && m < pb.clipEnd) v.currentTime = target;
+        }
+        if (tile._held || v.paused) {
+          tile._held = false;
+          v.play().catch(() => {});
+          if (tile.dataset.state === "gap") setState(tile, "live", "");
+        }
+        continue;
+      }
       const diff = pb.from + v.currentTime * pb.speed - m;
       if (diff > 0.6 * sp) {
         // Ahead: wait for the clock.
@@ -1827,6 +1904,13 @@ function downloadForm(wrap, cam, tile) {
   wrap.appendChild(form);
 }
 
+// The first play of a downloaded clip makes its MP4 (about ten seconds).
+listen("clip-preparing", (e) => {
+  document.querySelectorAll(`.cam-cell[data-id="${CSS.escape(e.payload)}"] .cam-tile`).forEach((tile) => {
+    if (tile.dataset.state === "connecting") setState(tile, "connecting", "preparing the downloaded clip (first time only)…");
+  });
+});
+
 listen("download-progress", (e) => {
   const p = e.payload;
   document.querySelectorAll(`.pb-form[data-device-id="${p.device_id}"] .pb-dl-note`).forEach((n) => {
@@ -1854,7 +1938,7 @@ $("cam-add-group").addEventListener("click", () => {
 $("cam-show-all").addEventListener("click", () => { viewGroup = null; renderCameraGrid(); });
 $("cam-sound-all").addEventListener("click", () => {
   const tiles = [...$("cam-grid").querySelectorAll(".cam-cell")].map((c) => [c.querySelector(".cam-tile"), cameraById(c.dataset.id)]);
-  const anyOff = tiles.some(([t]) => !t.querySelector("audio"));
+  const anyOff = tiles.some(([t]) => !t.querySelector("audio") && !t._fileSound);
   for (const [t, cam] of tiles) {
     if (anyOff) startAudio(t, cam); else { stopAudio(t); t._audioWanted = false; }
   }

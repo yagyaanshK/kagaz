@@ -191,6 +191,8 @@ pub fn mux_mp4(
         .arg("copy")
         .arg("-movflags")
         .arg("+faststart")
+        .arg("-f")
+        .arg("mp4")
         .arg(out);
     let output = cmd
         .output()
