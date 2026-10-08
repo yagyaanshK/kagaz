@@ -5,7 +5,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 fn main() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../drivers");
+    // Read where the crate is now (not where it was when this script was
+    // first compiled), so moving the checkout does not break the build.
+    let root = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("cargo sets this"))
+        .join("../../drivers");
     let mut files: Vec<PathBuf> = Vec::new();
     collect(&root, &mut files);
     // An empty database would build fine and ship without any driver; a
