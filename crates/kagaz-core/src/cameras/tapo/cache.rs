@@ -131,6 +131,47 @@ pub fn has_span(root: &Path, device_id: &str, start: i64, end: i64) -> bool {
     covered_until(root, device_id, start, end) >= end - 1
 }
 
+/// Save a camera's recording list for a day ("YYYY-MM-DD") beside its
+/// footage, so the day can be shown when the camera cannot be asked.
+pub fn save_list(
+    root: &Path,
+    device_id: &str,
+    day: &str,
+    list: &serde_json::Value,
+) -> std::io::Result<()> {
+    let dir = day_dir(root, device_id, day);
+    std::fs::create_dir_all(&dir)?;
+    let text = serde_json::to_string(list).map_err(std::io::Error::other)?;
+    let tmp = dir.join("list.json.part");
+    std::fs::write(&tmp, text)?;
+    std::fs::rename(tmp, dir.join("list.json"))
+}
+
+/// The saved recording list for a day, if there is one.
+pub fn load_list(root: &Path, device_id: &str, day: &str) -> Option<serde_json::Value> {
+    let text = std::fs::read_to_string(day_dir(root, device_id, day).join("list.json")).ok()?;
+    serde_json::from_str(&text).ok()
+}
+
+/// Where downloaded footage exists between two unix times, as merged
+/// spans (pieces that touch or overlap become one).
+pub fn coverage(root: &Path, device_id: &str, start: i64, end: i64) -> Vec<(i64, i64)> {
+    let mut spans: Vec<(i64, i64)> = list(root, device_id)
+        .iter()
+        .map(|e| (e.start.max(start), e.covered_end().min(end)))
+        .filter(|(a, b)| b > a)
+        .collect();
+    spans.sort();
+    let mut out: Vec<(i64, i64)> = Vec::new();
+    for (a, b) in spans {
+        match out.last_mut() {
+            Some(last) if a <= last.1 + 2 => last.1 = last.1.max(b),
+            _ => out.push((a, b)),
+        }
+    }
+    out
+}
+
 /// Writes one span to disk as it arrives; `finish` makes it visible.
 pub struct Writer {
     entry: Entry,
@@ -517,6 +558,17 @@ mod tests {
         assert!(!has_span(&root, "DEV1", 1000, 1200));
         assert_eq!(covered_until(&root, "DEV1", 1000, 1200), 1060);
         assert_eq!(covered_until(&root, "DEV1", 900, 1200), 900);
+        assert_eq!(coverage(&root, "DEV1", 0, 2000), vec![(1000, 1060)]);
+        save_list(
+            &root,
+            "DEV1",
+            "2026-10-01",
+            &serde_json::json!({ "clips": [] }),
+        )
+        .unwrap();
+        assert!(load_list(&root, "DEV1", "2026-10-01").is_some());
+        // The saved list is not mistaken for a recording.
+        assert_eq!(list(&root, "DEV1").len(), 1);
         assert_eq!(find(&root, "DEV1", 1030).unwrap().start, 1000);
         assert!(find(&root, "DEV1", 1060).is_none());
         let _ = std::fs::remove_dir_all(&root);

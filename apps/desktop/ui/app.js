@@ -688,7 +688,8 @@ async function mountPlayback(tile, cam, from, opts = {}) {
     if (!span) { enterGap(tile, cam, from); return; }
     to = span.end;
   } else {
-    // No list: ask to the end of the day (the camera will skip its own gaps).
+    // No list from the camera, saved, or from downloaded footage: only the
+    // camera can say whether it has anything (it skips its own gaps).
     const day = seekDayStart();
     to = day !== null ? day + 86400 : from + 3600;
   }
@@ -712,7 +713,9 @@ async function mountPlayback(tile, cam, from, opts = {}) {
     return;
   }
   tile._playback = { token: handle.token, stream: handle.stream, from, to, speed, asked: tile._askedAt || Date.now(), firstFrame: false };
-  setState(tile, "connecting", handle.cached ? "loading from your disk…" : "asking the camera for its recording…");
+  setState(tile, "connecting", handle.cached ? "loading from your disk…"
+    : clips ? "asking the camera for its recording…"
+    : "no recording list for this camera; asking the camera whether it has this time…");
   const player = document.createElement("video");
   player.autoplay = true;
   player.muted = true;
@@ -1766,9 +1769,10 @@ function fillTimeline(cell, cam) {
   const det = clips.detections || [];
   const people = det.filter((d) => d.label === "person").length;
   const motion = det.filter((d) => d.label === "motion").length;
+  const from = clips.source === "saved" ? " (saved list)" : clips.source === "footage" ? " (from the downloaded footage; the camera's list could not be read)" : "";
   note.textContent = clips.clips.length
-    ? `${clips.clips.length} recordings, ${Math.round(total / 60)} min; ${motion} motion, ${people} person` + (card.state !== "normal" ? `; card ${card.state}` : "")
-    : (card.state === "normal" ? "nothing recorded that day" : `SD card ${card.state}`);
+    ? `${clips.clips.length} recordings, ${Math.round(total / 60)} min; ${motion} motion, ${people} person` + (card.state !== "normal" && card.state !== "unknown" ? `; card ${card.state}` : "") + from
+    : (card.state === "normal" ? "nothing recorded that day" : `SD card ${card.state}`) + from;
 }
 
 function updatePosition(cell, cam, at) {
