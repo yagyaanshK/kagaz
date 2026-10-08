@@ -310,6 +310,85 @@ impl Writer {
     }
 }
 
+/// Keep the footage of downloads that were cut off without finishing (the
+/// computer shut down, the process was killed): a `.part` file nobody has
+/// written to for ten minutes becomes an incomplete entry, so the next fetch
+/// resumes after it instead of starting that stretch again.
+pub fn salvage(root: &Path) -> Vec<Entry> {
+    let mut kept = Vec::new();
+    let Ok(cameras) = std::fs::read_dir(root) else {
+        return kept;
+    };
+    for cam in cameras.flatten() {
+        let device_id = cam.file_name().to_string_lossy().to_string();
+        let Ok(days) = std::fs::read_dir(cam.path()) else {
+            continue;
+        };
+        for day in days.flatten() {
+            let Ok(files) = std::fs::read_dir(day.path()) else {
+                continue;
+            };
+            for f in files.flatten() {
+                if let Some(e) = salvage_part(&device_id, &f.path()) {
+                    kept.push(e);
+                }
+            }
+        }
+    }
+    kept
+}
+
+fn salvage_part(device_id: &str, part: &Path) -> Option<Entry> {
+    use std::io::Read;
+    let name = part.file_name()?.to_str()?;
+    let (start, end) = name.strip_suffix(".ts.part")?.split_once('-')?;
+    let (start, end): (i64, i64) = (start.parse().ok()?, end.parse().ok()?);
+    let meta = std::fs::metadata(part).ok()?;
+    let idle = meta.modified().ok()?.elapsed().ok()?;
+    if idle < std::time::Duration::from_secs(600) {
+        return None;
+    }
+    // A cut-off write can end inside a packet.
+    let bytes = meta.len() - meta.len() % TS as u64;
+    let file = std::fs::OpenOptions::new().write(true).open(part).ok()?;
+    file.set_len(bytes).ok()?;
+    drop(file);
+    let mut pts = super::relay::PtsTracker::default();
+    let mut reader = std::fs::File::open(part).ok()?;
+    let mut buf = vec![0u8; TS * 8192];
+    loop {
+        let n = reader.read(&mut buf).ok()?;
+        if n == 0 {
+            break;
+        }
+        pts.update(&buf[..n]);
+    }
+    let seconds = pts.seconds();
+    if seconds < 2.0 {
+        let _ = std::fs::remove_file(part);
+        return None;
+    }
+    let path = part.with_file_name(format!("{start}-{end}.ts"));
+    if path.exists() {
+        return None;
+    }
+    let entry = Entry {
+        device_id: device_id.to_string(),
+        start,
+        end,
+        exact_start: false,
+        seconds,
+        bytes,
+        complete: seconds >= (end - start) as f64 - 2.0,
+        fetched_at: now(),
+        path,
+    };
+    std::fs::rename(part, &entry.path).ok()?;
+    let note = serde_json::to_string_pretty(&entry).ok()?;
+    std::fs::write(entry.path.with_extension("json"), note).ok()?;
+    Some(entry)
+}
+
 const TS: usize = 188;
 const PTS_WRAP: u64 = 1 << 33;
 
