@@ -395,7 +395,7 @@ async fn recording_days(
     .await
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct RecordingClips {
     utc_offset_minutes: i32,
     sd_card: kagaz_core::cameras::tapo::SdCard,
@@ -404,52 +404,146 @@ struct RecordingClips {
     detections: Vec<DetectionView>,
     /// Unix time at which the day starts on the camera's clock.
     day_start: i64,
+    /// Where this list came from: "camera", "saved" (kept from an earlier
+    /// answer) or "footage" (worked out from the downloaded recordings).
+    #[serde(default)]
+    source: String,
+    /// Saved after the day had ended, so nothing more can be added to it.
+    #[serde(default)]
+    whole_day: bool,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct DetectionView {
     start: i64,
     end: i64,
     kind: u32,
-    label: &'static str,
+    label: String,
 }
 
-/// The clips of one camera-local day ("YYYY-MM-DD").
+/// The clips of one camera-local day ("YYYY-MM-DD"). A day that is over is
+/// read from the list saved last time, without asking the camera; today,
+/// or a day never asked, comes from the camera and is saved. When the camera
+/// cannot answer, the saved list is used, or failing that the downloaded
+/// footage shows where recordings exist.
 #[tauri::command]
 async fn recording_clips(
     state: tauri::State<'_, CameraState>,
     device_id: String,
     date: String,
 ) -> Result<RecordingClips, String> {
+    use kagaz_core::cameras::tapo::cache;
     use kagaz_core::cameras::tapo::recordings::{self, Recordings};
     let e = running(&state)?;
     let (_, cam) = camera_of(&e, &device_id)?;
     blocking(move || {
+        let root = kagaz_core::paths::recordings_dir();
+        let day: String = date.chars().filter(|c| c.is_ascii_digit()).collect();
+        let dashed = recordings::dash_date(&day);
+        let saved = || {
+            cache::load_list(&root, &cam.device_id, &dashed)
+                .and_then(|v| serde_json::from_value::<RecordingClips>(v).ok())
+                .map(|mut l| {
+                    l.source = "saved".into();
+                    l
+                })
+        };
+        // A finished day does not change: use the saved list as it is.
+        let local_today = {
+            let t = kagaz_core::localtime::now();
+            format!("{:04}{:02}{:02}", t.year, t.month, t.day)
+        };
+        if day < local_today {
+            if let Some(l) = saved().filter(|l| l.whole_day) {
+                return Ok(l);
+            }
+        }
         let session = e._server.session();
         let rec = Recordings::new(&session, &cam);
-        let offset = rec.utc_offset_minutes().map_err(|e| e.to_string())?;
-        let day: String = date.chars().filter(|c| c.is_ascii_digit()).collect();
-        let day_start = recordings::day_start(&day, offset).ok_or("bad date")?;
-        Ok(RecordingClips {
-            utc_offset_minutes: offset,
-            sd_card: rec.sd_card().map_err(|e| e.to_string())?,
-            clips: rec.clips(&day).map_err(|e| e.to_string())?,
-            // Detections are a nicety: a refusal leaves the timeline without them.
-            detections: rec
-                .detections(day_start, day_start + 86_400)
-                .unwrap_or_default()
-                .into_iter()
-                .map(|d| DetectionView {
-                    start: d.start,
-                    end: d.end,
-                    kind: d.kind,
-                    label: d.label(),
+        let asked = (|| -> Result<RecordingClips, String> {
+            let offset = rec.utc_offset_minutes().map_err(|e| e.to_string())?;
+            let day_start = recordings::day_start(&day, offset).ok_or("bad date")?;
+            Ok(RecordingClips {
+                utc_offset_minutes: offset,
+                sd_card: rec.sd_card().map_err(|e| e.to_string())?,
+                clips: rec.clips(&day).map_err(|e| e.to_string())?,
+                // Detections are a nicety: a refusal leaves the timeline without them.
+                detections: rec
+                    .detections(day_start, day_start + 86_400)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|d| DetectionView {
+                        start: d.start,
+                        end: d.end,
+                        kind: d.kind,
+                        label: d.label().to_string(),
+                    })
+                    .collect(),
+                day_start,
+                source: "camera".into(),
+                // Asked after the day (and a few minutes for the last clip) ended.
+                whole_day: unix_now() > day_start + 86_400 + 600,
+            })
+        })();
+        match asked {
+            Ok(list) => {
+                if let Ok(v) = serde_json::to_value(&list) {
+                    let _ = cache::save_list(&root, &cam.device_id, &dashed, &v);
+                }
+                Ok(list)
+            }
+            Err(why) => {
+                if let Some(l) = saved() {
+                    return Ok(l);
+                }
+                // Nothing saved: where the downloaded footage is, recordings exist.
+                let offset = local_utc_offset_minutes();
+                let day_start = recordings::day_start(&day, offset).ok_or("bad date")?;
+                let spans = cache::coverage(&root, &cam.device_id, day_start, day_start + 86_400);
+                if spans.is_empty() {
+                    return Err(why);
+                }
+                Ok(RecordingClips {
+                    utc_offset_minutes: offset,
+                    sd_card: kagaz_core::cameras::tapo::SdCard {
+                        state: "unknown".into(),
+                        ..Default::default()
+                    },
+                    clips: spans
+                        .into_iter()
+                        .map(|(start, end)| kagaz_core::cameras::tapo::Clip {
+                            start,
+                            end,
+                            video_type: 1,
+                        })
+                        .collect(),
+                    detections: Vec::new(),
+                    day_start,
+                    source: "footage".into(),
+                    whole_day: false,
                 })
-                .collect(),
-            day_start,
-        })
+            }
+        }
     })
     .await
+}
+
+/// This computer's offset from UTC in minutes (for a camera that cannot be asked).
+fn local_utc_offset_minutes() -> i32 {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    let t = kagaz_core::localtime::now();
+    let local = (((t.hour * 60 + t.minute) * 60 + t.second) as i64) - now.rem_euclid(86_400);
+    // Into -12 h .. +14 h, rounded to the quarter hour.
+    let mut minutes = local.div_euclid(60) as i32;
+    if minutes > 14 * 60 {
+        minutes -= 24 * 60;
+    } else if minutes < -12 * 60 {
+        minutes += 24 * 60;
+    }
+    (minutes as f64 / 15.0).round() as i32 * 15
 }
 
 #[derive(Debug, Clone, Serialize)]
