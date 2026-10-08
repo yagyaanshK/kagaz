@@ -25,6 +25,8 @@ pub struct PlaybackState {
     pub bytes: u64,
     /// Why it ended early, if it did.
     pub error: String,
+    /// Playback speed, so its sound can be played at the same pace.
+    pub speed: f64,
 }
 
 /// A listener for one session's raw G.711 bytes.
@@ -188,7 +190,13 @@ impl TsServer {
     ) -> (String, String) {
         let token = uuid::Uuid::new_v4().simple().to_string();
         if let Ok(mut p) = self.playbacks.lock() {
-            p.insert(token.clone(), PlaybackState::default());
+            p.insert(
+                token.clone(),
+                PlaybackState {
+                    speed,
+                    ..PlaybackState::default()
+                },
+            );
         }
         let mut url = format!(
             "http://127.0.0.1:{}/tapo/{device_id}.ts?from={from}&to={to}&once={token}",
@@ -278,7 +286,7 @@ impl TsServer {
     /// Stream the audio of the session `key` as WAV until the listener leaves
     /// or the session ends.
     fn serve_audio(&self, key: &str, mut client: TcpStream) {
-        use super::audio::{decode, wav_header, Law};
+        use super::audio::{decode, Law};
         let (tx, rx) = std::sync::mpsc::sync_channel::<Vec<u8>>(64);
         if let Ok(mut taps) = self.taps.lock() {
             taps.entry(key.to_string()).or_default().push(tx);
@@ -296,7 +304,14 @@ impl TsServer {
                 .and_then(|()| client.write_all(b"\r\n"))
                 .is_ok()
         };
-        if !chunk(&wav_header()) {
+        // A sped-up (or slowed) playback: label the sound's rate to match.
+        let speed = self
+            .playback_state(key)
+            .map(|st| st.speed)
+            .filter(|s| *s > 0.0)
+            .unwrap_or(1.0);
+        let rate = ((8000.0 * speed).round() as u32).clamp(2000, 64000);
+        if !chunk(&super::audio::wav_header_at(rate)) {
             return;
         }
         log(&format!("audio {key}: listener joined"));
