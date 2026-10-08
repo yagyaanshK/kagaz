@@ -4,6 +4,7 @@
 
 pub mod audio;
 pub mod cache;
+pub mod clock;
 pub mod cloud;
 pub mod download;
 pub mod recordings;
