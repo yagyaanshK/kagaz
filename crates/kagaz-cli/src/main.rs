@@ -264,6 +264,29 @@ enum TapoCommand {
         #[arg(long)]
         to: Option<String>,
     },
+    /// Run as a recorder on an always-on computer: every day, in a download window,
+    /// copy that day's footage from the cameras' SD cards into the recordings folder
+    /// (carrying unfinished days over to the next night), and check the cameras'
+    /// clocks regularly, correcting the times of a camera whose clock went wrong
+    Nightly {
+        /// Cameras (name, part of it, or device id); none means every camera on the account
+        cameras: Vec<String>,
+        /// Leave out these cameras
+        #[arg(long)]
+        except: Vec<String>,
+        /// The footage to copy each day, HH:MM-HH:MM on the cameras' clocks
+        #[arg(long, default_value = "10:00-18:00")]
+        footage: String,
+        /// When to download, HH:MM-HH:MM on this computer's clock; downloads stop at the end
+        #[arg(long, default_value = "20:00-24:00")]
+        window: String,
+        /// Minutes between clock checks (0 turns the clock watcher off)
+        #[arg(long, default_value_t = 15)]
+        clock_minutes: u64,
+        /// How many earlier days to finish when they were left incomplete
+        #[arg(long, default_value_t = 7)]
+        catch_up_days: u32,
+    },
     /// Save recorded footage from a camera's SD card as an MP4 file (through the video engine)
     Download {
         /// Camera name, or part of it, or its device id
@@ -1455,6 +1478,22 @@ fn tapo_command(cmd: TapoCommand) -> Result<()> {
             from.as_deref(),
             to.as_deref(),
         ),
+        TapoCommand::Nightly {
+            cameras,
+            except,
+            footage,
+            window,
+            clock_minutes,
+            catch_up_days,
+        } => nightly(
+            &path,
+            &cameras,
+            &except,
+            &footage,
+            &window,
+            clock_minutes,
+            catch_up_days,
+        ),
         TapoCommand::Download {
             camera,
             from,
@@ -1583,9 +1622,57 @@ fn fetch_recordings(
     from: Option<&str>,
     to: Option<&str>,
 ) -> Result<()> {
-    use kagaz_core::cameras::tapo::cache;
-    use kagaz_core::cameras::tapo::recordings::{self, Recordings};
     let session = load_tapo_session(session_path)?;
+    let cams = chosen_cameras(&session, wanted, except)?;
+    let day: String = date.chars().filter(|c| c.is_ascii_digit()).collect();
+    if day.len() != 8 {
+        anyhow::bail!("--date must be YYYY-MM-DD");
+    }
+    let root = kagaz_core::paths::recordings_dir();
+    println!("Recordings folder: {}", root.display());
+    let (from_s, to_s) = (
+        from.map(time_of_day).transpose()?.unwrap_or(0),
+        to.map(time_of_day).transpose()?.unwrap_or(86_400),
+    );
+    let started = std::time::Instant::now();
+    let workers: Vec<_> = cams
+        .into_iter()
+        .map(|cam| {
+            let (session, root, day) = (session.clone(), root.clone(), day.clone());
+            std::thread::spawn(move || {
+                let got = fetch_camera_day(&session, &cam, &root, &day, (from_s, to_s), None);
+                (cam.name, got)
+            })
+        })
+        .collect();
+    println!();
+    let mut total = 0;
+    for w in workers {
+        if let Ok((name, got)) = w.join() {
+            total += got.bytes;
+            println!(
+                "{name}: {} fetched ({}), {} already here, {} failed",
+                got.fetched,
+                human_size(got.bytes),
+                got.skipped,
+                got.problems.len()
+            );
+        }
+    }
+    println!(
+        "Done in {:.0} min, {} in all.",
+        started.elapsed().as_secs_f32() / 60.0,
+        human_size(total)
+    );
+    Ok(())
+}
+
+/// The cameras asked for (all when none), less the ones left out.
+fn chosen_cameras(
+    session: &kagaz_core::cameras::tapo::Session,
+    wanted: &[String],
+    except: &[String],
+) -> Result<Vec<kagaz_core::cameras::tapo::Camera>> {
     let all = session.cameras()?;
     let mut cams: Vec<kagaz_core::cameras::tapo::Camera> = if wanted.is_empty() {
         all.clone()
@@ -1599,180 +1686,391 @@ fn fetch_recordings(
         let skip = find_camera(&all, x)?.device_id.clone();
         cams.retain(|c| c.device_id != skip);
     }
-    let day: String = date.chars().filter(|c| c.is_ascii_digit()).collect();
-    if day.len() != 8 {
-        anyhow::bail!("--date must be YYYY-MM-DD");
+    Ok(cams)
+}
+
+/// "HH:MM" as seconds into the day ("24:00" is the day's end).
+fn time_of_day(t: &str) -> Result<i64> {
+    let (h, m) = t
+        .split_once(':')
+        .ok_or_else(|| anyhow::anyhow!("times are HH:MM, not {t:?}"))?;
+    let secs = h.trim().parse::<i64>()? * 3600 + m.trim().parse::<i64>()? * 60;
+    if !(0..=86_400).contains(&secs) {
+        anyhow::bail!("{t:?} is not a time of day");
     }
-    let dashed = recordings::dash_date(&day);
-    let root = kagaz_core::paths::recordings_dir();
-    println!("Recordings folder: {}", root.display());
-    let clock = |t: Option<&str>, default: i64| -> Result<i64> {
-        Ok(match t {
-            None => default,
-            Some(t) => {
-                let (h, m) = t
-                    .split_once(':')
-                    .ok_or_else(|| anyhow::anyhow!("times are HH:MM"))?;
-                h.trim().parse::<i64>()? * 3600 + m.trim().parse::<i64>()? * 60
+    Ok(secs)
+}
+
+/// "HH:MM-HH:MM" as two times of day.
+fn time_range(t: &str) -> Result<(i64, i64)> {
+    let (a, b) = t
+        .split_once('-')
+        .ok_or_else(|| anyhow::anyhow!("ranges are HH:MM-HH:MM, not {t:?}"))?;
+    let (a, b) = (time_of_day(a)?, time_of_day(b)?);
+    if b <= a {
+        anyhow::bail!("{t:?} ends before it starts");
+    }
+    Ok((a, b))
+}
+
+#[derive(Default)]
+struct Fetched {
+    bytes: u64,
+    fetched: usize,
+    skipped: usize,
+    problems: Vec<String>,
+    /// Every wanted clip of the day is on disk.
+    complete: bool,
+}
+
+/// Copy one camera's clips of a day (`YYYYMMDD`, between two times of day
+/// on its clock) into the recordings folder, resuming what earlier tries
+/// brought. With a deadline it stops there, keeping what arrived.
+fn fetch_camera_day(
+    session: &kagaz_core::cameras::tapo::Session,
+    cam: &kagaz_core::cameras::tapo::Camera,
+    root: &std::path::Path,
+    day: &str,
+    (from_s, to_s): (i64, i64),
+    deadline: Option<std::time::Instant>,
+) -> Fetched {
+    use kagaz_core::cameras::tapo::cache;
+    use kagaz_core::cameras::tapo::recordings::{self, Recordings};
+    let rec = Recordings::new(session, cam);
+    let dashed = recordings::dash_date(day);
+    let say = |m: &str| println!("[{}] {m}", cam.name);
+    let late = || deadline.is_some_and(|d| std::time::Instant::now() >= d);
+    const LATE: &str = "the download window has ended";
+    let mut out = Fetched::default();
+    let attempt = |what: &str, f: &mut dyn FnMut() -> std::result::Result<(), String>| {
+        let mut last = String::new();
+        for n in 0..6u64 {
+            if n > 0 {
+                std::thread::sleep(std::time::Duration::from_secs(5 * n));
             }
-        })
+            if late() {
+                return Err(format!("{what}: {LATE}"));
+            }
+            match f() {
+                Ok(()) => return Ok(()),
+                Err(e) => last = e,
+            }
+        }
+        Err(format!("{what}: {last}"))
     };
-    let (from_s, to_s) = (clock(from, 0)?, clock(to, 86_400)?);
-    let started = std::time::Instant::now();
-    let mut workers = Vec::new();
-    for cam in cams {
-        let session = session.clone();
-        let root = root.clone();
-        let (day, dashed) = (day.clone(), dashed.clone());
-        workers.push(std::thread::spawn(
-            move || -> (String, u64, usize, usize, Vec<String>) {
-                let rec = Recordings::new(&session, &cam);
-                let say = |m: &str| println!("[{}] {m}", cam.name);
-                let mut problems = Vec::new();
-                let attempt =
-                    |what: &str, f: &mut dyn FnMut() -> std::result::Result<(), String>| {
-                        let mut last = String::new();
-                        for n in 0..6u64 {
-                            if n > 0 {
-                                std::thread::sleep(std::time::Duration::from_secs(5 * n));
-                            }
-                            match f() {
-                                Ok(()) => return Ok(()),
-                                Err(e) => last = e,
-                            }
-                        }
-                        Err(format!("{what}: {last}"))
-                    };
-                let mut offset = 0;
-                let mut clips = Vec::new();
-                if let Err(e) = attempt("recording list", &mut || {
-                    offset = rec.utc_offset_minutes().map_err(|e| e.to_string())?;
-                    clips = rec.clips(&day).map_err(|e| e.to_string())?;
-                    Ok(())
-                }) {
-                    say(&e);
-                    return (cam.name.clone(), 0, 0, 0, vec![e]);
-                }
-                let day_start = recordings::day_start(&day, offset).unwrap_or(0);
-                let wanted: Vec<_> = clips
-                    .into_iter()
-                    .filter(|c| c.end > day_start + from_s && c.start < day_start + to_s)
-                    .collect();
-                say(&format!("{} clips to fetch", wanted.len()));
-                let (mut bytes, mut fetched, mut skipped) = (0u64, 0usize, 0usize);
-                for c in &wanted {
-                    if cache::has_span(&root, &cam.device_id, c.start, c.end) {
-                        skipped += 1;
-                        continue;
-                    }
-                    let label = format!(
-                        "{} to {}",
-                        recordings::format_time(c.start, offset),
-                        &recordings::format_time(c.end, offset)[11..]
-                    );
-                    let mut got = 0u64;
-                    let r = attempt(&label, &mut || {
-                        // Resume after whatever earlier attempts already brought
-                        // (two seconds back, so the camera's start frame overlaps).
-                        let done = cache::covered_until(&root, &cam.device_id, c.start, c.end);
-                        if done >= c.end - 1 {
-                            return Ok(());
-                        }
-                        let from = if done > c.start { done - 2 } else { c.start };
-                        let mut w = cache::Writer::create(
-                            &root,
-                            &cam.device_id,
-                            &dashed,
-                            from,
-                            c.end,
-                            from == c.start,
-                        )
-                        .map_err(|e| e.to_string())?;
-                        let mut werr = None;
-                        let pulled = rec.pull(from, c.end, &mut |chunk| {
-                            if let Err(e) = w.write(chunk) {
-                                werr = Some(e.to_string());
-                                return false;
-                            }
-                            true
-                        });
-                        if let Some(e) = werr {
-                            return Err(e);
-                        }
-                        // Keep what arrived even when the attempt failed: the next one resumes after it.
-                        let n = match pulled {
-                            Ok(n) => n,
-                            Err(e) => {
-                                if let Ok(Some(entry)) = w.finish(false) {
-                                    got += entry.bytes;
-                                }
-                                return Err(if e.is_busy() {
-                                    "the camera is busy sending a recording to someone else"
-                                        .to_string()
-                                } else {
-                                    format!("{e}; resuming")
-                                });
-                            }
-                        };
-                        match w.finish(false).map_err(|e| e.to_string())? {
-                            Some(entry) if entry.complete => {
-                                got += n;
-                                Ok(())
-                            }
-                            Some(entry) => {
-                                got += entry.bytes;
-                                Err(format!(
-                                    "stopped after {:.0} of {} s; resuming",
-                                    entry.seconds,
-                                    entry.end - entry.start
-                                ))
-                            }
-                            None => Err("nothing arrived".into()),
-                        }
-                    });
-                    match r {
-                        Ok(()) => {
-                            bytes += got;
-                            fetched += 1;
-                            say(&format!("{label}: {}", human_size(got)));
-                            // Ready to play in the window at once (an MP4 beside it).
-                            if let Ok(ffmpeg) = kagaz_core::extras::ffmpeg::ensure(&mut |_| {}) {
-                                for e in cache::list(&root, &cam.device_id)
-                                    .into_iter()
-                                    .filter(|e| e.start < c.end && e.covered_end() > c.start)
-                                {
-                                    let _ = cache::ensure_mp4(&e, &ffmpeg);
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            say(&e);
-                            problems.push(e);
-                        }
-                    }
-                }
-                (cam.name.clone(), bytes, fetched, skipped, problems)
-            },
-        ));
+    let mut offset = 0;
+    let mut clips = Vec::new();
+    if let Err(e) = attempt("recording list", &mut || {
+        offset = rec.utc_offset_minutes().map_err(|e| e.to_string())?;
+        clips = rec.clips(day).map_err(|e| e.to_string())?;
+        Ok(())
+    }) {
+        say(&e);
+        out.problems.push(e);
+        return out;
     }
-    println!();
-    let mut total = 0;
-    for w in workers {
-        if let Ok((name, bytes, fetched, skipped, problems)) = w.join() {
-            total += bytes;
-            println!(
-                "{name}: {fetched} fetched ({}), {skipped} already here, {} failed",
-                human_size(bytes),
-                problems.len()
-            );
+    let day_start = recordings::day_start(day, offset).unwrap_or(0);
+    let wanted: Vec<_> = clips
+        .into_iter()
+        .filter(|c| c.end > day_start + from_s && c.start < day_start + to_s)
+        .collect();
+    say(&format!("{dashed}: {} clips to fetch", wanted.len()));
+    for c in &wanted {
+        if cache::has_span(root, &cam.device_id, c.start, c.end) {
+            out.skipped += 1;
+            continue;
+        }
+        if late() {
+            out.problems.push(LATE.into());
+            break;
+        }
+        let label = format!(
+            "{} to {}",
+            recordings::format_time(c.start, offset),
+            &recordings::format_time(c.end, offset)[11..]
+        );
+        let mut got = 0u64;
+        let r = attempt(&label, &mut || {
+            // Resume after whatever earlier attempts already brought
+            // (two seconds back, so the camera's start frame overlaps).
+            let done = cache::covered_until(root, &cam.device_id, c.start, c.end);
+            if done >= c.end - 1 {
+                return Ok(());
+            }
+            let from = if done > c.start { done - 2 } else { c.start };
+            let mut w =
+                cache::Writer::create(root, &cam.device_id, &dashed, from, c.end, from == c.start)
+                    .map_err(|e| e.to_string())?;
+            let mut werr = None;
+            let pulled = rec.pull(from, c.end, &mut |chunk| {
+                if let Err(e) = w.write(chunk) {
+                    werr = Some(e.to_string());
+                    return false;
+                }
+                !late()
+            });
+            if let Some(e) = werr {
+                return Err(e);
+            }
+            // Keep what arrived even when the attempt failed: the next one resumes after it.
+            let n = match pulled {
+                Ok(n) => n,
+                Err(e) => {
+                    if let Ok(Some(entry)) = w.finish(false) {
+                        got += entry.bytes;
+                    }
+                    return Err(if e.is_busy() {
+                        "the camera is busy sending a recording to someone else".to_string()
+                    } else {
+                        format!("{e}; resuming")
+                    });
+                }
+            };
+            match w.finish(false).map_err(|e| e.to_string())? {
+                Some(entry) if entry.complete => {
+                    got += n;
+                    Ok(())
+                }
+                Some(entry) => {
+                    got += entry.bytes;
+                    Err(format!(
+                        "stopped after {:.0} of {} s; resuming",
+                        entry.seconds,
+                        entry.end - entry.start
+                    ))
+                }
+                None => Err("nothing arrived".into()),
+            }
+        });
+        match r {
+            Ok(()) => {
+                out.bytes += got;
+                out.fetched += 1;
+                say(&format!("{label}: {}", human_size(got)));
+                // Ready to play in the window at once (an MP4 beside it).
+                if let Ok(ffmpeg) = kagaz_core::extras::ffmpeg::ensure(&mut |_| {}) {
+                    for e in cache::list(root, &cam.device_id)
+                        .into_iter()
+                        .filter(|e| e.start < c.end && e.covered_end() > c.start)
+                    {
+                        let _ = cache::ensure_mp4(&e, &ffmpeg);
+                    }
+                }
+            }
+            Err(e) => {
+                out.bytes += got;
+                say(&e);
+                out.problems.push(e);
+            }
         }
     }
+    out.complete = out.problems.is_empty();
+    out
+}
+
+/// The recorder loop: see `TapoCommand::Nightly`.
+fn nightly(
+    session_path: &std::path::Path,
+    wanted: &[String],
+    except: &[String],
+    footage: &str,
+    window: &str,
+    clock_minutes: u64,
+    catch_up_days: u32,
+) -> Result<()> {
+    use std::time::{Duration, Instant};
+    let footage = time_range(footage)?;
+    let (open_at, close_at) = time_range(window)?;
+    let mut session = load_tapo_session(session_path)?;
+    let refresh = |session: &mut kagaz_core::cameras::tapo::Session| -> Result<()> {
+        session.refresh()?;
+        session.save(session_path)?;
+        Ok(())
+    };
+    let cams = chosen_cameras(&session, wanted, except)?;
+    let root = kagaz_core::paths::recordings_dir();
+    let stamp = || {
+        let t = kagaz_core::localtime::now();
+        format!(
+            "{:04}-{:02}-{:02} {:02}:{:02}:{:02}",
+            t.year, t.month, t.day, t.hour, t.minute, t.second
+        )
+    };
     println!(
-        "Done in {:.0} min, {} in all.",
-        started.elapsed().as_secs_f32() / 60.0,
-        human_size(total)
+        "{} recorder for {}: footage {}, downloads {window} each day, clock check every {clock_minutes} min; folder {}",
+        stamp(),
+        cams.iter().map(|c| c.name.as_str()).collect::<Vec<_>>().join(", "),
+        footage_text(footage),
+        root.display()
     );
-    Ok(())
+    // The login is renewed twice a day, and whenever the cloud refuses it.
+    let mut refreshed = Instant::now();
+    let mut refused = false;
+    let mut next_watch = Instant::now();
+    let mut done_night = String::new();
+    loop {
+        if refused || refreshed.elapsed() > Duration::from_secs(12 * 3600) {
+            refused = false;
+            match refresh(&mut session) {
+                Ok(()) => refreshed = Instant::now(),
+                Err(e) => println!("{} could not refresh the login: {e}", stamp()),
+            }
+        }
+        if clock_minutes > 0 && Instant::now() >= next_watch {
+            next_watch = Instant::now() + Duration::from_secs(clock_minutes * 60);
+            refused = watch_clocks(&session, &cams, &root, &stamp);
+        }
+        let t = kagaz_core::localtime::now();
+        let today = format!("{:04}{:02}{:02}", t.year, t.month, t.day);
+        let now_s = i64::from(t.hour * 3600 + t.minute * 60 + t.second);
+        if (open_at..close_at).contains(&now_s) && done_night != today {
+            done_night = today.clone();
+            let deadline = Instant::now() + Duration::from_secs((close_at - now_s) as u64);
+            println!("{} download window open until {window}", stamp());
+            night(
+                &session,
+                &cams,
+                &root,
+                &today,
+                footage,
+                catch_up_days,
+                deadline,
+            );
+            println!("{} download window done", stamp());
+        }
+        std::thread::sleep(Duration::from_secs(30));
+    }
+}
+
+fn footage_text((a, b): (i64, i64)) -> String {
+    format!(
+        "{:02}:{:02}-{:02}:{:02}",
+        a / 3600,
+        a % 3600 / 60,
+        b / 3600,
+        b % 3600 / 60
+    )
+}
+
+/// One night: today's footage first, then earlier days left unfinished, all
+/// cameras side by side, until the deadline.
+fn night(
+    session: &kagaz_core::cameras::tapo::Session,
+    cams: &[kagaz_core::cameras::tapo::Camera],
+    root: &std::path::Path,
+    today: &str,
+    footage: (i64, i64),
+    catch_up_days: u32,
+    deadline: std::time::Instant,
+) {
+    use kagaz_core::cameras::tapo::recordings;
+    let Some(today_start) = recordings::day_start(today, 0) else {
+        return;
+    };
+    let days: Vec<String> = (0..=i64::from(catch_up_days))
+        .map(|back| recordings::day_of(today_start - back * 86_400, 0))
+        .collect();
+    std::thread::scope(|scope| {
+        for cam in cams {
+            let days = &days;
+            scope.spawn(move || {
+                for day in days {
+                    if std::time::Instant::now() >= deadline {
+                        break;
+                    }
+                    let got = fetch_camera_day(session, cam, root, day, footage, Some(deadline));
+                    if got.fetched > 0 || !got.problems.is_empty() {
+                        println!(
+                            "[{}] {}: {} fetched ({}), {} already here, {}",
+                            cam.name,
+                            recordings::dash_date(day),
+                            got.fetched,
+                            human_size(got.bytes),
+                            got.skipped,
+                            if got.complete {
+                                "complete".to_string()
+                            } else {
+                                format!("{} unfinished", got.problems.len())
+                            }
+                        );
+                    }
+                }
+            });
+        }
+    });
+}
+
+/// Read every camera's clock; keep the readings beside the day's footage
+/// and correct the times of a camera whose clock is off. True when the
+/// cloud refused the login.
+fn watch_clocks(
+    session: &kagaz_core::cameras::tapo::Session,
+    cams: &[kagaz_core::cameras::tapo::Camera],
+    root: &std::path::Path,
+    stamp: &dyn Fn() -> String,
+) -> bool {
+    let mut refused = false;
+    use kagaz_core::cameras::tapo::clock;
+    use kagaz_core::cameras::tapo::recordings::{self, Recordings};
+    for cam in cams {
+        let rec = Recordings::new(session, cam);
+        let asked = unix_now();
+        let answer = session.device_request(
+            &cam.device_id,
+            &cam.app_server,
+            "getClockStatus",
+            serde_json::json!({ "system": { "name": "clock_status" } }),
+        );
+        let at = (asked + unix_now()) / 2;
+        let camera = match answer {
+            Ok(v) => match v
+                .pointer("/system/clock_status/seconds_from_1970")
+                .and_then(serde_json::Value::as_i64)
+            {
+                Some(t) => t,
+                None => continue,
+            },
+            Err(e) => {
+                refused |= matches!(e, kagaz_core::cameras::tapo::CloudError::Unauthorized);
+                println!("{} [{}] clock check failed: {e}", stamp(), cam.name);
+                continue;
+            }
+        };
+        let Ok(offset) = rec.utc_offset_minutes() else {
+            continue;
+        };
+        let reading = clock::Reading { at, camera };
+        let wrong = (at - camera).abs() > clock::WRONG_AFTER;
+        if wrong {
+            println!("{} [{}] clock is {} s off", stamp(), cam.name, at - camera);
+        }
+        // The camera files footage by its own day; a correction left open
+        // may sit in the day before (the clock jumped past midnight).
+        let day = recordings::day_of(camera, offset);
+        let before = recordings::day_of(camera - 86_400, offset);
+        for (d, main) in [(day.as_str(), true), (before.as_str(), false)] {
+            let dashed = recordings::dash_date(d);
+            let mut saved = clock::load_day(root, &cam.device_id, &dashed);
+            let open = saved.corrections.iter().any(|c| c.open);
+            if !main && !open {
+                continue;
+            }
+            let clips = if wrong || open {
+                rec.clips(d).unwrap_or_default()
+            } else {
+                Vec::new()
+            };
+            clock::record_reading(&mut saved, reading.clone(), &clips);
+            if let Err(e) = clock::save_day(root, &cam.device_id, &dashed, &saved) {
+                println!(
+                    "{} [{}] could not save the clock record: {e}",
+                    stamp(),
+                    cam.name
+                );
+            }
+        }
+    }
+    refused
 }
 
 /// The camera the user named: by device id, exact name, then part of the name.
@@ -1883,4 +2181,11 @@ fn verdict(driverless: bool, driver_only: bool, yes: &str, needs_driver: &str) -
     } else {
         "not advertised".to_string()
     }
+}
+
+fn unix_now() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
 }
