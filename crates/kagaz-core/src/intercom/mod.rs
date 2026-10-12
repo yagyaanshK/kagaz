@@ -9,6 +9,7 @@
 //! (voice over RTP, the door camera's video, opening the door) builds on
 //! top of it.
 
+pub mod incoming;
 pub mod sip;
 
 use serde::{Deserialize, Serialize};
