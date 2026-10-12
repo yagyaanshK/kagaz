@@ -12,6 +12,7 @@
 pub mod incoming;
 pub mod media;
 pub mod sip;
+pub mod stations;
 
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};

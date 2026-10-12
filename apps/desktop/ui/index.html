@@ -40,8 +40,89 @@
     </section>
 
     <section id="doorbell" class="pane hidden">
-      <h2>Doorbell</h2>
-      <p class="muted">A video door intercom over SIP. Being built now — it will ring here, show the door camera, let you talk, and open the door.</p>
+      <div class="cam-head">
+        <h2>Doorbell</h2>
+        <div class="actions">
+          <span id="door-listen" class="pill muted">…</span>
+          <button id="door-rescan" type="button" title="Look for door stations on this network">Look again</button>
+          <div class="cam-menu">
+            <button id="door-gear" type="button" title="Settings" aria-label="Settings">&#x2699;</button>
+            <div id="door-settings" class="cam-settings hidden">
+              <label>Listen on UDP port
+                <input id="door-port" type="number" min="1" max="65535" value="5060">
+              </label>
+              <div class="cam-settings-row">
+                <button id="door-port-go" type="button">Apply</button>
+              </div>
+              <p class="muted small">The door station calls this computer directly (Direct IP), so no account or password is needed. On the station's web page, add <code id="door-local">this computer</code> as a Direct IP target.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p id="door-message" class="muted"></p>
+
+      <div id="door-call" class="hidden">
+        <div class="door-video">
+          <video id="door-video" class="hidden" autoplay playsinline muted></video>
+          <div id="door-video-note" class="door-video-note"></div>
+          <span id="door-call-clock" class="door-clock">0:00</span>
+        </div>
+        <div class="door-call-body">
+          <div class="door-who">
+            <span id="door-caller"></span>
+            <span id="door-call-sub" class="muted"></span>
+          </div>
+          <div class="door-call-actions">
+            <button id="door-answer" type="button" class="big ok">Answer</button>
+            <button id="door-decline" type="button" class="big">Decline</button>
+            <button id="door-open" type="button" class="big accent">Open door</button>
+            <button id="door-hangup" type="button" class="big">Hang up</button>
+          </div>
+          <p id="door-call-note" class="muted"></p>
+        </div>
+      </div>
+
+      <div id="door-list">
+        <h3>Door stations</h3>
+        <p id="door-note" class="muted"></p>
+        <ul id="door-stations" class="cards"></ul>
+      </div>
+
+      <div id="door-station" class="hidden">
+        <button id="door-station-back" type="button" class="back">&#x2190; Door stations</button>
+        <h3 id="door-station-title">Door station</h3>
+        <div class="grid">
+          <label>Name
+            <input id="door-station-name" type="text" placeholder="Front door">
+          </label>
+          <label>Address
+            <input id="door-station-address" type="text" placeholder="192.168.1.20" inputmode="decimal">
+          </label>
+          <label>SIP port
+            <input id="door-station-port" type="number" min="1" max="65535" value="5060">
+          </label>
+        </div>
+        <div class="actions">
+          <button id="door-station-save" type="button" class="accent">Save</button>
+          <button id="door-station-check" type="button">Check it answers</button>
+          <button id="door-station-remove" type="button" class="hidden">Remove</button>
+          <span id="door-station-state" class="muted"></span>
+        </div>
+        <div class="door-howto">
+          <h3>To make it ring here</h3>
+          <ol class="muted">
+            <li>Open the station's web page in a browser and sign in as its administrator.</li>
+            <li>Under the Direct IP (or "IP call") settings, add this computer: <code class="door-local-copy">…</code>.</li>
+            <li>Press the bell. Kagaz rings, shows who it is, and the Open door button works during the call.</li>
+          </ol>
+          <p class="muted">Nothing on the station's own account or server changes; this only adds one more place the bell rings.</p>
+        </div>
+      </div>
+
+      <div id="door-recent-box">
+        <h3>Recent rings</h3>
+        <ul id="door-recent" class="plain"></ul>
+      </div>
     </section>
 
     <section id="cameras" class="pane hidden">

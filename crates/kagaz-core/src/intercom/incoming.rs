@@ -145,32 +145,87 @@ impl Incoming {
     /// Wait until the caller hangs up (BYE/CANCEL), answering it so the
     /// device stops. Returns when the call is over.
     pub fn wait_end(&self) -> Result<(), Error> {
-        let mut buf = vec![0u8; 65535];
-        loop {
-            match self.sock.recv_from(&mut buf) {
-                Ok((n, from)) => {
-                    if let Ok(msg) = sip::parse(&String::from_utf8_lossy(&buf[..n])) {
-                        match msg.method().as_deref() {
-                            Some("BYE") | Some("CANCEL") => {
-                                let _ = self.sock.send_to(
-                                    msg.response_to(200, "OK", &self.to_tag, None, None)
-                                        .as_bytes(),
-                                    from,
-                                );
-                                return Ok(());
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-                Err(e)
-                    if e.kind() == std::io::ErrorKind::WouldBlock
-                        || e.kind() == std::io::ErrorKind::TimedOut =>
-                {
-                    continue;
-                }
-                Err(e) => return Err(Error::Transport(e.to_string())),
+        while !self.poll_end(Duration::from_millis(500))? {}
+        Ok(())
+    }
+
+    /// Read the signalling for up to `wait`: true once the caller has given
+    /// up (CANCEL) or hung up (BYE). Anyone else calling meanwhile hears busy.
+    pub fn poll_end(&self, wait: Duration) -> Result<bool, Error> {
+        drain(
+            &self.sock,
+            &self.to_tag,
+            self.call_id(),
+            Some(&self.invite),
+            wait,
+        )
+    }
+}
+
+/// Service the socket for up to `wait`. Answers a BYE or CANCEL for our
+/// call (and the INVITE itself with 487 when cancelled) and says whether the
+/// call is over; a new INVITE for another call gets 486 Busy Here.
+fn drain(
+    sock: &UdpSocket,
+    to_tag: &str,
+    call_id: &str,
+    invite: Option<&Message>,
+    wait: Duration,
+) -> Result<bool, Error> {
+    let started = std::time::Instant::now();
+    let mut buf = vec![0u8; 65535];
+    loop {
+        let left = wait.saturating_sub(started.elapsed());
+        if left.is_zero() {
+            return Ok(false);
+        }
+        sock.set_read_timeout(Some(left))
+            .map_err(|e| Error::Transport(e.to_string()))?;
+        let (n, from) = match sock.recv_from(&mut buf) {
+            Ok(x) => x,
+            Err(e)
+                if e.kind() == std::io::ErrorKind::WouldBlock
+                    || e.kind() == std::io::ErrorKind::TimedOut =>
+            {
+                return Ok(false);
             }
+            Err(e) => return Err(Error::Transport(e.to_string())),
+        };
+        let Ok(msg) = sip::parse(&String::from_utf8_lossy(&buf[..n])) else {
+            continue;
+        };
+        let ours = msg.header("Call-ID") == Some(call_id);
+        match msg.method().as_deref() {
+            Some("BYE") if ours => {
+                let _ = sock.send_to(
+                    msg.response_to(200, "OK", to_tag, None, None).as_bytes(),
+                    from,
+                );
+                return Ok(true);
+            }
+            Some("CANCEL") if ours => {
+                let _ = sock.send_to(msg.response_to(200, "OK", "", None, None).as_bytes(), from);
+                if let Some(invite) = invite {
+                    let _ = sock.send_to(
+                        invite
+                            .response_to(487, "Request Terminated", to_tag, None, None)
+                            .as_bytes(),
+                        from,
+                    );
+                }
+                return Ok(true);
+            }
+            Some("INVITE") if !ours => {
+                let _ = sock.send_to(
+                    msg.response_to(486, "Busy Here", &sip::token(), None, None)
+                        .as_bytes(),
+                    from,
+                );
+            }
+            Some("OPTIONS") => {
+                let _ = sock.send_to(msg.response_to(200, "OK", "", None, None).as_bytes(), from);
+            }
+            _ => {}
         }
     }
 }
@@ -229,6 +284,12 @@ impl ActiveCall {
         self.remote_media.as_ref()
     }
 
+    /// Read the signalling for up to `wait`: true once the other side has
+    /// hung up (BYE, answered with 200 OK).
+    pub fn poll_end(&self, wait: Duration) -> Result<bool, Error> {
+        drain(&self.sock, &self.our_tag, &self.call_id, None, wait)
+    }
+
     fn in_dialog_request(&self, method: &str, content_type: Option<&str>, body: &str) -> String {
         let branch = format!("z9hG4bK{}", sip::token());
         let mut lines = vec![
@@ -268,25 +329,54 @@ impl Listener {
         Ok(Listener { sock, local })
     }
 
+    /// The `ip:port` we answer on, as advertised to callers.
+    pub fn local(&self) -> &str {
+        &self.local
+    }
+
     /// Block until a call comes in. Replies 100 Trying straight away so the
     /// device stops retransmitting, and returns the call for the caller to
     /// ring/answer/decline. Non-INVITE messages are handled quietly.
     pub fn next_call(&self) -> Result<Incoming, Error> {
+        loop {
+            if let Some(call) = self.next_call_within(Duration::from_millis(500))? {
+                return Ok(call);
+            }
+        }
+    }
+
+    /// Like `next_call`, but gives up after `wait` with `None`, so a caller
+    /// can check for other work (or a stop request) between calls.
+    pub fn next_call_within(&self, wait: Duration) -> Result<Option<Incoming>, Error> {
+        let started = std::time::Instant::now();
         let mut buf = vec![0u8; 65535];
         loop {
+            let left = wait.saturating_sub(started.elapsed());
+            if left.is_zero() {
+                return Ok(None);
+            }
+            self.sock
+                .set_read_timeout(Some(left))
+                .map_err(|e| Error::Transport(e.to_string()))?;
             let (n, from) = match self.sock.recv_from(&mut buf) {
                 Ok(x) => x,
                 Err(e)
                     if e.kind() == std::io::ErrorKind::WouldBlock
                         || e.kind() == std::io::ErrorKind::TimedOut =>
                 {
-                    continue;
+                    return Ok(None);
                 }
                 Err(e) => return Err(Error::Transport(e.to_string())),
             };
             let Ok(msg) = sip::parse(&String::from_utf8_lossy(&buf[..n])) else {
                 continue;
             };
+            if msg.method().as_deref() == Some("OPTIONS") {
+                let _ = self
+                    .sock
+                    .send_to(msg.response_to(200, "OK", "", None, None).as_bytes(), from);
+                continue;
+            }
             if msg.method().as_deref() != Some("INVITE") {
                 continue;
             }
@@ -296,7 +386,7 @@ impl Listener {
                 msg.response_to(100, "Trying", "", None, None).as_bytes(),
                 from,
             );
-            return Ok(Incoming {
+            return Ok(Some(Incoming {
                 sock: self
                     .sock
                     .try_clone()
@@ -305,7 +395,7 @@ impl Listener {
                 remote: from,
                 to_tag,
                 contact: self.local.clone(),
-            });
+            }));
         }
     }
 }
@@ -466,5 +556,72 @@ m=video 20002 RTP/AVP 104\r\n";
         assert!(req.contains("CSeq: 2 INFO"));
         assert!(req.contains("Content-Type: application/dtmf-relay"));
         assert!(req.contains("Signal=#"));
+    }
+    #[test]
+    fn a_cancel_ends_the_ring_and_a_stranger_hears_busy() {
+        let listener = Listener::bind(0).unwrap();
+        let our_port = listener.sock.local_addr().unwrap().port();
+        let station = UdpSocket::bind("127.0.0.1:0").unwrap();
+        station
+            .set_read_timeout(Some(Duration::from_secs(1)))
+            .unwrap();
+        station
+            .send_to(INVITE.as_bytes(), ("127.0.0.1", our_port))
+            .unwrap();
+        let call = listener
+            .next_call_within(Duration::from_secs(1))
+            .unwrap()
+            .expect("the INVITE arrives");
+        assert_eq!(call.caller(), "Door");
+        assert!(call.media().has_video());
+        // Nothing yet: polling just times out.
+        assert!(!call.poll_end(Duration::from_millis(50)).unwrap());
+        // Another INVITE while this one rings is told busy.
+        let other = INVITE.replace("Call-ID: call-9", "Call-ID: call-10");
+        station
+            .send_to(other.as_bytes(), ("127.0.0.1", our_port))
+            .unwrap();
+        assert!(!call.poll_end(Duration::from_millis(200)).unwrap());
+        let mut buf = [0u8; 4096];
+        let mut seen = Vec::new();
+        while let Ok((n, _)) = station.recv_from(&mut buf) {
+            seen.push(String::from_utf8_lossy(&buf[..n]).to_string());
+            if seen.len() == 2 {
+                break;
+            }
+        }
+        assert!(seen.iter().any(|m| m.starts_with("SIP/2.0 100 Trying")));
+        assert!(seen
+            .iter()
+            .any(|m| m.starts_with("SIP/2.0 486 Busy Here") && m.contains("Call-ID: call-10")));
+        // The caller gives up: CANCEL is answered and the INVITE gets 487.
+        let cancel = INVITE
+            .replace(
+                "INVITE sip:kagaz@192.0.2.6:5060 SIP/2.0",
+                "CANCEL sip:kagaz@192.0.2.6:5060 SIP/2.0",
+            )
+            .replace("CSeq: 1 INVITE", "CSeq: 1 CANCEL");
+        station
+            .send_to(cancel.as_bytes(), ("127.0.0.1", our_port))
+            .unwrap();
+        assert!(call.poll_end(Duration::from_secs(1)).unwrap());
+        let mut seen = Vec::new();
+        while let Ok((n, _)) = station.recv_from(&mut buf) {
+            seen.push(String::from_utf8_lossy(&buf[..n]).to_string());
+            if seen.len() == 2 {
+                break;
+            }
+        }
+        assert!(seen
+            .iter()
+            .any(|m| m.starts_with("SIP/2.0 200 OK") && m.contains("CSeq: 1 CANCEL")));
+        assert!(seen.iter().any(
+            |m| m.starts_with("SIP/2.0 487 Request Terminated") && m.contains("CSeq: 1 INVITE")
+        ));
+        // With nobody calling, the listener comes back empty within the wait.
+        assert!(listener
+            .next_call_within(Duration::from_millis(50))
+            .unwrap()
+            .is_none());
     }
 }
