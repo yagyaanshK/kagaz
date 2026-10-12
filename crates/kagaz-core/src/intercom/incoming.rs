@@ -71,9 +71,60 @@ impl Incoming {
         self.reply(486, "Busy Here", None)
     }
 
-    /// Answer the call with our SDP (200 OK). Media handling comes next.
-    pub fn answer(&self, sdp: &str) -> Result<(), Error> {
-        self.reply_body(200, "OK", Some(sdp))
+    /// Answer the call: allocate our RTP ports, send 200 OK with our SDP,
+    /// and hand back the live call (to open the door, speak, hang up). The
+    /// RTP sockets are held open; audio/video processing plugs in later.
+    pub fn answer(&self) -> Result<ActiveCall, Error> {
+        let local_ip = self
+            .contact
+            .rsplit_once(':')
+            .map(|(ip, _)| ip.to_string())
+            .unwrap_or_else(|| self.contact.clone());
+        let audio = UdpSocket::bind("0.0.0.0:0").map_err(|e| Error::Transport(e.to_string()))?;
+        let audio_port = audio
+            .local_addr()
+            .map_err(|e| Error::Transport(e.to_string()))?
+            .port();
+        let media = self.media();
+        let with_video = media.has_video();
+        let video = if with_video {
+            Some(UdpSocket::bind("0.0.0.0:0").map_err(|e| Error::Transport(e.to_string()))?)
+        } else {
+            None
+        };
+        let video_port = video
+            .as_ref()
+            .and_then(|v| v.local_addr().ok())
+            .map(|a| a.port())
+            .unwrap_or(0);
+        let sdp = super::media::answer_sdp(&local_ip, audio_port, video_port, with_video);
+        self.reply_body(200, "OK", Some(&sdp))?;
+        let peer = self.invite.header("From").unwrap_or("").to_string();
+        let our_identity = self.invite.header("To").unwrap_or("").to_string();
+        let remote_target = self
+            .invite
+            .header("Contact")
+            .and_then(uri_in)
+            .or_else(|| uri_in(&peer))
+            .unwrap_or_default();
+        let remote_media = media.connection_ip.clone().zip(media.audio_port);
+        Ok(ActiveCall {
+            sock: self
+                .sock
+                .try_clone()
+                .map_err(|e| Error::Transport(e.to_string()))?,
+            remote_sig: self.remote,
+            remote_target,
+            our_identity,
+            our_tag: self.to_tag.clone(),
+            peer,
+            call_id: self.invite.header("Call-ID").unwrap_or("").to_string(),
+            contact: self.contact.clone(),
+            cseq: 1,
+            _audio: audio,
+            _video: video,
+            remote_media,
+        })
     }
 
     fn reply(&self, code: u16, reason: &str, sdp: Option<&str>) -> Result<(), Error> {
@@ -121,6 +172,81 @@ impl Incoming {
                 Err(e) => return Err(Error::Transport(e.to_string())),
             }
         }
+    }
+}
+
+/// A call we have answered: the dialog is up, so we can open the door,
+/// (later) carry voice and video, and hang up. The RTP sockets live here.
+pub struct ActiveCall {
+    sock: UdpSocket,
+    remote_sig: SocketAddr,
+    /// Their Contact URI — where in-dialog requests are addressed.
+    remote_target: String,
+    /// Our side of the dialog (the INVITE's To) plus our tag.
+    our_identity: String,
+    our_tag: String,
+    /// Their side of the dialog (the INVITE's From, already tagged).
+    peer: String,
+    call_id: String,
+    contact: String,
+    cseq: u32,
+    _audio: UdpSocket,
+    _video: Option<UdpSocket>,
+    /// Where the caller receives audio RTP (for DTMF tones / voice later).
+    remote_media: Option<(String, u16)>,
+}
+
+impl ActiveCall {
+    /// Open the door: ask the station to press `#`, which it maps to its
+    /// relay (SIP INFO, `application/dtmf-relay`).
+    pub fn open_door(&mut self) -> Result<(), Error> {
+        self.press('#')
+    }
+
+    /// Send one DTMF digit in-dialog.
+    pub fn press(&mut self, digit: char) -> Result<(), Error> {
+        self.cseq += 1;
+        let body = super::media::dtmf_info_body(digit);
+        let req = self.in_dialog_request("INFO", Some("application/dtmf-relay"), &body);
+        self.sock
+            .send_to(req.as_bytes(), self.remote_sig)
+            .map_err(|e| Error::Transport(e.to_string()))?;
+        Ok(())
+    }
+
+    /// End the call (BYE).
+    pub fn hangup(&mut self) -> Result<(), Error> {
+        self.cseq += 1;
+        let req = self.in_dialog_request("BYE", None, "");
+        self.sock
+            .send_to(req.as_bytes(), self.remote_sig)
+            .map_err(|e| Error::Transport(e.to_string()))?;
+        Ok(())
+    }
+
+    /// Where the caller wants its audio RTP, if the SDP said so.
+    pub fn remote_audio(&self) -> Option<&(String, u16)> {
+        self.remote_media.as_ref()
+    }
+
+    fn in_dialog_request(&self, method: &str, content_type: Option<&str>, body: &str) -> String {
+        let branch = format!("z9hG4bK{}", sip::token());
+        let mut lines = vec![
+            format!("{method} {} SIP/2.0", self.remote_target),
+            format!("Via: SIP/2.0/UDP {};branch={branch};rport", self.contact),
+            "Max-Forwards: 70".to_string(),
+            format!("From: {};tag={}", self.our_identity, self.our_tag),
+            format!("To: {}", self.peer),
+            format!("Call-ID: {}", self.call_id),
+            format!("CSeq: {} {method}", self.cseq),
+            format!("Contact: <sip:kagaz@{}>", self.contact),
+            "User-Agent: Kagaz".to_string(),
+        ];
+        if let Some(ct) = content_type {
+            lines.push(format!("Content-Type: {ct}"));
+        }
+        lines.push(format!("Content-Length: {}", body.len()));
+        format!("{}\r\n\r\n{body}", lines.join("\r\n"))
     }
 }
 
@@ -308,5 +434,37 @@ m=video 20002 RTP/AVP 104\r\n";
         assert!(resp.contains("Call-ID: call-9"));
         assert!(resp.contains("CSeq: 1 INVITE"));
         assert!(resp.contains("Contact: <sip:kagaz@192.0.2.6:5060>"));
+    }
+
+    #[test]
+    fn open_door_sends_a_dtmf_info_in_dialog() {
+        let station = UdpSocket::bind("127.0.0.1:0").unwrap();
+        station
+            .set_read_timeout(Some(Duration::from_secs(1)))
+            .unwrap();
+        let mut call = ActiveCall {
+            sock: UdpSocket::bind("127.0.0.1:0").unwrap(),
+            remote_sig: station.local_addr().unwrap(),
+            remote_target: "sip:20011001@127.0.0.1".into(),
+            our_identity: "<sip:kagaz@127.0.0.1:15060>".into(),
+            our_tag: "ourtag".into(),
+            peer: "\"Door\" <sip:20011001@127.0.0.1>;tag=111".into(),
+            call_id: "cid".into(),
+            contact: "127.0.0.1:15060".into(),
+            cseq: 1,
+            _audio: UdpSocket::bind("127.0.0.1:0").unwrap(),
+            _video: None,
+            remote_media: None,
+        };
+        call.open_door().unwrap();
+        let mut buf = [0u8; 2048];
+        let (n, _) = station.recv_from(&mut buf).unwrap();
+        let req = std::str::from_utf8(&buf[..n]).unwrap();
+        assert!(req.starts_with("INFO sip:20011001@127.0.0.1 SIP/2.0\r\n"));
+        assert!(req.contains("From: <sip:kagaz@127.0.0.1:15060>;tag=ourtag"));
+        assert!(req.contains("To: \"Door\" <sip:20011001@127.0.0.1>;tag=111"));
+        assert!(req.contains("CSeq: 2 INFO"));
+        assert!(req.contains("Content-Type: application/dtmf-relay"));
+        assert!(req.contains("Signal=#"));
     }
 }

@@ -10,6 +10,7 @@
 //! top of it.
 
 pub mod incoming;
+pub mod media;
 pub mod sip;
 
 use serde::{Deserialize, Serialize};
