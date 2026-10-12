@@ -10,9 +10,12 @@
 //   - Recordings are drawn in the bar; detections the camera reported sit on
 //     a lane above it (motion orange, person blue). Clicking one seeks to
 //     its start.
+//   - Where a camera restarted there is a red line; where its clock may be
+//     wrong afterwards the bar is striped, and where it was corrected tinted.
 //
 // The caller supplies the data and decides what a seek does:
-//   makeTimeline(el, { dayStart, spans, detections, cursor, onSeek, clock })
+//   makeTimeline(el, { dayStart, spans, detections, cursor, onSeek, clock,
+//                      bands, marks })
 // each a function, called whenever the bar redraws (`draw()`), so the bar
 // always shows current data.
 
@@ -24,12 +27,13 @@ function makeTimeline(el, opts) {
   el.classList.add("tl");
   el.innerHTML =
     '<div class="tl-events"></div>' +
-    '<div class="tl-track"><div class="tl-spans"></div><div class="tl-pos hidden"></div>' +
+    '<div class="tl-track"><div class="tl-spans"></div><div class="tl-marks"></div><div class="tl-pos hidden"></div>' +
     '<div class="tl-ghost hidden"><span class="tl-tip"></span></div></div>' +
     '<div class="tl-scale"></div>';
   const events = el.querySelector(".tl-events");
   const track = el.querySelector(".tl-track");
   const spans = el.querySelector(".tl-spans");
+  const marks = el.querySelector(".tl-marks");
   const pos = el.querySelector(".tl-pos");
   const ghost = el.querySelector(".tl-ghost");
   const tip = el.querySelector(".tl-tip");
@@ -81,7 +85,26 @@ function makeTimeline(el, opts) {
   function drawData() {
     spans.innerHTML = "";
     events.innerHTML = "";
+    marks.innerHTML = "";
     const lo = view.day + view.from, hi = lo + view.len;
+    for (const b of (opts.bands && opts.bands()) || []) {
+      if (b.end <= lo || b.start >= hi) continue;
+      const a = Math.max(b.start, lo), z = Math.min(b.end, hi);
+      const band = document.createElement("div");
+      band.className = `tl-band tl-band-${b.kind}`;
+      band.style.left = `${pct(a)}%`;
+      band.style.width = `${Math.max(0.2, ((z - a) / view.len) * 100)}%`;
+      band.title = b.title;
+      marks.appendChild(band);
+    }
+    for (const m of (opts.marks && opts.marks()) || []) {
+      if (m.at < lo || m.at >= hi) continue;
+      const line = document.createElement("div");
+      line.className = "tl-restart";
+      line.style.left = `${pct(m.at)}%`;
+      line.title = m.title;
+      marks.appendChild(line);
+    }
     for (const sp of opts.spans() || []) {
       if (sp.end <= lo || sp.start >= hi) continue;
       const a = Math.max(sp.start, lo), b = Math.min(sp.end, hi);

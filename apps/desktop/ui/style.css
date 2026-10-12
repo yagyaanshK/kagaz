@@ -67,25 +67,62 @@ h3 { font-size: 14px; margin: 18px 0 6px; }
 
 #search-note { margin: 0 16px 8px; font-size: 13px; }
 
-#devices {
+/* The left-hand category nav. */
+#categories {
   list-style: none;
-  margin: 0;
-  padding: 0 8px 8px;
-  overflow-y: auto;
-  flex: 1;
+  margin: 4px 0 0;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
-
-#devices li {
-  padding: 10px 10px;
+#categories li {
+  padding: 10px 12px;
   border-radius: 8px;
   cursor: pointer;
   border: 1px solid transparent;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
-#devices li:hover { background: var(--bg); }
-#devices li.active { border-color: var(--accent); background: var(--bg); }
+#categories li:hover { background: var(--bg); }
+#categories li.active { border-color: var(--accent); background: var(--bg); }
+#categories .cat-name { font-weight: 600; }
+#categories .cat-note { font-size: 12px; }
+
+/* The available devices of the chosen category, in the main area. */
+#picker.pane { max-width: 980px; }
+#devices {
+  list-style: none;
+  margin: 14px 0 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 10px;
+}
+#devices li {
+  padding: 12px 14px;
+  border-radius: 10px;
+  cursor: pointer;
+  border: 1px solid var(--line);
+  background: var(--bg);
+}
+#devices li:hover { border-color: var(--accent); }
+#devices li.active { border-color: var(--accent); }
 #devices .name { font-weight: 600; }
-#devices .where { font-size: 12px; color: var(--muted); }
-#devices .caps { font-size: 12px; margin-top: 4px; }
+#devices .where { font-size: 12px; color: var(--muted); margin-top: 2px; }
+#devices .caps { font-size: 12px; margin-top: 6px; }
+
+.back {
+  background: none;
+  border: none;
+  color: var(--accent);
+  cursor: pointer;
+  padding: 0;
+  font-size: 13px;
+  margin-bottom: 10px;
+}
+.back:hover { text-decoration: underline; }
 .cap-ok { color: var(--ok); }
 .cap-warn { color: var(--warn); }
 .cap-bad { color: var(--bad); }
@@ -239,6 +276,7 @@ label small { font-size: 12px; min-height: 1.2em; }
 .pb-row .muted { margin-left: auto; }
 .pb-form { display: flex; gap: 6px; align-items: center; font-size: 12px; flex-wrap: wrap; }
 .pb-form input { width: 6em; padding: 2px 4px; }
+.pb-clock-form .ck-help, .pb-clock-form .ck-row { flex-basis: 100%; }
 .cam-cell.big { grid-column: 1 / -1; }
 .cam-tile .cam-quality { position: absolute; right: 8px; bottom: 6px; font-size: 11px; padding: 1px 6px; background: rgba(0,0,0,0.5); color: #fff; border: 1px solid rgba(255,255,255,0.4); border-radius: 4px; }
 .cam-tile .cam-quality:hover { background: rgba(0,0,0,0.8); }
@@ -313,6 +351,15 @@ label small { font-size: 12px; min-height: 1.2em; }
 .tl-spans { position: absolute; inset: 0; overflow: hidden; border-radius: 4px; }
 .tl-span { position: absolute; top: 0; bottom: 0; background: var(--accent); opacity: 0.6; }
 .tl-span.tl-event-rec { background: #e8892f; opacity: 0.45; }
+.tl-marks { position: absolute; inset: 0; pointer-events: none; }
+.tl-band { position: absolute; top: 0; bottom: 0; pointer-events: auto; }
+.tl-band-unsure { background: repeating-linear-gradient(135deg, rgba(232,80,60,0.55) 0 4px, transparent 4px 8px); }
+.tl-band-fixed { background: rgba(255,210,74,0.35); border-top: 2px solid #ffd24a; box-sizing: border-box; }
+.tl-restart { position: absolute; top: -3px; bottom: -3px; width: 2px; margin-left: -1px; background: #e8503c; pointer-events: auto; z-index: 2; }
+.tl-key-unsure { background: repeating-linear-gradient(135deg, #e8503c 0 2px, transparent 2px 4px); }
+.tl-key-fixed { background: #ffd24a; }
+.cam-tile .tile-clock { position: absolute; left: 8px; top: 6px; z-index: 2; font-size: 11px; padding: 1px 6px; border-radius: 4px; color: #fff; background: rgba(232,80,60,0.85); }
+.cam-tile .tile-clock.fixed { background: rgba(160,120,0,0.85); }
 .tl-pos { position: absolute; top: -3px; bottom: -3px; width: 3px; margin-left: -1px; background: #fff; box-shadow: 0 0 3px #000; border-radius: 2px; pointer-events: none; z-index: 3; }
 .tl-ghost { position: absolute; top: -4px; bottom: -4px; width: 1px; background: rgba(255,255,255,0.75); pointer-events: none; z-index: 4; }
 .tl-ghost.tl-drag { width: 3px; margin-left: -1px; background: #ffd24a; box-shadow: 0 0 4px #000; }
