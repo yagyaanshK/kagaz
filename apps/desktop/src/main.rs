@@ -411,6 +411,37 @@ struct RecordingClips {
     /// Saved after the day had ended, so nothing more can be added to it.
     #[serde(default)]
     whole_day: bool,
+    /// Restarts in the day's recording (real times; filled when answering).
+    #[serde(default, skip_deserializing)]
+    restarts: Vec<RestartView>,
+    /// Stretches whose times were corrected (real times).
+    #[serde(default, skip_deserializing)]
+    corrections: Vec<CorrectionView>,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+struct RestartView {
+    /// When the camera went off and came back, as shown on the timeline.
+    stopped: i64,
+    resumed: i64,
+    /// The camera set its clock from the internet here (so its times are right after it).
+    corrected_at: Option<i64>,
+    /// Until when its times are unsure: the fix above, or the end of the day's footage.
+    unsure_until: i64,
+    /// A correction covers the stretch after this restart (seconds added).
+    offset: Option<i64>,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+struct CorrectionView {
+    /// Real times of the corrected stretch, and how much was added.
+    from: i64,
+    until: i64,
+    offset: i64,
+    source: String,
+    note: String,
+    /// The stretch in the camera's own times, to remove it by.
+    camera_from: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -428,6 +459,119 @@ struct DetectionView {
 /// footage shows where recordings exist.
 #[tauri::command]
 async fn recording_clips(
+    state: tauri::State<'_, CameraState>,
+    device_id: String,
+    date: String,
+) -> Result<RecordingClips, String> {
+    let list = recording_clips_as_labelled(state, device_id.clone(), date).await?;
+    Ok(in_real_time(list, &device_id))
+}
+
+/// Move a day's list to real time with the camera's clock corrections, and
+/// say where it restarted.
+fn in_real_time(mut list: RecordingClips, device_id: &str) -> RecordingClips {
+    use kagaz_core::cameras::tapo::clock;
+    let root = kagaz_core::paths::recordings_dir();
+    let fixes = clock::Corrections::load(&root, device_id);
+    let day_end = list.clips.iter().map(|c| c.end).max().unwrap_or(0);
+    list.restarts = clock::restarts(&list.clips)
+        .into_iter()
+        .map(|r| RestartView {
+            stopped: fixes.to_real(r.stopped),
+            resumed: fixes.to_real(r.resumed),
+            corrected_at: r.corrected_at.map(|t| fixes.to_real(t)),
+            unsure_until: fixes.to_real(r.corrected_at.unwrap_or(day_end)),
+            offset: fixes
+                .0
+                .iter()
+                .find(|c| c.from <= r.resumed && r.resumed < c.until)
+                .map(|c| c.offset),
+        })
+        .collect();
+    let (lo, hi) = (list.day_start - 86_400, list.day_start + 2 * 86_400);
+    list.corrections = fixes
+        .0
+        .iter()
+        .filter(|c| c.until > lo && c.from < hi)
+        .map(|c| CorrectionView {
+            from: c.from + c.offset,
+            until: c.until + c.offset,
+            offset: c.offset,
+            source: c.source.clone(),
+            note: c.note.clone(),
+            camera_from: c.from,
+        })
+        .collect();
+    list.clips = fixes.clips(&list.clips);
+    for d in &mut list.detections {
+        (d.start, d.end) = fixes.span(d.start, d.end);
+    }
+    list
+}
+
+/// Correct a camera's clock for a day: it showed `shown` (its burned-in time,
+/// unix) when the real time was `real`. Covers the stretch from the restart
+/// before that moment to the next restart or the end of the day. Returns the
+/// day's list in real time.
+#[tauri::command]
+async fn clock_correct(
+    state: tauri::State<'_, CameraState>,
+    device_id: String,
+    date: String,
+    shown: i64,
+    real: i64,
+    note: String,
+) -> Result<RecordingClips, String> {
+    use kagaz_core::cameras::tapo::clock;
+    let list = recording_clips_as_labelled(state, device_id.clone(), date.clone()).await?;
+    let root = kagaz_core::paths::recordings_dir();
+    let day = dashed_day(&date);
+    let mut saved = clock::load_day(&root, &device_id, &day);
+    let fix = clock::correction_for(&list.clips, shown, real, note);
+    // A new pair for the same stretch replaces the old one.
+    saved
+        .corrections
+        .retain(|c| c.until <= fix.from || c.from >= fix.until);
+    saved.corrections.push(fix);
+    clock::save_day(&root, &device_id, &day, &saved).map_err(|e| e.to_string())?;
+    Ok(in_real_time(list, &device_id))
+}
+
+/// Remove the correction starting at camera time `camera_from`.
+#[tauri::command]
+async fn clock_uncorrect(
+    state: tauri::State<'_, CameraState>,
+    device_id: String,
+    date: String,
+    camera_from: i64,
+) -> Result<RecordingClips, String> {
+    use kagaz_core::cameras::tapo::clock;
+    let root = kagaz_core::paths::recordings_dir();
+    let day = dashed_day(&date);
+    let mut saved = clock::load_day(&root, &device_id, &day);
+    saved.corrections.retain(|c| c.from != camera_from);
+    clock::save_day(&root, &device_id, &day, &saved).map_err(|e| e.to_string())?;
+    let list = recording_clips_as_labelled(state, device_id.clone(), date).await?;
+    Ok(in_real_time(list, &device_id))
+}
+
+fn dashed_day(date: &str) -> String {
+    let day: String = date.chars().filter(|c| c.is_ascii_digit()).collect();
+    kagaz_core::cameras::tapo::recordings::dash_date(&day)
+}
+
+/// A real span in the camera's own times (it may have been corrected).
+fn camera_span(device_id: &str, from: i64, to: i64) -> (i64, i64) {
+    let fixes = kagaz_core::cameras::tapo::clock::Corrections::load(
+        &kagaz_core::paths::recordings_dir(),
+        device_id,
+    );
+    let start = fixes.to_camera(from);
+    (start, start + (to - from))
+}
+
+/// The day's list in the camera's own times.
+async fn recording_clips_as_labelled(
     state: tauri::State<'_, CameraState>,
     device_id: String,
     date: String,
@@ -483,6 +627,8 @@ async fn recording_clips(
                 source: "camera".into(),
                 // Asked after the day (and a few minutes for the last clip) ended.
                 whole_day: unix_now() > day_start + 86_400 + 600,
+                restarts: Vec::new(),
+                corrections: Vec::new(),
             })
         })();
         match asked {
@@ -521,6 +667,8 @@ async fn recording_clips(
                     day_start,
                     source: "footage".into(),
                     whole_day: false,
+                    restarts: Vec::new(),
+                    corrections: Vec::new(),
                 })
             }
         }
@@ -568,6 +716,8 @@ async fn playback_start(
     let e = running(&state)?;
     let (index, cam) = camera_of(&e, &device_id)?;
     let speed = speed.unwrap_or(1.0).clamp(0.25, 8.0);
+    // The window speaks real time; the camera and the files its own.
+    let (from, to) = camera_span(&device_id, from, to);
     blocking(move || {
         let (token, url) = e
             ._server
@@ -615,6 +765,11 @@ async fn playback_clip(
     use kagaz_core::cameras::tapo::cache;
     let e = running(&state)?;
     let (index, cam) = camera_of(&e, &device_id)?;
+    let fixes = kagaz_core::cameras::tapo::clock::Corrections::load(
+        &kagaz_core::paths::recordings_dir(),
+        &device_id,
+    );
+    let at = fixes.to_camera(at);
     blocking(move || {
         let Some(entry) = cache::find(&kagaz_core::paths::recordings_dir(), &cam.device_id, at)
         else {
@@ -629,10 +784,11 @@ async fn playback_clip(
             ._server
             .clip_url(index, &entry)
             .ok_or("clip outside the recordings folder")?;
+        let (start, end) = fixes.span(entry.start, entry.covered_end());
         Ok(Some(ClipView {
             url,
-            start: entry.start,
-            end: entry.covered_end(),
+            start,
+            end,
             exact: entry.exact_start,
         }))
     })
@@ -687,6 +843,7 @@ async fn download_recording(
     use kagaz_core::cameras::tapo::download;
     let e = running(&state)?;
     let (_, cam) = camera_of(&e, &device_id)?;
+    let (from, to) = camera_span(&device_id, from, to);
     {
         let mut busy = state.downloading.lock().map_err(|_| "state poisoned")?;
         if !busy.insert(device_id.clone()) {
@@ -963,6 +1120,8 @@ fn main() {
             cameras_start,
             recording_days,
             recording_clips,
+            clock_correct,
+            clock_uncorrect,
             playback_start,
             playback_clip,
             playback_state,
