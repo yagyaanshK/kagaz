@@ -409,6 +409,7 @@ function selectCategory(cat) {
   $("picker").classList.toggle("hidden", cat !== "print");
   $("doorbell").classList.toggle("hidden", cat !== "doorbell");
   if (cat === "print" && !devices.length) rescan();
+  if (cat === "doorbell") refreshDoorbell();
 }
 
 document.querySelectorAll("#categories li").forEach((li) =>
@@ -2135,3 +2136,284 @@ $("scan-form").addEventListener("change", () => {
 });
 Pictures.update($("scan-form"));
 rescan();
+
+// ---------- doorbell ----------
+// The listener thread in the backend owns the call; this side shows the
+// ring, and the buttons send one word each (answer / decline / open / hang up).
+
+let doorStatus = null;           // the backend's last doorbell-state
+let doorStations = { listen_port: 5060, stations: [] };
+let doorFound = [];              // SIP endpoints seen on the network this time
+let doorSelected = null;         // the station being edited: { name, address, port, saved }
+let doorClockTimer = null;
+let doorChime = null;            // { ctx, timer } while ringing
+
+function doorStationName(address) {
+  const s = doorStations.stations.find((x) => x.address === address);
+  return s ? s.name : "";
+}
+
+async function refreshDoorbell() {
+  try { doorStatus = await invoke("doorbell_status"); } catch (e) { $("door-message").textContent = "" + e; }
+  try { doorStations = await invoke("doorbell_stations"); } catch (_) {}
+  $("door-port").value = doorStations.listen_port;
+  renderDoorbell();
+  renderDoorStations();
+  if (!doorFound.length && !doorStations.stations.length) lookForStations();
+}
+
+function renderDoorbell() {
+  const st = doorStatus;
+  if (!st) return;
+  const pill = $("door-listen");
+  pill.textContent = st.listening ? `Listening at ${st.local}` : "Not listening";
+  pill.classList.toggle("on", st.listening);
+  pill.classList.toggle("off", !st.listening);
+  $("door-message").textContent = st.message || "";
+  $("door-local").textContent = st.local || "this computer's address";
+  document.querySelectorAll(".door-local-copy").forEach((el) => { el.textContent = st.local || "this computer's address"; });
+
+  const ringing = st.phase === "ringing";
+  const inCall = st.phase === "in_call";
+  $("door-call").classList.toggle("hidden", !(ringing || inCall));
+  $("door-call").classList.toggle("ringing", ringing);
+  $("door-answer").classList.toggle("hidden", !ringing);
+  $("door-decline").classList.toggle("hidden", !ringing);
+  $("door-open").classList.toggle("hidden", !inCall);
+  $("door-hangup").classList.toggle("hidden", !inCall);
+  if (ringing || inCall) {
+    const name = doorStationName(st.from) || st.caller || "Someone at the door";
+    $("door-caller").textContent = name;
+    $("door-call-sub").textContent = ringing
+      ? `is ringing · ${st.from}`
+      : `in call · ${st.from}`;
+    $("door-video-note").textContent = ringing
+      ? (st.has_video ? "Answer to see and hear the door camera." : "This station offers no video.")
+      : (st.has_video ? "Door camera picture: coming in the next build. Sound and the door button work." : "No video from this station.");
+    if (st.door_opened_at) {
+      $("door-call-note").textContent = `Door opened at ${new Date(st.door_opened_at * 1000).toLocaleTimeString()}.`;
+      $("door-open").textContent = "Door opened ✓";
+      $("door-open").classList.add("done");
+    } else {
+      $("door-call-note").textContent = "";
+      $("door-open").textContent = "Open door";
+      $("door-open").classList.remove("done");
+    }
+    startDoorClock(st.since);
+  } else {
+    stopDoorClock();
+  }
+  if (ringing) startChime(); else stopChime();
+
+  // The sidebar entry says when it is ringing, so other views notice too.
+  const li = document.querySelector('#categories li[data-cat="doorbell"]');
+  if (li) {
+    li.classList.toggle("ringing", ringing);
+    li.querySelector(".cat-note").textContent = ringing ? "ringing now" : inCall ? "in a call" : "video intercom";
+  }
+
+  const ul = $("door-recent");
+  ul.innerHTML = "";
+  for (const e of st.recent || []) {
+    const li2 = document.createElement("li");
+    const when = new Date(e.at * 1000);
+    const who = doorStationName(e.from) || e.caller || e.from;
+    li2.textContent = `${when.toLocaleDateString()} ${when.toLocaleTimeString()} — ${who}: ${e.outcome}`;
+    li2.className = e.outcome === "missed" ? "warn" : e.outcome === "door opened" ? "ok" : "";
+    ul.appendChild(li2);
+  }
+  $("door-recent-box").classList.toggle("hidden", !(st.recent || []).length);
+}
+
+function startDoorClock(since) {
+  stopDoorClock();
+  const tick = () => {
+    const s = Math.max(0, Math.floor(Date.now() / 1000 - since));
+    $("door-call-clock").textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+  };
+  tick();
+  doorClockTimer = setInterval(tick, 1000);
+}
+function stopDoorClock() {
+  if (doorClockTimer) clearInterval(doorClockTimer);
+  doorClockTimer = null;
+}
+
+// A two-note chime, repeated while the bell rings. Made here, no file needed.
+function startChime() {
+  if (doorChime) return;
+  let ctx;
+  try { ctx = new (window.AudioContext || window.webkitAudioContext)(); } catch (_) { return; }
+  const ding = () => {
+    const t = ctx.currentTime;
+    for (const [freq, at, len] of [[784, 0, 0.5], [622, 0.35, 0.8]]) {
+      const o = ctx.createOscillator();
+      const g = ctx.createGain();
+      o.type = "sine";
+      o.frequency.value = freq;
+      g.gain.setValueAtTime(0.0001, t + at);
+      g.gain.exponentialRampToValueAtTime(0.4, t + at + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + at + len);
+      o.connect(g).connect(ctx.destination);
+      o.start(t + at);
+      o.stop(t + at + len + 0.05);
+    }
+  };
+  ding();
+  doorChime = { ctx, timer: setInterval(ding, 2500) };
+}
+function stopChime() {
+  if (!doorChime) return;
+  clearInterval(doorChime.timer);
+  try { doorChime.ctx.close(); } catch (_) {}
+  doorChime = null;
+}
+
+function renderDoorStations() {
+  const ul = $("door-stations");
+  ul.innerHTML = "";
+  const seen = new Set();
+  for (const s of doorStations.stations) {
+    seen.add(s.address);
+    const found = doorFound.find((f) => f.address === s.address);
+    ul.appendChild(stationCard({
+      title: s.name,
+      where: `${s.address}:${s.port}`,
+      line: found ? ["cap-ok", `answers · ${found.agent}`] : ["muted", "saved"],
+      onClick: () => openStation({ ...s, saved: true }),
+    }));
+  }
+  for (const f of doorFound) {
+    if (seen.has(f.address)) continue;
+    ul.appendChild(stationCard({
+      title: f.agent,
+      where: `${f.address}:${f.port}`,
+      line: ["cap-warn", "found on the network · click to add"],
+      onClick: () => openStation({ name: f.agent, address: f.address, port: f.port, saved: false }),
+    }));
+  }
+  const add = stationCard({
+    title: "+ Add by address",
+    where: "a station that was not found",
+    line: null,
+    onClick: () => openStation({ name: "", address: "", port: 5060, saved: false }),
+  });
+  add.classList.add("add");
+  ul.appendChild(add);
+}
+
+function stationCard({ title, where, line, onClick }) {
+  const li = document.createElement("li");
+  li.innerHTML = `<div class="name"></div><div class="where"></div><div class="caps"></div>`;
+  li.querySelector(".name").textContent = title;
+  li.querySelector(".where").textContent = where;
+  if (line) {
+    const span = document.createElement("span");
+    span.className = line[0];
+    span.textContent = line[1];
+    li.querySelector(".caps").appendChild(span);
+  }
+  li.addEventListener("click", onClick);
+  return li;
+}
+
+async function lookForStations() {
+  $("door-rescan").disabled = true;
+  $("door-note").textContent = "Looking for door stations on this network…";
+  try {
+    doorFound = await invoke("doorbell_discover", { port: doorStations.listen_port });
+    const n = doorFound.length;
+    $("door-note").textContent = n
+      ? `${n} SIP device${n === 1 ? "" : "s"} answered.`
+      : "Nothing answered on this network. A station that is off, or on another network, cannot be found; you can still add it by address.";
+  } catch (e) {
+    $("door-note").textContent = "Could not look: " + e;
+  }
+  $("door-rescan").disabled = false;
+  renderDoorStations();
+}
+
+function openStation(s) {
+  doorSelected = s;
+  $("door-list").classList.add("hidden");
+  $("door-recent-box").classList.add("hidden");
+  $("door-station").classList.remove("hidden");
+  $("door-station-title").textContent = s.saved ? s.name : "New door station";
+  $("door-station-name").value = s.name || "";
+  $("door-station-address").value = s.address || "";
+  $("door-station-port").value = s.port || 5060;
+  $("door-station-remove").classList.toggle("hidden", !s.saved);
+  $("door-station-state").textContent = "";
+  if (!s.address) $("door-station-address").focus();
+}
+
+function closeStation() {
+  doorSelected = null;
+  $("door-station").classList.add("hidden");
+  $("door-list").classList.remove("hidden");
+  renderDoorbell();
+  renderDoorStations();
+}
+
+$("door-station-back").addEventListener("click", closeStation);
+$("door-station-save").addEventListener("click", async () => {
+  const name = $("door-station-name").value;
+  const address = $("door-station-address").value;
+  const port = Number($("door-station-port").value) || 5060;
+  try {
+    doorStations = await invoke("doorbell_station_save", { name, address, port });
+    closeStation();
+  } catch (e) {
+    $("door-station-state").textContent = "" + e;
+  }
+});
+$("door-station-remove").addEventListener("click", async () => {
+  if (!doorSelected || !doorSelected.saved) return;
+  if (!confirm(`Forget "${doorSelected.name}" at ${doorSelected.address}?`)) return;
+  try {
+    doorStations = await invoke("doorbell_station_remove", { address: doorSelected.address });
+    closeStation();
+  } catch (e) {
+    $("door-station-state").textContent = "" + e;
+  }
+});
+$("door-station-check").addEventListener("click", async () => {
+  const address = $("door-station-address").value.trim();
+  const port = Number($("door-station-port").value) || 5060;
+  $("door-station-state").textContent = "asking…";
+  try {
+    const found = await invoke("doorbell_probe", { address, port });
+    $("door-station-state").textContent = found
+      ? `It answers: ${found.agent}`
+      : "No answer. Is it on, on this network, and is Direct IP calling switched on?";
+  } catch (e) {
+    $("door-station-state").textContent = "" + e;
+  }
+});
+
+$("door-rescan").addEventListener("click", lookForStations);
+$("door-gear").addEventListener("click", () => $("door-settings").classList.toggle("hidden"));
+$("door-port-go").addEventListener("click", async () => {
+  const port = Number($("door-port").value);
+  if (!(port >= 1 && port <= 65535)) { $("door-message").textContent = "The port must be 1 to 65535."; return; }
+  try {
+    await invoke("doorbell_listen", { port });
+    doorStations.listen_port = port;
+    $("door-settings").classList.add("hidden");
+  } catch (e) {
+    $("door-message").textContent = "" + e;
+  }
+});
+
+for (const [id, cmd] of [["door-answer", "doorbell_answer"], ["door-decline", "doorbell_decline"],
+                         ["door-open", "doorbell_open_door"], ["door-hangup", "doorbell_hangup"]]) {
+  $(id).addEventListener("click", async () => {
+    try { await invoke(cmd); } catch (e) { $("door-message").textContent = "" + e; }
+  });
+}
+
+listen("doorbell-state", (e) => {
+  doorStatus = e.payload;
+  if (doorStatus.phase === "ringing") selectCategory("doorbell");
+  renderDoorbell();
+});

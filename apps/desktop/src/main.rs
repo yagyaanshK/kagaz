@@ -12,6 +12,8 @@ use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_dialog::DialogExt;
 
+mod doorbell;
+
 /// Run a blocking core call off the UI thread.
 async fn blocking<T: Send + 'static>(
     f: impl FnOnce() -> Result<T, String> + Send + 'static,
@@ -1105,7 +1107,14 @@ fn main() {
             downloading: std::sync::Mutex::new(std::collections::HashSet::new()),
             pending_login: std::sync::Mutex::new(None),
         })
+        .manage(doorbell::DoorbellState::new())
         .plugin(tauri_plugin_dialog::init())
+        .setup(|app| {
+            // Listen for the doorbell from the start: that is what it is for.
+            let port = kagaz_core::intercom::stations::Stations::load().listen_port;
+            doorbell::start(app.handle(), port);
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             discover,
             explain_device,
@@ -1132,7 +1141,18 @@ fn main() {
             tapo_login,
             tapo_login_code,
             tapo_logout,
-            startup_view
+            startup_view,
+            doorbell::doorbell_status,
+            doorbell::doorbell_answer,
+            doorbell::doorbell_decline,
+            doorbell::doorbell_open_door,
+            doorbell::doorbell_hangup,
+            doorbell::doorbell_listen,
+            doorbell::doorbell_stations,
+            doorbell::doorbell_station_save,
+            doorbell::doorbell_station_remove,
+            doorbell::doorbell_probe,
+            doorbell::doorbell_discover
         ])
         .build(tauri::generate_context!())
         .expect("error while building the Kagaz window")
