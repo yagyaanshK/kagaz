@@ -234,6 +234,12 @@ enum IntercomCommand {
         #[arg(long)]
         listen: bool,
     },
+    /// Wait for an incoming call (the doorbell) and report each ring; for Direct IP use port 5060
+    Listen {
+        /// UDP port to listen on
+        #[arg(long, default_value_t = 5060)]
+        port: u16,
+    },
 }
 
 #[derive(Subcommand)]
@@ -2206,6 +2212,29 @@ fn intercom_command(cmd: IntercomCommand) -> Result<()> {
                 }
             }
             Ok(())
+        }
+        IntercomCommand::Listen { port } => {
+            use kagaz_core::intercom::incoming::Listener;
+            let listener = Listener::bind(port)?;
+            println!("Listening for the doorbell on UDP {port} (Ctrl+C to stop)...");
+            loop {
+                let call = listener.next_call()?;
+                let media = call.media();
+                println!(
+                    "RING from {} <{}> | video: {} | from {}",
+                    call.caller(),
+                    call.caller_uri(),
+                    if media.has_video() { "yes" } else { "no" },
+                    call.remote()
+                );
+                call.ringing()?;
+                // We only alert for now; let the call ring until the caller gives up.
+                if let Err(e) = call.wait_end() {
+                    println!("call ended: {e}");
+                } else {
+                    println!("call ended");
+                }
+            }
         }
     }
 }

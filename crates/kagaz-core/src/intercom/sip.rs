@@ -39,6 +39,63 @@ impl Message {
             .find(|(k, _)| k.eq_ignore_ascii_case(name))
             .map(|(_, v)| v.as_str())
     }
+
+    /// Every header with this name, in order (Via can repeat).
+    pub fn headers_named<'a>(&'a self, name: &'a str) -> impl Iterator<Item = &'a str> {
+        self.headers
+            .iter()
+            .filter(move |(k, _)| k.eq_ignore_ascii_case(name))
+            .map(|(_, v)| v.as_str())
+    }
+
+    /// The request method (REGISTER, INVITE, ACK, BYE, ...), when this is a request.
+    pub fn method(&self) -> Option<String> {
+        let first = self.start.split_whitespace().next()?;
+        (!first.starts_with("SIP/")).then(|| first.to_uppercase())
+    }
+
+    /// Build a response to this request: echo its Via, From, To, Call-ID and
+    /// CSeq, add `to_tag` to the To header (what a 18x/2xx needs), an optional
+    /// Contact, and an optional SDP body.
+    pub fn response_to(
+        &self,
+        code: u16,
+        reason: &str,
+        to_tag: &str,
+        contact: Option<&str>,
+        sdp: Option<&str>,
+    ) -> String {
+        let mut lines = vec![format!("SIP/2.0 {code} {reason}")];
+        for via in self.headers_named("Via") {
+            lines.push(format!("Via: {via}"));
+        }
+        if let Some(from) = self.header("From") {
+            lines.push(format!("From: {from}"));
+        }
+        if let Some(to) = self.header("To") {
+            if to.contains("tag=") || to_tag.is_empty() {
+                lines.push(format!("To: {to}"));
+            } else {
+                lines.push(format!("To: {to};tag={to_tag}"));
+            }
+        }
+        if let Some(cid) = self.header("Call-ID") {
+            lines.push(format!("Call-ID: {cid}"));
+        }
+        if let Some(cseq) = self.header("CSeq") {
+            lines.push(format!("CSeq: {cseq}"));
+        }
+        if let Some(contact) = contact {
+            lines.push(format!("Contact: <{contact}>"));
+        }
+        lines.push("User-Agent: Kagaz".to_string());
+        let body = sdp.unwrap_or("");
+        if sdp.is_some() {
+            lines.push("Content-Type: application/sdp".to_string());
+        }
+        lines.push(format!("Content-Length: {}", body.len()));
+        format!("{}\r\n\r\n{}", lines.join("\r\n"), body)
+    }
 }
 
 /// A live connection to the SIP server, over TCP or UDP. It carries the
@@ -194,7 +251,7 @@ fn md5_hex(s: &str) -> String {
     h.finalize().iter().map(|b| format!("{b:02x}")).collect()
 }
 
-fn token() -> String {
+pub(crate) fn token() -> String {
     uuid::Uuid::new_v4().simple().to_string()
 }
 
