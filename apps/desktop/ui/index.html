@@ -12,17 +12,36 @@
       <h1>Kagaz</h1>
       <button id="rescan" title="Look again on the network and USB">Look again</button>
     </header>
-    <p id="search-note" class="muted">Looking for printers and scanners…</p>
-    <ul id="devices"></ul>
-    <div id="cameras-entry">
-      <button id="cameras-open" type="button">Cameras</button>
-      <span class="muted" id="cameras-entry-note">Tapo, through your account</span>
-    </div>
+    <ul id="categories">
+      <li data-cat="print" class="active">
+        <span class="cat-name">Printers &amp; Scanners</span>
+        <span class="cat-note muted">on the network and USB</span>
+      </li>
+      <li data-cat="cameras">
+        <span class="cat-name">Cameras</span>
+        <span class="cat-note muted">Tapo, through your account</span>
+      </li>
+      <li data-cat="doorbell">
+        <span class="cat-name">Doorbell</span>
+        <span class="cat-note muted">video intercom</span>
+      </li>
+    </ul>
   </aside>
 
   <main id="main">
     <section id="empty" class="pane">
-      <p class="muted">Pick a device on the left.</p>
+      <p class="muted">Pick a kind of device on the left.</p>
+    </section>
+
+    <section id="picker" class="pane hidden">
+      <h2>Printers &amp; Scanners</h2>
+      <p id="search-note" class="muted">Looking for printers and scanners…</p>
+      <ul id="devices"></ul>
+    </section>
+
+    <section id="doorbell" class="pane hidden">
+      <h2>Doorbell</h2>
+      <p class="muted">A video door intercom over SIP. Being built now — it will ring here, show the door camera, let you talk, and open the door.</p>
     </section>
 
     <section id="cameras" class="pane hidden">
@@ -76,7 +95,7 @@
         <button id="pb-pause" type="button" title="Pause or resume every camera">&#x23F8; Pause all</button>
         <div id="pb-seek" title="Every camera shown: recordings, and what the cameras detected. Click or drag to move all of them; scroll to zoom, shift + scroll to move along"></div>
         <span id="pb-seek-at" class="muted">—</span>
-        <span class="tl-legend"><i class="tl-key tl-key-rec"></i>recording <i class="tl-key tl-key-motion"></i>motion <i class="tl-key tl-key-person"></i>person</span>
+        <span class="tl-legend"><i class="tl-key tl-key-rec"></i>recording <i class="tl-key tl-key-motion"></i>motion <i class="tl-key tl-key-person"></i>person <i class="tl-key tl-key-unsure"></i>clock unsure after a restart <i class="tl-key tl-key-fixed"></i>clock corrected</span>
         <label id="pb-speed-box" title="Playback speed; sound plays at 1x only">
           <input type="range" id="pb-speed" min="-2" max="3" step="0.05" value="0">
           <span id="pb-speed-label">1x</span>
@@ -110,6 +129,7 @@
     </section>
 
     <section id="detail" class="pane hidden">
+      <button id="detail-back" type="button" class="back">&#x2190; Devices</button>
       <h2 id="d-title"></h2>
       <p id="d-sub" class="muted"></p>
 

@@ -99,7 +99,9 @@ async function select(i) {
   const d = devices[i];
   renderList();
   $("empty").classList.add("hidden");
+  $("picker").classList.add("hidden");
   $("cameras").classList.add("hidden");
+  $("doorbell").classList.add("hidden");
   $("detail").classList.remove("hidden");
   $("d-title").textContent = title(d);
   $("d-sub").textContent = [d.manufacturer, d.model, where(d)].filter(Boolean).join(" · ");
@@ -388,10 +390,29 @@ function showCameras() {
   current = null;
   renderList();
   $("empty").classList.add("hidden");
+  $("picker").classList.add("hidden");
+  $("doorbell").classList.add("hidden");
   $("detail").classList.add("hidden");
   $("cameras").classList.remove("hidden");
   refreshCameras();
 }
+
+// The left-hand categories drive the main area.
+function selectCategory(cat) {
+  document.querySelectorAll("#categories li").forEach((li) =>
+    li.classList.toggle("active", li.dataset.cat === cat));
+  $("empty").classList.add("hidden");
+  if (cat === "cameras") { showCameras(); return; }
+  // Leaving the cameras view: stop showing its pane.
+  $("cameras").classList.add("hidden");
+  $("detail").classList.add("hidden");
+  $("picker").classList.toggle("hidden", cat !== "print");
+  $("doorbell").classList.toggle("hidden", cat !== "doorbell");
+  if (cat === "print" && !devices.length) rescan();
+}
+
+document.querySelectorAll("#categories li").forEach((li) =>
+  li.addEventListener("click", () => selectCategory(li.dataset.cat)));
 
 async function refreshCameras() {
   try {
@@ -1126,6 +1147,8 @@ function buildGroupControls(box) {
     spans: () => tlSpans(cellIds(box)),
     detections: () => tlDetections(cellIds(box)),
     dataKey: () => tlKey(cellIds(box)),
+    bands: () => tlBands(cellIds(box)),
+    marks: () => tlMarks(cellIds(box)),
     cursor: () => cellsNow(cellsOf(box)),
     onSeek: (t) => {
       const first = cellsOf(box).map((c) => c.querySelector(".cam-tile")).find((x) => x._sync);
@@ -1339,7 +1362,61 @@ function tlDetections(ids) {
     return list.detections.map((d) => ({ ...d, camera: name }));
   });
 }
-function tlKey(ids) { return ids.map((id) => (pbClips[id] ? pbClips[id].date + pbClips[id].clips.length : "-")).join(","); }
+function tlKey(ids) {
+  return ids.map((id) => {
+    const l = pbClips[id];
+    return l ? l.date + l.clips.length + ":" + (l.corrections || []).map((c) => c.from + "+" + c.offset).join(";") : "-";
+  }).join(",");
+}
+
+// "+1 h 15 min", "-40 s": how far a camera's clock was off.
+function offsetText(sec) {
+  const sign = sec < 0 ? "-" : "+";
+  const a = Math.abs(sec);
+  const h = Math.floor(a / 3600), m = Math.floor((a % 3600) / 60), s = a % 60;
+  return sign + [h ? `${h} h` : "", m ? `${m} min` : "", s || (!h && !m) ? `${s} s` : ""].filter(Boolean).join(" ");
+}
+
+const isSet = (v) => v !== null && v !== undefined;
+
+// Where a camera restarted, and the stretches after it whose times may be
+// wrong (striped) or were corrected (tinted).
+function tlBands(ids) {
+  return ids.flatMap((id) => {
+    const l = pbClips[id];
+    if (!l) return [];
+    const who = ids.length > 1 ? (cameraById(id)?.name || "") + ": " : "";
+    const out = [];
+    for (const r of l.restarts || []) {
+      if (isSet(r.offset) || isSet(r.corrected_at) || r.unsure_until <= r.resumed) continue;
+      out.push({ start: r.resumed, end: r.unsure_until, kind: "unsure",
+        title: `${who}the camera restarted at ${clockText(r.stopped)} and did not set its clock from the internet: the times from here to ${clockText(r.unsure_until)} may be wrong. Use Clock… under the camera to correct them.` });
+    }
+    for (const c of l.corrections || []) {
+      out.push({ start: c.from, end: c.until, kind: "fixed",
+        title: `${who}times corrected by ${offsetText(c.offset)}` + (c.note ? ` (${c.note})` : "") + (c.source === "watcher" ? ", measured by the clock watcher" : "") });
+    }
+    return out;
+  });
+}
+function tlMarks(ids) {
+  return ids.flatMap((id) => (pbClips[id]?.restarts || []).map((r) => {
+    const who = ids.length > 1 ? (cameraById(id)?.name || "") + ": " : "";
+    return { at: r.stopped, title: `${who}camera restarted at ${clockText(r.stopped)}, recording again at ${clockText(r.resumed)}`
+      + (isSet(r.corrected_at) ? `; it set its clock from the internet at ${clockText(r.corrected_at)}` : "; it did not set its clock from the internet that day") };
+  }));
+}
+
+// The note a tile shows while its moment is in such a stretch.
+function clockNoteAt(id, at) {
+  const l = pbClips[id];
+  if (!l || at === null) return null;
+  const c = (l.corrections || []).find((x) => x.from <= at && at < x.until);
+  if (c) return { text: `clock corrected ${offsetText(c.offset)}`, fixed: true };
+  const r = (l.restarts || []).find((x) => !isSet(x.offset) && !isSet(x.corrected_at) && x.resumed <= at && at < x.unsure_until);
+  if (r) return { text: `clock unsure: camera restarted at ${clockText(r.stopped)}`, fixed: false };
+  return null;
+}
 const cellIds = (root) => cellsOf(root).map((c) => c.dataset.id);
 
 // The top bar: every camera shown.
@@ -1349,6 +1426,8 @@ const topTimeline = makeTimeline($("pb-seek"), {
   spans: () => tlSpans(cellIds($("cam-grid"))),
   detections: () => tlDetections(cellIds($("cam-grid"))),
   dataKey: () => tlKey(cellIds($("cam-grid"))),
+  bands: () => tlBands(cellIds($("cam-grid"))),
+  marks: () => tlMarks(cellIds($("cam-grid"))),
   cursor: () => topAt,
   onSeek: (t) => seekAll(t),
   clock: (t) => clockText(t),
@@ -1766,6 +1845,7 @@ async function preparePlayback() {
     tile._ended = false;
     tile._sync = null;
     tile._held = false;
+    tile.querySelector(".tile-clock")?.remove();
     setState(tile, "lost", "pick a time and press Play, or click the timeline");
     tile.querySelector(".cam-reload")?.classList.add("hidden");
   }
@@ -1814,6 +1894,8 @@ function buildTimeline(cam, tile) {
     spans: () => tlSpans([cam.device_id]),
     detections: () => tlDetections([cam.device_id]),
     dataKey: () => tlKey([cam.device_id]),
+    bands: () => tlBands([cam.device_id]),
+    marks: () => tlMarks([cam.device_id]),
     cursor: () => tileNow(tile),
     // This camera only: it gets a clock of its own.
     onSeek: (at) => startSynced([tile.closest(".cam-cell")], at, tile._sync ? tile._sync.speed : speedValue()),
@@ -1825,13 +1907,16 @@ function buildTimeline(cam, tile) {
     + '<button type="button" class="tile-pause" title="Pause or resume this camera">\u23F8</button>'
     + '<input type="range" class="tile-speed" min="-2" max="3" step="0.05" value="0" title="Speed for this camera">'
     + '<span class="tile-speed-label">1x</span>'
-    + '<button type="button" class="pb-download">Download…</button><span class="muted pb-note"></span>';
+    + '<button type="button" class="pb-download">Download…</button>'
+    + '<button type="button" class="pb-clock" title="Correct this camera\'s times for the day, when its clock was wrong">Clock…</button>'
+    + '<span class="muted pb-note"></span>';
   const cellOf = () => tile.closest(".cam-cell");
   row.querySelector(".tile-pause").addEventListener("click", () => togglePause([cellOf()]));
   const tsl = row.querySelector(".tile-speed");
   tsl.addEventListener("input", () => { row.querySelector(".tile-speed-label").textContent = speedText(sliderSpeed(tsl.value)); });
   tsl.addEventListener("change", () => speedCells([cellOf()], sliderSpeed(tsl.value)));
   row.querySelector(".pb-download").addEventListener("click", () => downloadForm(wrap, cam, tile));
+  row.querySelector(".pb-clock").addEventListener("click", () => clockForm(wrap, cam, tile));
   wrap.appendChild(row);
   return wrap;
 }
@@ -1863,6 +1948,17 @@ function updatePosition(cell, cam, at) {
   drawBar(cell);
   const label = cell.querySelector(".pb-at");
   if (label) label.textContent = clockText(Math.floor(at));
+  const tile = cell.querySelector(".cam-tile");
+  const note = clockNoteAt(cam.device_id, at);
+  let badge = tile.querySelector(".tile-clock");
+  if (!note) { if (badge) badge.remove(); return; }
+  if (!badge) {
+    badge = document.createElement("span");
+    badge.className = "tile-clock";
+    tile.appendChild(badge);
+  }
+  badge.textContent = note.text;
+  badge.classList.toggle("fixed", note.fixed);
 }
 
 function playAll(root) {
@@ -1911,6 +2007,54 @@ function downloadForm(wrap, cam, tile) {
   wrap.appendChild(form);
 }
 
+// Correct a camera's times for the day on screen: "it showed X when the
+// real time was Y". What it showed is the time printed on its video.
+function clockForm(wrap, cam, tile) {
+  let form = wrap.querySelector(".pb-clock-form");
+  if (form) { form.remove(); return; }
+  form = document.createElement("div");
+  form.className = "pb-form pb-clock-form";
+  const list = pbClips[cam.device_id];
+  const fixes = (list && list.corrections) || [];
+  const now = tileNow(tile);
+  const shown = now !== null ? clock24(now) : "12:00:00";
+  form.innerHTML = `the camera's clock showed <input type="time" class="ck-shown" value="${shown}" step="1">`
+    + ` when the real time was <input type="time" class="ck-real" value="${shown}" step="1">`
+    + ` <button type="button" class="ck-save">Correct</button><span class="muted ck-note"></span>`
+    + `<div class="muted ck-help">Read the time printed on the video, and the real time from another camera or anything else you know. It applies from the restart before that moment to the next restart or the end of the day.</div>`
+    + fixes.map((c) => `<div class="ck-row">${clockText(c.from)} – ${clockText(c.until)}: ${offsetText(c.offset)}${c.note ? " (" + c.note + ")" : ""} <button type="button" class="ck-remove" data-from="${c.camera_from}">Remove</button></div>`).join("");
+  const note = form.querySelector(".ck-note");
+  const date = $("pb-date").value;
+  const apply = (updated) => {
+    updated.date = date;
+    pbClips[cam.device_id] = updated;
+    fillTimeline(wrap.closest(".cam-cell"), cam);
+    fillSeekBar();
+    document.querySelectorAll(".cam-group").forEach((box) => drawGroupBar(box));
+    form.remove();
+  };
+  form.querySelector(".ck-save").addEventListener("click", async () => {
+    const l = pbClips[cam.device_id];
+    if (!l) { note.textContent = "no recording list for this camera"; return; }
+    const secs = (v) => { const [h, m, s] = v.split(":").map(Number); return h * 3600 + m * 60 + (s || 0); };
+    const a = form.querySelector(".ck-shown").value, b = form.querySelector(".ck-real").value;
+    if (!a || !b) { note.textContent = "fill in both times"; return; }
+    const shownAt = l.day_start + secs(a), realAt = l.day_start + secs(b);
+    if (shownAt === realAt) { note.textContent = "the two times are the same: nothing to correct"; return; }
+    note.textContent = "saving…";
+    try {
+      apply(await invoke("clock_correct", { deviceId: cam.device_id, date, shown: shownAt, real: realAt,
+        note: `showed ${clockText(shownAt)} when it was ${clockText(realAt)}` }));
+    } catch (e) { note.textContent = "failed: " + e; }
+  });
+  form.querySelectorAll(".ck-remove").forEach((btn) => btn.addEventListener("click", async () => {
+    try {
+      apply(await invoke("clock_uncorrect", { deviceId: cam.device_id, date, cameraFrom: Number(btn.dataset.from) }));
+    } catch (e) { note.textContent = "failed: " + e; }
+  }));
+  wrap.appendChild(form);
+}
+
 // The first play of a downloaded clip makes its MP4 (about ten seconds).
 listen("clip-preparing", (e) => {
   document.querySelectorAll(`.cam-cell[data-id="${CSS.escape(e.payload)}"] .cam-tile`).forEach((tile) => {
@@ -1927,7 +2071,12 @@ listen("download-progress", (e) => {
 
 // ---- controls ----
 
-$("cameras-open").addEventListener("click", showCameras);
+$("detail-back").addEventListener("click", () => {
+  current = null;
+  renderList();
+  $("detail").classList.add("hidden");
+  selectCategory("print");
+});
 $("cam-layout").addEventListener("change", () => $("cam-grid").style.setProperty("--cols", $("cam-layout").value));
 $("cam-mode").addEventListener("change", () => { if (camStatus && camStatus.running) renderCameraGrid(); });
 $("cam-reload-all").addEventListener("click", () => { if (camStatus && camStatus.running) renderCameraGrid(); });
@@ -1974,10 +2123,12 @@ listen("cameras-progress", (e) => {
 $("rescan").addEventListener("click", rescan);
 invoke("startup_view").then((v) => {
   if (v === "cameras") {
-    showCameras();
+    selectCategory("cameras");
     setTimeout(() => $("cam-start").click(), 800);
+  } else {
+    selectCategory("print");
   }
-}).catch(() => {});
+}).catch(() => { selectCategory("print"); });
 $("scan-form").addEventListener("change", () => {
   renderResolutions();
   Pictures.update($("scan-form"));
