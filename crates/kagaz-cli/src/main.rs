@@ -192,6 +192,9 @@ enum Command {
         #[arg(long, default_value_t = 1984)]
         port: u16,
     },
+    /// Video doorbell (intercom): register to its SIP server and ring when someone presses the bell
+    #[command(subcommand)]
+    Intercom(IntercomCommand),
     /// Make a printer flash its display so you know which one it is
     Identify {
         /// Its number in `kagaz discover`, an IP address, hostname, or part of its name
@@ -199,6 +202,37 @@ enum Command {
         /// Seconds to listen for answers while finding the device
         #[arg(long, default_value_t = 3)]
         timeout: u64,
+    },
+}
+
+#[derive(Subcommand)]
+enum IntercomCommand {
+    /// Save the SIP account (server details as flags; the secret from a file, never the command line)
+    Setup {
+        /// SIP server IP or name (from the device's Account -> Basic page)
+        #[arg(long)]
+        server: String,
+        /// SIP server port
+        #[arg(long, default_value_t = 5070)]
+        port: u16,
+        /// "tcp" or "udp"
+        #[arg(long, default_value = "tcp")]
+        transport: String,
+        /// SIP user / register name (e.g. 20011001)
+        #[arg(long)]
+        user: String,
+        /// Display name shown to the other side
+        #[arg(long, default_value = "")]
+        name: String,
+        /// A file with `username=` and `password=` lines (the password stays out of shell history)
+        #[arg(long)]
+        from_file: std::path::PathBuf,
+    },
+    /// Register to the SIP server and report whether it accepted us
+    Register {
+        /// After registering, keep the connection open and print what the server sends (incoming calls)
+        #[arg(long)]
+        listen: bool,
     },
 }
 
@@ -904,6 +938,7 @@ fn main() -> Result<()> {
         }
         Command::Tapo(cmd) => tapo_command(cmd),
         Command::Cameras { port } => cameras_serve(port),
+        Command::Intercom(cmd) => intercom_command(cmd),
         Command::Identify { device, timeout } => {
             let devices = discover(&DiscoverOptions {
                 timeout: Duration::from_secs(timeout),
@@ -2102,6 +2137,77 @@ fn find_camera<'a>(
         .ok_or_else(|| {
             anyhow::anyhow!("no camera matches \"{camera}\"; `kagaz tapo cameras` lists them")
         })
+}
+
+fn intercom_command(cmd: IntercomCommand) -> Result<()> {
+    use kagaz_core::intercom::{sip, SipAccount};
+    match cmd {
+        IntercomCommand::Setup {
+            server,
+            port,
+            transport,
+            user,
+            name,
+            from_file,
+        } => {
+            let text = std::fs::read_to_string(&from_file)
+                .with_context(|| format!("cannot read {}", from_file.display()))?;
+            let field = |key: &str| {
+                text.lines()
+                    .find_map(|l| l.trim().strip_prefix(&format!("{key}=")))
+                    .map(|v| v.trim().to_string())
+            };
+            let username = field("username").unwrap_or(user);
+            let password = field("password")
+                .ok_or_else(|| anyhow::anyhow!("no `password=` line in {}", from_file.display()))?;
+            let account = SipAccount {
+                username,
+                password,
+                display_name: name,
+                server,
+                port,
+                transport,
+                expires: 1800,
+            };
+            account.save()?;
+            println!(
+                "Saved intercom account {} on {}:{} ({}). Test it with `kagaz intercom register`.",
+                account.username, account.server, account.port, account.transport
+            );
+            Ok(())
+        }
+        IntercomCommand::Register { listen } => {
+            let account = SipAccount::load()?;
+            println!(
+                "Registering {} to {}:{} over {}...",
+                account.username, account.server, account.port, account.transport
+            );
+            let mut conn = sip::Connection::open(&account, std::time::Duration::from_secs(10))?;
+            let reg = sip::register(&account, &mut conn)?;
+            println!(
+                "Registered. The server granted {} s; we are {}.",
+                reg.expires, reg.local
+            );
+            if listen {
+                println!("Listening for the doorbell's call (Ctrl+C to stop)...");
+                loop {
+                    match conn.recv() {
+                        Ok(msg) => println!("<- {}", msg.start),
+                        Err(e) => {
+                            // A read timeout is normal between messages.
+                            if e.to_string().contains("timed out")
+                                || e.to_string().contains("would block")
+                            {
+                                continue;
+                            }
+                            return Err(e.into());
+                        }
+                    }
+                }
+            }
+            Ok(())
+        }
+    }
 }
 
 fn load_tapo_session(path: &std::path::Path) -> Result<kagaz_core::cameras::tapo::Session> {
