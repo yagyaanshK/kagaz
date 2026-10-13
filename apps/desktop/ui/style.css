@@ -194,6 +194,27 @@ button:disabled { opacity: 0.6; cursor: default; }
 #scan-log li.bad { color: var(--bad); }
 #scan-log li.ok { color: var(--ok); }
 
+/* Print and Copy tabs */
+#print-log, #copy-log { margin: 12px 0 0; padding-left: 18px; }
+#print-log li.warn, #copy-log li.warn { color: var(--warn); }
+#print-log li.bad, #copy-log li.bad { color: var(--bad); }
+#print-log li.ok, #copy-log li.ok { color: var(--ok); }
+.status-box { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin-bottom: 14px; }
+.supplies { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 16px; width: 100%; font-size: 12px; }
+.supplies li { display: flex; align-items: center; gap: 6px; }
+.supplies .sup-bar { width: 70px; height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
+.supplies .sup-bar i { display: block; height: 100%; background: var(--muted); }
+.supplies li.low .sup-level { color: var(--warn); }
+.file-drop { display: flex; align-items: center; gap: 12px; padding: 14px; margin-bottom: 14px; border: 1px dashed var(--line); border-radius: 10px; min-width: 0; }
+.file-drop span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+#print-go, #copy-print { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+.thumbs { list-style: none; margin: 8px 0 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 12px; }
+.thumbs li { display: flex; flex-direction: column; gap: 6px; padding: 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); cursor: grab; }
+.thumbs li.dragging { opacity: 0.5; }
+.thumbs li.dropped img { opacity: 0.3; }
+.thumbs img { width: 100%; height: auto; border: 1px solid var(--line); background: #fff; }
+.thumbs label { flex-direction: row; align-items: center; gap: 6px; color: var(--text); }
+
 @media (max-width: 720px) {
   body { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
   #sidebar { border-right: none; border-bottom: 1px solid var(--line); max-height: 40vh; }

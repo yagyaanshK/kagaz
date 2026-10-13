@@ -4,6 +4,7 @@
 //! the image crate.
 
 pub mod pwg;
+pub mod system;
 
 use crate::ipp::{
     self, call, encode_request, out, out_int, urls_for, IppError, Value, GROUP_JOB, OP_PRINT_JOB,
@@ -32,7 +33,7 @@ impl Sides {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PrintRequest {
     pub copies: u32,
     pub sides: Sides,
@@ -41,6 +42,9 @@ pub struct PrintRequest {
     /// Ask for colour when the printer can do it.
     pub color: bool,
     pub job_name: Option<String>,
+    /// 1-based pages of a PDF to print, like "1-3, 5"; all when None.
+    #[serde(default)]
+    pub pages: Option<String>,
 }
 
 impl Default for PrintRequest {
@@ -51,6 +55,7 @@ impl Default for PrintRequest {
             media: None,
             color: true,
             job_name: None,
+            pages: None,
         }
     }
 }
@@ -70,9 +75,10 @@ pub struct Plan {
     pub copies: u32,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Event {
-    Planned(Plan),
+    Planned { plan: Plan },
     Rendering { page: usize, of: usize },
     Validated,
     Sending { bytes: usize },
@@ -247,12 +253,23 @@ pub fn render_file(
     plan: &Plan,
     on_event: &mut dyn FnMut(Event),
 ) -> Result<Vec<RenderedPage>, PrintError> {
+    render_file_pages(path, plan, None, on_event)
+}
+
+/// Like [`render_file`], but only the 1-based `pages` of a PDF (all when None).
+pub fn render_file_pages(
+    path: &Path,
+    plan: &Plan,
+    pages: Option<&str>,
+    on_event: &mut dyn FnMut(Event),
+) -> Result<Vec<RenderedPage>, PrintError> {
     let data = std::fs::read(path).map_err(|source| PrintError::Read {
         path: path.to_path_buf(),
         source,
     })?;
+    let wanted = pages;
     let pages = if data.starts_with(b"%PDF") {
-        render_pdf(data, plan, on_event)?
+        render_pdf(data, plan, wanted, on_event)?
     } else if image::guess_format(&data).is_ok() {
         on_event(Event::Rendering { page: 1, of: 1 });
         let img = image::load_from_memory(&data).map_err(|e| PrintError::Render(e.to_string()))?;
@@ -269,6 +286,7 @@ pub fn render_file(
 fn render_pdf(
     data: Vec<u8>,
     plan: &Plan,
+    wanted: Option<&str>,
     on_event: &mut dyn FnMut(Event),
 ) -> Result<Vec<RenderedPage>, PrintError> {
     use hayro::hayro_interpret::InterpreterSettings;
@@ -282,13 +300,18 @@ fn render_pdf(
     if total == 0 {
         return Err(PrintError::Render("the PDF has no pages".into()));
     }
+    let chosen = match wanted {
+        Some(spec) => parse_pages(spec, total).map_err(PrintError::Unsupported)?,
+        None => (1..=total).collect(),
+    };
     let cache = RenderCache::new();
     let settings = InterpreterSettings::default();
-    let mut out = Vec::with_capacity(total);
-    for (i, page) in pages.iter().enumerate() {
+    let mut out = Vec::with_capacity(chosen.len());
+    for (n, number) in chosen.iter().enumerate() {
+        let page = &pages[number - 1];
         on_event(Event::Rendering {
-            page: i + 1,
-            of: total,
+            page: n + 1,
+            of: chosen.len(),
         });
         let (w_pt, h_pt) = page.render_dimensions();
         // Landscape pages go on the paper sideways.
@@ -326,6 +349,139 @@ fn render_pdf(
         out.push(place(img, plan));
     }
     Ok(out)
+}
+
+/// How a scanned page goes onto the paper.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum Fit {
+    /// The original's own size, as a photocopier does; shrunk only if it
+    /// would not fit the paper.
+    #[default]
+    ActualSize,
+    /// As large as the paper allows.
+    FitToPage,
+}
+
+/// The 1-based page numbers a spec like "1-3, 5" picks out of `total`.
+pub fn parse_pages(spec: &str, total: usize) -> Result<Vec<usize>, String> {
+    let mut out = Vec::new();
+    for part in spec.split(',').map(str::trim).filter(|p| !p.is_empty()) {
+        let (a, b) = match part.split_once('-') {
+            Some((a, b)) => (a.trim(), b.trim()),
+            None => (part, part),
+        };
+        let first: usize = a
+            .parse()
+            .map_err(|_| format!("\"{part}\" is not a page or a range like 2-5"))?;
+        let last: usize = if b.is_empty() {
+            total
+        } else {
+            b.parse()
+                .map_err(|_| format!("\"{part}\" is not a page or a range like 2-5"))?
+        };
+        if first == 0 || first > last || last > total {
+            return Err(format!(
+                "pages {part} are not in this document, which has {total} page{}",
+                if total == 1 { "" } else { "s" }
+            ));
+        }
+        out.extend(first..=last);
+    }
+    if out.is_empty() {
+        return Err("no pages chosen".into());
+    }
+    Ok(out)
+}
+
+/// Lay scanned pages onto the planned paper.
+pub fn render_scans(
+    pages: &[crate::scan::Page],
+    plan: &Plan,
+    fit: Fit,
+    on_event: &mut dyn FnMut(Event),
+) -> Result<Vec<RenderedPage>, PrintError> {
+    let total = pages.len();
+    let mut out = Vec::with_capacity(total);
+    for (i, page) in pages.iter().enumerate() {
+        on_event(Event::Rendering {
+            page: i + 1,
+            of: total,
+        });
+        let img =
+            image::load_from_memory(&page.data).map_err(|e| PrintError::Render(e.to_string()))?;
+        out.push(match fit {
+            Fit::FitToPage => fit_to_page(img, plan),
+            Fit::ActualSize => actual_size(img, page.dpi.max(1), plan),
+        });
+    }
+    Ok(out)
+}
+
+/// Scale a scan from its own resolution to the printer's, keeping its real
+/// size; shrink it only when it is larger than the paper.
+fn actual_size(img: DynamicImage, scan_dpi: u32, plan: &Plan) -> RenderedPage {
+    let page_w = plan.width_pt as f32 * plan.dpi as f32 / 72.0;
+    let page_h = plan.height_pt as f32 * plan.dpi as f32 / 72.0;
+    let ratio = plan.dpi as f32 / scan_dpi as f32;
+    let (w, h) = (img.width() as f32 * ratio, img.height() as f32 * ratio);
+    let shrink = (page_w / w).min(page_h / h).min(1.0);
+    let (w, h) = (
+        ((w * shrink).round() as u32).max(1),
+        ((h * shrink).round() as u32).max(1),
+    );
+    let img = if (w, h) == (img.width(), img.height()) {
+        img
+    } else {
+        img.resize_exact(w, h, image::imageops::FilterType::Triangle)
+    };
+    place(img, plan)
+}
+
+/// Check, encode and send pages that are already rendered for `plan`.
+pub fn send_pages(
+    device: &Device,
+    plan: &Plan,
+    job_name: &str,
+    mut pages: Vec<RenderedPage>,
+    dry_run: bool,
+    on_event: &mut dyn FnMut(Event),
+) -> Result<Option<(i32, String)>, PrintError> {
+    validate(device, plan, job_name)?;
+    on_event(Event::Validated);
+    if dry_run {
+        return Ok(None);
+    }
+    let document = to_pwg(&mut pages, plan);
+    on_event(Event::Sending {
+        bytes: document.len(),
+    });
+    let result = submit(device, plan, job_name, &document)?;
+    on_event(Event::Submitted {
+        job_id: result.0,
+        state: result.1.clone(),
+    });
+    Ok(Some(result))
+}
+
+/// Print scanned pages without a driver: the copy half of a photocopy.
+pub fn print_scans(
+    device: &Device,
+    pages: &[crate::scan::Page],
+    req: &PrintRequest,
+    fit: Fit,
+    dry_run: bool,
+    on_event: &mut dyn FnMut(Event),
+) -> Result<Option<(i32, String)>, PrintError> {
+    if pages.is_empty() {
+        return Err(PrintError::Unsupported(
+            "there are no pages to print".into(),
+        ));
+    }
+    let plan = plan(device, req)?;
+    on_event(Event::Planned { plan: plan.clone() });
+    let job_name = req.job_name.clone().unwrap_or_else(|| "Kagaz copy".into());
+    let rendered = render_scans(pages, &plan, fit, on_event)?;
+    send_pages(device, &plan, &job_name, rendered, dry_run, on_event)
 }
 
 /// Scale an image to fit the paper (rotating it when that fits better) and
@@ -532,29 +688,15 @@ pub fn print(
     on_event: &mut dyn FnMut(Event),
 ) -> Result<Option<(i32, String)>, PrintError> {
     let plan = plan(device, req)?;
-    on_event(Event::Planned(plan.clone()));
+    on_event(Event::Planned { plan: plan.clone() });
     let job_name = req.job_name.clone().unwrap_or_else(|| {
         path.file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("Kagaz print")
             .to_string()
     });
-    let mut pages = render_file(path, &plan, on_event)?;
-    validate(device, &plan, &job_name)?;
-    on_event(Event::Validated);
-    if dry_run {
-        return Ok(None);
-    }
-    let document = to_pwg(&mut pages, &plan);
-    on_event(Event::Sending {
-        bytes: document.len(),
-    });
-    let result = submit(device, &plan, &job_name, &document)?;
-    on_event(Event::Submitted {
-        job_id: result.0,
-        state: result.1.clone(),
-    });
-    Ok(Some(result))
+    let rendered = render_file_pages(path, &plan, req.pages.as_deref(), on_event)?;
+    send_pages(device, &plan, &job_name, rendered, dry_run, on_event)
 }
 
 #[cfg(test)]
@@ -685,5 +827,99 @@ mod tests {
         assert_eq!(pages[0].pixels, vec![0, 255]);
         assert_eq!(pages[1].pixels, vec![255, 0]);
         assert!(doc.len() > 2 * pwg::HEADER_LEN);
+    }
+
+    #[test]
+    fn reads_page_ranges() {
+        assert_eq!(parse_pages("1-3, 5", 6).unwrap(), vec![1, 2, 3, 5]);
+        assert_eq!(parse_pages("4-", 6).unwrap(), vec![4, 5, 6]);
+        assert_eq!(parse_pages(" 2 ", 2).unwrap(), vec![2]);
+        assert!(parse_pages("0", 3).is_err());
+        assert!(parse_pages("3-2", 3).is_err());
+        assert!(parse_pages("7", 6).is_err());
+        assert!(parse_pages("a", 6).is_err());
+        assert!(parse_pages(" , ", 6).is_err());
+    }
+
+    fn scan_of(width: u32, height: u32, dpi: u32) -> crate::scan::Page {
+        let img = GrayImage::from_pixel(width, height, image::Luma([0]));
+        let mut png = Vec::new();
+        DynamicImage::ImageLuma8(img)
+            .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+            .unwrap();
+        crate::scan::Page {
+            data: png,
+            mime: "image/png",
+            dpi,
+            color: crate::scan::ColorMode::Gray,
+        }
+    }
+
+    fn black_width(page: &RenderedPage) -> usize {
+        let mid = page.height as usize / 2 * page.width as usize;
+        page.pixels[mid..mid + page.width as usize]
+            .iter()
+            .filter(|&&p| p == 0)
+            .count()
+    }
+
+    #[test]
+    fn a_copy_keeps_the_original_size() {
+        // A 4-inch-wide original scanned at 50 dpi, printed at 10 dpi on A4
+        // (8.26 in wide): 40 pixels of black, centred.
+        let plan = a4_plan(10, true);
+        let pages = render_scans(
+            &[scan_of(200, 100, 50)],
+            &plan,
+            Fit::ActualSize,
+            &mut |_| {},
+        )
+        .unwrap();
+        assert_eq!((pages[0].width, pages[0].height), (83, 117));
+        assert_eq!(black_width(&pages[0]), 40);
+
+        // Fill the paper instead: a 2-inch A4-shaped original grows to the
+        // width of the page.
+        let small = scan_of(100, 141, 50);
+        let actual = render_scans(
+            std::slice::from_ref(&small),
+            &plan,
+            Fit::ActualSize,
+            &mut |_| {},
+        )
+        .unwrap();
+        assert_eq!(black_width(&actual[0]), 20);
+        let filled = render_scans(&[small], &plan, Fit::FitToPage, &mut |_| {}).unwrap();
+        assert!(black_width(&filled[0]) >= 82);
+    }
+
+    #[test]
+    fn a_copy_larger_than_the_paper_is_shrunk_to_fit() {
+        // 20 inches wide at 10 dpi on an 8.26-inch page.
+        let plan = a4_plan(10, true);
+        let pages =
+            render_scans(&[scan_of(200, 50, 10)], &plan, Fit::ActualSize, &mut |_| {}).unwrap();
+        assert!(black_width(&pages[0]) <= 83);
+        assert!(black_width(&pages[0]) >= 82);
+    }
+
+    #[test]
+    fn prints_only_the_chosen_pdf_pages() {
+        let dir = std::env::temp_dir().join(format!("kagaz-pages-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("t.pdf");
+        std::fs::write(&path, TEST_PDF).unwrap();
+        let plan = a4_plan(20, true);
+        let all = render_file(&path, &plan, &mut |_| {}).unwrap();
+        let one = render_file_pages(&path, &plan, Some("1"), &mut |_| {}).unwrap();
+        assert_eq!(one.len(), 1);
+        assert!(render_file_pages(
+            &path,
+            &plan,
+            Some(&format!("{}", all.len() + 1)),
+            &mut |_| {}
+        )
+        .is_err());
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

@@ -1,6 +1,7 @@
 //! Finding devices. Each method returns partial `Device`s; `discover` runs the
 //! methods and merges the results into one entry per physical device.
 
+pub mod direct;
 pub mod mdns;
 pub mod mdns_txt;
 pub mod snmp;
@@ -94,6 +95,9 @@ pub fn discover(opts: &DiscoverOptions) -> Result<Vec<Device>, DiscoverError> {
         // this returns at once when everyone already answered.
         let _ = snmp::enrich(&mut devices, Duration::from_secs(1));
     }
+    // Multicast answers go missing (busy Wi-Fi, firewalls, phones); ask
+    // the devices themselves for what they did not announce.
+    direct::fill(&mut devices, Duration::from_millis(1500));
     // A stable order, so "device 2" means the same thing on the next run.
     devices.sort_by(|a, b| {
         a.name

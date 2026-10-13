@@ -123,10 +123,66 @@ enum Command {
         /// Print in black and white even on a colour printer
         #[arg(long)]
         gray: bool,
+        /// Only these pages of a PDF, like "1-3,5"
+        #[arg(long)]
+        pages: Option<String>,
+        /// Print through this system print queue (and so its installed driver); see `kagaz queues`
+        #[arg(long, conflicts_with = "driver")]
+        queue: Option<String>,
+        /// Print through the system print queue that matches the device (its installed driver)
+        #[arg(long)]
+        driver: bool,
         /// Do everything except send the job: render, and ask the printer to validate it
         #[arg(long)]
         dry_run: bool,
         /// Seconds to listen for answers while finding the device
+        #[arg(long, default_value_t = 3)]
+        timeout: u64,
+    },
+    /// List this computer's print queues (the printers its installed drivers print to)
+    Queues {
+        /// Print machine-readable JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Photocopy: scan the originals and print them, without saving a file
+    Copy {
+        /// The scanner: its number in `kagaz discover`, an IP address, hostname, or part of its name
+        device: String,
+        /// Print on this printer instead of the scanner's own (same kinds of selector)
+        #[arg(long)]
+        to: Option<String>,
+        /// Where the originals are; auto = the feeder if it has paper, else the glass
+        #[arg(long, value_enum, default_value_t = SourceArg::Auto)]
+        source: SourceArg,
+        /// Scan resolution in dots per inch (150 draft, 300 normal, 600 fine)
+        #[arg(long, default_value_t = 300)]
+        dpi: u32,
+        /// Colour, grey or black-and-white
+        #[arg(long, value_enum, default_value_t = ModeArg::Gray)]
+        mode: ModeArg,
+        /// Paper size, for the scan and the print
+        #[arg(long, value_enum, default_value_t = PaperArg::A4)]
+        paper: PaperArg,
+        /// Keep the original's size (actual) or fill the paper (fill)
+        #[arg(long, value_enum, default_value_t = FitArg::Actual)]
+        fit: FitArg,
+        /// Number of copies
+        #[arg(long, default_value_t = 1)]
+        copies: u32,
+        /// one, long (two-sided, flip on the long edge) or short
+        #[arg(long, value_enum, default_value_t = SidesArg::One)]
+        sides: SidesArg,
+        /// Print through this system print queue (its installed driver)
+        #[arg(long, conflicts_with = "driver")]
+        queue: Option<String>,
+        /// Print through the system print queue that matches the printer
+        #[arg(long)]
+        driver: bool,
+        /// Scan, then only ask the printer whether it takes the job
+        #[arg(long)]
+        dry_run: bool,
+        /// Seconds to listen for answers while finding the devices
         #[arg(long, default_value_t = 3)]
         timeout: u64,
     },
@@ -357,6 +413,12 @@ enum SidesArg {
     One,
     Long,
     Short,
+}
+
+#[derive(Clone, Copy, ValueEnum, PartialEq, Eq)]
+enum FitArg {
+    Actual,
+    Fill,
 }
 
 #[derive(Clone, Copy, ValueEnum, PartialEq, Eq)]
@@ -648,22 +710,7 @@ fn main() -> Result<()> {
             })?;
             let d = select_device(&devices, &device)?;
             println!("Scanning from {}", title(d));
-            let pages = kagaz_core::scan::scan(d, &req, &mut |e| match e {
-                Event::Starting { source, dpi } => {
-                    let where_ = match source {
-                        Source::Glass => "the glass",
-                        Source::Feeder => "the feeder",
-                        Source::FeederDuplex => "the feeder, both sides",
-                        Source::Auto => "the scanner",
-                    };
-                    println!("  from {where_} at {dpi} dpi...");
-                }
-                Event::FeederEmpty => println!("  the feeder is empty; using the glass instead"),
-                Event::Page { number, bytes } => {
-                    println!("  page {number} received ({})", human_size(bytes as u64))
-                }
-                Event::Substituted { note } => println!("  note: {note}"),
-            })?;
+            let pages = kagaz_core::scan::scan(d, &req, &mut say_scan_event)?;
             let written = kagaz_core::output::write(
                 &pages,
                 &OutputOptions {
@@ -713,6 +760,9 @@ fn main() -> Result<()> {
             sides,
             paper,
             gray,
+            pages,
+            queue,
+            driver,
             dry_run,
             timeout,
         } => {
@@ -740,34 +790,151 @@ fn main() -> Result<()> {
                 }),
                 color: !gray,
                 job_name: None,
+                pages,
             };
+            if let Some(queue) = queue_choice(queue, driver, d)? {
+                println!("Printing {} through the \"{queue}\" queue", file.display());
+                anyhow::ensure!(
+                    !dry_run,
+                    "--dry-run asks the printer itself; it cannot be used with a queue"
+                );
+                let job = kagaz_core::print::system::print_file(&queue, &file, &req)?;
+                println!("Handed to the queue as request {job}.");
+                return Ok(());
+            }
             println!("Printing {} on {}", file.display(), title(d));
-            let result = kagaz_core::print::print(d, &file, &req, dry_run, &mut |e| match e {
-                PrintEvent::Planned(p) => println!(
-                    "  {} at {} dpi, {}, {}{}",
-                    kagaz_core::ipp::status::media_name(&p.media),
-                    p.dpi,
-                    if p.gray { "black and white" } else { "colour" },
-                    p.sides.keyword(),
-                    if p.copies > 1 {
-                        format!(", {} copies", p.copies)
-                    } else {
-                        String::new()
-                    }
-                ),
-                PrintEvent::Rendering { page, of } => {
-                    println!("  rendering page {page} of {of}...")
-                }
-                PrintEvent::Validated => println!("  the printer accepts the job settings"),
-                PrintEvent::Sending { bytes } => {
-                    println!("  sending {}...", human_size(bytes as u64))
-                }
-                PrintEvent::Submitted { job_id, state } => println!("  job {job_id} {state}"),
-            })?;
+            let result = kagaz_core::print::print(d, &file, &req, dry_run, &mut say_print_event)?;
             match result {
                 None => println!("Dry run: nothing was sent."),
                 Some((id, _)) => {
                     println!("Sent as job {id}. `kagaz status {device}` shows the queue.")
+                }
+            }
+            Ok(())
+        }
+        Command::Queues { json } => {
+            let queues = kagaz_core::print::system::queues()?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&queues)?);
+            } else if queues.is_empty() {
+                println!("This computer has no print queues.");
+            } else {
+                for q in &queues {
+                    println!(
+                        "{}{}\n  {}\n  {}",
+                        q.name,
+                        if q.is_default { "  (default)" } else { "" },
+                        q.description,
+                        q.target
+                    );
+                }
+            }
+            Ok(())
+        }
+        Command::Copy {
+            device,
+            to,
+            source,
+            dpi,
+            mode,
+            paper,
+            fit,
+            copies,
+            sides,
+            queue,
+            driver,
+            dry_run,
+            timeout,
+        } => {
+            let devices = discover(&DiscoverOptions {
+                timeout: Duration::from_secs(timeout),
+                ..Default::default()
+            })?;
+            let scanner = select_device(&devices, &device)?;
+            let printer = match &to {
+                Some(p) => select_device(&devices, p)?,
+                None => scanner,
+            };
+            let color = match mode {
+                ModeArg::Color => ColorMode::Color,
+                ModeArg::Gray => ColorMode::Gray,
+                ModeArg::Bw => ColorMode::BlackWhite,
+            };
+            let paper = match paper {
+                PaperArg::Max => anyhow::bail!("a copy needs a paper size: a4, letter or legal"),
+                p => p,
+            };
+            let scan_req = ScanRequest {
+                source: match source {
+                    SourceArg::Auto => Source::Auto,
+                    SourceArg::Glass => Source::Glass,
+                    SourceArg::Feeder => Source::Feeder,
+                    SourceArg::Duplex => Source::FeederDuplex,
+                },
+                dpi,
+                color,
+                paper: match paper {
+                    PaperArg::Letter => Paper::Letter,
+                    PaperArg::Legal => Paper::Legal,
+                    _ => Paper::A4,
+                },
+                engine: if scanner.can_scan_driverless() {
+                    kagaz_core::scan::Engine::Driverless
+                } else {
+                    kagaz_core::scan::Engine::Driver
+                },
+            };
+            let print_req = PrintRequest {
+                copies,
+                sides: match sides {
+                    SidesArg::One => Sides::OneSided,
+                    SidesArg::Long => Sides::TwoSidedLongEdge,
+                    SidesArg::Short => Sides::TwoSidedShortEdge,
+                },
+                media: Some(
+                    match paper {
+                        PaperArg::Letter => "na_letter_8.5x11in",
+                        PaperArg::Legal => "na_legal_8.5x14in",
+                        _ => "iso_a4_210x297mm",
+                    }
+                    .to_string(),
+                ),
+                color: color == ColorMode::Color,
+                job_name: Some("Kagaz copy".into()),
+                pages: None,
+            };
+            let fit = match fit {
+                FitArg::Actual => kagaz_core::print::Fit::ActualSize,
+                FitArg::Fill => kagaz_core::print::Fit::FitToPage,
+            };
+            // Decide where it prints before scanning, so a wrong choice
+            // fails before the scanner moves.
+            let queue = queue_choice(queue, driver, printer)?;
+            anyhow::ensure!(
+                queue.is_none() || !dry_run,
+                "--dry-run asks the printer itself; it cannot be used with a queue"
+            );
+            println!("Scanning from {}", title(scanner));
+            let pages = kagaz_core::scan::scan(scanner, &scan_req, &mut say_scan_event)?;
+            match queue {
+                Some(q) => {
+                    println!("Printing {} page(s) through the \"{q}\" queue", pages.len());
+                    let job = kagaz_core::print::system::print_scans(&q, &pages, &print_req, fit)?;
+                    println!("Handed to the queue as request {job}.");
+                }
+                None => {
+                    println!("Printing {} page(s) on {}", pages.len(), title(printer));
+                    match kagaz_core::print::print_scans(
+                        printer,
+                        &pages,
+                        &print_req,
+                        fit,
+                        dry_run,
+                        &mut say_print_event,
+                    )? {
+                        None => println!("Dry run: nothing was printed."),
+                        Some((id, _)) => println!("Sent as job {id}."),
+                    }
                 }
             }
             Ok(())
@@ -2291,6 +2458,64 @@ fn cameras_serve(port: u16) -> Result<()> {
 }
 
 /// Pick one device by what the user typed, or explain why that failed.
+/// The system queue to print through, if the user asked for one.
+fn queue_choice(queue: Option<String>, driver: bool, printer: &Device) -> Result<Option<String>> {
+    if queue.is_some() {
+        return Ok(queue);
+    }
+    if !driver {
+        return Ok(None);
+    }
+    let queues = kagaz_core::print::system::queues()?;
+    match kagaz_core::print::system::queue_for(&queues, printer) {
+        Some(q) => Ok(Some(q.name.clone())),
+        None => anyhow::bail!(
+            "no print queue on this computer matches {}; `kagaz queues` lists them, and --queue picks one",
+            title(printer)
+        ),
+    }
+}
+
+fn say_scan_event(e: Event) {
+    match e {
+        Event::Starting { source, dpi } => {
+            let where_ = match source {
+                Source::Glass => "the glass",
+                Source::Feeder => "the feeder",
+                Source::FeederDuplex => "the feeder, both sides",
+                Source::Auto => "the scanner",
+            };
+            println!("  from {where_} at {dpi} dpi...");
+        }
+        Event::FeederEmpty => println!("  the feeder is empty; using the glass instead"),
+        Event::Page { number, bytes } => {
+            println!("  page {number} received ({})", human_size(bytes as u64))
+        }
+        Event::Substituted { note } => println!("  note: {note}"),
+    }
+}
+
+fn say_print_event(e: PrintEvent) {
+    match e {
+        PrintEvent::Planned { plan: p } => println!(
+            "  {} at {} dpi, {}, {}{}",
+            kagaz_core::ipp::status::media_name(&p.media),
+            p.dpi,
+            if p.gray { "black and white" } else { "colour" },
+            p.sides.keyword(),
+            if p.copies > 1 {
+                format!(", {} copies", p.copies)
+            } else {
+                String::new()
+            }
+        ),
+        PrintEvent::Rendering { page, of } => println!("  rendering page {page} of {of}..."),
+        PrintEvent::Validated => println!("  the printer accepts the job settings"),
+        PrintEvent::Sending { bytes } => println!("  sending {}...", human_size(bytes as u64)),
+        PrintEvent::Submitted { job_id, state } => println!("  job {job_id} {state}"),
+    }
+}
+
 fn select_device<'a>(devices: &'a [Device], selector: &str) -> Result<&'a Device> {
     match kagaz_core::find(devices, selector) {
         Ok(d) => Ok(d),

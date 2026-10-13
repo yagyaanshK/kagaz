@@ -32,3 +32,11 @@ webpki-roots = "1"
 base64 = "0.22"
 lzma-rs = "0.3"
 tar = "0.4"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_Graphics_Printing",
+    "Win32_Storage_Xps",
+] }
