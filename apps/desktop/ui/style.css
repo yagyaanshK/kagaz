@@ -207,6 +207,7 @@ button:disabled { opacity: 0.6; cursor: default; }
 .supplies li.low .sup-level { color: var(--warn); }
 .file-drop { display: flex; align-items: center; gap: 12px; padding: 14px; margin-bottom: 14px; border: 1px dashed var(--line); border-radius: 10px; min-width: 0; }
 .file-drop span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.file-note { margin: -6px 0 14px; color: var(--bad); }
 #print-go, #copy-print { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
 .thumbs { list-style: none; margin: 8px 0 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 12px; }
 .thumbs li { display: flex; flex-direction: column; gap: 6px; padding: 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); cursor: grab; }

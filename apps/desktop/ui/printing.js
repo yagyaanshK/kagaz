@@ -167,6 +167,8 @@
     }
     li.textContent = text;
     li.className = cls || "";
+    // Outcomes can land below the fold on a phone; bring them into view.
+    if (cls === "ok" || cls === "bad") li.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }
 
   function describeProgress(p) {
@@ -203,7 +205,21 @@
 
   // ---------- print ----------
 
+  // Problems with the chosen file show right under the file chooser.
+  const fileNote = document.createElement("p");
+  fileNote.id = "print-file-note";
+  fileNote.className = "file-note hidden";
+  fileNote.setAttribute("role", "alert");
+  $("print-drop").insertAdjacentElement("afterend", fileNote);
+
+  function fileProblem(text) {
+    fileNote.textContent = text;
+    fileNote.classList.toggle("hidden", !text);
+    if (text) fileNote.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }
+
   function setFile(path, shownName) {
+    fileProblem("");
     filePath = path;
     const name = shownName || path.split(/[\\/]/).pop();
     $("print-file").textContent = name;
@@ -222,12 +238,22 @@
     picker.value = "";
     if (!file) return;
     const ext = (file.name.split(".").pop() || "").toLowerCase();
+    fileProblem("");
+    filePath = null;
+    $("print-file").textContent = "Reading " + file.name + "…";
     try {
-      const bytes = new Uint8Array(await file.arrayBuffer());
-      const path = await invoke("upload_document", bytes, { headers: { "x-ext": ext } });
+      const data = await new Promise((resolve, reject) => {
+        const r = new FileReader();
+        r.onload = () => resolve(String(r.result).replace(/^data:[^,]*,/, ""));
+        r.onerror = () => reject(r.error || "the phone would not hand over the file");
+        r.readAsDataURL(file);
+      });
+      const path = await invoke("upload_document", { ext, data });
       setFile(path, file.name);
     } catch (e) {
-      logTo("print-log", "Could not read " + file.name + ": " + e, "bad");
+      $("print-file").textContent = "Nothing chosen.";
+      $("print-file").classList.add("muted");
+      fileProblem("Could not read " + file.name + ": " + e);
     }
   });
 
@@ -240,7 +266,7 @@
       const p = await invoke("choose_print_file");
       if (p) setFile(p);
     } catch (e) {
-      logTo("print-log", "Could not open the file chooser: " + e, "bad");
+      fileProblem("Could not open the file chooser: " + e);
     }
   });
 
@@ -249,7 +275,7 @@
     const paths = (e.payload && e.payload.paths) || [];
     const p = paths.find((x) => /\.(pdf|jpe?g|png)$/i.test(x));
     if (p) setFile(p);
-    else if (paths.length) logTo("print-log", "Kagaz prints PDF, JPEG and PNG files.", "warn");
+    else if (paths.length) fileProblem("Kagaz prints PDF, JPEG and PNG files.");
   });
 
   function printRequest(f) {
@@ -266,7 +292,7 @@
   async function runPrint(dryRun) {
     if (busy || !device) return;
     if (!filePath) {
-      logTo("print-log", "Choose a document first.", "warn");
+      fileProblem("Choose a document first.");
       return;
     }
     const sel = $("print-target");
