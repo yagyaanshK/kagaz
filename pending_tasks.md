@@ -25,6 +25,32 @@ with the commit that closes them.
       device); the USB product string is used instead.
 - [ ] **macOS run.** No Mac available.
 
+## OneTouch doorbells
+
+- [ ] **Remember sign-in securely and offer Reconnect** (requested 2026-10-14):
+      save credentials in the OS credential store after successful sign-in;
+      reconnect only when the user clicks, never automatically. Include a way
+      to forget the saved account. Not implemented yet.
+- [ ] **Discovery availability** (2026-10-14): this machine could resolve the
+      OneTouch gateway but not `rps.akuvox.com` or `bk.rps.akuvox.com`. The supplied
+      Smart Cloud APK declares the latter as its alternate redirect service
+      (`UrlDefine.RPS_SERVER_GET_REDIRECT_ALTERNATE`, `UrlTools.getGetAlternateRedirectUrl`).
+      Kagaz currently uses only the primary. Investigate DNS and implement the
+      vendor's alternate discovery flow before retrying account sign-in.
+
+- [ ] **Smart Cloud account and real media validation** (2026-10-13): account
+      sign-in, device list, live RTSP adapter, cloud snapshot/video history,
+      token refresh and logout are implemented and locally tested. User reports
+      snapshots only in the working OneTouch Smart Cloud app. Desktop sign-in
+      and device discovery are verified. Live video stays blank in Kagaz while
+      the vendor app can play it. Cloud history currently returns an empty list. Verify live video, snapshots,
+      expired-token refresh, and logout/reopen after the remaining fixes.
+- [ ] **Legacy OTIPVDP account validation** (2026-10-13): separate service
+      selection, device-MAC discovery, plain/encrypted login and legacy history
+      formats are implemented. Needs an unmigrated account for a real check.
+- [ ] **OneTouch two-factor accounts and Indoor-monitor recordings**: not supported
+      by this implementation. Existing direct SIP calls remain separate.
+
 ## Known gaps in the code
 
 - [ ] **eSCL over TLS only** (`_uscans` with no `_uscan`): refused with a

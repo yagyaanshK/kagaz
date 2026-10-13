@@ -212,6 +212,17 @@ The desktop window (`cargo run -p kagaz-desktop`) shows the same devices,
 the same plain-words explanation and the same scan options; on Linux it
 needs the webkit2gtk and gtk3 development packages to build.
 
+## OneTouch doorbell accounts
+
+In the desktop app, open **Doorbell → Sign in**. Select **OneTouch Smart Cloud**
+for migrated accounts, or **OTIPVDP (legacy)** for an older account. After sign-in,
+choose a device for live video or open **Recordings & snapshots** for cloud
+history. Only entries with video have a Play button; snapshots remain pictures.
+Local intercom calls continue to work separately.
+
+The integration builds and passes protocol/UI checks; authenticated playback
+still needs verification with a real account. See [protocol notes and limits](docs/onetouch.md).
+
 ## Roadmap
 
 - **M1 Find and explain.** Discover printers and scanners on the network and

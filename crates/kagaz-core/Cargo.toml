@@ -31,6 +31,9 @@ webpki-roots = "1"
 base64 = "0.22"
 lzma-rs = "0.3"
 tar = "0.4"
+url = "2"
+aes = "0.8"
+cbc = { version = "0.1", features = ["alloc"] }
 
 [target.'cfg(not(target_os = "android"))'.dependencies]
 nusb = "0.2"

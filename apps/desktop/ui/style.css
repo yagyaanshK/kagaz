@@ -471,3 +471,23 @@ ul.cards li.add .name { color: var(--accent); }
 @media (max-width: 900px) {
   #door-call { grid-template-columns: 1fr; }
 }
+
+/* OneTouch account and cloud media */
+.ot-panel { margin-top: 16px; padding: 16px; border: 1px solid var(--line); border-radius: 10px; }
+.ot-heading { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 10px; }
+.ot-heading h3, .ot-heading p { margin: 0 0 6px; }
+.ot-heading .actions { margin: 0; flex-wrap: wrap; }
+#ot-login label { display: flex; flex-direction: column; gap: 4px; }
+.ot-devices { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin-top: 14px; }
+.ot-device { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; padding: 12px; border: 1px solid var(--line); border-radius: 8px; }
+.ot-recording { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.ot-recording span { flex: 1 1 200px; }
+#ot-player { margin-top: 16px; }
+#ot-video, #ot-picture { display: block; width: 100%; max-height: 65vh; object-fit: contain; background: #111; border-radius: 8px; }
+#ot-live-tab[aria-pressed="true"], #ot-recordings-tab[aria-pressed="true"] { border-color: var(--accent); }
+.ot-local-heading { margin-top: 30px; }
+
+.ot-password-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; max-width: 100%; }
+.ot-password-row { display: flex; align-items: stretch; gap: 6px; min-width: 0; }
+.ot-password-row input { min-width: 0; width: 14em; flex: 1 1 auto; }
+.ot-password-row button { flex: 0 0 auto; min-width: 4.5em; padding: 4px 8px; }

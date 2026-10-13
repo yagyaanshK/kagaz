@@ -400,6 +400,7 @@ function showCameras() {
 
 // The left-hand categories drive the main area.
 function selectCategory(cat) {
+  if (cat !== "doorbell" && typeof stopOneTouch === "function") stopOneTouch();
   document.querySelectorAll("#categories li").forEach((li) =>
     li.classList.toggle("active", li.dataset.cat === cat));
   $("empty").classList.add("hidden");
@@ -2155,6 +2156,7 @@ function doorStationName(address) {
 }
 
 async function refreshDoorbell() {
+  if (typeof refreshOneTouch === "function") refreshOneTouch();
   try { doorStatus = await invoke("doorbell_status"); } catch (e) { $("door-message").textContent = "" + e; }
   try { doorStations = await invoke("doorbell_stations"); } catch (_) {}
   $("door-port").value = doorStations.listen_port;
