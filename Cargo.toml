@@ -12,6 +12,15 @@ license = "GPL-3.0-or-later"
 repository = "https://github.com/yagyaanshK/kagaz"
 authors = ["Yagyaansh Khaneja"]
 
+[profile.dev]
+# Line numbers in panics and backtraces, but no full debug info: with builds
+# for Linux, Windows and two Android targets, debug output had grown to tens
+# of GB.
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
+
 [profile.release]
 opt-level = 3
 lto = "fat"
