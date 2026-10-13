@@ -1,8 +1,32 @@
 //! Where Kagaz keeps things on each OS, without a directories crate.
 
 use std::path::PathBuf;
+use std::sync::OnceLock;
+
+/// Folders an app platform hands out (Android and iOS have no home folder
+/// of the usual kind): set once at start-up, before anything is read.
+struct AppDirs {
+    config: PathBuf,
+    cache: PathBuf,
+    documents: PathBuf,
+}
+
+static APP_DIRS: OnceLock<AppDirs> = OnceLock::new();
+
+/// Use these folders instead of the per-OS defaults. Only the first call
+/// counts.
+pub fn set_app_dirs(config: PathBuf, cache: PathBuf, documents: PathBuf) {
+    let _ = APP_DIRS.set(AppDirs {
+        config,
+        cache,
+        documents,
+    });
+}
 
 fn home() -> Option<PathBuf> {
+    if let Some(d) = APP_DIRS.get() {
+        return Some(d.documents.clone());
+    }
     std::env::var_os("HOME")
         .or_else(|| std::env::var_os("USERPROFILE"))
         .map(PathBuf::from)
@@ -12,6 +36,9 @@ fn home() -> Option<PathBuf> {
 /// `~/.cache/kagaz` on Linux, `~/Library/Caches/kagaz` on macOS,
 /// `%LOCALAPPDATA%\kagaz\cache` on Windows.
 pub fn cache_dir() -> PathBuf {
+    if let Some(d) = APP_DIRS.get() {
+        return d.cache.clone();
+    }
     if cfg!(target_os = "windows") {
         std::env::var_os("LOCALAPPDATA")
             .map(PathBuf::from)
@@ -51,6 +78,9 @@ pub fn scans_dir() -> PathBuf {
 /// `~/.config/kagaz` on Linux, `~/Library/Application Support/kagaz` on
 /// macOS, `%APPDATA%\\kagaz` on Windows.
 pub fn config_dir() -> PathBuf {
+    if let Some(d) = APP_DIRS.get() {
+        return d.config.clone();
+    }
     if cfg!(target_os = "windows") {
         std::env::var_os("APPDATA")
             .map(PathBuf::from)

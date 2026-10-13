@@ -6,6 +6,7 @@ pub mod escl;
 pub mod multipart;
 pub mod sane;
 pub mod vendor;
+pub mod wia;
 pub mod wsd;
 
 use crate::device::{Device, Protocol};
@@ -58,7 +59,8 @@ pub enum Engine {
     /// Kagaz itself, over eSCL or WSD.
     #[default]
     Driverless,
-    /// The installed vendor driver, through SANE.
+    /// The installed vendor driver: through SANE on Linux and macOS,
+    /// through WIA on Windows.
     Driver,
 }
 
@@ -218,8 +220,25 @@ pub fn driverless_capabilities(device: &Device) -> Result<Option<EngineCaps>, Sc
     Ok(None)
 }
 
-/// What the installed vendor driver offers for this device, via SANE; `None` when none knows it.
+/// What the installed vendor driver offers for this device (SANE, or WIA on
+/// Windows); `None` when none knows it.
 pub fn driver_capabilities(device: &Device) -> Result<Option<EngineCaps>, ScanError> {
+    if wia::available() {
+        let devices = wia::list_devices()?;
+        let Some(dev) = wia::device_for(&devices, device) else {
+            return Ok(None);
+        };
+        let caps = wia::capabilities(&dev.id)?;
+        return Ok(Some(EngineCaps {
+            engine: Engine::Driver,
+            via: format!("WIA ({})", dev.name),
+            resolutions: caps.resolutions,
+            glass: caps.flatbed,
+            feeder: caps.feeder,
+            duplex: caps.duplex,
+            colors: caps.colors,
+        }));
+    }
     if !sane::available() {
         return Ok(None);
     }
@@ -288,6 +307,21 @@ pub fn scan(
     req: &ScanRequest,
     on_event: &mut dyn FnMut(Event),
 ) -> Result<Vec<Page>, ScanError> {
+    if req.engine == Engine::Driver && cfg!(windows) {
+        let devices = wia::list_devices()?;
+        let dev = wia::device_for(&devices, device).ok_or_else(|| {
+            ScanError::NotSupported(format!(
+                "Windows has no scanner driver installed for {}",
+                if device.name.is_empty() {
+                    "this device"
+                } else {
+                    &device.name
+                }
+            ))
+        })?;
+        let caps = wia::capabilities(&dev.id)?;
+        return wia::scan(&dev.id, &caps, req, on_event);
+    }
     if req.engine == Engine::Driver {
         if !sane::available() {
             return Err(ScanError::NotSupported(

@@ -17,7 +17,10 @@
 //! and when `usblp` is not bound, it is fetched with the class-specific
 //! GET_DEVICE_ID request, which needs permission to open the device.
 
-use crate::device::{Device, Protocol, Service, UsbInfo};
+use crate::device::Device;
+#[cfg(not(target_os = "android"))]
+use crate::device::{Protocol, Service, UsbInfo};
+#[cfg(not(target_os = "android"))]
 use nusb::MaybeFuture;
 use std::collections::BTreeMap;
 
@@ -109,6 +112,14 @@ pub fn decode_device_id_reply(raw: &[u8]) -> Option<String> {
 }
 
 /// Enumerate the USB bus and return one `Device` per printer-class device.
+/// Android apps reach USB only through the system's permission dialog,
+/// which Kagaz does not use; the network finds the same printers.
+#[cfg(target_os = "android")]
+pub fn scan() -> Result<Vec<Device>, String> {
+    Ok(Vec::new())
+}
+
+#[cfg(not(target_os = "android"))]
 pub fn scan() -> Result<Vec<Device>, String> {
     let devices = nusb::list_devices()
         .wait()
@@ -127,6 +138,7 @@ pub fn scan() -> Result<Vec<Device>, String> {
     Ok(found)
 }
 
+#[cfg(not(target_os = "android"))]
 fn describe(info: &nusb::DeviceInfo, ifaces: PrinterInterfaces) -> Device {
     let mut attributes = BTreeMap::new();
     attributes.insert("vendor_id".to_string(), format!("{:04x}", info.vendor_id()));
@@ -208,7 +220,7 @@ fn describe(info: &nusb::DeviceInfo, ifaces: PrinterInterfaces) -> Device {
         addresses: Vec::new(),
         uuid: None,
         usb: Some(UsbInfo {
-            bus: info.busnum(),
+            bus: bus_number(info),
             address: info.device_address(),
             vendor_id: info.vendor_id(),
             product_id: info.product_id(),
@@ -218,8 +230,22 @@ fn describe(info: &nusb::DeviceInfo, ifaces: PrinterInterfaces) -> Device {
     }
 }
 
+#[cfg(target_os = "linux")]
+fn bus_number(info: &nusb::DeviceInfo) -> u8 {
+    info.busnum()
+}
+
+/// Windows and macOS name the bus with a string; keep a stable small number for it.
+#[cfg(not(any(target_os = "linux", target_os = "android")))]
+fn bus_number(info: &nusb::DeviceInfo) -> u8 {
+    info.bus_id()
+        .bytes()
+        .fold(0u8, |a, b| a.wrapping_mul(31).wrapping_add(b))
+}
+
 /// The IEEE 1284 Device ID of interface `interface`, or a plain-words note
 /// saying why it could not be read.
+#[cfg(not(target_os = "android"))]
 fn read_device_id(info: &nusb::DeviceInfo, interface: u8) -> Result<String, String> {
     #[cfg(target_os = "linux")]
     if let Some(id) = sysfs_device_id(info.sysfs_path(), interface) {
@@ -251,7 +277,7 @@ fn sysfs_device_id(device_dir: &std::path::Path, interface: u8) -> Option<String
     None
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(not(any(target_os = "windows", target_os = "android")))]
 fn control_device_id(info: &nusb::DeviceInfo, interface: u8) -> Result<String, String> {
     use nusb::transfer::{ControlIn, ControlType, Recipient};
     use std::time::Duration;
@@ -291,7 +317,7 @@ fn control_device_id(_info: &nusb::DeviceInfo, _interface: u8) -> Result<String,
     Err("the printer's identity is not read on Windows yet; using the USB product name".to_string())
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(not(any(target_os = "windows", target_os = "android")))]
 fn permission_note() -> String {
     if cfg!(target_os = "linux") {
         "the printer's identity could not be read: no permission to open the USB device (add your user to the `lp` group, or run once with sudo)".to_string()

@@ -203,15 +203,39 @@
 
   // ---------- print ----------
 
-  function setFile(path) {
+  function setFile(path, shownName) {
     filePath = path;
-    const name = path.split(/[\\/]/).pop();
+    const name = shownName || path.split(/[\\/]/).pop();
     $("print-file").textContent = name;
     $("print-file").title = path;
     $("print-file").classList.remove("muted");
   }
 
+  // A phone hands the page a file's contents, not a path: read it here
+  // and keep it in the app's cache.
+  const onPhone = /Android|iPhone|iPad/.test(navigator.userAgent);
+  const picker = document.createElement("input");
+  picker.type = "file";
+  picker.accept = ".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png";
+  picker.addEventListener("change", async () => {
+    const file = picker.files && picker.files[0];
+    picker.value = "";
+    if (!file) return;
+    const ext = (file.name.split(".").pop() || "").toLowerCase();
+    try {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const path = await invoke("upload_document", bytes, { headers: { "x-ext": ext } });
+      setFile(path, file.name);
+    } catch (e) {
+      logTo("print-log", "Could not read " + file.name + ": " + e, "bad");
+    }
+  });
+
   $("print-pick").addEventListener("click", async () => {
+    if (onPhone) {
+      picker.click();
+      return;
+    }
     try {
       const p = await invoke("choose_print_file");
       if (p) setFile(p);

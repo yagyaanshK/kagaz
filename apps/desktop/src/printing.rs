@@ -50,6 +50,13 @@ pub struct Sent {
     label: String,
 }
 
+impl Sent {
+    #[cfg_attr(not(mobile), allow(dead_code))]
+    pub fn new(label: String) -> Self {
+        Sent { label }
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct Thumb {
     index: usize,
@@ -108,6 +115,28 @@ pub async fn choose_print_file(app: AppHandle) -> Result<Option<String>, String>
         Ok(picked.map(|p| p.to_string()))
     })
     .await
+}
+
+/// Keep a document the page read from a file picker (a phone has no file
+/// paths to hand over); returns where it was put. The body is the file's
+/// bytes; the `x-ext` header its extension.
+#[tauri::command]
+pub fn upload_document(request: tauri::ipc::Request<'_>) -> Result<String, String> {
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err("expected the file's bytes".into());
+    };
+    let ext = request
+        .headers()
+        .get("x-ext")
+        .and_then(|v| v.to_str().ok())
+        .map(|e| e.to_ascii_lowercase())
+        .filter(|e| ["pdf", "jpg", "jpeg", "png"].contains(&e.as_str()))
+        .ok_or("Kagaz prints PDF, JPEG and PNG files")?;
+    let dir = kagaz_core::paths::cache_dir().join("uploads");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let path = dir.join(format!("document.{ext}"));
+    std::fs::write(&path, bytes).map_err(|e| e.to_string())?;
+    Ok(path.display().to_string())
 }
 
 #[tauri::command]
@@ -301,6 +330,4 @@ mod mobile {
 }
 
 #[cfg(mobile)]
-mod mobile {
-    pub use crate::mobile::{print_document, print_scans};
-}
+use super::mobile;

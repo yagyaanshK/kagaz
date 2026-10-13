@@ -13,6 +13,8 @@ use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_dialog::DialogExt;
 
 mod doorbell;
+#[cfg(mobile)]
+mod mobile;
 mod printing;
 
 /// Run a blocking core call off the UI thread.
@@ -79,6 +81,14 @@ async fn choose_save_path(
     suggested_name: String,
     extension: String,
 ) -> Result<Option<String>, String> {
+    #[cfg(mobile)]
+    {
+        // No save dialog on a phone: the file is made in the cache and
+        // then copied into Downloads/Kagaz.
+        let _ = (&app, &extension);
+        return mobile::save_path(&suggested_name).map(Some);
+    }
+    #[allow(unreachable_code)]
     blocking(move || {
         let label = match extension.as_str() {
             "pdf" => "PDF document",
@@ -123,6 +133,14 @@ async fn scan(
             &PathBuf::from(path),
         )
         .map_err(|e| e.to_string())?;
+        #[cfg(mobile)]
+        let written = written
+            .into_iter()
+            .map(|mut w| {
+                w.path = PathBuf::from(mobile::publish(&app, &w.path)?);
+                Ok(w)
+            })
+            .collect::<Result<Vec<_>, String>>()?;
         Ok(written
             .into_iter()
             .map(|w| WrittenFile {
@@ -1045,6 +1063,17 @@ fn default_scan_name(extension: String) -> String {
     )
 }
 
+/// The phone's print dialog and Downloads folder (an empty plugin elsewhere).
+#[cfg(mobile)]
+fn phone_plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
+    mobile::init()
+}
+
+#[cfg(not(mobile))]
+fn phone_plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
+    tauri::plugin::Builder::new("kagaz-phone").build()
+}
+
 /// GNOME (and other systemd desktops) decide which app a window belongs to
 /// from the systemd unit its process runs in. Started from a terminal,
 /// Kagaz sits in the terminal's unit and the dock files its window under
@@ -1099,7 +1128,15 @@ fn own_app_scope() {
     }
 }
 
+#[allow(dead_code)] // the library build (lib.rs) starts at `run`
 fn main() {
+    run()
+}
+
+/// The app. The desktop starts it from `main`; Android and iOS load the
+/// library (lib.rs) and start it here.
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
     #[cfg(target_os = "linux")]
     own_app_scope();
     tauri::Builder::default()
@@ -1111,7 +1148,18 @@ fn main() {
         .manage(doorbell::DoorbellState::new())
         .manage(printing::CopyState::default())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(phone_plugin())
         .setup(|app| {
+            // A phone hands out its own folders for settings and caches.
+            #[cfg(mobile)]
+            {
+                let p = app.path();
+                kagaz_core::paths::set_app_dirs(
+                    p.app_config_dir()?,
+                    p.app_cache_dir()?,
+                    p.app_data_dir()?,
+                );
+            }
             // Listen for the doorbell from the start: that is what it is for.
             let port = kagaz_core::intercom::stations::Stations::load().listen_port;
             doorbell::start(app.handle(), port);
@@ -1159,6 +1207,7 @@ fn main() {
             printing::print_queues,
             printing::choose_print_file,
             printing::print_file,
+            printing::upload_document,
             printing::copy_scan,
             printing::copy_print,
             printing::copy_discard
