@@ -117,6 +117,7 @@ async function select(i) {
       : "No driverless scan service (eSCL or WSD) was seen on this device, so Kagaz cannot scan from it.";
   }
 
+  document.dispatchEvent(new CustomEvent("kagaz-device", { detail: { device: d, index: i } }));
   $("button-state").textContent = "";
   loadButtonSettings(d);
   if (canScan(d)) loadCapabilities(d, i);
@@ -152,8 +153,8 @@ function fillList(id, items) {
 
 function showTab(name) {
   document.querySelectorAll(".tab").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
-  $("tab-about").classList.toggle("hidden", name !== "about");
-  $("tab-scan").classList.toggle("hidden", name !== "scan");
+  document.querySelectorAll("#detail .tab-pane").forEach((p) => p.classList.toggle("hidden", p.id !== "tab-" + name));
+  document.dispatchEvent(new CustomEvent("kagaz-tab", { detail: name }));
 }
 
 // ---------- the printer's own Scan button (Brother scan-key tool) ----------

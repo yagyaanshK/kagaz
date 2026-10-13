@@ -216,7 +216,9 @@
 
       <nav class="tabs">
         <button class="tab active" data-tab="about">About</button>
+        <button class="tab" data-tab="print">Print</button>
         <button class="tab" data-tab="scan">Scan</button>
+        <button class="tab" data-tab="copy">Copy</button>
       </nav>
 
       <div id="tab-about" class="tab-pane">
@@ -229,6 +231,60 @@
           <h3 id="about-notes-head">Also</h3>
           <ul id="about-notes"></ul>
         </div>
+      </div>
+
+      <div id="tab-print" class="tab-pane hidden">
+        <div id="print-status" class="status-box hidden">
+          <span id="print-state-pill" class="pill"></span>
+          <span id="print-message" class="muted small"></span>
+          <ul id="print-supplies" class="supplies"></ul>
+        </div>
+        <form id="print-form">
+          <div class="file-drop" id="print-drop">
+            <button type="button" id="print-pick">Choose a document…</button>
+            <span id="print-file" class="muted">PDF, JPEG or PNG. You can also drop a file on the window.</span>
+          </div>
+          <div class="grid">
+            <label>Print with
+              <select name="target" id="print-target"></select>
+              <small id="print-target-note" class="muted"></small>
+            </label>
+            <label>Copies
+              <input name="copies" type="number" min="1" max="999" value="1">
+            </label>
+            <label>Sides
+              <select name="sides">
+                <option value="OneSided">one side</option>
+                <option value="TwoSidedLongEdge">both sides, turn like a book</option>
+                <option value="TwoSidedShortEdge">both sides, turn like a notepad</option>
+              </select>
+            </label>
+            <label>Paper
+              <select name="media" id="print-media">
+                <option value="">the printer's default</option>
+                <option value="iso_a4_210x297mm">A4</option>
+                <option value="na_letter_8.5x11in">Letter</option>
+                <option value="na_legal_8.5x14in">Legal</option>
+                <option value="iso_a5_148x210mm">A5</option>
+              </select>
+            </label>
+            <label>Colour
+              <select name="color">
+                <option value="color">colour</option>
+                <option value="gray">black and white</option>
+              </select>
+            </label>
+            <label>Pages
+              <input name="pages" type="text" placeholder="all, or like 1-3, 5" autocomplete="off">
+            </label>
+          </div>
+          <div class="actions">
+            <button type="submit" id="print-go" class="accent">Print</button>
+            <button type="button" id="print-check" title="Ask the printer whether it takes these settings, without printing">Check settings</button>
+            <span id="print-state" class="muted"></span>
+          </div>
+        </form>
+        <ul id="print-log" class="log"></ul>
       </div>
 
       <div id="tab-scan" class="tab-pane hidden">
@@ -313,6 +369,78 @@
         </section>
       </div>
 
+      <div id="tab-copy" class="tab-pane hidden">
+        <p id="copy-unavailable" class="muted hidden"></p>
+        <form id="copy-form">
+          <div class="grid">
+            <label>Originals are
+              <select name="source">
+                <option value="Auto">in the feeder if loaded, else on the glass</option>
+                <option value="Glass">on the glass</option>
+                <option value="Feeder">in the feeder</option>
+                <option value="FeederDuplex">in the feeder, both sides</option>
+              </select>
+            </label>
+            <label>Quality
+              <select name="dpi">
+                <option value="150">draft (fast)</option>
+                <option value="300" selected>normal</option>
+                <option value="600">fine (slow)</option>
+              </select>
+            </label>
+            <label>Colour
+              <select name="color">
+                <option value="Color">colour</option>
+                <option value="Gray" selected>grey</option>
+                <option value="BlackWhite">black and white</option>
+              </select>
+            </label>
+            <label>Paper
+              <select name="paper">
+                <option value="A4">A4</option>
+                <option value="Letter">Letter</option>
+                <option value="Legal">Legal</option>
+              </select>
+            </label>
+            <label>Size
+              <select name="fit">
+                <option value="ActualSize">same size as the original</option>
+                <option value="FitToPage">fill the paper</option>
+              </select>
+            </label>
+            <label>Copies
+              <input name="copies" type="number" min="1" max="999" value="1">
+            </label>
+            <label>Sides
+              <select name="sides">
+                <option value="OneSided">one side</option>
+                <option value="TwoSidedLongEdge">both sides, turn like a book</option>
+                <option value="TwoSidedShortEdge">both sides, turn like a notepad</option>
+              </select>
+            </label>
+            <label>Print on
+              <select name="target" id="copy-target"></select>
+            </label>
+          </div>
+          <div class="actions">
+            <button type="submit" id="copy-go" class="accent big">Copy</button>
+            <button type="button" id="copy-preview" title="Scan first, look at the pages, then print">Scan and look first</button>
+            <span id="copy-state" class="muted"></span>
+          </div>
+        </form>
+        <div id="copy-pages" class="hidden">
+          <h3>Scanned pages</h3>
+          <p class="muted small">Untick a page to leave it out. Drag pages to change the order.</p>
+          <ol id="copy-thumbs" class="thumbs"></ol>
+          <div class="actions">
+            <button type="button" id="copy-print" class="accent">Print these</button>
+            <button type="button" id="copy-more">Scan more pages</button>
+            <button type="button" id="copy-clear">Start over</button>
+          </div>
+        </div>
+        <ul id="copy-log" class="log"></ul>
+      </div>
+
       <div id="unsupported" class="hidden">
         <p class="muted" id="unsupported-text"></p>
       </div>
@@ -322,5 +450,6 @@
   <script src="pictures.js"></script>
   <script src="timeline.js"></script>
   <script src="app.js"></script>
+  <script src="printing.js"></script>
 </body>
 </html>

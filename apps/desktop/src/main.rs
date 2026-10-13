@@ -13,6 +13,7 @@ use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_dialog::DialogExt;
 
 mod doorbell;
+mod printing;
 
 /// Run a blocking core call off the UI thread.
 async fn blocking<T: Send + 'static>(
@@ -1108,6 +1109,7 @@ fn main() {
             pending_login: std::sync::Mutex::new(None),
         })
         .manage(doorbell::DoorbellState::new())
+        .manage(printing::CopyState::default())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             // Listen for the doorbell from the start: that is what it is for.
@@ -1152,7 +1154,14 @@ fn main() {
             doorbell::doorbell_station_save,
             doorbell::doorbell_station_remove,
             doorbell::doorbell_probe,
-            doorbell::doorbell_discover
+            doorbell::doorbell_discover,
+            printing::printer_status,
+            printing::print_queues,
+            printing::choose_print_file,
+            printing::print_file,
+            printing::copy_scan,
+            printing::copy_print,
+            printing::copy_discard
         ])
         .build(tauri::generate_context!())
         .expect("error while building the Kagaz window")

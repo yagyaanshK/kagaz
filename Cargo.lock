@@ -2194,12 +2194,15 @@ dependencies = [
  "ureq",
  "uuid",
  "webpki-roots 1.0.9",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
 name = "kagaz-desktop"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
+ "image",
  "kagaz-core",
  "serde",
  "serde_json",
