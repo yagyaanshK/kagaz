@@ -118,25 +118,29 @@ pub async fn choose_print_file(app: AppHandle) -> Result<Option<String>, String>
 }
 
 /// Keep a document the page read from a file picker (a phone has no file
-/// paths to hand over); returns where it was put. The body is the file's
-/// bytes; the `x-ext` header its extension.
+/// paths to hand over); returns where it was put. `data` is the file in
+/// base64: plain text crosses into the app the same way on every platform,
+/// where raw bytes arrive differently on Android.
 #[tauri::command]
-pub fn upload_document(request: tauri::ipc::Request<'_>) -> Result<String, String> {
-    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
-        return Err("expected the file's bytes".into());
-    };
-    let ext = request
-        .headers()
-        .get("x-ext")
-        .and_then(|v| v.to_str().ok())
-        .map(|e| e.to_ascii_lowercase())
-        .filter(|e| ["pdf", "jpg", "jpeg", "png"].contains(&e.as_str()))
-        .ok_or("Kagaz prints PDF, JPEG and PNG files")?;
-    let dir = kagaz_core::paths::cache_dir().join("uploads");
-    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    let path = dir.join(format!("document.{ext}"));
-    std::fs::write(&path, bytes).map_err(|e| e.to_string())?;
-    Ok(path.display().to_string())
+pub async fn upload_document(ext: String, data: String) -> Result<String, String> {
+    blocking(move || {
+        let ext = ext.to_ascii_lowercase();
+        if !["pdf", "jpg", "jpeg", "png"].contains(&ext.as_str()) {
+            return Err("Kagaz prints PDF, JPEG and PNG files".into());
+        }
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(data.trim())
+            .map_err(|e| format!("the file arrived damaged ({e})"))?;
+        if bytes.is_empty() {
+            return Err("the file is empty".into());
+        }
+        let dir = kagaz_core::paths::cache_dir().join("uploads");
+        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        let path = dir.join(format!("document.{ext}"));
+        std::fs::write(&path, bytes).map_err(|e| e.to_string())?;
+        Ok(path.display().to_string())
+    })
+    .await
 }
 
 #[tauri::command]
