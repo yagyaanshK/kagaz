@@ -215,6 +215,20 @@ button:disabled { opacity: 0.6; cursor: default; }
 .thumbs img { width: 100%; height: auto; border: 1px solid var(--line); background: #fff; }
 .thumbs label { flex-direction: row; align-items: center; gap: 6px; color: var(--text); }
 
+/* Phones: the kinds of device become one scrolling row, controls get
+   finger-sized, and button rows wrap. */
+@media (max-width: 720px) {
+  #sidebar { max-height: none; }
+  #sidebar header { padding: 10px 12px 4px; }
+  #categories { flex-direction: row; overflow-x: auto; padding: 6px 8px; }
+  #categories li { flex: 0 0 auto; padding: 8px 12px; }
+  #categories .cat-note { display: none; }
+  .tabs { overflow-x: auto; }
+  .actions { flex-wrap: wrap; }
+  select, button, input { min-height: 40px; }
+  .thumbs { grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); }
+}
+
 @media (max-width: 720px) {
   body { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
   #sidebar { border-right: none; border-bottom: 1px solid var(--line); max-height: 40vh; }

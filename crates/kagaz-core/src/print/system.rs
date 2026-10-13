@@ -253,7 +253,6 @@ mod platform {
     use super::super::{render_file_pages, render_scans, Plan, RenderedPage, Sides};
     use super::*;
     use std::ptr::{null, null_mut};
-    use windows_sys::Win32::Foundation::HANDLE;
     use windows_sys::Win32::Graphics::Gdi::{
         CreateDCW, DeleteDC, GetDeviceCaps, StretchDIBits, BITMAPINFO, BITMAPINFOHEADER, BI_RGB,
         DEVMODEW, DIB_RGB_COLORS, DM_COLOR, DM_COPIES, DM_DUPLEX, DM_PAPERSIZE, HDC, LOGPIXELSX,
@@ -261,7 +260,7 @@ mod platform {
     };
     use windows_sys::Win32::Graphics::Printing::{
         ClosePrinter, DocumentPropertiesW, EnumPrintersW, GetDefaultPrinterW, OpenPrinterW,
-        PRINTER_ENUM_CONNECTIONS, PRINTER_ENUM_LOCAL, PRINTER_INFO_2W,
+        PRINTER_ENUM_CONNECTIONS, PRINTER_ENUM_LOCAL, PRINTER_HANDLE, PRINTER_INFO_2W,
     };
     use windows_sys::Win32::Storage::Xps::{
         AbortDoc, EndDoc, EndPage, StartDocW, StartPage, DOCINFOW,
@@ -361,7 +360,7 @@ mod platform {
     fn devmode(queue: &str, req: &PrintRequest) -> Result<Vec<u64>, PrintError> {
         let name = wide(queue);
         unsafe {
-            let mut printer: HANDLE = null_mut();
+            let mut printer = PRINTER_HANDLE::default();
             if OpenPrinterW(name.as_ptr(), &mut printer, null()) == 0 {
                 return Err(PrintError::Unsupported(format!(
                     "Windows has no printer called \"{queue}\""
@@ -458,12 +457,12 @@ mod platform {
         let dc = Dc(dc);
         let (dpi_x, dpi_y, phys_w, phys_h, off_x, off_y) = unsafe {
             (
-                GetDeviceCaps(dc.0, LOGPIXELSX),
-                GetDeviceCaps(dc.0, LOGPIXELSY),
-                GetDeviceCaps(dc.0, PHYSICALWIDTH),
-                GetDeviceCaps(dc.0, PHYSICALHEIGHT),
-                GetDeviceCaps(dc.0, PHYSICALOFFSETX),
-                GetDeviceCaps(dc.0, PHYSICALOFFSETY),
+                GetDeviceCaps(dc.0, LOGPIXELSX as i32),
+                GetDeviceCaps(dc.0, LOGPIXELSY as i32),
+                GetDeviceCaps(dc.0, PHYSICALWIDTH as i32),
+                GetDeviceCaps(dc.0, PHYSICALHEIGHT as i32),
+                GetDeviceCaps(dc.0, PHYSICALOFFSETX as i32),
+                GetDeviceCaps(dc.0, PHYSICALOFFSETY as i32),
             )
         };
         if dpi_x <= 0 || dpi_y <= 0 || phys_w <= 0 || phys_h <= 0 {
