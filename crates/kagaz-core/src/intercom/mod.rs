@@ -11,6 +11,7 @@
 
 pub mod incoming;
 pub mod media;
+pub mod onetouch;
 pub mod sip;
 pub mod stations;
 

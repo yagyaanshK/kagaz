@@ -222,7 +222,7 @@ impl Engine {
                 source,
             }
         })?;
-        let log_path = extras_dir().join("go2rtc.log");
+        let log_path = extras_dir().join(format!("go2rtc-{api_port}.log"));
         let log = std::fs::File::create(&log_path).map_err(|source| ExtraError::Io {
             path: log_path.clone(),
             source,

@@ -13,6 +13,7 @@ use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_dialog::DialogExt;
 
 mod doorbell;
+mod onetouch;
 #[cfg(mobile)]
 mod mobile;
 mod printing;
@@ -1147,6 +1148,7 @@ pub fn run() {
         })
         .manage(doorbell::DoorbellState::new())
         .manage(printing::CopyState::default())
+        .manage(onetouch::OneTouchState::default())
         .plugin(tauri_plugin_dialog::init())
         .plugin(phone_plugin())
         .setup(|app| {
@@ -1210,7 +1212,15 @@ pub fn run() {
             printing::upload_document,
             printing::copy_scan,
             printing::copy_print,
-            printing::copy_discard
+            printing::copy_discard,
+            onetouch::onetouch_status,
+            onetouch::onetouch_login,
+            onetouch::onetouch_logout,
+            onetouch::onetouch_refresh,
+            onetouch::onetouch_live,
+            onetouch::onetouch_stop,
+            onetouch::onetouch_recordings,
+            onetouch::onetouch_recording_media
         ])
         .build(tauri::generate_context!())
         .expect("error while building the Kagaz window")

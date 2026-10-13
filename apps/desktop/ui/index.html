@@ -54,11 +54,63 @@
               <div class="cam-settings-row">
                 <button id="door-port-go" type="button">Apply</button>
               </div>
-              <p class="muted small">The door station calls this computer directly (Direct IP), so no account or password is needed. On the station's web page, add <code id="door-local">this computer</code> as a Direct IP target.</p>
+              <p class="muted small">Optional local calls use Direct IP, independently of your OneTouch account. On the station's web page, add <code id="door-local">this computer</code> as a Direct IP target.</p>
             </div>
           </div>
         </div>
       </div>
+      <div id="ot-account" class="ot-panel">
+        <div class="ot-heading">
+          <div><h3 id="ot-service-name">OneTouch</h3><p id="ot-account-name" class="muted">Live video and recordings through your OneTouch account.</p></div>
+          <div class="actions">
+            <button id="ot-signin" type="button">Sign in</button>
+            <button id="ot-refresh" type="button" class="hidden">Refresh devices</button>
+            <button id="ot-signout" type="button" class="hidden">Sign out</button>
+          </div>
+        </div>
+        <form id="ot-login" class="hidden">
+          <label>Account service
+            <select id="ot-provider"><option value="smart_cloud">OneTouch Smart Cloud</option><option value="otipvdp">OTIPVDP (legacy)</option></select>
+          </label>
+          <div id="ot-legacy-settings" class="cam-login-row hidden">
+            <label>Device MAC (optional)<input id="ot-legacy-device" placeholder="From OTIPVDP advanced settings" autocomplete="off"></label>
+            <p class="muted small">Leave blank to use OTIPVDP’s default server discovery. Legacy sign-in uses the older service’s HTTP protocol.</p>
+          </div>
+          <div class="cam-login-row">
+            <label>Account username <input id="ot-username" autocomplete="username" aria-describedby="ot-username-help" required></label>
+            <div class="ot-password-field">
+              <label for="ot-password">Password</label>
+              <div class="ot-password-row">
+                <input id="ot-password" type="password" autocomplete="current-password" required>
+                <button id="ot-password-toggle" type="button" aria-controls="ot-password" aria-label="Show password">Show</button>
+              </div>
+            </div>
+          </div>
+          <p id="ot-username-help" class="muted small">Use the login username from your phone app or welcome email. It may differ from your contact email address.</p>
+          <p id="ot-session-note" class="muted small">OneTouch may sign you out of the phone app when you sign in here.</p>
+          <div class="actions"><button id="ot-login-submit" class="accent" type="submit">Sign in</button><button id="ot-login-cancel" type="button">Cancel</button></div>
+        </form>
+        <p id="ot-message" class="muted" role="status" aria-live="polite"></p>
+        <div id="ot-connected" class="hidden">
+          <div class="actions" role="group" aria-label="Doorbell view">
+            <button id="ot-live-tab" type="button" aria-pressed="true">Live</button>
+            <button id="ot-recordings-tab" type="button" aria-pressed="false">Recordings &amp; snapshots</button>
+          </div>
+          <div id="ot-devices" class="ot-devices"></div>
+          <div id="ot-recordings-pane" class="hidden">
+            <p class="muted small">History saved to your OneTouch account. Entries with video include a Play button.</p>
+            <div id="ot-recordings" class="ot-recordings"></div>
+            <div class="actions"><button id="ot-prev" type="button">Previous</button><span id="ot-page">Page 1</span><button id="ot-next" type="button">Next</button><button id="ot-recordings-refresh" type="button">Refresh recordings</button></div>
+          </div>
+          <div id="ot-player" class="hidden">
+            <div class="ot-heading"><h3 id="ot-playing-title"></h3><button id="ot-stop" type="button">Close video</button></div>
+            <video id="ot-video" autoplay controls playsinline></video>
+            <img id="ot-picture" class="hidden" alt="Doorbell snapshot">
+            <p id="ot-player-note" class="muted" role="status"></p>
+          </div>
+        </div>
+      </div>
+      <h3 class="ot-local-heading">Local intercom</h3>
       <p id="door-message" class="muted"></p>
 
       <div id="door-call" class="hidden">
@@ -451,5 +503,6 @@
   <script src="timeline.js"></script>
   <script src="app.js"></script>
   <script src="printing.js"></script>
+  <script src="onetouch.js"></script>
 </body>
 </html>
