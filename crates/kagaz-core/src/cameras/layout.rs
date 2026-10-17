@@ -103,7 +103,7 @@ mod tests {
     fn layout_round_trips_and_reconciles() {
         let mut l = Layout {
             groups: vec![Group {
-                name: "Hall".into(),
+                name: "Upstairs".into(),
                 cameras: vec!["a".into(), "gone".into()],
                 collapsed: true,
             }],
