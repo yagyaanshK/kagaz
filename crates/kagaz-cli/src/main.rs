@@ -290,6 +290,24 @@ enum IntercomCommand {
         #[arg(long)]
         listen: bool,
     },
+    /// Calls through the OneTouch cloud, on the account's own app line (sign in to OneTouch in the window first). Without options: sign in, report, sign out
+    Cloud {
+        /// Stay signed in and report rings until Ctrl+C
+        #[arg(long)]
+        listen: bool,
+        /// With --listen: answer each ring and report the voice and video that arrive
+        #[arg(long)]
+        answer: bool,
+        /// Call this device (its name, or part of it) and report what arrives
+        #[arg(long)]
+        call: Option<String>,
+        /// Seconds to stay in an answered call before hanging up
+        #[arg(long, default_value_t = 15)]
+        seconds: u64,
+        /// Press this key once the call connects (# opens most doors)
+        #[arg(long)]
+        press: Option<char>,
+    },
     /// Wait for an incoming call (the doorbell) and report each ring; for Direct IP use port 5060
     Listen {
         /// UDP port to listen on
@@ -2378,6 +2396,165 @@ fn intercom_command(cmd: IntercomCommand) -> Result<()> {
                     }
                 }
             }
+            Ok(())
+        }
+        IntercomCommand::Cloud {
+            listen,
+            answer,
+            call,
+            seconds,
+            press,
+        } => {
+            use kagaz_core::intercom::onetouch::Session;
+            use kagaz_core::intercom::phone::{Event as PhoneEvent, MediaOut, Phone};
+            use std::sync::atomic::{AtomicUsize, Ordering};
+            use std::sync::Arc;
+            let session = Session::load()?.ok_or_else(|| {
+                anyhow::anyhow!("not signed in to OneTouch; sign in from the Doorbell pane first")
+            })?;
+            let setup = session.call_setup().map_err(|e| match e {
+                kagaz_core::intercom::onetouch::Error::Expired => anyhow::anyhow!(
+                    "the OneTouch session has expired; reconnect it from the Doorbell pane"
+                ),
+                e => e.into(),
+            })?;
+            println!("The account can call:");
+            for d in &setup.devices {
+                println!(
+                    "  {} ({}, {}{})",
+                    d.name,
+                    d.kind,
+                    if d.online { "online" } else { "offline" },
+                    if d.door_dtmf.is_empty() { "" } else { ", opens a door" }
+                );
+            }
+            if setup.rtp_scrambled {
+                println!("Note: this account scrambles call media, which Kagaz cannot play yet.");
+            }
+            let target = match &call {
+                Some(name) => {
+                    let n = name.to_lowercase();
+                    Some(
+                        setup
+                            .devices
+                            .iter()
+                            .find(|d| d.name.to_lowercase().contains(&n))
+                            .ok_or_else(|| anyhow::anyhow!("no device called \"{name}\""))?
+                            .clone(),
+                    )
+                }
+                None => None,
+            };
+            let names: Vec<(String, String)> = setup
+                .devices
+                .iter()
+                .map(|d| (d.sip.clone(), d.name.clone()))
+                .collect();
+            let audio = Arc::new(AtomicUsize::new(0));
+            let (video, keys) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)));
+            let (a, v, k) = (audio.clone(), video.clone(), keys.clone());
+            let (tx, rx) = std::sync::mpsc::channel();
+            let phone = Phone::start(
+                setup.line.clone(),
+                move |e| {
+                    let _ = tx.send(e);
+                },
+                move |m| match m {
+                    MediaOut::Audio(pcm) => {
+                        a.fetch_add(pcm.len(), Ordering::Relaxed);
+                    }
+                    MediaOut::Video(unit) => {
+                        v.fetch_add(1, Ordering::Relaxed);
+                        if unit.key {
+                            k.fetch_add(1, Ordering::Relaxed);
+                        }
+                    }
+                },
+            );
+            let name_of = |number: &str| {
+                names
+                    .iter()
+                    .find(|(n, _)| n == number)
+                    .map(|(_, name)| name.clone())
+                    .unwrap_or_else(|| "an unknown caller".into())
+            };
+            let mut connected_at: Option<std::time::Instant> = None;
+            let mut called = false;
+            loop {
+                let e = match rx.recv_timeout(std::time::Duration::from_millis(500)) {
+                    Ok(e) => Some(e),
+                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => None,
+                    Err(_) => break,
+                };
+                match e {
+                    Some(PhoneEvent::Line { up: true, detail }) => {
+                        println!("Line up ({detail}).");
+                        if let Some(t) = &target {
+                            if !called {
+                                called = true;
+                                println!("Calling {}...", t.name);
+                                phone.call(&t.sip);
+                            }
+                        } else if !listen {
+                            break;
+                        } else {
+                            println!("Waiting for rings (Ctrl+C to stop)...");
+                        }
+                    }
+                    Some(PhoneEvent::Line { up: false, detail }) => {
+                        println!("Line down: {detail}");
+                        if !listen && target.is_none() {
+                            anyhow::bail!("could not sign in: {detail}");
+                        }
+                    }
+                    Some(PhoneEvent::Incoming { number, video, .. }) => {
+                        println!(
+                            "RING from {}{}",
+                            name_of(&number),
+                            if video { " (with video)" } else { "" }
+                        );
+                        if answer {
+                            println!("Answering...");
+                            phone.answer();
+                        }
+                    }
+                    Some(PhoneEvent::Outgoing { .. }) => {}
+                    Some(PhoneEvent::Ringing { .. }) => println!("It is ringing there."),
+                    Some(PhoneEvent::Connected { video, .. }) => {
+                        println!(
+                            "Connected{}; staying {seconds} s.",
+                            if video { " with video" } else { "" }
+                        );
+                        connected_at = Some(std::time::Instant::now());
+                        if let Some(key) = press {
+                            println!("Pressing {key}.");
+                            phone.dtmf(key);
+                        }
+                    }
+                    Some(PhoneEvent::Ended { reason, .. }) => {
+                        println!(
+                            "Call ended: {reason}. Received {:.1} s of voice, {} pictures ({} keyframes).",
+                            audio.swap(0, Ordering::Relaxed) as f64 / 8000.0,
+                            video.swap(0, Ordering::Relaxed),
+                            keys.swap(0, Ordering::Relaxed)
+                        );
+                        connected_at = None;
+                        if target.is_some() {
+                            break;
+                        }
+                    }
+                    None => {}
+                }
+                if connected_at.is_some_and(|t| t.elapsed().as_secs() >= seconds) {
+                    println!("Hanging up.");
+                    phone.hangup();
+                    connected_at = None;
+                }
+            }
+            drop(phone);
+            // Give the sign-out a moment to reach the server.
+            std::thread::sleep(std::time::Duration::from_secs(2));
+            println!("Signed out.");
             Ok(())
         }
         IntercomCommand::Listen { port } => {

@@ -9,9 +9,13 @@
 //! (voice over RTP, the door camera's video, opening the door) builds on
 //! top of it.
 
+pub mod g711;
+pub mod h264;
 pub mod incoming;
+pub mod sdp;
 pub mod media;
 pub mod onetouch;
+pub mod phone;
 pub mod sip;
 pub mod stations;
 

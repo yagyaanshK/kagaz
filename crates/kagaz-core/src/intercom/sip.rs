@@ -268,7 +268,7 @@ fn auth_param(challenge: &str, key: &str) -> Option<String> {
 
 /// The `Authorization` value answering a `WWW-Authenticate`/`Proxy-Authenticate`
 /// challenge, by HTTP digest (MD5), with qop=auth when the server asks for it.
-fn digest_authorization(account: &SipAccount, method: &str, uri: &str, challenge: &str) -> String {
+pub(crate) fn digest_authorization(account: &SipAccount, method: &str, uri: &str, challenge: &str) -> String {
     let realm = auth_param(challenge, "realm").unwrap_or_default();
     let nonce = auth_param(challenge, "nonce").unwrap_or_default();
     let opaque = auth_param(challenge, "opaque");

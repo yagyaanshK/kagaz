@@ -95,7 +95,7 @@ fn update(app: &AppHandle, f: impl FnOnce(&mut Status)) {
 
 /// Bring the window forward for a ring.
 #[cfg(desktop)]
-fn attention(app: &AppHandle) {
+pub(crate) fn attention(app: &AppHandle) {
     if let Some(win) = app.get_webview_window("main") {
         let _ = win.show();
         let _ = win.unminimize();
@@ -106,7 +106,7 @@ fn attention(app: &AppHandle) {
 
 /// A phone shows the app's own screen; the ring sound plays in the page.
 #[cfg(mobile)]
-fn attention(_app: &AppHandle) {}
+pub(crate) fn attention(_app: &AppHandle) {}
 
 /// Start (or restart) listening on `port`. Safe to call again: the old
 /// thread stops first.

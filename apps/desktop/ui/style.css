@@ -208,6 +208,35 @@ button:disabled { opacity: 0.6; cursor: default; }
 .file-drop { display: flex; align-items: center; gap: 12px; padding: 14px; margin-bottom: 14px; border: 1px dashed var(--line); border-radius: 10px; min-width: 0; }
 .file-drop span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .file-note { margin: -6px 0 14px; color: var(--bad); }
+
+/* Doorbell calls through the OneTouch cloud */
+.calls-panel { margin: 14px 0 6px; padding: 16px; border: 1px solid var(--line); border-radius: 10px; }
+.calls-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.calls-head h3 { margin: 0 0 4px; }
+.calls-head p { margin: 0; }
+.switch { flex-direction: row; align-items: center; gap: 8px; color: var(--text); cursor: pointer; white-space: nowrap; }
+.switch input { width: 18px; height: 18px; accent-color: var(--accent); }
+.calls-devices { list-style: none; margin: 12px 0 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; }
+.calls-devices li { display: grid; grid-template-columns: 1fr auto; grid-template-rows: auto auto; column-gap: 8px; align-items: center; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
+.calls-devices .name { font-weight: 600; }
+.calls-devices .small { grid-row: 2; }
+.calls-devices button { grid-row: 1 / span 2; grid-column: 2; }
+#call-card { margin-top: 12px; display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 16px; padding: 14px; border: 1px solid var(--accent); border-radius: 12px; background: var(--bg); }
+#call-card.ringing { animation: call-pulse 1.2s ease-in-out infinite; }
+@keyframes call-pulse { 50% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent) 35%, transparent); } }
+.call-video { position: relative; aspect-ratio: 16 / 9; background: #111; border-radius: 8px; overflow: hidden; display: flex; align-items: center; justify-content: center; }
+#call-canvas { width: 100%; height: 100%; object-fit: contain; }
+.call-video-note { position: absolute; color: #ddd; font-size: 13px; padding: 0 12px; text-align: center; }
+.call-clock { position: absolute; top: 8px; right: 10px; color: #fff; font-size: 12px; background: rgba(0, 0, 0, 0.45); padding: 2px 8px; border-radius: 999px; }
+.call-who { display: flex; flex-direction: column; gap: 2px; }
+.call-who #call-peer { font-size: 20px; font-weight: 600; }
+.call-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+button.ok { background: var(--ok); color: var(--accent-text); border-color: var(--ok); }
+button.danger { background: var(--bad); color: #fff; border-color: var(--bad); }
+@media (max-width: 720px) {
+  #call-card { grid-template-columns: 1fr; }
+  .call-actions button.big { flex: 1 1 40%; }
+}
 #print-go, #copy-print { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
 .thumbs { list-style: none; margin: 8px 0 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 12px; }
 .thumbs li { display: flex; flex-direction: column; gap: 6px; padding: 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); cursor: grab; }

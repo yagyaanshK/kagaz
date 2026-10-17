@@ -5,11 +5,19 @@ package life.omniverse.kagaz
 // - holds Wi-Fi's multicast lock so discovery hears mDNS and WS-Discovery;
 // - opens Android's print dialog for a PDF, which prints through whatever
 //   print service (vendor plugin, Mopria) the phone has;
-// - copies a finished scan into Downloads/Kagaz.
+// - copies a finished scan into Downloads/Kagaz;
+// - keeps the doorbell line alive in the background and rings for calls
+//   (KagazCallService).
 
 import android.app.Activity
 import android.content.ContentValues
 import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
+import android.os.PowerManager
+import android.provider.Settings
+import androidx.core.content.ContextCompat
 import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.Bundle
@@ -46,6 +54,17 @@ class SaveArgs {
     var mime: String = "application/octet-stream"
 }
 
+@InvokeArg
+class ListenArgs {
+    var on: Boolean = false
+}
+
+@InvokeArg
+class CallArgs {
+    var phase: String = "idle"
+    var peer: String = ""
+}
+
 @TauriPlugin
 class KagazPlugin(private val activity: Activity) : Plugin(activity) {
     private var multicast: WifiManager.MulticastLock? = null
@@ -56,6 +75,50 @@ class KagazPlugin(private val activity: Activity) : Plugin(activity) {
         multicast = wifi.createMulticastLock("kagaz-discovery").apply {
             setReferenceCounted(false)
             acquire()
+        }
+    }
+
+    @Command
+    fun keepListening(invoke: Invoke) {
+        val args = invoke.parseArgs(ListenArgs::class.java)
+        val context = activity.applicationContext
+        val service = Intent(context, KagazCallService::class.java)
+        activity.runOnUiThread {
+            try {
+                if (args.on) {
+                    askOnce()
+                    ContextCompat.startForegroundService(context, service)
+                } else {
+                    context.stopService(service)
+                }
+                invoke.resolve()
+            } catch (e: Exception) {
+                invoke.reject(e.message ?: "could not keep the doorbell line open")
+            }
+        }
+    }
+
+    @Command
+    fun callChanged(invoke: Invoke) {
+        val args = invoke.parseArgs(CallArgs::class.java)
+        KagazCallService.ring(activity.applicationContext, if (args.phase == "ringing") args.peer else null)
+        invoke.resolve()
+    }
+
+    /** Notifications (Android 13+), and leaving battery optimisation, asked once. */
+    private fun askOnce() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            activity.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            activity.requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 41)
+        }
+        val prefs = activity.getSharedPreferences("kagaz", Context.MODE_PRIVATE)
+        val power = activity.getSystemService(Context.POWER_SERVICE) as PowerManager
+        if (!power.isIgnoringBatteryOptimizations(activity.packageName) && !prefs.getBoolean("asked_battery", false)) {
+            prefs.edit().putBoolean("asked_battery", true).apply()
+            activity.startActivity(
+                Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:" + activity.packageName))
+            )
         }
     }
 
