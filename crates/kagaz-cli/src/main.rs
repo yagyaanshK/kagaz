@@ -301,6 +301,9 @@ enum IntercomCommand {
         /// Call this device (its name, or part of it) and report what arrives
         #[arg(long)]
         call: Option<String>,
+        /// Call this number instead; "self" calls the account's own line, which rings its other phones
+        #[arg(long, conflicts_with = "call")]
+        number: Option<String>,
         /// Seconds to stay in an answered call before hanging up
         #[arg(long, default_value_t = 15)]
         seconds: u64,
@@ -2402,6 +2405,7 @@ fn intercom_command(cmd: IntercomCommand) -> Result<()> {
             listen,
             answer,
             call,
+            number,
             seconds,
             press,
         } => {
@@ -2443,7 +2447,20 @@ fn intercom_command(cmd: IntercomCommand) -> Result<()> {
                             .clone(),
                     )
                 }
-                None => None,
+                None => number.map(|n| {
+                    let sip = if n == "self" { setup.line.username.clone() } else { n };
+                    kagaz_core::intercom::onetouch::calls::CallDevice {
+                        name: if sip == setup.line.username {
+                            "the account's other phones".into()
+                        } else {
+                            "that number".into()
+                        },
+                        sip,
+                        kind: "other".into(),
+                        door_dtmf: String::new(),
+                        online: true,
+                    }
+                }),
             };
             let names: Vec<(String, String)> = setup
                 .devices

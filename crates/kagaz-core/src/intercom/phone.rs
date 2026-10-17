@@ -495,6 +495,10 @@ struct Line {
     registered: bool,
     last_ping: Instant,
     call: Option<Dialog>,
+    /// Rings of our own outgoing call to our own number, coming back to us:
+    /// left ringing (never answered busy, which could end the call for the
+    /// other phones too) until the server cancels them.
+    own_legs: Vec<(Message, String)>,
 }
 
 fn connect(account: &SipAccount) -> Result<(TcpStream, Receiver<Wire>, String), String> {
@@ -575,6 +579,7 @@ fn run(
             registered: false,
             last_ping: Instant::now(),
             call: None,
+            own_legs: Vec::new(),
         };
         match line.serve(&commands) {
             Served::Stopped => {
@@ -861,14 +866,27 @@ impl Line {
         match method {
             "INVITE" => {
                 if self.same_call(&m) {
+                    let d = self.call.as_ref().unwrap();
+                    let looped = d.state != State::Confirmed
+                        || !m.header("To").is_some_and(|t| t.contains(&d.local_tag));
+                    if looped {
+                        // Our own call came back to us.
+                        return self.reply(&m, 482, "Loop Detected", &token(), None);
+                    }
                     // A re-INVITE in our dialog (session refresh): keep the media.
-                    let tag = self
-                        .call
-                        .as_ref()
-                        .map(|d| d.local_tag.clone())
-                        .unwrap_or_default();
+                    let tag = d.local_tag.clone();
                     let (sdp, _) = self.answer_sdp(&m);
                     return self.reply(&m, 200, "OK", &tag, Some(&sdp));
+                }
+                let (from_number, _) = caller(&m);
+                let calling_own_line = self.call.as_ref().is_some_and(|d| {
+                    d.state == State::Calling && !d.incoming && d.number == self.account.username
+                });
+                if calling_own_line && from_number == self.account.username {
+                    let tag = token();
+                    self.reply(&m, 180, "Ringing", &tag, None)?;
+                    self.own_legs.push((m, tag));
+                    return Ok(());
                 }
                 if self.call.is_some() {
                     return self.reply(&m, 486, "Busy Here", &token(), None);
@@ -922,6 +940,15 @@ impl Line {
             "ACK" => Ok(()),
             "CANCEL" => {
                 self.reply(&m, 200, "OK", "", None)?;
+                let cid = m.header("Call-ID").unwrap_or_default().to_string();
+                if let Some(i) = self
+                    .own_legs
+                    .iter()
+                    .position(|(inv, _)| inv.header("Call-ID") == Some(cid.as_str()))
+                {
+                    let (inv, tag) = self.own_legs.remove(i);
+                    return self.reply(&inv, 487, "Request Terminated", &tag, None);
+                }
                 if self.same_call(&m) {
                     let d = self.call.as_ref().unwrap();
                     if d.state == State::Ringing {
@@ -1292,6 +1319,9 @@ impl Line {
 
     fn end_call(&mut self, reason: &str) {
         *self.audio.lock().unwrap() = None;
+        for (inv, tag) in std::mem::take(&mut self.own_legs) {
+            let _ = self.reply(&inv, 487, "Request Terminated", &tag, None);
+        }
         if let Some(d) = self.call.take() {
             d.diag.line(&format!("ended: {reason}"));
             drop(d.media);

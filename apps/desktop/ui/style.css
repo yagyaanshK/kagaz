@@ -231,8 +231,11 @@ button:disabled { opacity: 0.6; cursor: default; }
 .call-who { display: flex; flex-direction: column; gap: 2px; }
 .call-who #call-peer { font-size: 20px; font-weight: 600; }
 .call-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
-button.ok { background: var(--ok); color: var(--accent-text); border-color: var(--ok); }
 button.danger { background: var(--bad); color: #fff; border-color: var(--bad); }
+.calls-dial { display: flex; gap: 8px; margin-top: 10px; }
+.calls-dial input { flex: 1; min-width: 0; }
+.call-volume { flex-direction: row; align-items: center; gap: 8px; margin-top: 12px; }
+.call-volume input { flex: 1; max-width: 220px; accent-color: var(--accent); }
 @media (max-width: 720px) {
   #call-card { grid-template-columns: 1fr; }
   .call-actions button.big { flex: 1 1 40%; }
