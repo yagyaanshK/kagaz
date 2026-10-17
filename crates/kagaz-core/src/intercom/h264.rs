@@ -16,8 +16,23 @@ pub struct AccessUnit {
 const START: [u8; 4] = [0, 0, 0, 1];
 const MAX_UNIT: usize = 4 * 1024 * 1024;
 
+/// What the depacketizer has seen, for diagnosing a call without a picture.
+#[derive(Debug, Clone, Default)]
+pub struct Stats {
+    pub packets: u64,
+    pub units: u64,
+    pub keyframes: u64,
+    /// Pictures dropped because a packet was lost.
+    pub damaged: u64,
+    /// Pictures dropped while waiting for a keyframe.
+    pub waiting: u64,
+    /// Count of each NAL unit type (0..32) seen, including fragment starts.
+    pub nal_types: [u64; 32],
+}
+
 #[derive(Default)]
 pub struct Depacketizer {
+    pub stats: Stats,
     unit: Vec<u8>,
     key: bool,
     timestamp: Option<u32>,
@@ -61,6 +76,18 @@ impl Depacketizer {
     /// when this packet completes one.
     pub fn push(&mut self, packet: &[u8]) -> Option<AccessUnit> {
         let (seq, timestamp, marker, payload) = parse_rtp(packet)?;
+        self.stats.packets += 1;
+        if let Some(&h) = payload.first() {
+            let t = (h & 0x1F) as usize;
+            let t = if t == 28 && payload.len() > 1 && payload[1] & 0x80 != 0 {
+                (payload[1] & 0x1F) as usize
+            } else {
+                t
+            };
+            if t != 28 {
+                self.stats.nal_types[t] += 1;
+            }
+        }
         let mut done = None;
         if self.timestamp.is_some_and(|t| t != timestamp) {
             // A new picture began without the last one's marker bit.
@@ -172,13 +199,19 @@ impl Depacketizer {
         }
         if damaged {
             self.need_key = true;
+            self.stats.damaged += 1;
             return None;
         }
         if self.need_key {
             if !key {
+                self.stats.waiting += 1;
                 return None;
             }
             self.need_key = false;
+        }
+        self.stats.units += 1;
+        if key {
+            self.stats.keyframes += 1;
         }
         let mut data = unit;
         if key && !has_nal(&data, 7) {
