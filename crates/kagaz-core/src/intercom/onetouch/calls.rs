@@ -16,7 +16,8 @@ pub struct CallDevice {
     pub name: String,
     /// The number to dial through the cloud.
     pub sip: String,
-    /// What it is: "door", "indoor", "guard", or "other".
+    /// What it is: "door", "indoor", "guard", "apps" (the other phones and
+    /// computers signed in to this account), or "other".
     pub kind: String,
     /// DTMF that opens its door during a call; empty when it has no lock.
     pub door_dtmf: String,
@@ -101,7 +102,7 @@ pub(crate) fn parse_call_setup(data: &Value) -> Result<CallSetup, Error> {
         _ => "tcp",
     };
     let display = text(&app["display_name"]);
-    let devices = data["dev_list"]
+    let mut devices: Vec<CallDevice> = data["dev_list"]
         .as_array()
         .map(|list| {
             list.iter()
@@ -126,6 +127,16 @@ pub(crate) fn parse_call_setup(data: &Value) -> Result<CallSetup, Error> {
                 .collect()
         })
         .unwrap_or_default();
+    // Every app signed in to the account shares its line, so calling the
+    // line's own number rings all the others (this one turns its own ring
+    // down as busy).
+    devices.push(CallDevice {
+        name: "Other phones on this account".into(),
+        sip: sip.clone(),
+        kind: "apps".into(),
+        door_dtmf: String::new(),
+        online: true,
+    });
     Ok(CallSetup {
         line: SipAccount {
             username: sip,
@@ -169,7 +180,11 @@ mod tests {
         );
         assert!(s.line.over_tcp());
         assert!(!s.rtp_scrambled);
-        assert_eq!(s.devices.len(), 2);
+        assert_eq!(s.devices.len(), 3);
+        assert_eq!(
+            (s.devices[2].kind.as_str(), s.devices[2].sip.as_str()),
+            ("apps", "20011001")
+        );
         assert_eq!(s.devices[0].kind, "door");
         assert!(s.devices[0].online);
         assert_eq!(s.devices[1].kind, "indoor");

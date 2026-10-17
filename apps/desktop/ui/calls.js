@@ -37,10 +37,17 @@
             <button id="call-mute" type="button" class="big">Mute</button>
             <button id="call-hangup" type="button" class="big danger">Hang up</button>
           </div>
+          <label class="call-volume" title="How loud their voice plays here">Volume
+            <input id="call-volume" type="range" min="0.5" max="3" step="0.1" value="1">
+          </label>
           <p id="call-note" class="muted small"></p>
         </div>
       </div>
       <ul id="calls-devices" class="calls-devices"></ul>
+      <form id="calls-dial" class="calls-dial">
+        <input id="calls-number" type="text" inputmode="numeric" autocomplete="off" placeholder="Another OneTouch number, e.g. a family member's app">
+        <button type="submit">Call</button>
+      </form>
     </div>`;
 
   const head = document.querySelector("#doorbell .cam-head");
@@ -70,6 +77,7 @@
     $("calls-line").classList.toggle("cap-warn", ["down", "expired", "signed_out"].includes(s.line));
     $("calls-retry-row").classList.toggle("hidden", !["down", "expired", "signed_out"].includes(s.line) || !s.enabled);
     renderDevices(s);
+    $("calls-dial").querySelector("button").disabled = s.line !== "up" || (s.phase && s.phase !== "idle");
     renderCard(s);
   }
 
@@ -81,7 +89,7 @@
       const li = document.createElement("li");
       li.innerHTML = `<span class="name"></span><span class="muted small"></span><button type="button">Call</button>`;
       li.querySelector(".name").textContent = d.name;
-      const kind = { door: "door station", indoor: "indoor monitor", guard: "guard phone" }[d.kind] || "device";
+      const kind = { door: "door station", indoor: "indoor monitor", guard: "guard phone", apps: "rings your other phones" }[d.kind] || "device";
       li.querySelector(".small").textContent = `${kind}${d.online ? "" : ", offline"}`;
       const b = li.querySelector("button");
       b.disabled = busy || s.line !== "up";
@@ -180,6 +188,48 @@
     return actx;
   }
 
+  // Their voice is levelled before it plays: an automatic gain lifts quiet
+  // speech towards a steady loudness (but not the hiss between words), a
+  // compressor holds loud bursts down, and the volume slider sits on top.
+  const TARGET_RMS = 0.12; // about -18 dBFS: comfortable speech
+  const NOISE_RMS = 0.006; // quieter than this is the line's hiss, not speech
+  const MAX_GAIN = 8; // +18 dB at most
+  let voice = null; // { level: GainNode, out: GainNode }
+  let speech = TARGET_RMS; // smoothed loudness of recent speech
+  let userVolume = 1;
+  try {
+    userVolume = Number(localStorage.getItem("kagaz-call-volume")) || 1;
+  } catch (e) {}
+  $("call-volume").value = userVolume;
+
+  function voiceChain() {
+    if (voice) return voice;
+    const level = actx.createGain();
+    const comp = actx.createDynamicsCompressor();
+    comp.threshold.value = -20;
+    comp.knee.value = 10;
+    comp.ratio.value = 8;
+    comp.attack.value = 0.003;
+    comp.release.value = 0.25;
+    const out = actx.createGain();
+    out.gain.value = userVolume;
+    level.connect(comp);
+    comp.connect(out);
+    out.connect(actx.destination);
+    voice = { level, out };
+    return voice;
+  }
+
+  function levelVoice(samples) {
+    let sum = 0;
+    for (let i = 0; i < samples.length; i++) sum += samples[i] * samples[i];
+    const rms = Math.sqrt(sum / samples.length);
+    if (rms < NOISE_RMS) return; // keep the gain; don't chase the hiss
+    speech = speech * 0.9 + rms * 0.1;
+    const gain = Math.max(0.5, Math.min(MAX_GAIN, TARGET_RMS / speech));
+    voiceChain().level.gain.setTargetAtTime(gain, actx.currentTime, 0.4);
+  }
+
   function playVoice(bytes) {
     if (!actx) return;
     const n = bytes.byteLength >> 1;
@@ -188,9 +238,10 @@
     const buf = actx.createBuffer(1, n, 8000);
     const ch = buf.getChannelData(0);
     for (let i = 0; i < n; i++) ch[i] = view.getInt16(i * 2, true) / 32768;
+    levelVoice(ch);
     const src = actx.createBufferSource();
     src.buffer = buf;
-    src.connect(actx.destination);
+    src.connect(voiceChain().level);
     const now = actx.currentTime;
     // A small cushion against network jitter; catch up when it grows.
     if (playAt < now + 0.02 || playAt > now + 0.4) playAt = now + 0.08;
@@ -383,6 +434,23 @@
     } catch (e) {
       note(String(e));
     }
+  });
+  $("calls-dial").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const number = $("calls-number").value.replace(/\s+/g, "");
+    if (!/^[0-9A-Za-z*#+]+$/.test(number)) {
+      note("Enter the number to call.");
+      return;
+    }
+    audioContext();
+    invoke("calls_call", { number }).catch((err) => note(String(err)));
+  });
+  $("call-volume").addEventListener("input", (e) => {
+    userVolume = Number(e.target.value) || 1;
+    if (voice) voice.out.gain.setTargetAtTime(userVolume, actx.currentTime, 0.05);
+    try {
+      localStorage.setItem("kagaz-call-volume", String(userVolume));
+    } catch (err) {}
   });
   $("call-mute").addEventListener("click", () => {
     muted = !muted;
