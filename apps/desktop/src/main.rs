@@ -12,6 +12,7 @@ use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_dialog::DialogExt;
 
+mod calls;
 mod doorbell;
 mod onetouch;
 #[cfg(mobile)]
@@ -1148,6 +1149,7 @@ pub fn run() {
         })
         .manage(doorbell::DoorbellState::new())
         .manage(printing::CopyState::default())
+        .manage(calls::CallsState::default())
         .manage(onetouch::OneTouchState::default())
         .plugin(tauri_plugin_dialog::init())
         .plugin(phone_plugin())
@@ -1165,6 +1167,8 @@ pub fn run() {
             // Listen for the doorbell from the start: that is what it is for.
             let port = kagaz_core::intercom::stations::Stations::load().listen_port;
             doorbell::start(app.handle(), port);
+            // And take the OneTouch account's calls, when signed in.
+            calls::start(app.handle());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -1209,6 +1213,16 @@ pub fn run() {
             printing::print_queues,
             printing::choose_print_file,
             printing::print_file,
+            calls::calls_status,
+            calls::calls_enable,
+            calls::calls_restart,
+            calls::calls_answer,
+            calls::calls_decline,
+            calls::calls_hangup,
+            calls::calls_call,
+            calls::calls_press,
+            calls::calls_audio,
+            calls::calls_media,
             printing::upload_document,
             printing::copy_scan,
             printing::copy_print,

@@ -180,3 +180,29 @@ pub fn publish(app: &AppHandle, path: &Path) -> Result<String, String> {
 pub fn save_path(name: &str) -> Result<String, String> {
     Ok(scratch(name)?.display().to_string())
 }
+
+#[derive(Serialize)]
+struct ListenArgs {
+    on: bool,
+}
+
+#[derive(Serialize)]
+struct CallArgs<'a> {
+    phase: &'a str,
+    peer: &'a str,
+}
+
+/// Keep the doorbell line alive in the background (a foreground service
+/// with its own small notification), or let it go.
+pub fn keep_listening(app: &AppHandle, on: bool) {
+    if let Ok(p) = phone(app) {
+        let _ = p.run_mobile_plugin::<()>("keepListening", ListenArgs { on });
+    }
+}
+
+/// Ring (a call notification that can light the screen) or stop ringing.
+pub fn call_changed(app: &AppHandle, phase: &str, peer: &str) {
+    if let Ok(p) = phone(app) {
+        let _ = p.run_mobile_plugin::<()>("callChanged", CallArgs { phase, peer });
+    }
+}
