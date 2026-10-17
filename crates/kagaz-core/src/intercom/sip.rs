@@ -268,7 +268,12 @@ fn auth_param(challenge: &str, key: &str) -> Option<String> {
 
 /// The `Authorization` value answering a `WWW-Authenticate`/`Proxy-Authenticate`
 /// challenge, by HTTP digest (MD5), with qop=auth when the server asks for it.
-pub(crate) fn digest_authorization(account: &SipAccount, method: &str, uri: &str, challenge: &str) -> String {
+pub(crate) fn digest_authorization(
+    account: &SipAccount,
+    method: &str,
+    uri: &str,
+    challenge: &str,
+) -> String {
     let realm = auth_param(challenge, "realm").unwrap_or_default();
     let nonce = auth_param(challenge, "nonce").unwrap_or_default();
     let opaque = auth_param(challenge, "opaque");
@@ -311,6 +316,9 @@ pub struct Registered {
     /// The connection, still open — the server reuses it to reach us for
     /// the doorbell's call (important behind NAT, as we are here).
     pub local: String,
+    /// Every device registered on this line, as the server lists them in
+    /// its answer (the Contact headers), ours included.
+    pub contacts: Vec<String>,
 }
 
 /// Dialog-level identifiers kept across the REGISTER's two requests.
@@ -358,7 +366,16 @@ pub fn register(account: &SipAccount, conn: &mut Connection) -> Result<Registere
                 .header("Expires")
                 .and_then(|v| v.trim().parse().ok())
                 .unwrap_or(account.expires);
-            Ok(Registered { expires, local })
+            let contacts = response
+                .headers_named("Contact")
+                .chain(response.headers_named("m"))
+                .flat_map(|c| c.split(">,").map(|p| p.trim().to_string()))
+                .collect();
+            Ok(Registered {
+                expires,
+                local,
+                contacts,
+            })
         }
         Some(code) => Err(Error::Rejected(format!("{code} {}", response.reason()))),
         None => Err(Error::Malformed(format!(

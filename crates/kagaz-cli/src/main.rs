@@ -2413,15 +2413,42 @@ fn intercom_command(cmd: IntercomCommand) -> Result<()> {
             use kagaz_core::intercom::phone::{Event as PhoneEvent, MediaOut, Phone};
             use std::sync::atomic::{AtomicUsize, Ordering};
             use std::sync::Arc;
-            let session = Session::load()?.ok_or_else(|| {
-                anyhow::anyhow!("not signed in to OneTouch; sign in from the Doorbell pane first")
-            })?;
-            let setup = session.call_setup().map_err(|e| match e {
-                kagaz_core::intercom::onetouch::Error::Expired => anyhow::anyhow!(
-                    "the OneTouch session has expired; reconnect it from the Doorbell pane"
-                ),
-                e => e.into(),
-            })?;
+            // A live setup from the saved session; else the call line the
+            // window kept from its last setup (it needs no live sign-in).
+            let live = Session::load()
+                .map_err(|e| e.to_string())
+                .and_then(|s| s.ok_or_else(|| "not signed in to OneTouch".to_string()))
+                .and_then(|s| s.call_setup().map_err(|e| e.to_string()));
+            let setup = match live {
+                Ok(setup) => setup,
+                Err(why) => {
+                    let path = kagaz_core::paths::config_dir().join("onetouch-line.json");
+                    let saved: Option<serde_json::Value> = std::fs::read(&path)
+                        .ok()
+                        .and_then(|b| serde_json::from_slice(&b).ok());
+                    let parsed = saved.and_then(|v| {
+                        Some((
+                            serde_json::from_value::<kagaz_core::intercom::SipAccount>(
+                                v["line"].clone(),
+                            )
+                            .ok()?,
+                            serde_json::from_value::<
+                                Vec<kagaz_core::intercom::onetouch::calls::CallDevice>,
+                            >(v["devices"].clone())
+                            .unwrap_or_default(),
+                        ))
+                    });
+                    let (line, devices) = parsed.ok_or_else(|| {
+                        anyhow::anyhow!("{why}; sign in to OneTouch from the Doorbell pane first")
+                    })?;
+                    println!("({why}; using the call line saved by the window)");
+                    kagaz_core::intercom::onetouch::calls::CallSetup {
+                        line,
+                        rtp_scrambled: false,
+                        devices,
+                    }
+                }
+            };
             println!("The account can call:");
             for d in &setup.devices {
                 println!(
@@ -2536,6 +2563,12 @@ fn intercom_command(cmd: IntercomCommand) -> Result<()> {
                         }
                     }
                     Some(PhoneEvent::Outgoing { .. }) => {}
+                    Some(PhoneEvent::Others { contacts }) => {
+                        println!("Other devices signed in on this line: {}", contacts.len());
+                        for c in &contacts {
+                            println!("  {c}");
+                        }
+                    }
                     Some(PhoneEvent::Ringing { .. }) => println!("It is ringing there."),
                     Some(PhoneEvent::Connected { video, .. }) => {
                         println!(
