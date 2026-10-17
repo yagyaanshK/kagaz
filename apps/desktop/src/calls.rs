@@ -135,6 +135,7 @@ fn on_event(app: &AppHandle, e: Event) {
             s.video = video;
             s.since = now();
         }),
+        Event::Others { .. } => {}
         Event::Ended { reason, .. } => update(app, |s| {
             s.phase = "idle".into();
             s.detail = reason;

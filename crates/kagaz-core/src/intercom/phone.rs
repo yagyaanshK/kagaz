@@ -44,6 +44,9 @@ pub enum Event {
     Connected { id: String, video: bool },
     /// The call is over.
     Ended { id: String, reason: String },
+    /// The other devices signed in on this line, as the server lists them
+    /// when it confirms our sign-in (their Contact addresses).
+    Others { contacts: Vec<String> },
 }
 
 /// Media for the app: decoded voice (8 kHz mono) or a whole picture.
@@ -801,6 +804,14 @@ impl Line {
                     .unwrap_or(self.account.expires)
                     .max(30);
                 self.reg_due = Instant::now() + Duration::from_secs(u64::from(expires) * 4 / 5);
+                let mine = format!("@{}", self.local);
+                let others: Vec<String> = m
+                    .headers_named("Contact")
+                    .chain(m.headers_named("m"))
+                    .flat_map(|c| c.split(">,").map(|p| p.trim().to_string()))
+                    .filter(|c| !c.is_empty() && !c.contains(&mine))
+                    .collect();
+                (self.events)(Event::Others { contacts: others });
                 if !self.registered {
                     self.registered = true;
                     (self.events)(Event::Line {
@@ -926,6 +937,8 @@ impl Line {
                 });
                 if let Some(d) = &self.call {
                     if let Some(inv) = &d.invite {
+                        d.diag
+                            .line(&format!("incoming call:\n{}", headers_for_log(inv)));
                         d.diag.line(&format!("incoming offer:\n{}", inv.body));
                     }
                 }
@@ -1011,6 +1024,8 @@ impl Line {
         }
         let code = m.status().unwrap_or(0);
         let d = self.call.as_mut().unwrap();
+        d.diag
+            .line(&format!("reply to our call:\n{}", headers_for_log(&m)));
         if d.state != State::Calling {
             // A repeated 200 OK: ACK it again.
             if (200..300).contains(&code) {
@@ -1334,6 +1349,16 @@ impl Line {
     }
 }
 
+/// A message's first line and headers for the call log; credentials left out.
+fn headers_for_log(m: &Message) -> String {
+    let mut out = vec![m.start.clone()];
+    for (k, v) in &m.headers {
+        let secret = ["authorization", "proxy-authorization"].contains(&k.to_lowercase().as_str());
+        out.push(format!("{k}: {}", if secret { "(left out)" } else { v }));
+    }
+    out.join("\n")
+}
+
 fn is_register_response(m: &Message) -> bool {
     m.status().is_some()
         && m.header("CSeq")
@@ -1537,7 +1562,10 @@ mod tests {
                 expires: 300,
             },
             move |e| {
-                let _ = etx.send(e);
+                // The list of other devices is not part of this story.
+                if !matches!(e, Event::Others { .. }) {
+                    let _ = etx.send(e);
+                }
             },
             move |m| {
                 if let MediaOut::Audio(pcm) = m {
