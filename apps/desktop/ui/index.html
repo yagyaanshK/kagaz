@@ -63,11 +63,14 @@
         <div class="ot-heading">
           <div><h3 id="ot-service-name">OneTouch</h3><p id="ot-account-name" class="muted">Live video and recordings through your OneTouch account.</p></div>
           <div class="actions">
+            <button id="ot-reconnect" type="button" class="accent hidden">Reconnect</button>
             <button id="ot-signin" type="button">Sign in</button>
+            <button id="ot-forget" type="button" class="hidden">Forget saved sign-in</button>
             <button id="ot-refresh" type="button" class="hidden">Refresh devices</button>
             <button id="ot-signout" type="button" class="hidden">Sign out</button>
           </div>
         </div>
+        <p id="ot-remembered" class="muted small hidden"></p>
         <form id="ot-login" class="hidden">
           <label>Account service
             <select id="ot-provider"><option value="smart_cloud">OneTouch Smart Cloud</option><option value="otipvdp">OTIPVDP (legacy)</option></select>
@@ -87,6 +90,8 @@
             </div>
           </div>
           <p id="ot-username-help" class="muted small">Use the login username from your phone app or welcome email. It may differ from your contact email address.</p>
+          <label id="ot-remember-label" class="ot-remember"><input id="ot-remember" type="checkbox" checked> Remember sign-in securely on this computer</label>
+          <p id="ot-remember-help" class="muted small">If your session expires, click Reconnect without retyping. Signing out keeps the saved sign-in; Forget saved sign-in removes it.</p>
           <p id="ot-session-note" class="muted small">OneTouch may sign you out of the phone app when you sign in here.</p>
           <div class="actions"><button id="ot-login-submit" class="accent" type="submit">Sign in</button><button id="ot-login-cancel" type="button">Cancel</button></div>
         </form>
@@ -104,6 +109,7 @@
           </div>
           <div id="ot-player" class="hidden">
             <div class="ot-heading"><h3 id="ot-playing-title"></h3><button id="ot-stop" type="button">Close video</button></div>
+            <div id="ot-live-video" class="hidden"></div>
             <video id="ot-video" autoplay controls playsinline></video>
             <img id="ot-picture" class="hidden" alt="Doorbell snapshot">
             <p id="ot-player-note" class="muted" role="status"></p>

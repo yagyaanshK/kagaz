@@ -28,6 +28,10 @@ Smart Cloud:
 - `EncryptTools` and `CheckAPITools`: region `06` padded to 12 characters and
   interleaved with a random key for HTTPS `/v3.2/redirect`, API version `6.54`.
   The public discovery service was checked and returned the OneTouch gateway.
+  Network failures and temporary HTTP failures try the APK's HTTPS backup
+  `bk.rps.akuvox.com/v3.2/redirect`, with API `3.0` as used by
+  `IntercomRemoteRepository.requestBKGetRedirect`. Account credentials are not
+  sent to either discovery endpoint; returned gateway origins are validated.
 - `IntercomRemoteRepository.getOemUserAgent` / `OemDefined.DISCREET`: every
   Smart Cloud request sends `User-Agent: Onetouchsmartcloud`. The gateway uses
   this OEM identifier; a generic User-Agent caused `result: 1` even with valid
@@ -67,10 +71,37 @@ Video:
 - APK `MonitorModel` and RTSP library: `rtsp://relay/MAC`, username `user`,
   per-device RTSP password, `Account` and `Manual: 1` on DESCRIBE.
 - A random-path loopback RTSP adapter rewrites request/SDP URLs and Digest
-  authorization for the upstream URI, adds those headers, and forwards TCP
-  interleaved RTP. Real RTSP passwords stay in the adapter, not the engine URL.
-- The existing go2rtc engine remuxes live video for the webview. Each engine now
-  writes its own log so the doorbell engine cannot truncate a camera engine log.
+  authorization for the upstream URI. It follows the relay's session-specific
+  `Content-Base` over the existing authenticated connection, even when that base
+  differs from the original hostname and device path.
+- The relay returns UDP transport even when TCP is requested. The adapter maps
+  the engine's loopback RTP/RTCP ports to relay sockets, includes `X-SSRC`, and
+  sends a NAT-opening packet from the advertised port. Packets are forwarded
+  only between the negotiated engine and relay endpoints. Closing playback stops
+  these sockets. RTP obfuscation is not supported.
+- go2rtc source options use `#transport=udp#backchannel=0` (separate `#` options,
+  as parsed by its [RTSP handler](https://github.com/AlexxIT/go2rtc/blob/v1.9.14/internal/rtsp/rtsp.go)).
+  Real RTSP passwords stay in the adapter, not the engine URL.
+- Smart Cloud SDP can advertise H.264 parameter sets that differ from the live
+  RTP's SPS/PPS. Reinjecting those stale sets at keyframes caused native decoder
+  errors and freezes. Smart Cloud uses the configuration carried in the stream;
+  legacy OTIPVDP retains the SDP configuration. Audio and other codecs are unchanged.
+- Smart Cloud H.264 UDP delivery uses an 80 ms reorder window (at most 128
+  queued packets) and bounded frame assembly. Missing fragments discard the
+  incomplete picture and dependent pictures until a complete keyframe arrives.
+  The active in-band SPS/PPS precede each forwarded keyframe. This keeps damaged
+  pictures out of the native decoder; playback can briefly wait for a keyframe
+  when packets are lost.
+- Live playback uses the pinned engine's `VideoRTC` MSE player over a loopback
+  WebSocket. The raw MPEG-TS route decoded in a standalone GStreamer pipeline
+  but failed in WebKit's video element; fragmented MP4 through MSE plays there.
+  Recorded media retains its ordinary video/image element. Closing live playback
+  disconnects the player and releases its timers as well as the RTSP bridge.
+- After UDP setup, go2rtc manages control-connection liveness using the negotiated
+  RTSP keepalive interval. The bridge's initial 30-second handshake deadline no
+  longer interrupts an otherwise active UDP stream.
+- Each engine writes its own log so the doorbell engine cannot truncate a camera
+  engine log.
 - Selected HTTP(S) cloud media URLs go directly to the video/image element.
   Account tokens are never forwarded to media hosts. Refresh history if signed
   media URLs expire.
@@ -79,7 +110,20 @@ Video:
 
 `<config>/onetouch-session.json` stores the selected service, username and tokens,
 never the account password. Writes are atomic, with mode `0600` on Unix. One
-account is active at a time. Logout removes the saved session and clears devices,
+account is active at a time. **Remember sign-in securely** stores the successful
+login separately in the OS credential store: Secret Service on Linux, Keychain
+on macOS, Credential Manager on Windows. The implementation uses
+[keyring](https://docs.rs/keyring/3.6.3/keyring/). No plaintext-file fallback is used;
+if the vault is unavailable, sign-in can succeed with a notice that remembering
+failed. This feature is not yet offered on mobile builds.
+
+Expiration and startup do not replay passwords. **Reconnect** makes one login
+attempt only when clicked, using the saved provider and legacy discovery input.
+The webview receives remembered-account metadata, never the saved password.
+**Sign out** preserves the remembered login; **Forget saved sign-in** removes it
+from the vault without ending an active session.
+
+Logout removes the saved token session and clears devices,
 history and streams. Leaving the Doorbell pane or closing video stops its stream.
 Native commands serialize changes so late requests cannot restore a logged-out
 session. Frontend playback generations discard late video responses.
@@ -91,15 +135,29 @@ containing credentials. Network errors omit request URLs and response bodies.
 
 ## Validation and limits
 
-- Protocol tests cover login encoding, both legacy response formats, account and
+- Credential-store tests cover invalid records and metadata-only UI responses.
+  A synthetic credential was stored, read, and deleted in the Linux OS vault.
+  UI checks cover manual reconnect after expiry, no automatic password replay,
+  retry after failure, legacy account remembering, and forgetting credentials.
+- Protocol tests cover discovery fallback and gateway validation, login encoding,
+  both legacy response formats, account and
   history parsing, credential redaction, private session storage and expiration.
-- RTSP tests cover URL/Digest rewriting, SDP lengths, interleaved framing, and
-  a real loopback connection with header injection and shutdown on drop.
+- RTSP tests cover URL/Digest rewriting, session-specific SDP bases, framing,
+  a real control connection, UDP video/feedback forwarding, unrelated-sender
+  rejection, shutdown on drop, and H.264 SDP cleanup without changing other codecs.
+  RTP tests cover reordering, duplicates, sequence wrap, malformed packets,
+  fragment loss and recovery at the next complete keyframe.
 - Desktop build and JavaScript syntax checks pass. A Chromium UI check with
   simulated Tauri responses exercises login failure/retry, both providers,
   unavailable monitoring, snapshot/video actions, pagination and logout.
 - Desktop sign-in and device discovery have been verified against the service.
-- Live video currently opens a blank player; relay troubleshooting remains open.
+- The initial standalone/MSE checks did not establish stable playback in Kagaz.
+  Native playback diagnostics reproduced decoder failures with stale SDP and
+  lost/out-of-order UDP fragments. After the fixes, a check in the actual Kagaz
+  window ran for over three minutes and delivered over 4,000 rendered frames,
+  with no media-error event or player restart. Hardware-decoder allocation
+  warnings occurred without a fatal playback error. The user confirmed continuous
+  playback in Kagaz on 2026-10-14.
 - The cloud history request succeeds but returns an empty list. Snapshot
   rendering with real account data remains unverified.
 - A subsequent saved session returned `1000000001` (token invalid), and its

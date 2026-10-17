@@ -515,7 +515,7 @@ ul.cards li.add .name { color: var(--accent); }
 .ot-recording { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 12px 0; border-bottom: 1px solid var(--line); }
 .ot-recording span { flex: 1 1 200px; }
 #ot-player { margin-top: 16px; }
-#ot-video, #ot-picture { display: block; width: 100%; max-height: 65vh; object-fit: contain; background: #111; border-radius: 8px; }
+#ot-video, #ot-picture, #ot-live-video video { display: block; width: 100%; max-height: 65vh; object-fit: contain; background: #111; border-radius: 8px; }
 #ot-live-tab[aria-pressed="true"], #ot-recordings-tab[aria-pressed="true"] { border-color: var(--accent); }
 .ot-local-heading { margin-top: 30px; }
 
@@ -523,3 +523,7 @@ ul.cards li.add .name { color: var(--accent); }
 .ot-password-row { display: flex; align-items: stretch; gap: 6px; min-width: 0; }
 .ot-password-row input { min-width: 0; width: 14em; flex: 1 1 auto; }
 .ot-password-row button { flex: 0 0 auto; min-width: 4.5em; padding: 4px 8px; }
+
+#ot-login .ot-remember { flex-direction: row; align-items: center; gap: 8px; margin-top: 12px; }
+
+#ot-live-video onetouch-live-player { display: block; }

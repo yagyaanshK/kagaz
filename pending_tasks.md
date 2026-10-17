@@ -27,23 +27,22 @@ with the commit that closes them.
 
 ## OneTouch doorbells
 
-- [ ] **Remember sign-in securely and offer Reconnect** (requested 2026-10-14):
-      save credentials in the OS credential store after successful sign-in;
-      reconnect only when the user clicks, never automatically. Include a way
-      to forget the saved account. Not implemented yet.
-- [ ] **Discovery availability** (2026-10-14): this machine could resolve the
-      OneTouch gateway but not `rps.akuvox.com` or `bk.rps.akuvox.com`. The supplied
-      Smart Cloud APK declares the latter as its alternate redirect service
-      (`UrlDefine.RPS_SERVER_GET_REDIRECT_ALTERNATE`, `UrlTools.getGetAlternateRedirectUrl`).
-      Kagaz currently uses only the primary. Investigate DNS and implement the
-      vendor's alternate discovery flow before retrying account sign-in.
-
+- [x] **Remember sign-in securely and offer Reconnect** (2026-10-14): desktop
+      credentials use the OS vault. Reconnect requires a click, sign-out keeps
+      the remembered account, and Forget saved sign-in removes it. Synthetic
+      Linux vault and UI checks pass; real-account reconnect awaits verification.
+- [x] **Discovery fallback** (2026-10-14): try the APK's backup redirect service
+      after network/temporary HTTP failures. Preserve API versions and validate
+      the returned gateway. Primary service availability remains external.
 - [ ] **Smart Cloud account and real media validation** (2026-10-13): account
       sign-in, device list, live RTSP adapter, cloud snapshot/video history,
       token refresh and logout are implemented and locally tested. User reports
       snapshots only in the working OneTouch Smart Cloud app. Desktop sign-in
-      and device discovery are verified. Live video stays blank in Kagaz while
-      the vendor app can play it. Cloud history currently returns an empty list. Verify live video, snapshots,
+      and device discovery are verified. Native playback exposed stale H.264
+      configuration and damaged UDP frames; fixes now reorder packets and drop
+      incomplete pictures. The actual Kagaz window ran for over three minutes
+      with over 4,000 rendered frames and no playback error or restart.
+      The user confirmed continuous playback on 2026-10-14. Cloud history currently returns an empty list. Verify live video, snapshots,
       expired-token refresh, and logout/reopen after the remaining fixes.
 - [ ] **Legacy OTIPVDP account validation** (2026-10-13): separate service
       selection, device-MAC discovery, plain/encrypted login and legacy history

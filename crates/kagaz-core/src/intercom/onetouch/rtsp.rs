@@ -1,15 +1,18 @@
 //! Loopback RTSP adapter. Adds OneTouch's Account/Manual DESCRIBE headers,
-//! rewrites the relay authority, and forwards interleaved RTP without decoding.
+//! rewrites relay URLs and relays UDP RTP/RTCP to the loopback video engine.
 //! go2rtc handles RTSP negotiation, H.264 and browser remuxing.
-use super::md5_hex;
+use super::{md5_hex, rtp::H264Rtp};
 use base64::Engine as _;
 use std::io::{self, BufRead, BufReader, Write};
-use std::net::{Shutdown, TcpListener, TcpStream, ToSocketAddrs};
+use std::net::{
+    IpAddr, Ipv4Addr, Ipv6Addr, Shutdown, SocketAddr, TcpListener, TcpStream, ToSocketAddrs,
+    UdpSocket,
+};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc, Mutex,
 };
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use url::Url;
 
 #[derive(Clone)]
@@ -19,6 +22,7 @@ pub struct Target {
     port: u16,
     password: String,
     account: String,
+    inband_h264: bool,
 }
 impl Target {
     pub fn new(relay: &str, mac: &str, password: &str, account: &str) -> io::Result<Self> {
@@ -40,7 +44,15 @@ impl Target {
             port: url.port().unwrap_or(554),
             password: password.into(),
             account: account.into(),
+            inband_h264: false,
         })
+    }
+    /// Smart Cloud relays can advertise stale H.264 parameter sets. Their RTP
+    /// carries the active SPS/PPS; do not let the engine inject the stale sets
+    /// at every keyframe. Legacy sources keep their advertised configuration.
+    pub fn with_inband_h264(mut self) -> Self {
+        self.inband_h264 = true;
+        self
     }
 }
 fn invalid() -> io::Error {
@@ -84,7 +96,8 @@ impl Bridge {
                 }
             })?;
         Ok(Self {
-            url: format!("{}#transport=tcp&backchannel=0", source),
+            // go2rtc separates source options with #, not URL query separators.
+            url: format!("{}#transport=udp#backchannel=0", source),
             stop,
             sockets,
             thread: Some(thread),
@@ -214,6 +227,45 @@ fn rewrite_request(header: &str, target: &Target, local: &str) -> io::Result<Str
     result.push_str("\r\n");
     Ok(result)
 }
+fn inband_h264_sdp(body: &[u8]) -> Vec<u8> {
+    let sdp = String::from_utf8_lossy(body);
+    let payloads: Vec<_> = sdp
+        .lines()
+        .filter_map(|line| {
+            let (payload, codec) = line.strip_prefix("a=rtpmap:")?.split_once(' ')?;
+            codec
+                .split('/')
+                .next()?
+                .eq_ignore_ascii_case("H264")
+                .then_some(payload)
+        })
+        .collect();
+    let lines: Vec<_> = sdp
+        .lines()
+        .map(|line| {
+            if let Some((payload, params)) =
+                line.strip_prefix("a=fmtp:").and_then(|v| v.split_once(' '))
+            {
+                if payloads.contains(&payload) {
+                    let params = params
+                        .split(';')
+                        .filter(|param| {
+                            let key = param.trim().split('=').next().unwrap_or("");
+                            !key.eq_ignore_ascii_case("sprop-parameter-sets")
+                                && !key.eq_ignore_ascii_case("profile-level-id")
+                        })
+                        .collect::<Vec<_>>()
+                        .join(";");
+                    return format!("a=fmtp:{payload} {params}");
+                }
+            }
+            line.to_string()
+        })
+        .collect();
+    let mut sdp = lines.join("\r\n");
+    sdp.push_str("\r\n");
+    sdp.into_bytes()
+}
 fn rewrite_response(header: &str, body: &[u8], remote: &str, local: &str) -> (String, Vec<u8>) {
     let body = if header.to_ascii_lowercase().contains("application/sdp") {
         String::from_utf8_lossy(body)
@@ -237,6 +289,201 @@ fn rewrite_response(header: &str, body: &[u8], remote: &str, local: &str) -> (St
     out.push_str("\r\n");
     (out, body)
 }
+fn header_value<'a>(header: &'a str, name: &str) -> Option<&'a str> {
+    header
+        .lines()
+        .filter_map(|line| line.split_once(':'))
+        .find(|(key, _)| key.eq_ignore_ascii_case(name))
+        .map(|(_, value)| value.trim())
+}
+fn set_header(header: &str, name: &str, value: &str) -> String {
+    let mut out = String::new();
+    for line in header.lines().filter(|line| !line.is_empty()) {
+        if !line
+            .split_once(':')
+            .is_some_and(|(key, _)| key.eq_ignore_ascii_case(name))
+        {
+            out.push_str(line);
+            out.push_str("\r\n");
+        }
+    }
+    out.push_str(&format!("{name}: {value}\r\n\r\n"));
+    out
+}
+fn ports(transport: &str, name: &str) -> io::Result<[u16; 2]> {
+    let value = transport
+        .split(';')
+        .filter_map(|part| part.trim().split_once('='))
+        .find(|(key, _)| *key == name)
+        .map(|(_, value)| value)
+        .ok_or_else(invalid)?;
+    let (a, b) = value.split_once('-').ok_or_else(invalid)?;
+    let pair = [
+        a.parse().map_err(|_| invalid())?,
+        b.parse().map_err(|_| invalid())?,
+    ];
+    if pair.contains(&0) || pair[0] == pair[1] {
+        return Err(invalid());
+    }
+    Ok(pair)
+}
+
+// The relay answers SETUP with UDP even when TCP was requested. Let go2rtc
+// negotiate UDP, but bridge its loopback endpoints to the authenticated peer.
+struct UdpSetup {
+    sequence: String,
+    sockets: [UdpSocket; 2],
+    client_ports: [u16; 2],
+    ssrc: u32,
+}
+impl UdpSetup {
+    fn new(header: &str, peer: IpAddr) -> io::Result<Self> {
+        let client_ports = ports(
+            header_value(header, "Transport").ok_or_else(invalid)?,
+            "client_port",
+        )?;
+        let bind_ip = if peer.is_ipv4() {
+            IpAddr::V4(Ipv4Addr::UNSPECIFIED)
+        } else {
+            IpAddr::V6(Ipv6Addr::UNSPECIFIED)
+        };
+        let sockets = [
+            UdpSocket::bind((bind_ip, 0))?,
+            UdpSocket::bind((bind_ip, 0))?,
+        ];
+        let random = uuid::Uuid::new_v4();
+        let ssrc = 100_000_000
+            + u32::from_be_bytes(random.as_bytes()[..4].try_into().unwrap()) % 900_000_000;
+        Ok(Self {
+            sequence: header_value(header, "CSeq").ok_or_else(invalid)?.into(),
+            sockets,
+            client_ports,
+            ssrc,
+        })
+    }
+    fn local_ports(&self) -> io::Result<[u16; 2]> {
+        Ok([
+            self.sockets[0].local_addr()?.port(),
+            self.sockets[1].local_addr()?.port(),
+        ])
+    }
+    fn request(&self, header: &str) -> io::Result<String> {
+        let ports = self.local_ports()?;
+        let header = set_header(
+            header,
+            "Transport",
+            &format!("RTP/AVP;unicast;client_port={}-{}", ports[0], ports[1]),
+        );
+        Ok(set_header(&header, "X-SSRC", &self.ssrc.to_string()))
+    }
+    fn start(
+        self,
+        header: &str,
+        peer: IpAddr,
+        stop: Arc<AtomicBool>,
+        h264_payload: Option<u8>,
+    ) -> io::Result<String> {
+        if header_value(header, "X-Rtp-Confuse").is_some_and(|value| value != "0") {
+            return Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "Encrypted OneTouch RTP is unsupported",
+            ));
+        }
+        let server_ports = ports(
+            header_value(header, "Transport").ok_or_else(invalid)?,
+            "server_port",
+        )?;
+        let local_ports = self.local_ports()?;
+        let rewritten = set_header(
+            header,
+            "Transport",
+            &format!(
+                "RTP/AVP;unicast;client_port={}-{};server_port={}-{}",
+                self.client_ports[0], self.client_ports[1], local_ports[0], local_ports[1]
+            ),
+        );
+        for (index, socket) in self.sockets.into_iter().enumerate() {
+            let upstream = SocketAddr::new(peer, server_ports[index]);
+            let loopback = if peer.is_ipv4() {
+                IpAddr::V4(Ipv4Addr::LOCALHOST)
+            } else {
+                IpAddr::V6(Ipv6Addr::LOCALHOST)
+            };
+            let client = SocketAddr::new(loopback, self.client_ports[index]);
+            let mut video = if index == 0 {
+                h264_payload.map(H264Rtp::new)
+            } else {
+                None
+            };
+            socket.set_read_timeout(Some(Duration::from_millis(if video.is_some() {
+                20
+            } else {
+                200
+            })))?;
+            // Open the NAT mapping from the advertised port, as the phone does.
+            let mut probe = [0u8; 12];
+            probe[0] = 0x80;
+            probe[1] = 96;
+            probe[8..12].copy_from_slice(&self.ssrc.to_be_bytes());
+            socket.send_to(&probe, upstream)?;
+            let stop = stop.clone();
+            std::thread::Builder::new()
+                .name("onetouch-rtp".into())
+                .spawn(move || {
+                    let mut buffer = [0u8; 65535];
+                    while !stop.load(Ordering::Acquire) {
+                        match socket.recv_from(&mut buffer) {
+                            Ok((size, source)) => {
+                                let destination = if source == upstream {
+                                    if let Some(video) = video.as_mut() {
+                                        let packets = video.push(&buffer[..size], Instant::now());
+                                        if packets
+                                            .iter()
+                                            .any(|p| socket.send_to(p, client).is_err())
+                                        {
+                                            break;
+                                        }
+                                        continue;
+                                    }
+                                    client
+                                } else if source == client {
+                                    upstream
+                                } else {
+                                    continue;
+                                };
+                                // Ignore unrelated senders; never forward to a packet-supplied address.
+                                if socket.send_to(&buffer[..size], destination).is_err() {
+                                    break;
+                                }
+                            }
+                            Err(e)
+                                if matches!(
+                                    e.kind(),
+                                    io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
+                                ) =>
+                            {
+                                if let Some(video) = video.as_mut() {
+                                    let packets = video.poll(Instant::now());
+                                    if packets.iter().any(|p| socket.send_to(p, client).is_err()) {
+                                        break;
+                                    }
+                                }
+                            }
+                            Err(_) => break,
+                        }
+                    }
+                })?;
+        }
+        Ok(rewritten)
+    }
+}
+struct StopDatagrams(Arc<AtomicBool>);
+impl Drop for StopDatagrams {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::Release);
+    }
+}
+
 fn forward(
     client: TcpStream,
     target: &Target,
@@ -277,15 +524,84 @@ fn forward(
     upstream.write_all(&body)?;
     let mut response_reader = BufReader::new(upstream.try_clone()?);
     let mut receiver = client.try_clone()?;
-    let remote = target.remote.clone();
+    let remote = Arc::new(Mutex::new(target.remote.clone()));
+    let response_remote = remote.clone();
+    let pending: Arc<Mutex<Option<UdpSetup>>> = Arc::new(Mutex::new(None));
+    let response_pending = pending.clone();
+    let datagrams = Arc::new(AtomicBool::new(false));
+    let _stop_datagrams = StopDatagrams(datagrams.clone());
+    let peer = upstream.peer_addr()?.ip();
     let local_response = local.to_string();
+    let inband_h264 = target.inband_h264;
     let writer_thread = std::thread::spawn(move || {
         let result = (|| -> io::Result<()> {
+            let mut h264_payload = None;
             loop {
                 match frame(&mut response_reader)? {
                     Frame::Binary(bytes) => receiver.write_all(&bytes)?,
-                    Frame::Message(header, body) => {
-                        let (h, b) = rewrite_response(&header, &body, &remote, &local_response);
+                    Frame::Message(mut header, body) => {
+                        // The cloud's Content-Base can use another authority and a
+                        // session-specific path. Keep using the authenticated TCP
+                        // connection; only map subsequent request URIs to that base.
+                        if let Some(base) = header_value(&header, "Content-Base") {
+                            let url = Url::parse(base).map_err(|_| invalid())?;
+                            if url.scheme() != "rtsp"
+                                || url.host_str().is_none()
+                                || !url.username().is_empty()
+                                || url.password().is_some()
+                                || url.query().is_some()
+                                || url.fragment().is_some()
+                            {
+                                return Err(invalid());
+                            }
+                            *response_remote.lock().unwrap() =
+                                base.trim_end_matches('/').to_string();
+                        }
+                        let mut pending = response_pending.lock().unwrap();
+                        if pending.as_ref().is_some_and(|setup| {
+                            header_value(&header, "CSeq") == Some(setup.sequence.as_str())
+                        }) {
+                            let setup = pending.take().unwrap();
+                            if header.starts_with("RTSP/1.0 200") {
+                                header =
+                                    setup.start(&header, peer, datagrams.clone(), h264_payload)?;
+                                // Once media uses UDP, the control socket may be
+                                // quiet until the negotiated RTSP keepalive. Let
+                                // go2rtc own its liveness deadline; closing its
+                                // socket or dropping Bridge still stops both sides.
+                                receiver.set_read_timeout(None)?;
+                                response_reader.get_ref().set_read_timeout(None)?;
+                            }
+                        }
+                        drop(pending);
+                        let body = if inband_h264
+                            && header_value(&header, "Content-Type").is_some_and(|v| {
+                                v.split(';')
+                                    .next()
+                                    .unwrap_or("")
+                                    .trim()
+                                    .eq_ignore_ascii_case("application/sdp")
+                            }) {
+                            h264_payload =
+                                String::from_utf8_lossy(&body).lines().find_map(|line| {
+                                    let (payload, codec) =
+                                        line.strip_prefix("a=rtpmap:")?.split_once(' ')?;
+                                    if codec.trim().eq_ignore_ascii_case("H264/90000") {
+                                        payload.parse::<u8>().ok()
+                                    } else {
+                                        None
+                                    }
+                                });
+                            inband_h264_sdp(&body)
+                        } else {
+                            body
+                        };
+                        let (h, b) = rewrite_response(
+                            &header,
+                            &body,
+                            &response_remote.lock().unwrap(),
+                            &local_response,
+                        );
                         receiver.write_all(h.as_bytes())?;
                         receiver.write_all(&b)?;
                     }
@@ -300,7 +616,15 @@ fn forward(
             match frame(&mut client_reader)? {
                 Frame::Binary(bytes) => upstream.write_all(&bytes)?,
                 Frame::Message(header, body) => {
-                    upstream.write_all(rewrite_request(&header, target, local)?.as_bytes())?;
+                    let mut mapped = target.clone();
+                    mapped.remote = remote.lock().unwrap().clone();
+                    let mut request = rewrite_request(&header, &mapped, local)?;
+                    if header.starts_with("SETUP ") {
+                        let setup = UdpSetup::new(&request, peer)?;
+                        request = setup.request(&request)?;
+                        *pending.lock().unwrap() = Some(setup);
+                    }
+                    upstream.write_all(request.as_bytes())?;
                     upstream.write_all(&body)?;
                 }
             }
@@ -360,6 +684,7 @@ mod tests {
         });
         let bridge = Bridge::start(target).unwrap();
         assert!(!bridge.url.contains("private-password"));
+        assert!(bridge.url.ends_with("#transport=udp#backchannel=0"));
         let mut url = Url::parse(bridge.url.split('#').next().unwrap()).unwrap();
         url.set_username("").unwrap();
         url.set_password(None).unwrap();
@@ -380,6 +705,113 @@ mod tests {
         drop(bridge);
         server.join().unwrap();
     }
+    #[test]
+    fn udp_media_and_feedback_are_bridged_and_stopped() {
+        let engine_rtp = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let engine_rtcp = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let relay_rtp = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let relay_rtcp = UdpSocket::bind("127.0.0.1:0").unwrap();
+        for s in [&engine_rtp, &engine_rtcp, &relay_rtp, &relay_rtcp] {
+            s.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        }
+        let setup = UdpSetup::new(&format!(
+            "SETUP rtsp://relay.example/device/trackID=0 RTSP/1.0\r\nCSeq: 3\r\nTransport: RTP/AVP;unicast;client_port={}-{}\r\n\r\n",
+            engine_rtp.local_addr().unwrap().port(), engine_rtcp.local_addr().unwrap().port()
+        ), IpAddr::V4(Ipv4Addr::LOCALHOST)).unwrap();
+        let mapped = setup
+            .request("SETUP rtsp://relay.example/device/trackID=0 RTSP/1.0\r\nCSeq: 3\r\n\r\n")
+            .unwrap();
+        let proxy_ports = setup.local_ports().unwrap();
+        assert_eq!(
+            ports(header_value(&mapped, "Transport").unwrap(), "client_port").unwrap(),
+            proxy_ports
+        );
+        assert!(header_value(&mapped, "X-SSRC").is_some());
+        let stop = Arc::new(AtomicBool::new(false));
+        let guard = StopDatagrams(stop.clone());
+        let response = setup.start(&format!(
+            "RTSP/1.0 200 OK\r\nCSeq: 3\r\nX-Rtp-Confuse: 0\r\nTransport: RTP/AVP;unicast;server_port={}-{}\r\n\r\n",
+            relay_rtp.local_addr().unwrap().port(), relay_rtcp.local_addr().unwrap().port()
+        ), IpAddr::V4(Ipv4Addr::LOCALHOST), stop, None).unwrap();
+        assert_eq!(
+            ports(header_value(&response, "Transport").unwrap(), "server_port").unwrap(),
+            proxy_ports
+        );
+        let mut buffer = [0; 100];
+        let (n, proxy_rtp) = relay_rtp.recv_from(&mut buffer).unwrap();
+        assert_eq!(n, 12);
+        assert_eq!(buffer[0], 0x80);
+        let (_, proxy_rtcp) = relay_rtcp.recv_from(&mut buffer).unwrap();
+        let unrelated = UdpSocket::bind("127.0.0.1:0").unwrap();
+        unrelated.send_to(b"untrusted", proxy_rtp).unwrap();
+        relay_rtp.send_to(b"video packet", proxy_rtp).unwrap();
+        let (n, _) = engine_rtp.recv_from(&mut buffer).unwrap();
+        assert_eq!(&buffer[..n], b"video packet");
+        engine_rtcp.send_to(b"feedback", proxy_rtcp).unwrap();
+        let (n, _) = relay_rtcp.recv_from(&mut buffer).unwrap();
+        assert_eq!(&buffer[..n], b"feedback");
+        drop(guard);
+        std::thread::sleep(Duration::from_millis(300));
+        engine_rtp
+            .set_read_timeout(Some(Duration::from_millis(300)))
+            .unwrap();
+        relay_rtp.send_to(b"stopped", proxy_rtp).unwrap();
+        assert!(engine_rtp.recv_from(&mut buffer).is_err());
+    }
+
+    #[test]
+    fn maps_session_specific_content_base_to_loopback() {
+        let base = "rtsp://relay-address.example/temporary-session";
+        let local = "rtsp://127.0.0.1:123/token";
+        let (h, body) = rewrite_response(
+            &format!("RTSP/1.0 200 OK\r\nContent-Base: {base}/\r\nContent-Type: application/sdp\r\nContent-Length: 0\r\n\r\n"),
+            format!("a=control:{base}/trackID=0\r\n").as_bytes(), base, local,
+        );
+        assert_eq!(
+            header_value(&h, "Content-Base"),
+            Some("rtsp://127.0.0.1:123/token/")
+        );
+        assert!(String::from_utf8(body)
+            .unwrap()
+            .contains("rtsp://127.0.0.1:123/token/trackID=0"));
+        let mut target = Target::new("relay.example", "001122334455", "test", "resident").unwrap();
+        target.remote = base.into();
+        let request = rewrite_request(
+            &format!("SETUP {local}/trackID=0 RTSP/1.0\r\nCSeq: 3\r\n\r\n"),
+            &target,
+            local,
+        )
+        .unwrap();
+        assert!(request.starts_with(&format!("SETUP {base}/trackID=0 RTSP/1.0")));
+    }
+
+    #[test]
+    fn cloud_sdp_uses_inband_h264_without_changing_other_codecs() {
+        let sdp = b"v=0\r\na=rtpmap:96 H264/90000\r\na=fmtp:96 sprop-parameter-sets=stale;packetization-mode=1;profile-level-id=42E01F\r\na=rtpmap:97 H265/90000\r\na=fmtp:97 sprop-parameter-sets=keep;profile-level-id=keep\r\na=rtpmap:98 MPEG4-GENERIC/48000/2\r\na=fmtp:98 config=1190\r\n";
+        let cleaned = inband_h264_sdp(sdp);
+        let text = String::from_utf8(cleaned.clone()).unwrap();
+        assert!(text.contains("a=fmtp:96 packetization-mode=1\r\n"));
+        assert!(text.contains("a=fmtp:97 sprop-parameter-sets=keep;profile-level-id=keep\r\n"));
+        assert!(text.contains("a=fmtp:98 config=1190\r\n"));
+        assert!(!text.contains("stale"));
+        let (header, body) = rewrite_response(
+            "RTSP/1.0 200 OK\r\nContent-Type: application/sdp\r\nContent-Length: 999\r\n\r\n",
+            &cleaned,
+            "rtsp://remote",
+            "rtsp://local",
+        );
+        assert_eq!(
+            header_value(&header, "Content-Length")
+                .unwrap()
+                .parse::<usize>()
+                .unwrap(),
+            body.len()
+        );
+        let legacy = Target::new("relay.example", "001122334455", "test", "resident").unwrap();
+        assert!(!legacy.inband_h264);
+        assert!(legacy.with_inband_h264().inband_h264);
+    }
+
     #[test]
     fn binary_and_sdp_framing() {
         let input = b"$\x00\x00\x04abcdRTSP/1.0 200 OK\r\nContent-Length: 3\r\n\r\nsdp";

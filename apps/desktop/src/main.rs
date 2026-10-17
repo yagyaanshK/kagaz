@@ -1230,6 +1230,8 @@ pub fn run() {
             onetouch::onetouch_status,
             onetouch::onetouch_login,
             onetouch::onetouch_logout,
+            onetouch::onetouch_reconnect,
+            onetouch::onetouch_forget,
             onetouch::onetouch_refresh,
             onetouch::onetouch_live,
             onetouch::onetouch_stop,
