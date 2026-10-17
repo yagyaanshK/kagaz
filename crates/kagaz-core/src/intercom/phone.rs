@@ -224,7 +224,22 @@ impl Media {
     }
 
     /// Start receiving and set up the voice sender.
-    fn begin(&self, agreed: &Agreed, sink: MediaSink, out: &Arc<Mutex<Option<AudioOut>>>) {
+    fn begin(
+        &self,
+        agreed: &Agreed,
+        sink: MediaSink,
+        out: &Arc<Mutex<Option<AudioOut>>>,
+        diag: Diag,
+    ) {
+        diag.line(&format!(
+            "agreed: voice to {:?} ({:?}, tones {:?}); video from {:?} (payload {:?}, sprop {})",
+            agreed.audio,
+            agreed.law,
+            agreed.dtmf_pt,
+            agreed.video,
+            agreed.video_pt,
+            agreed.sprop.is_some()
+        ));
         if let (Some(dest), Some(law)) = (agreed.audio, agreed.law) {
             if let Ok(sock) = self.audio.try_clone() {
                 let mut sender = AudioOut {
@@ -246,12 +261,22 @@ impl Media {
             if let Ok(sock) = self.audio.try_clone() {
                 let stop = self.stop.clone();
                 let sink = sink.clone();
+                let diag = diag.clone();
                 std::thread::spawn(move || {
                     let mut buf = [0u8; 2048];
+                    let mut packets = 0u64;
+                    let mut from = None;
+                    let mut last = Instant::now();
                     while !stop.load(Ordering::SeqCst) {
-                        let Ok(n) = sock.recv(&mut buf) else {
+                        if last.elapsed() > Duration::from_secs(2) {
+                            diag.line(&format!("voice: {packets} packets from {from:?}"));
+                            last = Instant::now();
+                        }
+                        let Ok((n, peer)) = sock.recv_from(&mut buf) else {
                             continue;
                         };
+                        packets += 1;
+                        from = Some(peer);
                         let Some((_, _, _, payload)) = super::h264::parse_rtp(&buf[..n]) else {
                             continue;
                         };
@@ -266,6 +291,7 @@ impl Media {
             if let Ok(sock) = self.video.try_clone() {
                 let stop = self.stop.clone();
                 let sprop = agreed.sprop.clone();
+                let diag = diag.clone();
                 std::thread::spawn(move || {
                     let mut depack = Depacketizer::new();
                     if let Some(s) = &sprop {
@@ -275,7 +301,26 @@ impl Media {
                     let mut last_ping = Instant::now() - Duration::from_secs(10);
                     let ssrc = rand_u32();
                     let mut seq = rand_u16();
+                    let mut seen = 0u64;
+                    let mut other_pt = 0u64;
+                    let mut from = None;
+                    let mut last_log = Instant::now();
                     while !stop.load(Ordering::SeqCst) {
+                        if last_log.elapsed() > Duration::from_secs(2) {
+                            let st = &depack.stats;
+                            let types: Vec<String> = st
+                                .nal_types
+                                .iter()
+                                .enumerate()
+                                .filter(|(_, n)| **n > 0)
+                                .map(|(t, n)| format!("{t}:{n}"))
+                                .collect();
+                            diag.line(&format!(
+                                "video: {seen} packets from {from:?} ({other_pt} other payload types); depacketized {} packets into {} pictures ({} keyframes), dropped {} damaged and {} waiting for a keyframe; NAL types {}",
+                                st.packets, st.units, st.keyframes, st.damaged, st.waiting, types.join(" ")
+                            ));
+                            last_log = Instant::now();
+                        }
                         // We send no video, so a bare RTP header now and then
                         // keeps NAT and the relay pointing back at us.
                         if last_ping.elapsed() > Duration::from_secs(2) {
@@ -287,10 +332,19 @@ impl Media {
                             seq = seq.wrapping_add(1);
                             last_ping = Instant::now();
                         }
-                        let Ok(n) = sock.recv(&mut buf) else {
+                        let Ok((n, peer)) = sock.recv_from(&mut buf) else {
                             continue;
                         };
+                        seen += 1;
+                        from = Some(peer);
                         if n < 12 || buf[1] & 0x7F != pt {
+                            if other_pt == 0 && n >= 2 {
+                                diag.line(&format!(
+                                    "video: first packet with payload type {}",
+                                    buf[1] & 0x7F
+                                ));
+                            }
+                            other_pt += 1;
                             continue;
                         }
                         if let Some(unit) = depack.push(&buf[..n]) {
@@ -306,6 +360,25 @@ impl Media {
 impl Drop for Media {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::SeqCst);
+    }
+}
+
+/// A per-call diagnostic log in the system temp folder (`kagaz-call.log`),
+/// replaced by each call: the media descriptions and what arrived. It
+/// stays on this device; it holds addresses, never passwords.
+#[derive(Clone)]
+struct Diag(Arc<Mutex<Option<std::fs::File>>>);
+
+impl Diag {
+    fn new() -> Diag {
+        let file = std::fs::File::create(std::env::temp_dir().join("kagaz-call.log")).ok();
+        Diag(Arc::new(Mutex::new(file)))
+    }
+
+    fn line(&self, text: &str) {
+        if let Some(f) = self.0.lock().unwrap().as_mut() {
+            let _ = writeln!(f, "{text}");
+        }
     }
 }
 
@@ -403,6 +476,7 @@ struct Dialog {
     agreed: Agreed,
     started: Instant,
     number: String,
+    diag: Diag,
 }
 
 struct Line {
@@ -830,7 +904,13 @@ impl Line {
                     agreed: Agreed::default(),
                     started: Instant::now(),
                     number: number.clone(),
+                    diag: Diag::new(),
                 });
+                if let Some(d) = &self.call {
+                    if let Some(inv) = &d.invite {
+                        d.diag.line(&format!("incoming offer:\n{}", inv.body));
+                    }
+                }
                 (self.events)(Event::Incoming {
                     id,
                     number,
@@ -932,6 +1012,7 @@ impl Line {
                     .collect();
                 d.route.reverse();
                 d.state = State::Confirmed;
+                d.diag.line(&format!("their answer:\n{}", m.body));
                 d.agreed = sdp::agreed_from_answer(&sdp::parse(&m.body));
                 let ack = self.ack_for_2xx(&m);
                 self.send(&ack)?;
@@ -1034,6 +1115,7 @@ impl Line {
                 let (sdp, agreed) = self.answer_sdp(&invite);
                 self.reply(&invite, 200, "OK", &tag, Some(&sdp))?;
                 let d = self.call.as_mut().unwrap();
+                d.diag.line(&format!("our answer:\n{sdp}"));
                 d.agreed = agreed;
                 d.state = State::Confirmed;
                 self.start_media();
@@ -1156,7 +1238,11 @@ impl Line {
             agreed: Agreed::default(),
             started: Instant::now(),
             number: number.to_string(),
+            diag: Diag::new(),
         });
+        if let Some(d) = &self.call {
+            d.diag.line(&format!("our offer:\n{body}"));
+        }
         (self.events)(Event::Outgoing {
             id,
             number: number.to_string(),
@@ -1197,7 +1283,7 @@ impl Line {
             return;
         };
         if let Some(m) = &d.media {
-            m.begin(&d.agreed, self.media.clone(), &self.audio);
+            m.begin(&d.agreed, self.media.clone(), &self.audio, d.diag.clone());
         }
         let video = d.agreed.video.is_some();
         let id = d.id.clone();
@@ -1207,6 +1293,7 @@ impl Line {
     fn end_call(&mut self, reason: &str) {
         *self.audio.lock().unwrap() = None;
         if let Some(d) = self.call.take() {
+            d.diag.line(&format!("ended: {reason}"));
             drop(d.media);
             (self.events)(Event::Ended {
                 id: d.id,

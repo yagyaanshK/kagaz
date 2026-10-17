@@ -123,6 +123,7 @@
     if (phase === "talking") {
       startClock(s.since);
       startAudio();
+      watchVideo();
       if (!s.video) $("call-video-note").textContent = "No camera on this call";
     } else {
       stopClock();
@@ -258,6 +259,22 @@
 
   let decoder = null;
   let canvasCtx = null;
+  // What happened to the camera on this call, said on the card when no
+  // picture shows: nothing arrived, or it arrived and could not be shown.
+  const video = { received: 0, keys: 0, shown: 0, problem: "" };
+  let videoWatch = null;
+
+  function watchVideo() {
+    if (videoWatch) return;
+    videoWatch = setInterval(() => {
+      if (!status || status.phase !== "talking" || video.shown > 0) return;
+      $("call-video-note").textContent = !video.received
+        ? "No camera pictures have arrived yet"
+        : video.problem
+          ? `Pictures arrive (${video.received}) but cannot be shown: ${video.problem}`
+          : `Pictures arrive (${video.received}, ${video.keys} full) but none has been shown yet`;
+    }, 1000);
+  }
 
   function nalOf(data, kind) {
     for (let i = 0; i + 4 < data.length; i++) {
@@ -273,14 +290,19 @@
   }
 
   function showVideo(key, ts, data) {
+    video.received++;
+    if (key) video.keys++;
     if (typeof VideoDecoder === "undefined") {
-      $("call-video-note").textContent = "This window cannot show the camera picture";
+      video.problem = "this window has no video decoder (WebCodecs)";
       return;
     }
     if (!decoder || decoder.state === "closed") {
       if (!key) return;
       const sps = nalOf(data, 7);
-      if (!sps) return;
+      if (!sps) {
+        video.problem = "the first full picture came without its stream settings (SPS)";
+        return;
+      }
       const codec = `avc1.${hex2(sps[1])}${hex2(sps[2])}${hex2(sps[3])}`;
       const canvas = $("call-canvas");
       canvasCtx = canvas.getContext("2d");
@@ -290,10 +312,12 @@
           if (canvas.height !== frame.displayHeight) canvas.height = frame.displayHeight;
           canvasCtx.drawImage(frame, 0, 0);
           frame.close();
+          video.shown++;
           canvas.classList.remove("hidden");
           $("call-video-note").textContent = "";
         },
-        error: () => {
+        error: (e) => {
+          video.problem = `the decoder failed (${(e && e.message) || e})`;
           decoder = null;
         },
       });
@@ -301,7 +325,7 @@
         decoder.configure({ codec, optimizeForLatency: true });
       } catch (e) {
         decoder = null;
-        $("call-video-note").textContent = "This window cannot decode the camera picture";
+        video.problem = `the decoder refused ${codec} (${e.message || e})`;
         return;
       }
     }
@@ -309,11 +333,15 @@
     try {
       decoder.decode(new EncodedVideoChunk({ type: key ? "key" : "delta", timestamp: Math.round((ts * 1000) / 90), data }));
     } catch (e) {
+      video.problem = `decoding failed (${e.message || e})`;
       decoder = null;
     }
   }
 
   function stopVideo() {
+    clearInterval(videoWatch);
+    videoWatch = null;
+    Object.assign(video, { received: 0, keys: 0, shown: 0, problem: "" });
     if (decoder && decoder.state !== "closed") {
       try {
         decoder.close();

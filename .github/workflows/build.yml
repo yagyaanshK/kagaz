@@ -39,14 +39,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
-      - uses: android-actions/setup-android@v3
+      # The runner comes with the Android SDK (ANDROID_HOME); only the NDK
+      # is added.
       - name: NDK
         run: |
-          sdkmanager --install "ndk;29.0.14206865"
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;29.0.14206865" > /dev/null
           echo "NDK_HOME=$ANDROID_HOME/ndk/29.0.14206865" >> "$GITHUB_ENV"
       - uses: dtolnay/rust-toolchain@stable
         with:
