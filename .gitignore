@@ -2,6 +2,8 @@
 **/target
 /apps/desktop/node_modules
 /apps/desktop/dist
+# Built apps to install (the Android APK, Windows programs)
+/dist
 *.log
 .DS_Store
 # Camera recordings made with `kagaz tapo record` (private)
