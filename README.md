@@ -219,6 +219,9 @@ for migrated accounts, or **OTIPVDP (legacy)** for an older account. After sign-
 choose a device for live video or open **Recordings & snapshots** for cloud
 history. Only entries with video have a Play button; snapshots remain pictures.
 Local intercom calls continue to work separately.
+Enable **Remember sign-in securely** to keep the login in your desktop password
+store. If the session expires, click **Reconnect** without retyping. Sign out
+keeps the saved login; **Forget saved sign-in** removes it.
 
 The integration builds and passes protocol/UI checks; authenticated playback
 still needs verification with a real account. See [protocol notes and limits](docs/onetouch.md).

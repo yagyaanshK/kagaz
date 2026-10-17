@@ -2,6 +2,7 @@
 //! Account tokens never appear in webview models or errors.
 pub mod calls;
 mod legacy;
+mod rtp;
 pub mod rtsp;
 use md5::{Digest, Md5};
 use serde::{Deserialize, Serialize};
@@ -186,7 +187,10 @@ fn required(v: &Value, key: &str) -> Result<String, Error> {
 }
 fn api_data(v: Value) -> Result<Value, Error> {
     let code = field(&v, "err_code");
-    if matches!(code.as_str(), "1000000001" | "1000100001" | "1000100002" | "1000100003") {
+    if matches!(
+        code.as_str(),
+        "1000000001" | "1000100001" | "1000100002" | "1000100003"
+    ) {
         return Err(Error::Expired);
     }
     if code == "1000100004" {
@@ -265,6 +269,28 @@ fn service(value: &str) -> Result<String, Error> {
     }
     Ok(u.as_str().trim_end_matches('/').to_string())
 }
+// The APK uses API 6.54 on primary discovery, API 3.0 on its backup.
+// Discovery sends only the OEM region marker, never account credentials.
+fn discover_gate(a: &ureq::Agent, primary: &str, backup: &str) -> Result<String, Error> {
+    let user = discovery_user();
+    let fetch = |url: &str, version: &str| -> Result<String, Error> {
+        let response = a
+            .get(url)
+            .set("api-version", version)
+            .query("user", &user)
+            .call()
+            .map_err(transport_error)?;
+        service(&required(
+            &api_data(read_response(response)?)?,
+            "gate_serverV4",
+        )?)
+    };
+    match fetch(primary, "6.54") {
+        Err(Error::Network | Error::Http(408 | 429 | 500..=599)) => fetch(backup, "3.0"),
+        result => result,
+    }
+}
+
 impl Session {
     pub fn login(username: &str, password: &str) -> Result<(Self, Account), Error> {
         let username = username.trim();
@@ -272,19 +298,11 @@ impl Session {
             return Err(protocol("Enter your OneTouch username and password."));
         }
         let a = smart_cloud_agent();
-        let gate = (|| {
-            let response = a
-                .get("https://rps.akuvox.com/v3.2/redirect")
-                // Constant.API_VERSION_6_5_4 in the APK is the wire value 6.54.
-                .set("api-version", "6.54")
-                .query("user", &discovery_user())
-                .call()
-                .map_err(transport_error)?;
-            service(&required(
-                &api_data(read_response(response)?)?,
-                "gate_serverV4",
-            )?)
-        })()
+        let gate = discover_gate(
+            &a,
+            "https://rps.akuvox.com/v3.2/redirect",
+            "https://bk.rps.akuvox.com/v3.2/redirect",
+        )
         .map_err(|e| during("Finding the OneTouch server", e))?;
         let data = (|| {
             let response = login_request(&a, &gate, username, password)?
@@ -426,8 +444,13 @@ impl Session {
                 "OneTouch does not allow live monitoring for this device.",
             ));
         }
-        rtsp::Target::new(&self.relay, &device.id, &device.password, &account.uid)
-            .map_err(|_| protocol("OneTouch returned an invalid video relay address."))
+        let target = rtsp::Target::new(&self.relay, &device.id, &device.password, &account.uid)
+            .map_err(|_| protocol("OneTouch returned an invalid video relay address."))?;
+        Ok(if self.provider == Provider::SmartCloud {
+            target.with_inband_h264()
+        } else {
+            target
+        })
     }
     pub fn path() -> std::path::PathBuf {
         crate::paths::config_dir().join("onetouch-session.json")
@@ -607,6 +630,71 @@ mod tests {
         assert_eq!(pairs[0].1, shift("a&passwd=oops+#@example.test", 3));
         assert!(url.fragment().is_none());
     }
+    #[test]
+    fn discovery_uses_backup_after_outage_but_rejects_untrusted_gate() {
+        use std::net::TcpListener;
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let origin = format!("http://{}", listener.local_addr().unwrap());
+        let server = std::thread::spawn(move || {
+            let mut requests = Vec::new();
+            for index in 0..3 {
+                let (mut socket, _) = listener.accept().unwrap();
+                socket
+                    .set_read_timeout(Some(Duration::from_secs(3)))
+                    .unwrap();
+                let mut request = Vec::new();
+                let mut byte = [0];
+                while !request.ends_with(b"\r\n\r\n") {
+                    socket.read_exact(&mut byte).unwrap();
+                    request.push(byte[0]);
+                }
+                requests.push(String::from_utf8(request).unwrap());
+                let (status, body) = match index {
+                    0 => ("503 Unavailable", ""),
+                    1 => (
+                        "200 OK",
+                        r#"{"result":0,"datas":{"gate_serverV4":"https://gate.onetouchsmartcloud.com:8600"}}"#,
+                    ),
+                    _ => (
+                        "200 OK",
+                        r#"{"result":0,"datas":{"gate_serverV4":"https://attacker.example.test"}}"#,
+                    ),
+                };
+                write!(
+                    socket,
+                    "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                )
+                .unwrap();
+            }
+            requests
+        });
+        let a = smart_cloud_agent();
+        assert_eq!(
+            discover_gate(
+                &a,
+                &format!("{origin}/primary"),
+                &format!("{origin}/backup")
+            )
+            .unwrap(),
+            "https://gate.onetouchsmartcloud.com:8600"
+        );
+        assert!(discover_gate(
+            &a,
+            &format!("{origin}/untrusted"),
+            "http://127.0.0.1:1/unused"
+        )
+        .is_err());
+        let requests = server.join().unwrap();
+        assert!(requests[0].contains("api-version: 6.54"));
+        assert!(requests[1].contains("api-version: 3.0"));
+        assert!(requests[1].starts_with("GET /backup?user="));
+        for request in requests {
+            assert!(request.contains("User-Agent: Onetouchsmartcloud"));
+            assert!(!request.contains("passwd="));
+        }
+    }
+
     #[test]
     fn smart_cloud_sends_oem_header_on_login_and_authenticated_requests() {
         use std::net::TcpListener;

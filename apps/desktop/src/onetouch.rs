@@ -4,6 +4,9 @@ use kagaz_core::extras::go2rtc::{self, Engine};
 use kagaz_core::intercom::onetouch::{
     self, Account, Device, Provider, Recording, Recordings, Session,
 };
+#[path = "onetouch_credentials.rs"]
+mod credentials;
+use credentials::{SavedAccount, SavedLogin};
 use serde::Serialize;
 use std::sync::Mutex;
 use tauri::{AppHandle, Manager};
@@ -13,6 +16,8 @@ pub struct OneTouchState(Mutex<Inner>);
 #[derive(Default)]
 struct Inner {
     loaded: bool,
+    saved: Option<SavedAccount>,
+    notice: String,
     session: Option<Session>,
     account: Option<Account>,
     recordings: Vec<Recording>,
@@ -22,6 +27,9 @@ struct Inner {
 #[derive(Serialize)]
 pub struct Status {
     logged_in: bool,
+    remembered: Option<SavedAccount>,
+    remember_supported: bool,
+    notice: String,
     username: String,
     provider: Provider,
     service_name: String,
@@ -37,6 +45,9 @@ impl Inner {
     fn status(&self) -> Status {
         Status {
             logged_in: self.session.is_some(),
+            remembered: self.saved.clone(),
+            remember_supported: credentials::SUPPORTED,
+            notice: self.notice.clone(),
             provider: self
                 .session
                 .as_ref()
@@ -63,8 +74,25 @@ impl Inner {
     fn load(&mut self) -> Result<(), String> {
         if !self.loaded {
             self.session = Session::load().map_err(|e| e.to_string())?;
+            self.read_saved();
             self.loaded = true;
         }
+        Ok(())
+    }
+    fn read_saved(&mut self) {
+        match credentials::read() {
+            Ok(saved) => self.saved = saved.map(|s| s.account),
+            Err(e) => self.notice = e,
+        }
+    }
+    fn accept(&mut self, session: Session, account: Account) -> Result<(), String> {
+        session.save().map_err(|e| e.to_string())?;
+        self.stop();
+        self.engine = None;
+        self.recordings.clear();
+        self.session = Some(session);
+        self.account = Some(account);
+        self.loaded = true;
         Ok(())
     }
     fn cloud_error(&mut self, e: onetouch::Error) -> String {
@@ -96,6 +124,7 @@ pub async fn onetouch_login(
     password: String,
     provider: Option<Provider>,
     legacy_device: Option<String>,
+    remember: Option<bool>,
 ) -> Result<Status, String> {
     super::blocking(move || {
         let state = app.state::<OneTouchState>();
@@ -107,17 +136,69 @@ pub async fn onetouch_login(
             legacy_device.as_deref().unwrap_or_default(),
         )
         .map_err(|e| e.to_string())?;
-        session.save().map_err(|e| e.to_string())?;
-        s.stop();
-        s.engine = None;
-        s.recordings.clear();
-        s.session = Some(session);
-        s.account = Some(account);
-        s.loaded = true;
+        s.accept(session, account)?;
+        s.notice.clear();
+        let stored = if remember.unwrap_or(false) {
+            credentials::save(&SavedLogin {
+                account: SavedAccount {
+                    username: username.trim().into(),
+                    provider: provider.unwrap_or_default(),
+                    legacy_device: legacy_device.unwrap_or_default(),
+                },
+                password,
+            })
+        } else {
+            credentials::forget()
+        };
+        if let Err(e) = stored {
+            s.notice = format!("Signed in, but the saved sign-in could not be updated. {e}");
+        }
+        s.read_saved();
         Ok(s.status())
     })
     .await
 }
+/// Replays saved credentials only when the user explicitly clicks Reconnect.
+#[tauri::command]
+pub async fn onetouch_reconnect(app: AppHandle) -> Result<Status, String> {
+    super::blocking(move || {
+        let state = app.state::<OneTouchState>();
+        let mut s = state.0.lock().unwrap();
+        s.load()?;
+        if s.session.is_some() {
+            return Ok(s.status());
+        }
+        let saved =
+            credentials::read()?.ok_or("No saved sign-in. Enter your credentials once first.")?;
+        let (session, account) = Session::login_with_provider(
+            saved.account.provider,
+            &saved.account.username,
+            &saved.password,
+            &saved.account.legacy_device,
+        )
+        .map_err(|e| e.to_string())?;
+        s.accept(session, account)?;
+        s.notice.clear();
+        s.saved = Some(saved.account);
+        Ok(s.status())
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn onetouch_forget(app: AppHandle) -> Result<Status, String> {
+    super::blocking(move || {
+        let state = app.state::<OneTouchState>();
+        let mut s = state.0.lock().unwrap();
+        s.load()?;
+        credentials::forget()?;
+        s.saved = None;
+        s.notice.clear();
+        Ok(s.status())
+    })
+    .await
+}
+
 #[tauri::command]
 pub async fn onetouch_logout(app: AppHandle) -> Result<(), String> {
     super::blocking(move || {
@@ -194,7 +275,7 @@ pub async fn onetouch_live(app: AppHandle, device_id: String) -> Result<String, 
         engine
             .add_stream("onetouch_live", &bridge.url)
             .map_err(|_| "Could not open the doorbell video stream.")?;
-        let url = engine.ts_url("onetouch_live");
+        let url = engine.ws_url("onetouch_live");
         s.bridge = Some(bridge);
         Ok(url)
     })
@@ -262,4 +343,25 @@ pub async fn onetouch_recording_media(
         Ok(url.clone())
     })
     .await
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn status_keeps_remembered_metadata_separate_from_secrets() {
+        let mut inner = Inner::default();
+        inner.saved = Some(SavedAccount {
+            username: "resident@example.test".into(),
+            provider: Provider::Otipvdp,
+            legacy_device: "001122334455".into(),
+        });
+        let status = serde_json::to_value(inner.status()).unwrap();
+        assert_eq!(status["logged_in"], false);
+        assert_eq!(status["remembered"]["provider"], "otipvdp");
+        assert_eq!(status["remembered"]["username"], "resident@example.test");
+        assert!(status["remembered"].get("password").is_none());
+        assert!(status.get("token").is_none());
+    }
 }

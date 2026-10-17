@@ -8,6 +8,7 @@ let otMore = false;
 let otPlayback = 0;
 let otTimer = null;
 let otInitialized = false;
+let otLivePlayer = null;
 
 function otPasswordVisible(visible) {
   $('ot-password').type = visible ? 'text' : 'password';
@@ -20,6 +21,15 @@ $('ot-password-toggle').addEventListener('click', () => {
 
 function otRender() {
   const signed = !!otStatus?.logged_in;
+  const saved = otStatus?.remembered;
+  const canRemember = otStatus?.remember_supported !== false;
+  $('ot-reconnect').classList.toggle('hidden', signed || !saved);
+  $('ot-forget').classList.toggle('hidden', !saved && !otStatus?.notice);
+  $('ot-remembered').classList.toggle('hidden', !saved);
+  $('ot-remembered').textContent = saved ? `Saved sign-in: ${saved.username}. Reconnect happens only when you click it.` : '';
+  $('ot-signin').textContent = saved ? 'Use another account' : 'Sign in';
+  $('ot-remember-label').classList.toggle('hidden', !canRemember);
+  $('ot-remember-help').classList.toggle('hidden', !canRemember);
   $('ot-signin').classList.toggle('hidden', signed);
   $('ot-signout').classList.toggle('hidden', !signed);
   $('ot-refresh').classList.toggle('hidden', !signed);
@@ -45,7 +55,7 @@ function otRender() {
   $('ot-recordings-pane').classList.toggle('hidden', otTab !== 'recordings');
   $('ot-live-tab').setAttribute('aria-pressed', String(otTab === 'live'));
   $('ot-recordings-tab').setAttribute('aria-pressed', String(otTab === 'recordings'));
-  for (const id of ['ot-signin','ot-signout','ot-refresh','ot-login-submit','ot-login-cancel','ot-live-tab','ot-recordings-tab','ot-recordings-refresh','ot-provider','ot-legacy-device','ot-username','ot-password','ot-password-toggle']) $(id).disabled = otBusy;
+  for (const id of ['ot-reconnect','ot-forget','ot-remember','ot-signin','ot-signout','ot-refresh','ot-login-submit','ot-login-cancel','ot-live-tab','ot-recordings-tab','ot-recordings-refresh','ot-provider','ot-legacy-device','ot-username','ot-password','ot-password-toggle']) $(id).disabled = otBusy;
   $('ot-prev').disabled = otBusy || otPage <= 1;
   $('ot-next').disabled = otBusy || !otMore;
   document.querySelectorAll('#ot-recordings button').forEach(b => { b.disabled = otBusy; });
@@ -68,10 +78,16 @@ async function refreshOneTouch() {
       $('ot-message').textContent = 'Loading your OneTouch devices…';
       otStatus = await invoke('onetouch_refresh'); otInitialized = true;
     }
-    $('ot-message').textContent = '';
+    $('ot-message').textContent = otStatus?.notice || '';
   });
 }
 $('ot-signin').addEventListener('click', () => {
+  if (otStatus?.remembered) {
+    $('ot-username').value = otStatus.remembered.username;
+    $('ot-provider').value = otStatus.remembered.provider;
+    $('ot-legacy-device').value = otStatus.remembered.legacy_device || '';
+    $('ot-provider').dispatchEvent(new Event('change'));
+  }
   otPasswordVisible(false); $('ot-login').classList.remove('hidden'); $('ot-message').textContent = ''; $('ot-username').focus();
 });
 $('ot-login-cancel').addEventListener('click', () => {
@@ -83,16 +99,29 @@ $('ot-login').addEventListener('submit', async e => {
   if (!username || !password) { $('ot-message').textContent = 'Enter your OneTouch username and password.'; return; }
   otPasswordVisible(false);
   await otRun(async () => {
-    try { otStatus = await invoke('onetouch_login', { username, password, provider: $('ot-provider').value, legacyDevice: $('ot-legacy-device').value.trim() }); }
+    try { otStatus = await invoke('onetouch_login', { username, password, provider: $('ot-provider').value, legacyDevice: $('ot-legacy-device').value.trim(), remember: otStatus?.remember_supported !== false && $('ot-remember').checked }); }
     finally { $('ot-password').value = ''; otPasswordVisible(false); }
     otInitialized = true; otTab = 'live'; otPage = 1;
-    $('ot-login').classList.add('hidden'); $('ot-message').textContent = '';
+    $('ot-login').classList.add('hidden'); $('ot-message').textContent = otStatus?.notice || '';
   }, `Signing in to ${$('ot-provider').selectedOptions[0].textContent}…`);
 });
 $('ot-signout').addEventListener('click', () => otRun(async () => {
   await stopOneTouch();
-  await invoke('onetouch_logout'); otStatus = null; otInitialized = false;
+  await invoke('onetouch_logout'); otStatus = await invoke('onetouch_status'); otInitialized = false;
   $('ot-recordings').replaceChildren(); $('ot-message').textContent = ''; $('ot-password').value = ''; otPasswordVisible(false);
+}));
+$('ot-reconnect').addEventListener('click', () => otRun(async () => {
+  await stopOneTouch();
+  otStatus = await invoke('onetouch_reconnect');
+  otInitialized = true; otTab = 'live'; otPage = 1;
+  $('ot-login').classList.add('hidden');
+  $('ot-password').value = ''; otPasswordVisible(false);
+  $('ot-message').textContent = otStatus.notice || '';
+}, 'Reconnecting to OneTouch…'));
+$('ot-forget').addEventListener('click', () => otRun(async () => {
+  otStatus = await invoke('onetouch_forget');
+  $('ot-password').value = ''; $('ot-username').value = ''; otPasswordVisible(false);
+  $('ot-message').textContent = 'Saved sign-in removed.';
 }));
 $('ot-refresh').addEventListener('click', () => otRun(async () => {
   otStatus = await invoke('onetouch_refresh'); otInitialized = true; $('ot-message').textContent = '';
@@ -101,6 +130,13 @@ $('ot-refresh').addEventListener('click', () => otRun(async () => {
 async function stopOneTouch() {
   otPlayback++;
   clearTimeout(otTimer); otTimer = null;
+  if (otLivePlayer) {
+    clearTimeout(otLivePlayer.reconnectTID);
+    clearTimeout(otLivePlayer.disconnectTID);
+    otLivePlayer.ondisconnect();
+    otLivePlayer.remove(); otLivePlayer = null;
+  }
+  $('ot-live-video').classList.add('hidden');
   const v = $('ot-video'); v.pause(); v.removeAttribute('src'); v.load();
   $('ot-picture').removeAttribute('src'); $('ot-player').classList.add('hidden');
   try { await invoke('onetouch_stop'); } catch (_) {}
@@ -123,6 +159,45 @@ async function otPlayVideo(url, generation) {
     $('ot-player-note').textContent = e.name === 'NotAllowedError' ? 'Press Play to start video.' : 'Could not play this video. Refresh and try again.';
   });
 }
+// Use the engine's pinned MSE player for live H.264. WebKit rejects this
+// relay's raw MPEG-TS input even when a standalone decoder can play it.
+async function otPlayLive(url, generation) {
+  const source = new URL(url);
+  if (source.protocol !== 'ws:' || source.hostname !== '127.0.0.1') throw new Error('Invalid local video connection.');
+  if (!customElements.get('onetouch-live-player')) {
+    const { VideoRTC } = await import(`http://${source.host}/video-rtc.js`);
+    if (!customElements.get('onetouch-live-player')) customElements.define('onetouch-live-player', class extends VideoRTC {});
+  }
+  if (generation !== otPlayback) return;
+  const player = document.createElement('onetouch-live-player');
+  player.mode = 'mse';
+  player.visibilityCheck = false;
+  player.DISCONNECT_TIMEOUT = 0;
+  player.src = url;
+  otLivePlayer = player;
+  $('ot-video').classList.add('hidden');
+  $('ot-live-video').classList.remove('hidden');
+  $('ot-live-video').replaceChildren(player);
+  const v = player.video;
+  let lastTime = -1, lastProgress = Date.now();
+  const current = () => generation === otPlayback && otLivePlayer === player;
+  v.addEventListener('playing', () => {
+    if (current()) { $('ot-player-note').textContent = ''; lastProgress = Date.now(); }
+  });
+  v.addEventListener('error', () => {
+    if (current()) $('ot-player-note').textContent = 'Live video playback failed. Close video and try again.';
+  });
+  otTimer = setInterval(() => {
+    if (!current() || v.error) return;
+    if (v.currentTime > lastTime && v.readyState >= 2) {
+      lastTime = v.currentTime; lastProgress = Date.now(); $('ot-player-note').textContent = '';
+    } else if (v.paused && v.readyState >= 2) {
+      lastProgress = Date.now();
+    } else if (Date.now() - lastProgress > 20000) {
+      $('ot-player-note').textContent = 'No video received. Close video and try again.';
+    }
+  }, 1000);
+}
 async function otWatch(device) {
   await otRun(async () => {
     await stopOneTouch(); const generation = otPlayback;
@@ -130,7 +205,7 @@ async function otWatch(device) {
     const url = await invoke('onetouch_live', { deviceId: device.id });
     if (generation !== otPlayback) { await invoke('onetouch_stop'); return; }
     $('ot-message').textContent = '';
-    await otPlayVideo(url, generation);
+    await otPlayLive(url, generation);
   }, 'Opening live video…');
 }
 async function otLoadRecordings(page) {
