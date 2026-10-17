@@ -104,6 +104,9 @@ fn agent_builder() -> ureq::AgentBuilder {
         .timeout_read(Duration::from_secs(20))
         .timeout_write(Duration::from_secs(15))
         .redirects(0)
+        // The system's DNS first, a public resolver when it fails: some
+        // routers fail to resolve the vendor's domain.
+        .resolver(crate::dns::ureq_resolver)
 }
 fn agent() -> ureq::Agent {
     agent_builder().build()

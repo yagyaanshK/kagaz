@@ -6,9 +6,10 @@
 
 use super::blocking;
 use base64::Engine as _;
-use kagaz_core::intercom::onetouch::calls::CallDevice;
-use kagaz_core::intercom::onetouch::{self, Session};
+use kagaz_core::intercom::onetouch;
+use kagaz_core::intercom::onetouch::calls::{CallDevice, CallSetup};
 use kagaz_core::intercom::phone::{Event, MediaOut, Phone};
+use kagaz_core::intercom::SipAccount;
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
 use tauri::ipc::{Channel, InvokeResponseBody};
@@ -229,51 +230,133 @@ pub fn start(app: &AppHandle) {
             s.line = "connecting".into();
             s.detail = String::new();
         });
-        let setup = match Session::load() {
-            Ok(Some(session)) => session.call_setup(),
-            Ok(None) => {
-                update(&app, |s| {
-                    s.line = "signed_out".into();
-                    s.detail = "Sign in to OneTouch below to take its calls here.".into();
+        // A fresh setup from the window's own session (renewed, or signed
+        // in again from the saved login), kept for next time; when that
+        // fails, the line kept from last time: the call server is an
+        // address, so ringing needs neither DNS nor a live sign-in.
+        let (line, devices) = match fresh_setup(&app) {
+            Ok(setup) => {
+                if setup.rtp_scrambled {
+                    update(&app, |s| {
+                        s.detail =
+                            "This account scrambles call media; calls may ring but stay silent."
+                                .into()
+                    });
+                }
+                save_line(&SavedLine {
+                    line: setup.line.clone(),
+                    devices: setup.devices.clone(),
                 });
-                return;
+                (setup.line, setup.devices)
             }
-            Err(e) => Err(e),
+            Err((line_state, detail)) => match load_line() {
+                Some(saved) => {
+                    eprintln!("calls: {detail}; using the saved call line");
+                    (saved.line, saved.devices)
+                }
+                None => {
+                    eprintln!("calls: {detail}");
+                    update(&app, |s| {
+                        s.line = line_state.into();
+                        s.detail = detail;
+                    });
+                    return;
+                }
+            },
         };
-        let setup = match setup {
-            Ok(s) => s,
-            Err(onetouch::Error::Expired) => {
-                update(&app, |s| {
-                    s.line = "expired".into();
-                    s.detail = "The OneTouch sign-in has expired. Reconnect it below, then turn calls on again.".into();
-                });
-                return;
-            }
-            Err(e) => {
-                update(&app, |s| {
-                    s.line = "down".into();
-                    s.detail = e.to_string();
-                });
-                return;
-            }
-        };
-        update(&app, |s| s.devices = setup.devices.clone());
-        if setup.rtp_scrambled {
-            update(&app, |s| {
-                s.detail =
-                    "This account scrambles call media; calls may ring but stay silent.".into()
-            });
-        }
+        update(&app, |s| s.devices = devices.clone());
         let (a1, a2) = (app.clone(), app.clone());
-        let phone = Phone::start(
-            setup.line.clone(),
-            move |e| on_event(&a1, e),
-            move |m| on_media(&a2, m),
-        );
+        let phone = Phone::start(line, move |e| on_event(&a1, e), move |m| on_media(&a2, m));
         *state.phone.lock().unwrap() = Some(phone);
         #[cfg(mobile)]
         super::mobile::keep_listening(&app, true);
     });
+}
+
+/// The call setup from a live OneTouch session, or why there is none
+/// (the line state to show, and the detail).
+fn fresh_setup(app: &AppHandle) -> Result<CallSetup, (&'static str, String)> {
+    let session = match super::onetouch::session_for_calls(app) {
+        Ok(Some(session)) => session,
+        Ok(None) => {
+            return Err((
+                "signed_out",
+                "Sign in to OneTouch below to take its calls here.".into(),
+            ))
+        }
+        Err(e) => return Err(("down", e)),
+    };
+    session.call_setup().map_err(|e| match e {
+        onetouch::Error::Expired => (
+            "expired",
+            "The OneTouch sign-in has expired. Reconnect it below.".into(),
+        ),
+        e => ("down", e.to_string()),
+    })
+}
+
+/// The account's call line as last set up, so the bell rings without a
+/// live sign-in. It holds the line's own password (not the account's), so
+/// it lives in a file only this user can read, and goes on sign-out.
+#[derive(Serialize, Deserialize)]
+struct SavedLine {
+    line: SipAccount,
+    devices: Vec<CallDevice>,
+}
+
+fn line_path() -> std::path::PathBuf {
+    kagaz_core::paths::config_dir().join("onetouch-line.json")
+}
+
+fn save_line(saved: &SavedLine) {
+    let path = line_path();
+    let Some(dir) = path.parent() else {
+        return;
+    };
+    let _ = std::fs::create_dir_all(dir);
+    let Ok(text) = serde_json::to_vec(saved) else {
+        return;
+    };
+    let temp = dir.join(".onetouch-line.tmp");
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let written = options.open(&temp).and_then(|mut f| {
+        use std::io::Write;
+        f.write_all(&text)?;
+        f.sync_all()
+    });
+    if written.is_ok() {
+        let _ = std::fs::rename(&temp, &path);
+    } else {
+        let _ = std::fs::remove_file(&temp);
+    }
+}
+
+fn load_line() -> Option<SavedLine> {
+    serde_json::from_slice(&std::fs::read(line_path()).ok()?).ok()
+}
+
+/// Signing out of OneTouch also forgets the call line and stops it.
+pub fn forget_line(app: &AppHandle) {
+    let _ = std::fs::remove_file(line_path());
+    start(app);
+}
+
+/// After a OneTouch sign-in: bring the line up if it was waiting for one.
+pub fn signed_in(app: &AppHandle) {
+    let state = app.state::<CallsState>();
+    let waiting = {
+        let s = state.status.lock().unwrap();
+        s.enabled && matches!(s.line.as_str(), "signed_out" | "expired" | "down")
+    };
+    if waiting {
+        start(app);
+    }
 }
 
 fn with_phone(app: &AppHandle, f: impl FnOnce(&Phone)) -> Result<(), String> {

@@ -23,6 +23,12 @@ struct Inner {
     recordings: Vec<Recording>,
     engine: Option<Engine>,
     bridge: Option<onetouch::rtsp::Bridge>,
+    /// The saved password was refused on an automatic sign-in: no more
+    /// automatic attempts until the person signs in by hand.
+    auto_blocked: bool,
+    last_auto: Option<std::time::Instant>,
+    /// The person signed out: no automatic sign-in until they sign in again.
+    signed_out: bool,
 }
 #[derive(Serialize)]
 pub struct Status {
@@ -74,6 +80,7 @@ impl Inner {
     fn load(&mut self) -> Result<(), String> {
         if !self.loaded {
             self.session = Session::load().map_err(|e| e.to_string())?;
+            self.signed_out = signed_out_marker().exists();
             self.read_saved();
             self.loaded = true;
         }
@@ -95,6 +102,63 @@ impl Inner {
         self.loaded = true;
         Ok(())
     }
+    /// Sign in again from the saved login when there is no session, so the
+    /// person is not asked to press Reconnect. At most once a minute, and
+    /// never again after the password was refused. Ok(true) when signed in.
+    fn auto_reconnect(&mut self) -> Result<bool, String> {
+        if self.session.is_some() {
+            return Ok(true);
+        }
+        if self.auto_blocked
+            || self.signed_out
+            || self
+                .last_auto
+                .is_some_and(|t| t.elapsed() < std::time::Duration::from_secs(60))
+        {
+            return Ok(false);
+        }
+        let saved = credentials::read().inspect_err(|e| {
+            eprintln!("onetouch: cannot read the saved sign-in: {e}");
+        })?;
+        let Some(saved) = saved else {
+            eprintln!("onetouch: no saved sign-in to reconnect with");
+            return Ok(false);
+        };
+        self.last_auto = Some(std::time::Instant::now());
+        eprintln!("onetouch: signing in again from the saved sign-in");
+        match Session::login_with_provider(
+            saved.account.provider,
+            &saved.account.username,
+            &saved.password,
+            &saved.account.legacy_device,
+        ) {
+            Ok((session, account)) => {
+                self.accept(session, account)?;
+                self.notice.clear();
+                self.saved = Some(saved.account);
+                Ok(true)
+            }
+            Err(onetouch::Error::Credentials) => {
+                eprintln!("onetouch: the saved password was refused");
+                self.auto_blocked = true;
+                self.notice = "The saved OneTouch password was not accepted. Sign in again.".into();
+                Ok(false)
+            }
+            Err(e) => {
+                eprintln!("onetouch: signing in again failed: {e}");
+                Err(e.to_string())
+            }
+        }
+    }
+    /// The session failed for a reason other than the network (an expired
+    /// token can come back as other errors once its refresh is refused):
+    /// drop it and sign in again from the saved login.
+    fn sign_in_again(&mut self) -> bool {
+        self.stop();
+        self.session = None;
+        self.account = None;
+        self.auto_reconnect().unwrap_or(false)
+    }
     fn cloud_error(&mut self, e: onetouch::Error) -> String {
         if matches!(e, onetouch::Error::Expired) {
             self.stop();
@@ -113,6 +177,13 @@ pub async fn onetouch_status(app: AppHandle) -> Result<Status, String> {
         let state = app.state::<OneTouchState>();
         let mut s = state.0.lock().unwrap();
         s.load()?;
+        let was_out = s.session.is_none();
+        if let Err(e) = s.auto_reconnect() {
+            s.notice = format!("Could not reconnect to OneTouch: {e}");
+        }
+        if was_out && s.session.is_some() {
+            super::calls::signed_in(&app);
+        }
         Ok(s.status())
     })
     .await
@@ -138,6 +209,10 @@ pub async fn onetouch_login(
         .map_err(|e| e.to_string())?;
         s.accept(session, account)?;
         s.notice.clear();
+        s.auto_blocked = false;
+        s.signed_out = false;
+        let _ = std::fs::remove_file(signed_out_marker());
+        super::calls::signed_in(&app);
         let stored = if remember.unwrap_or(false) {
             credentials::save(&SavedLogin {
                 account: SavedAccount {
@@ -158,7 +233,8 @@ pub async fn onetouch_login(
     })
     .await
 }
-/// Replays saved credentials only when the user explicitly clicks Reconnect.
+/// Replays the saved credentials now. The same happens automatically when
+/// the session has expired (see `Inner::auto_reconnect`).
 #[tauri::command]
 pub async fn onetouch_reconnect(app: AppHandle) -> Result<Status, String> {
     super::blocking(move || {
@@ -179,7 +255,11 @@ pub async fn onetouch_reconnect(app: AppHandle) -> Result<Status, String> {
         .map_err(|e| e.to_string())?;
         s.accept(session, account)?;
         s.notice.clear();
+        s.auto_blocked = false;
+        s.signed_out = false;
+        let _ = std::fs::remove_file(signed_out_marker());
         s.saved = Some(saved.account);
+        super::calls::signed_in(&app);
         Ok(s.status())
     })
     .await
@@ -210,7 +290,11 @@ pub async fn onetouch_logout(app: AppHandle) -> Result<(), String> {
         s.account = None;
         s.recordings.clear();
         s.loaded = true;
-        Session::logout().map_err(|e| e.to_string())
+        s.signed_out = true;
+        let _ = std::fs::write(signed_out_marker(), b"");
+        let result = Session::logout().map_err(|e| e.to_string());
+        super::calls::forget_line(&app);
+        result
     })
     .await
 }
@@ -225,7 +309,13 @@ pub async fn onetouch_refresh(app: AppHandle) -> Result<Status, String> {
         };
         match session.account() {
             Ok(account) => s.account = Some(account),
-            Err(e) => return Err(s.cloud_error(e)),
+            Err(e) => {
+                let network = matches!(e, onetouch::Error::Network);
+                let message = s.cloud_error(e);
+                if network || !s.sign_in_again() {
+                    return Err(message);
+                }
+            }
         }
         Ok(s.status())
     })
@@ -345,6 +435,46 @@ pub async fn onetouch_recording_media(
     .await
 }
 
+/// Present while the person has signed out, so a restart does not sign
+/// them back in automatically.
+fn signed_out_marker() -> std::path::PathBuf {
+    kagaz_core::paths::config_dir().join("onetouch-signed-out")
+}
+
+/// A live session for the call line: the window's own session, checked
+/// with the cloud (renewing its token, or signing in again from the saved
+/// login when it has expired). All under the account lock, so the window's
+/// copy never goes stale. Ok(None) when there is no session and no saved
+/// login to make one.
+pub fn session_for_calls(app: &AppHandle) -> Result<Option<Session>, String> {
+    let state = app.state::<OneTouchState>();
+    let mut s = state.0.lock().unwrap();
+    s.load()?;
+    if !s.auto_reconnect()? {
+        return Ok(None);
+    }
+    for attempt in 0..2 {
+        let Some(session) = s.session.as_mut() else {
+            return Ok(None);
+        };
+        match session.account() {
+            Ok(account) => {
+                let _ = session.save();
+                let fresh = session.clone();
+                s.account = Some(account);
+                return Ok(Some(fresh));
+            }
+            Err(e) => {
+                let network = matches!(e, onetouch::Error::Network);
+                let message = s.cloud_error(e);
+                if network || attempt == 1 || !s.sign_in_again() {
+                    return Err(message);
+                }
+            }
+        }
+    }
+    Ok(None)
+}
 
 #[cfg(test)]
 mod tests {

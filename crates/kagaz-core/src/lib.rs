@@ -4,6 +4,7 @@
 pub mod cameras;
 pub mod device;
 pub mod discovery;
+pub mod dns;
 pub mod drivers;
 pub mod explain;
 pub mod extras;
