@@ -158,7 +158,7 @@ async function otLoadRecordings(page) {
     }
     container.append(row);
   }
-  $('ot-message').textContent = list.message || (list.entries.length ? '' : 'No cloud recordings or snapshots on this page. Footage stored only on the Hall unit is not included.');
+  $('ot-message').textContent = list.message || (list.entries.length ? '' : 'No cloud recordings or snapshots on this page. Footage stored only on an indoor monitor is not included.');
 }
 $('ot-live-tab').addEventListener('click', () => otRun(async () => { await stopOneTouch(); otTab = 'live'; }));
 $('ot-recordings-tab').addEventListener('click', () => otRun(async () => { otTab = 'recordings'; await otLoadRecordings(1); }, 'Loading recordings…'));
