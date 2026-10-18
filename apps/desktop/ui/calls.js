@@ -156,6 +156,10 @@
       $("call-video-note").textContent = s.video ? "Answer to see the camera" : "";
       card.dataset.ended = "";
     }
+    // The caller's live view while it rings, and after answering until the
+    // call's own picture shows.
+    if (phase === "ringing" || (phase === "talking" && !(player && player.stats.shown))) startPreview();
+    else stopPreview();
     if (phase !== "ringing" && ringing) {
       ringing = false;
       if (typeof stopChime === "function") stopChime();
@@ -165,7 +169,7 @@
       startClock(s.since);
       startAudio();
       startPlayer();
-      if (!s.video) $("call-video-note").textContent = "No camera on this call";
+      if (!s.video && !preview) $("call-video-note").textContent = "No camera on this call";
     } else {
       stopClock();
     }
@@ -226,6 +230,7 @@
   function startPlayer() {
     if (player) return;
     stage = new KagazPlayer.Stage($("call-video"), { title: (status && status.peer) || "", badge: "CALL", sound: true, level: true, volume: userVolume, label: "call" });
+    stage.el.classList.add("call-stage");
     player = stage.player;
     $("call-video").classList.add("has-stage");
     // In full screen the card's buttons are out of sight: the two that
@@ -235,10 +240,94 @@
     // What happened to the camera on this call, said on the card when no
     // picture shows: nothing arrived, or it arrived and could not be shown.
     videoWatch = setInterval(() => {
-      if (!player || !status || status.phase !== "talking" || !status.video) return;
-      $("call-video-note").textContent = videoNote();
+      if (!player || !status || status.phase !== "talking") return;
+      // The call's own picture is up: the live view has done its job.
+      if (player.stats.shown && preview) stopPreview();
+      if (preview && preview.stage.player.stats.shown) {
+        $("call-video-note").textContent = "";
+        return;
+      }
+      if (status.video) $("call-video-note").textContent = videoNote();
     }, 1000);
+    if (preview) addCallButtons(preview);
   }
+
+  // Open door and Hang up over a picture, for full screen.
+  function addCallButtons(st) {
+    if (st.buttons) return;
+    st.buttons = true;
+    st.stage.button("Open door", "Open door", () => $("call-open").click(), "kz-word kz-full-only kz-open");
+    st.stage.button("Hang up", "Hang up", () => $("call-hangup").click(), "kz-word kz-full-only kz-danger");
+  }
+
+  // ---------- the caller's live view ----------
+  // As in the OneTouch app, the caller's picture shows as soon as it
+  // rings: the account's live view of that device (a call's own video
+  // starts only once answered). After answering it stays until the call's
+  // picture shows, and goes if the relay ends it. Out of sight it stops,
+  // and starts again on return.
+
+  let preview = null; // { stage, handle, buttons }
+  let previewRetry = null;
+
+  function liveDeviceOf(peer) {
+    if (typeof otCards !== "function") return null;
+    const name = (peer || "").trim().toLowerCase();
+    const card = otCards().find((c) => c.name.trim().toLowerCase() === name && c.live && c.live.can_monitor);
+    return card ? card.live : null;
+  }
+
+  async function startPreview() {
+    if (preview || document.hidden || !status) return;
+    const device = liveDeviceOf(status.peer);
+    if (!device) {
+      // The account's devices may still be loading (the window just opened
+      // for this ring): look again shortly.
+      if (!previewRetry) previewRetry = setTimeout(() => {
+        previewRetry = null;
+        if (status && (status.phase === "ringing" || status.phase === "talking")) startPreview();
+      }, 1000);
+      return;
+    }
+    if (typeof otStopLive === "function") otStopLive(); // one live view at a time
+    const st = new KagazPlayer.Stage($("call-video"), { title: device.name, badge: "LIVE", sound: false, label: `ring ${device.name}` });
+    st.el.classList.add("call-preview");
+    st.setNote("Connecting to the camera\u2026");
+    const p = { stage: st, handle: null, buttons: false };
+    preview = p;
+    $("call-video").classList.add("has-stage", "previewing");
+    $("call-video-note").textContent = "";
+    if (status.phase === "talking") addCallButtons(p);
+    st.player.onended = () => {
+      if (preview !== p) return;
+      stopPreview();
+      // Ringing: say so on the card; talking: the call's picture takes over.
+      if (status && status.phase === "ringing" && status.video) $("call-video-note").textContent = "Answer to see the camera";
+    };
+    try {
+      p.handle = await KagazPlayer.watch(st.player, "onetouch_watch", { deviceId: device.id });
+      if (preview !== p) p.handle.stop();
+    } catch (e) {
+      if (preview === p) st.player.onended();
+    }
+  }
+
+  function stopPreview() {
+    clearTimeout(previewRetry);
+    previewRetry = null;
+    if (!preview) return;
+    const p = preview;
+    preview = null;
+    if (p.handle) p.handle.stop();
+    p.stage.stop();
+    $("call-video").classList.remove("previewing");
+    if (!stage) $("call-video").classList.remove("has-stage");
+  }
+
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) stopPreview();
+    else if (status) render(status);
+  });
 
   // Why no picture shows, in words: the page's own view once pictures
   // reach it, else what the line saw on the network.

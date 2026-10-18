@@ -290,6 +290,8 @@ body.kz-has-full { overflow: hidden; }
 .call-video.has-stage { aspect-ratio: auto; background: none; }
 .call-video-note { position: absolute; inset: 0; z-index: 1; display: flex; align-items: center; justify-content: center; color: #ddd; font-size: 13px; padding: 0 12px; text-align: center; pointer-events: none; }
 .call-video-note:empty { display: none; }
+/* While the caller's live view shows, the call's own (still black) picture waits behind it. */
+.call-video.previewing > .call-stage { display: none; }
 .call-clock { position: absolute; z-index: 1; top: 44px; right: 10px; color: #fff; font-size: 12px; background: rgba(0, 0, 0, 0.45); padding: 2px 8px; border-radius: 999px; }
 .call-who { display: flex; flex-direction: column; gap: 2px; }
 .call-who #call-peer { font-size: 20px; font-weight: 600; }
