@@ -1,7 +1,7 @@
 // OneTouch account/video UI. Account credentials stay in Rust; this receives
 // device metadata and only the selected recording's temporary media URL.
-// Live view plays inside the device's own card with the window's player
-// (player.js): Rust talks to the relay, the page decodes the pictures.
+// Each device is one card for both watching and calling; live view and
+// calls play inside the card with the window's player (player.js).
 let otStatus = null;
 let otBusy = false;
 let otTab = 'live';
@@ -10,7 +10,7 @@ let otMore = false;
 let otPlayback = 0;
 let otTimer = null;
 let otInitialized = false;
-let otLive = null; // { deviceId, player, handle, card, timer }
+let otLive = null; // { key, deviceId, stage, handle, timer }
 
 function otPasswordVisible(visible) {
   $('ot-password').type = visible ? 'text' : 'password';
@@ -47,9 +47,10 @@ function otRender() {
   $('ot-account-name').textContent = signed ? `Signed in as ${otStatus.username}` : 'Live video and recordings through your OneTouch account.';
   otRenderDevices();
   if (signed && !(otStatus.devices || []).length) {
-    const note = document.createElement('p'); note.className = 'muted'; note.textContent = 'No doorbells loaded. Try Refresh devices.'; $('ot-devices').append(note);
+    const note = document.createElement('p'); note.className = 'muted'; note.textContent = 'No doorbells loaded. Try Refresh devices in the \u22EF menu.'; $('ot-devices').append(note);
   }
   $('ot-devices').classList.toggle('hidden', otTab !== 'live');
+  if ($('ot-dial-box')) $('ot-dial-box').classList.toggle('hidden', otTab !== 'live');
   $('ot-recordings-pane').classList.toggle('hidden', otTab !== 'recordings');
   for (const [id, on] of [['ot-live-tab', otTab === 'live'], ['ot-recordings-tab', otTab === 'recordings']]) {
     $(id).setAttribute('aria-pressed', String(on)); $(id).classList.toggle('active', on);
@@ -60,30 +61,154 @@ function otRender() {
   document.querySelectorAll('#ot-recordings button').forEach(b => { b.disabled = otBusy; });
 }
 
-// One card per device; the one being watched holds the picture.
-function otRenderDevices() {
-  const list = $('ot-devices');
-  list.replaceChildren();
-  for (const device of otStatus?.devices || []) {
-    const card = document.createElement('div'); card.className = 'ot-device'; card.dataset.id = device.id;
-    const name = document.createElement('strong'); name.textContent = device.name;
-    const note = document.createElement('span'); note.className = 'muted small ot-device-note';
-    note.textContent = device.can_monitor ? 'Live view available' : 'Live monitoring is not enabled for this device';
-    const buttons = document.createElement('div'); buttons.className = 'ot-device-buttons';
-    const watching = otLive && otLive.deviceId === device.id;
-    const button = document.createElement('button'); button.type = 'button';
-    button.textContent = watching ? 'Close' : 'Watch live';
-    button.className = watching ? '' : 'accent';
-    button.disabled = otBusy || !device.can_monitor;
-    button.addEventListener('click', () => (watching ? stopOneTouch() : otWatch(device)));
-    buttons.append(button);
-    card.append(name, buttons, note);
-    if (watching) {
-      card.classList.add('watching');
-      card.append(otLive.box);
-    }
-    list.append(card);
+// ---------- the account's devices: one list for watching and calling ----------
+// The cloud describes each device twice: once for live view (its id, may
+// it be watched) and once for calls (its number, its door key). Both carry
+// the same name, so each device is one card. Tapping a card opens it: its
+// live view starts inside it when it has one, and its Call button appears
+// under the picture. The call itself (calls.js) then plays in the same
+// card. Calls arrive whether or not a card is open.
+
+const OT_KIND = { door: "Door station", indoor: "Indoor monitor", guard: "Guard phone", apps: "Your other phones", other: "Device" };
+const OT_LIVE_KIND = { "0": "door", "1": "door", "2": "indoor", "3": "guard" };
+const OT_ORDER = { door: 0, indoor: 1, guard: 2, other: 3, apps: 4 };
+const OT_ICON = {
+  door: '<svg viewBox="0 0 24 24"><path d="M6 3h12v18H6zM10 8h4M12 13a1.5 1.5 0 1 0 0 .01M9 18h6"/></svg>',
+  indoor: '<svg viewBox="0 0 24 24"><path d="M3 5h18v11H3zM8 20h8M12 16v4"/></svg>',
+  guard: '<svg viewBox="0 0 24 24"><path d="M12 3l8 3v6c0 4.5-3.5 8-8 9-4.5-1-8-4.5-8-9V6z"/></svg>',
+  apps: '<svg viewBox="0 0 24 24"><path d="M8 3h8v18H8zM11 18h2"/></svg>',
+  other: '<svg viewBox="0 0 24 24"><path d="M4 4h16v16H4z"/></svg>',
+};
+let otOpen = null; // the key of the open card
+
+function otCallStatus() {
+  return (window.KagazCalls && window.KagazCalls.status()) || null;
+}
+
+// Every device of the account, once, door stations first.
+function otCards() {
+  const norm = (n) => (n || "").trim().toLowerCase();
+  const cards = [];
+  const byName = new Map();
+  for (const d of otStatus?.devices || []) {
+    const card = { key: `live:${d.id}`, name: d.name, live: d, call: null, kind: OT_LIVE_KIND[d.kind] || "other", online: d.status !== "0" };
+    cards.push(card);
+    byName.set(norm(d.name), card);
   }
+  const calls = otCallStatus();
+  for (const d of (calls && calls.devices) || []) {
+    const card = byName.get(norm(d.name));
+    if (card && !card.call) {
+      card.call = d;
+      card.kind = d.kind || card.kind;
+      card.online = d.online;
+    } else {
+      cards.push({ key: `call:${d.sip}`, name: d.name, live: null, call: d, kind: d.kind || "other", online: d.online });
+    }
+  }
+  return cards
+    .map((c, i) => ({ c, i }))
+    .sort((a, b) => (OT_ORDER[a.c.kind] ?? 3) - (OT_ORDER[b.c.kind] ?? 3) || a.i - b.i)
+    .map(({ c }) => c);
+}
+
+function otRenderDevices() {
+  const list = $("ot-devices");
+  // A call may be playing inside a card: keep it out of the rebuild
+  // (calls.js puts it back where it belongs).
+  const callCard = $("call-card");
+  if (callCard && $("call-slot") && list.contains(callCard)) $("call-slot").appendChild(callCard);
+  list.replaceChildren();
+  const cards = otCards();
+  if (otOpen && !cards.some((c) => c.key === otOpen)) otOpen = null;
+  const calls = otCallStatus();
+  const lineUp = calls && calls.line === "up";
+  const busy = calls && calls.phase && calls.phase !== "idle";
+  for (const c of cards) {
+    const open = otOpen === c.key;
+    const watching = otLive && otLive.key === c.key;
+    const el = document.createElement("div");
+    el.className = "dev-card";
+    el.dataset.key = c.key;
+    el.dataset.name = c.name.trim().toLowerCase();
+    el.classList.toggle("open", open);
+    el.classList.toggle("watching", !!watching);
+    el.classList.toggle("offline", !c.online);
+
+    const head = document.createElement("button");
+    head.type = "button";
+    head.className = "dev-head";
+    head.setAttribute("aria-expanded", String(open));
+    const icon = document.createElement("span");
+    icon.className = "dev-icon";
+    icon.innerHTML = OT_ICON[c.kind] || OT_ICON.other;
+    const text = document.createElement("span");
+    text.className = "dev-text";
+    const name = document.createElement("strong");
+    name.textContent = c.name;
+    const sub = document.createElement("span");
+    sub.className = "muted small";
+    const canWatch = !!(c.live && c.live.can_monitor);
+    sub.textContent = [OT_KIND[c.kind] || OT_KIND.other, c.online ? "" : "offline", canWatch ? "live view" : ""].filter(Boolean).join(" · ");
+    text.append(name, sub);
+    const go = document.createElement("span");
+    go.className = "dev-go";
+    go.setAttribute("aria-hidden", "true");
+    go.textContent = open ? "✕" : canWatch ? "▶" : "›";
+    head.append(icon, text, go);
+    head.disabled = otBusy;
+    head.title = open ? "Close" : canWatch ? "Watch live" : "Open";
+    head.addEventListener("click", () => (open ? otClose() : otOpenCard(c)));
+    el.append(head);
+
+    const slot = document.createElement("div");
+    slot.className = "dev-slot";
+    el.append(slot);
+    if (watching) slot.append(otLive.stage.el);
+
+    if (open) {
+      const actions = document.createElement("div");
+      actions.className = "dev-actions";
+      const note = document.createElement("p");
+      note.className = "muted small dev-note";
+      if (c.call && !busy) {
+        const call = document.createElement("button");
+        call.type = "button";
+        call.className = "accent big";
+        call.textContent = c.kind === "apps" ? "Ring them" : "Call";
+        call.disabled = !lineUp || busy;
+        call.addEventListener("click", () => window.KagazCalls.call(c.call.sip, c.key));
+        actions.append(call);
+        if (!lineUp) note.textContent = calls && calls.line === "off" ? "Turn on “Ring me here” above to make calls." : "Calls connect once the call line is up (see above).";
+      }
+      if (watching) {
+        note.textContent = [note.textContent, "Live view is picture only: the door sends its sound in a call."].filter(Boolean).join(" ");
+      } else if (!canWatch) {
+        note.textContent = [note.textContent, c.live ? "OneTouch does not allow live view of this device." : c.kind === "apps" ? "Rings the other phones and tablets signed in to this account." : ""].filter(Boolean).join(" ");
+      }
+      actions.append(note);
+      el.append(actions);
+    }
+    list.append(el);
+  }
+  if (window.KagazCalls) window.KagazCalls.place();
+}
+
+async function otOpenCard(card) {
+  KagazPlayer.audioContext(); // a tap is what lets the page make sound later
+  await otStopLive();
+  otOpen = card.key;
+  if (card.live && card.live.can_monitor) await otWatch(card);
+  else otRenderDevices();
+  // The open card comes to the top, so its picture has the screen.
+  const el = document.querySelector(`.dev-card[data-key="${CSS.escape(card.key)}"]`);
+  if (el) el.scrollIntoView({ block: "start", behavior: "smooth" });
+}
+
+async function otClose() {
+  otOpen = null;
+  await otStopLive();
+  otRenderDevices();
 }
 
 async function otRun(work, message = '') {
@@ -153,17 +278,22 @@ $('ot-refresh').addEventListener('click', () => otRun(async () => {
   otStatus = await invoke('onetouch_refresh'); otInitialized = true; $('ot-message').textContent = '';
 }, 'Refreshing OneTouch devices…'));
 
+// Stop the live view (the card stays open).
+async function otStopLive() {
+  if (!otLive) return;
+  const live = otLive;
+  otLive = null;
+  clearInterval(live.timer);
+  if (live.handle) live.handle.stop();
+  live.stage.stop();
+  otRenderDevices();
+}
+
 // Stop whatever plays: the live view in a card, or a recording.
 async function stopOneTouch() {
   otPlayback++;
   clearTimeout(otTimer); otTimer = null;
-  if (otLive) {
-    const live = otLive; otLive = null;
-    clearInterval(live.timer);
-    if (live.handle) live.handle.stop(); else live.player.stop();
-    live.box.remove();
-    otRenderDevices();
-  }
+  await otStopLive();
   const v = $('ot-video'); v.pause(); v.removeAttribute('src'); v.load();
   $('ot-picture').removeAttribute('src'); $('ot-player').classList.add('hidden');
   try { await invoke('onetouch_stop'); } catch (_) {}
@@ -188,40 +318,33 @@ async function otPlayVideo(url, generation) {
 }
 
 // Live view inside the device's card: Rust speaks to the relay, the page
-// decodes the pictures and plays the sound (the click allows sound).
-async function otWatch(device) {
-  await stopOneTouch();
-  KagazPlayer.audioContext();
-  const box = document.createElement('div'); box.className = 'ot-live';
-  const note = document.createElement('div'); note.className = 'ot-live-note'; note.textContent = 'Connecting…';
-  const tools = document.createElement('div'); tools.className = 'ot-live-tools';
-  const sound = document.createElement('button'); sound.type = 'button'; sound.className = 'on'; sound.textContent = '\u{1F50A}'; sound.title = 'Sound';
-  tools.append(sound);
-  const player = new KagazPlayer.Player(box, { sound: true, volume: 1, label: `doorbell ${device.name}` });
-  box.append(note, tools);
-  sound.addEventListener('click', () => { player.sound = !player.sound; sound.classList.toggle('on', player.sound); sound.textContent = player.sound ? '\u{1F50A}' : '\u{1F507}'; });
-  const live = { deviceId: device.id, player, handle: null, box, timer: null };
+// decodes the pictures (player.js). The relay sends no sound for live
+// view; the door's sound comes in a call.
+async function otWatch(card) {
+  const device = card.live;
+  const stage = new KagazPlayer.Stage(document.createDocumentFragment(), { title: device.name, badge: "LIVE", sound: false, label: `doorbell ${device.name}` });
+  stage.setNote("Connecting…");
+  const live = { key: card.key, deviceId: device.id, stage, handle: null, timer: null };
   otLive = live;
   otRenderDevices();
-  // The card says what is happening until the first picture shows.
+  // The picture says what is happening until the first picture shows.
   live.timer = setInterval(() => {
     if (otLive !== live) return;
-    const text = player.note();
-    note.textContent = text;
-    note.classList.toggle('hidden', !text);
+    if (live.stage.player.stats.shown === 0) stage.setNote(live.stage.player.note());
   }, 500);
-  player.onended = (why) => {
+  stage.player.onended = (why) => {
     if (otLive !== live) return;
     clearInterval(live.timer);
-    note.classList.remove('hidden');
-    note.textContent = why ? `Live view ended: ${why}` : 'Live view ended';
+    stage.setIdle(true);
+    stage.setBadge("");
+    stage.setNote(why ? `Live view ended: ${why}. Tap ▶ to watch again.` : "Live view ended.");
   };
   $('ot-message').textContent = '';
   try {
-    live.handle = await KagazPlayer.watch(player, 'onetouch_watch', { deviceId: device.id });
+    live.handle = await KagazPlayer.watch(stage.player, 'onetouch_watch', { deviceId: device.id });
     if (otLive !== live) live.handle.stop();
   } catch (e) {
-    if (otLive === live) { clearInterval(live.timer); note.classList.remove('hidden'); note.textContent = String(e); }
+    if (otLive === live) { clearInterval(live.timer); stage.setIdle(true); stage.setBadge(""); stage.setNote(String(e)); }
   }
 }
 async function otLoadRecordings(page) {

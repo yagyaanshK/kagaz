@@ -1,25 +1,27 @@
 // Doorbell calls through the OneTouch cloud: the account's app line rings
-// here. A ring brings up the call card; a call shows the caller's camera,
-// plays their voice (levelled) and sends the microphone. Each device of the
-// account has a Call button. The picture and voice go through the window's
-// player (player.js). Uses app.js's globals: $, invoke, listen,
+// here. A ring brings up the call card at the top of the Doorbell pane; a
+// call shows the caller's camera, plays their voice (levelled) and sends
+// the microphone. The devices to call are the Doorbell pane's cards
+// (onetouch.js), which call through KagazCalls.call; a call made from a
+// card plays inside that card. The picture and voice go through the
+// window's player (player.js). Uses app.js's globals: $, invoke, listen,
 // selectCategory, startChime, stopChime.
 
 (() => {
   const PANEL = `
-    <div id="calls-panel" class="calls-panel">
-      <div class="calls-head">
-        <div>
-          <h3>Calls</h3>
+      <div id="calls-panel" class="calls-panel">
+        <div class="calls-head">
           <p id="calls-line" class="muted small"></p>
+          <label class="switch" title="Ring here when someone calls the OneTouch account">
+            <input id="calls-enabled" type="checkbox"> <span>Ring me here</span>
+          </label>
         </div>
-        <label class="switch" title="Ring here when someone calls the OneTouch account">
-          <input id="calls-enabled" type="checkbox"> <span>Ring me here</span>
-        </label>
-      </div>
-      <div id="calls-retry-row" class="actions hidden">
-        <button id="calls-retry" type="button">Try again</button>
-      </div>
+        <div id="calls-retry-row" class="actions hidden">
+          <button id="calls-retry" type="button">Try again</button>
+        </div>
+        <div id="call-slot"></div>
+      </div>`;
+  const CARD = `
       <div id="call-card" class="hidden">
         <div id="call-video" class="call-video">
           <div id="call-video-note" class="call-video-note"></div>
@@ -42,16 +44,19 @@
           </label>
           <p id="call-note" class="muted small"></p>
         </div>
-      </div>
-      <ul id="calls-devices" class="calls-devices"></ul>
-      <form id="calls-dial" class="calls-dial">
-        <input id="calls-number" type="text" inputmode="numeric" autocomplete="off" placeholder="Another OneTouch number, e.g. a family member's app">
-        <button type="submit">Call</button>
-      </form>
-    </div>`;
+      </div>`;
+  const DIAL = `
+      <details id="ot-dial-box" class="calls-more">
+        <summary>Call another number</summary>
+        <form id="calls-dial" class="calls-dial">
+          <input id="calls-number" type="text" inputmode="numeric" autocomplete="off" placeholder="A OneTouch number, e.g. a family member's app">
+          <button type="submit">Call</button>
+        </form>
+      </details>`;
 
-  const head = document.querySelector("#doorbell .cam-head");
-  head.insertAdjacentHTML("afterend", PANEL);
+  $("calls-host").innerHTML = PANEL;
+  $("call-slot").innerHTML = CARD;
+  $("ot-devices").insertAdjacentHTML("afterend", DIAL);
 
   let status = null;
   let clockTimer = null;
@@ -64,7 +69,7 @@
     connecting: "Connecting to OneTouch…",
     up: "Ringing here for OneTouch calls.",
     down: "Not connected",
-    signed_out: "Sign in to OneTouch below to take its calls here.",
+    signed_out: "Sign in to OneTouch to take its calls here.",
     expired: "The OneTouch sign-in has expired.",
   };
 
@@ -76,30 +81,50 @@
     $("calls-line").classList.toggle("cap-ok", s.line === "up");
     $("calls-line").classList.toggle("cap-warn", ["down", "expired", "signed_out"].includes(s.line));
     $("calls-retry-row").classList.toggle("hidden", !["down", "expired", "signed_out"].includes(s.line) || !s.enabled);
-    renderDevices(s);
     $("calls-dial").querySelector("button").disabled = s.line !== "up" || (s.phase && s.phase !== "idle");
     renderCard(s);
+    // The device cards show Call buttons by the line's state, and hold the call.
+    if (typeof otRenderDevices === "function") otRenderDevices();
+    else place();
   }
 
-  function renderDevices(s) {
-    const ul = $("calls-devices");
-    ul.innerHTML = "";
-    const busy = s.phase && s.phase !== "idle";
-    for (const d of s.devices || []) {
-      const li = document.createElement("li");
-      li.innerHTML = `<span class="name"></span><span class="muted small"></span><button type="button">Call</button>`;
-      li.querySelector(".name").textContent = d.name;
-      const kind = { door: "door station", indoor: "indoor monitor", guard: "guard phone", apps: "rings your other phones" }[d.kind] || "device";
-      li.querySelector(".small").textContent = `${kind}${d.online ? "" : ", offline"}`;
-      const b = li.querySelector("button");
-      b.disabled = busy || s.line !== "up";
-      b.addEventListener("click", () => {
-        KagazPlayer.audioContext(); // a click is what lets the page make sound
-        invoke("calls_call", { number: d.sip }).catch((e) => note(String(e)));
-      });
-      ul.appendChild(li);
-    }
+  // ---------- where the call card goes ----------
+
+  let callKey = null; // the card a call was made from
+
+  function keyForPeer(peer) {
+    const name = (peer || "").trim().toLowerCase();
+    if (!name) return null;
+    const el = document.querySelector(`.dev-card[data-name="${CSS.escape(name)}"]`);
+    return el ? el.dataset.key : null;
   }
+
+  // A ring shows at the top of the pane; a call made or answered plays in
+  // its device's card when there is one.
+  function place() {
+    const card = $("call-card");
+    const phase = (status && status.phase) || "idle";
+    let slot = null;
+    if (phase === "calling" || phase === "talking" || card.dataset.ended) {
+      const key = callKey || keyForPeer(status && status.peer);
+      if (key) slot = document.querySelector(`.dev-card[data-key="${CSS.escape(key)}"] .dev-slot`);
+    }
+    slot = slot || $("call-slot");
+    if (card.parentElement !== slot) slot.appendChild(card);
+  }
+
+  function call(number, key) {
+    KagazPlayer.audioContext(); // a click is what lets the page make sound
+    callKey = key || null;
+    // The relay cannot show the live view and a call at once.
+    if (typeof otStopLive === "function") otStopLive();
+    invoke("calls_call", { number }).catch((e) => {
+      callKey = null;
+      note(String(e));
+    });
+  }
+
+  window.KagazCalls = { status: () => status, call, place };
 
   function renderCard(s) {
     const phase = s.phase || "idle";
@@ -128,6 +153,7 @@
       ringing = false;
       if (typeof stopChime === "function") stopChime();
     }
+    if ((phase === "calling" || phase === "talking") && typeof otStopLive === "function") otStopLive();
     if (phase === "talking") {
       startClock(s.since);
       startAudio();
@@ -145,7 +171,11 @@
       $("call-state").textContent = s.detail || "call ended";
       setTimeout(() => {
         card.dataset.ended = "";
-        if (status && status.phase === "idle") card.classList.add("hidden");
+        if (status && status.phase === "idle") {
+          card.classList.add("hidden");
+          callKey = null;
+          place();
+        }
       }, 4000);
     }
     if (active) card.dataset.active = "1";
@@ -176,7 +206,8 @@
 
   // ---------- their picture and voice ----------
 
-  let player = null; // the call's picture and voice, while talking
+  let stage = null; // the call's picture and voice, while talking
+  let player = null;
   let videoWatch = null;
   let userVolume = 1;
   try {
@@ -186,7 +217,13 @@
 
   function startPlayer() {
     if (player) return;
-    player = new KagazPlayer.Player($("call-video"), { sound: true, level: true, volume: userVolume, label: "call" });
+    stage = new KagazPlayer.Stage($("call-video"), { title: (status && status.peer) || "", badge: "CALL", sound: true, level: true, volume: userVolume, label: "call" });
+    player = stage.player;
+    $("call-video").classList.add("has-stage");
+    // In full screen the card's buttons are out of sight: the two that
+    // matter are on the picture too.
+    stage.button("Open door", "Open door", () => $("call-open").click(), "kz-word kz-full-only kz-open");
+    stage.button("Hang up", "Hang up", () => $("call-hangup").click(), "kz-word kz-full-only kz-danger");
     // What happened to the camera on this call, said on the card when no
     // picture shows: nothing arrived, or it arrived and could not be shown.
     videoWatch = setInterval(() => {
@@ -198,8 +235,10 @@
   function stopPlayer() {
     clearInterval(videoWatch);
     videoWatch = null;
-    if (player) player.stop();
+    if (stage) stage.stop();
+    stage = null;
     player = null;
+    $("call-video").classList.remove("has-stage");
     $("call-video-note").textContent = "";
   }
 
@@ -297,8 +336,7 @@
       note("Enter the number to call.");
       return;
     }
-    KagazPlayer.audioContext();
-    invoke("calls_call", { number }).catch((err) => note(String(err)));
+    call(number, null);
   });
   $("call-volume").addEventListener("input", (e) => {
     userVolume = Number(e.target.value) || 1;

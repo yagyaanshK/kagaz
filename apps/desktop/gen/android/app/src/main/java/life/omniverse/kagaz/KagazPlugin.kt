@@ -7,7 +7,9 @@ package life.omniverse.kagaz
 //   print service (vendor plugin, Mopria) the phone has;
 // - copies a finished scan into Downloads/Kagaz;
 // - keeps the doorbell line alive in the background and rings for calls
-//   (KagazCallService).
+//   (KagazCallService);
+// - keeps a remembered sign-in, encrypted with a key that never leaves the
+//   Android Keystore (the desktop's password vault does this elsewhere).
 
 import android.app.Activity
 import android.content.ContentValues
@@ -30,6 +32,14 @@ import android.print.PrintDocumentAdapter
 import android.print.PrintDocumentInfo
 import android.print.PrintManager
 import android.provider.MediaStore
+import android.security.keystore.KeyGenParameterSpec
+import android.security.keystore.KeyProperties
+import android.util.Base64
+import java.security.KeyStore
+import javax.crypto.Cipher
+import javax.crypto.KeyGenerator
+import javax.crypto.SecretKey
+import javax.crypto.spec.GCMParameterSpec
 import android.webkit.WebView
 import app.tauri.annotation.Command
 import app.tauri.annotation.InvokeArg
@@ -64,6 +74,14 @@ class CallArgs {
     var phase: String = "idle"
     var peer: String = ""
 }
+
+@InvokeArg
+class SecretArgs {
+    lateinit var name: String
+    var value: String? = null
+}
+
+private const val SECRET_KEY = "kagaz-secrets"
 
 @TauriPlugin
 class KagazPlugin(private val activity: Activity) : Plugin(activity) {
@@ -120,6 +138,64 @@ class KagazPlugin(private val activity: Activity) : Plugin(activity) {
                 Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:" + activity.packageName))
             )
         }
+    }
+
+    // ---- Remembered secrets: AES-GCM with a Keystore key; only the sealed
+    // bytes (IV first) sit in the app's private preferences.
+
+    private fun secretKey(): SecretKey {
+        val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+        (store.getKey(SECRET_KEY, null) as? SecretKey)?.let { return it }
+        val generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
+        generator.init(
+            KeyGenParameterSpec.Builder(SECRET_KEY, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
+                .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                .setKeySize(256)
+                .build()
+        )
+        return generator.generateKey()
+    }
+
+    private fun secrets() = activity.getSharedPreferences("kagaz-secrets", Context.MODE_PRIVATE)
+
+    @Command
+    fun secretGet(invoke: Invoke) {
+        val args = invoke.parseArgs(SecretArgs::class.java)
+        val ret = JSObject()
+        try {
+            val sealed = secrets().getString(args.name, null)
+            if (sealed != null) {
+                val bytes = Base64.decode(sealed, Base64.NO_WRAP)
+                val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+                cipher.init(Cipher.DECRYPT_MODE, secretKey(), GCMParameterSpec(128, bytes, 0, 12))
+                ret.put("value", String(cipher.doFinal(bytes, 12, bytes.size - 12), Charsets.UTF_8))
+            }
+            invoke.resolve(ret)
+        } catch (e: Exception) {
+            invoke.reject("the saved sign-in could not be unlocked")
+        }
+    }
+
+    @Command
+    fun secretSet(invoke: Invoke) {
+        val args = invoke.parseArgs(SecretArgs::class.java)
+        try {
+            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+            cipher.init(Cipher.ENCRYPT_MODE, secretKey())
+            val sealed = cipher.iv + cipher.doFinal((args.value ?: "").toByteArray(Charsets.UTF_8))
+            secrets().edit().putString(args.name, Base64.encodeToString(sealed, Base64.NO_WRAP)).apply()
+            invoke.resolve()
+        } catch (e: Exception) {
+            invoke.reject("the sign-in could not be saved on this phone")
+        }
+    }
+
+    @Command
+    fun secretDelete(invoke: Invoke) {
+        val args = invoke.parseArgs(SecretArgs::class.java)
+        secrets().edit().remove(args.name).apply()
+        invoke.resolve()
     }
 
     @Command

@@ -99,6 +99,7 @@ const KagazPlayer = (() => {
       this.stats = { received: 0, keys: 0, shown: 0, audio: 0, problem: "" };
       this.onended = null; // (reason) => {}
       this.onframe = null; // () => {}, on every picture shown
+      this.onsize = null; // (width, height) => {}, when the picture's size is known or changes
       this.ended = false;
       // What a <video> would say, for code that watches progress.
       this.currentTime = 0;
@@ -285,8 +286,13 @@ const KagazPlayer = (() => {
 
     draw(frame) {
       const c = this.canvas;
-      if (c.width !== frame.displayWidth) c.width = frame.displayWidth;
-      if (c.height !== frame.displayHeight) c.height = frame.displayHeight;
+      if (c.width !== frame.displayWidth || c.height !== frame.displayHeight) {
+        c.width = frame.displayWidth;
+        c.height = frame.displayHeight;
+        // Wide pictures and tall ones are laid out differently (see Stage).
+        this.box.dataset.shape = shapeOf(c.width, c.height);
+        if (this.onsize) this.onsize(c.width, c.height);
+      }
       this.ctx.drawImage(frame, 0, 0);
       const ts = frame.timestamp / 1e6;
       frame.close();
@@ -427,6 +433,174 @@ const KagazPlayer = (() => {
     }
   }
 
+  // "wide" (landscape, as most cameras) or "tall" (portrait, as a phone).
+  function shapeOf(w, h) {
+    return h > w * 1.05 ? "tall" : "wide";
+  }
+
+  // Full screen for an element holding a picture. The page fills the
+  // window (a fixed layer) and, where the system allows, the screen too.
+  // On an upright phone a wide picture is turned on its side, as video
+  // apps do, so it uses the whole screen without the phone being rotated.
+  function fullscreen(el, on) {
+    const was = el.classList.contains("kz-full");
+    if (on === undefined) on = !was;
+    if (on === was) return on;
+    el.classList.toggle("kz-full", on);
+    document.body.classList.toggle("kz-has-full", on);
+    try {
+      if (on && document.documentElement.requestFullscreen && !document.fullscreenElement) {
+        document.documentElement.requestFullscreen().catch(() => {});
+      } else if (!on && document.fullscreenElement && document.exitFullscreen) {
+        document.exitFullscreen().catch(() => {});
+      }
+    } catch (e) {}
+    if (el._onfull) el._onfull(on);
+    return on;
+  }
+  document.addEventListener("keydown", (ev) => {
+    if (ev.key !== "Escape") return;
+    const full = document.querySelector(".kz-full");
+    if (full) {
+      ev.stopImmediatePropagation();
+      fullscreen(full, false);
+    }
+  }, true);
+  // Leaving the system's full screen (Esc, a gesture) leaves ours too.
+  document.addEventListener("fullscreenchange", () => {
+    if (document.fullscreenElement) return;
+    document.querySelectorAll(".kz-full").forEach((el) => fullscreen(el, false));
+  });
+
+  const ICON = {
+    full: '<svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>',
+    unfull: '<svg viewBox="0 0 24 24"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/></svg>',
+    close: '<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>',
+  };
+
+  // A stage: one picture with its controls over it, laid out by the
+  // picture's shape, as the big video apps do.
+  // - Wide (16:9 and so on), as YouTube: the full width of its place
+  //   (edge to edge on a phone), a title along the top and a bar of
+  //   buttons along the bottom over a soft shade.
+  // - Tall (9:16), as TikTok and Reels: as tall as the screen allows,
+  //   centred, the buttons in a column down the right edge.
+  // The controls show while nothing plays, on hover with a mouse, and for
+  // a few seconds after a tap with a finger; a tap on the picture itself
+  // shows or hides them. Full screen turns a wide picture on its side on
+  // an upright phone.
+  class Stage {
+    constructor(parent, { title = "", badge = "", ...options } = {}) {
+      this.el = document.createElement("div");
+      this.el.className = "kz-stage idle";
+      this.el.dataset.shape = "wide";
+      parent.appendChild(this.el);
+      this.player = new Player(this.el, options);
+      this.note = document.createElement("div");
+      this.note.className = "kz-note";
+      this.top = document.createElement("div");
+      this.top.className = "kz-top";
+      const name = document.createElement("span");
+      name.className = "kz-title";
+      name.textContent = title;
+      this.badge = document.createElement("span");
+      this.badge.className = "kz-badge";
+      this.badge.textContent = badge;
+      this.badge.classList.toggle("hidden", !badge);
+      this.top.append(this.badge, name);
+      this.bar = document.createElement("div");
+      this.bar.className = "kz-bar";
+      this.tools = document.createElement("div");
+      this.tools.className = "kz-tools";
+      this.bar.appendChild(this.tools);
+      this.fullButton = this.button(ICON.full, "Full screen", () => this.fullscreen(), "kz-full-button");
+      this.el.append(this.note, this.top, this.bar);
+      this.player.onsize = (w, h) => {
+        this.el.style.setProperty("--ar", `${w} / ${h}`);
+        this.el.dataset.shape = shapeOf(w, h);
+      };
+      this.player.onframe = () => {
+        if (this.el.classList.contains("idle")) {
+          this.el.classList.remove("idle");
+          this.peek();
+        }
+        this.setNote("");
+      };
+      this.el._onfull = (on) => {
+        this.fullButton.innerHTML = on ? ICON.unfull : ICON.full;
+        this.fullButton.title = on ? "Leave full screen (Esc)" : "Full screen";
+        this.peek();
+      };
+      this.hideTimer = null;
+      this.el.addEventListener("click", (ev) => {
+        if (ev.target.closest("button, input, a")) {
+          this.peek();
+          return;
+        }
+        if (this.el.classList.contains("show")) this.hide();
+        else this.peek();
+      });
+    }
+
+    // A round button over the picture; `html` is an icon or a short word.
+    button(html, title, onClick, extra = "") {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = `kz-button ${extra}`.trim();
+      b.title = title;
+      b.setAttribute("aria-label", title);
+      b.innerHTML = html;
+      b.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        onClick(ev);
+        this.peek();
+      });
+      if (this.fullButton) this.bar.insertBefore(b, this.fullButton);
+      else this.bar.appendChild(b);
+      return b;
+    }
+
+    // Show the controls for a while (until hidden on a touch screen).
+    peek() {
+      this.el.classList.add("show");
+      clearTimeout(this.hideTimer);
+      this.hideTimer = setTimeout(() => this.hide(), 3500);
+    }
+    hide() {
+      clearTimeout(this.hideTimer);
+      if (!this.el.classList.contains("idle")) this.el.classList.remove("show");
+    }
+
+    setTitle(text) {
+      this.top.querySelector(".kz-title").textContent = text;
+    }
+    setBadge(text) {
+      this.badge.textContent = text;
+      this.badge.classList.toggle("hidden", !text);
+    }
+    // Text over the picture: what is happening while none shows.
+    setNote(text) {
+      this.note.textContent = text || "";
+      this.note.classList.toggle("hidden", !text);
+    }
+    // Nothing is playing (any more): the controls stay up.
+    setIdle(idle) {
+      this.el.classList.toggle("idle", idle);
+      if (idle) this.el.classList.add("show");
+    }
+
+    fullscreen(on) {
+      return fullscreen(this.el, on);
+    }
+
+    stop() {
+      clearTimeout(this.hideTimer);
+      fullscreen(this.el, false);
+      this.player.stop();
+      this.el.remove();
+    }
+  }
+
   // Start watching: `command` is a Rust command that takes `channel` and
   // returns the watch id (or an object with `id`); the handle's stop()
   // ends it on both sides.
@@ -448,5 +622,5 @@ const KagazPlayer = (() => {
     };
   }
 
-  return { Player, watch, audioContext };
+  return { Player, Stage, watch, audioContext, fullscreen, shapeOf, ICON };
 })();

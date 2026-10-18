@@ -222,6 +222,7 @@ pub fn start(app: &AppHandle) {
             update(&app, |s| {
                 s.line = "off".into();
                 s.detail = String::new();
+                s.devices.clear();
             });
             #[cfg(mobile)]
             super::mobile::keep_listening(&app, false);
@@ -257,9 +258,12 @@ pub fn start(app: &AppHandle) {
                 }
                 None => {
                     eprintln!("calls: {detail}");
+                    // Nothing to call with: the list goes too, so the
+                    // page never offers devices it cannot reach.
                     update(&app, |s| {
                         s.line = line_state.into();
                         s.detail = detail;
+                        s.devices.clear();
                     });
                     return;
                 }

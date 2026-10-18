@@ -1200,6 +1200,7 @@ pub fn run() {
                     p.app_cache_dir()?,
                     p.app_data_dir()?,
                 );
+                mobile::remember_handle(app.handle());
             }
             // Listen for the doorbell from the start: that is what it is for.
             let port = kagaz_core::intercom::stations::Stations::load().listen_port;
