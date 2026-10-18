@@ -172,13 +172,16 @@ kagaz cameras
 
 Tapo cameras anywhere in the world, through your own TP-Link account and
 TP-Link's relay, exactly as the Tapo app reaches them, but shown the way
-you want: `kagaz tapo login` once (email code supported), then `kagaz
-cameras` serves every camera on the account and starts the video engine
-(go2rtc, downloaded and checksum-verified on first use, never bundled). The
-window's "Cameras" view shows them side by side, any number, click to
-enlarge. `kagaz tapo record <camera> --seconds 10` saves raw video to prove
-the path. No Tapo Care subscription is needed; only your own cameras are
-reachable.
+you want: `kagaz tapo login` once (email code supported), then the
+window's "Cameras" view shows every camera on the account side by side,
+any number, tap to enlarge, on the desktop and on a phone alike. The
+window plays the video itself: Kagaz takes the relay's stream apart into
+pictures and sound and the page decodes them with the browser's own
+decoder, so no helper program is needed. (`kagaz cameras` and the
+desktop's fallback modes still use the go2rtc engine, downloaded and
+checksum-verified on first use, never bundled.) `kagaz tapo record
+<camera> --seconds 10` saves raw video to prove the path. No Tapo Care
+subscription is needed; only your own cameras are reachable.
 
 ```
 kagaz tapo recordings <camera> --date 2026-10-06
