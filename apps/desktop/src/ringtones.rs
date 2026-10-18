@@ -47,6 +47,13 @@ pub struct Settings {
     /// 0 to 1.
     pub volume: f32,
     pub custom: Vec<Custom>,
+    /// How a ring shows on this device: the notification only (true), or
+    /// the notification and the ring sound (false). There is no sound
+    /// without a notification: a sound alone leaves people wondering why
+    /// their phone made it.
+    pub silent: bool,
+    /// Vibrate while ringing (phones), in either case.
+    pub vibrate: bool,
 }
 
 impl Default for Settings {
@@ -56,6 +63,8 @@ impl Default for Settings {
             devices: BTreeMap::new(),
             volume: 0.8,
             custom: Vec::new(),
+            silent: false,
+            vibrate: true,
         }
     }
 }
@@ -350,6 +359,17 @@ pub fn ringtones_set(
         .map(|(k, v)| (k.trim().to_lowercase(), v))
         .collect();
     s.volume = volume.clamp(0.0, 1.0);
+    save(&s)?;
+    Ok(listing())
+}
+
+/// How a ring shows here: the notification only (`silent`) or with the
+/// ring sound, and whether the phone vibrates.
+#[tauri::command]
+pub fn ring_style_set(silent: bool, vibrate: bool) -> Result<Listing, String> {
+    let mut s = load();
+    s.silent = silent;
+    s.vibrate = vibrate;
     save(&s)?;
     Ok(listing())
 }

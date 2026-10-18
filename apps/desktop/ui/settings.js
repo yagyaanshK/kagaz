@@ -186,9 +186,49 @@ const KagazDoorbellSettings = (() => {
     return row(name, "", sel, playButton(() => sel.value || s.events[kindKey] || s.events.all || "soft-chime"));
   }
 
+  // How a ring shows on this device: the notification with the ring sound,
+  // or the notification only (never a sound alone); and, on a phone,
+  // vibration with either.
+  function ringStyle() {
+    const s = listing.settings;
+    const phone = /Android|iPhone|iPad/i.test(navigator.userAgent);
+    const box = document.createDocumentFragment();
+    const style = document.createElement("select");
+    for (const [value, text] of [["ring", "Notification and ring sound"], ["silent", "Silent notification"]]) {
+      const o = el("option", "", text);
+      o.value = value;
+      style.appendChild(o);
+    }
+    style.value = s.silent ? "silent" : "ring";
+    style.setAttribute("aria-label", "When someone rings");
+    const note = () => (style.value === "silent"
+      ? "On this device. The notification only; tap it to open the call. The tones below play again if you switch back."
+      : phone ? "On this device. A volume key quiets a ring." : "On this device.");
+    const styleRow = row("When someone rings", note(), style);
+    box.appendChild(styleRow);
+    const vibrate = document.createElement("input");
+    vibrate.type = "checkbox";
+    vibrate.checked = s.vibrate !== false;
+    const save = async () => {
+      listing = await invoke("ring_style_set", { silent: style.value === "silent", vibrate: vibrate.checked });
+      const n = styleRow.querySelector(".set-label .muted");
+      if (n) n.textContent = note();
+    };
+    style.addEventListener("change", save);
+    vibrate.addEventListener("change", save);
+    if (phone) {
+      vibrate.setAttribute("aria-label", "Vibrate");
+      const sw = el("label", "switch");
+      sw.append(vibrate);
+      box.appendChild(row("Vibrate", "While it rings, in either case.", sw));
+    }
+    return box;
+  }
+
   function drawAll(box) {
     const s = listing.settings;
     const sec = section("Every doorbell", "The ring for any doorbell, unless its own section below says otherwise.");
+    sec.appendChild(ringStyle());
     sec.appendChild(kindTone("all", "Ringtone", "Calm tones made by Kagaz, or your own."));
     const range = document.createElement("input");
     range.type = "range";

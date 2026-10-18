@@ -18,6 +18,7 @@ class MainActivity : TauriActivity() {
     super.onCreate(savedInstanceState)
     kagazShown()
     showOverLockScreen(intent)
+    fromRing(intent)
     // Android 15 and later draw apps under the status and navigation bars;
     // keep the page clear of them (and of the keyboard when it is up).
     val content = findViewById<View>(android.R.id.content)
@@ -39,6 +40,21 @@ class MainActivity : TauriActivity() {
   override fun onNewIntent(intent: Intent) {
     super.onNewIntent(intent)
     showOverLockScreen(intent)
+    fromRing(intent)
+  }
+
+  /** Opened from the ring notification: Answer picks up; the card itself
+   *  shows the ring. Each only once (the extras are used up). */
+  private fun fromRing(intent: Intent?) {
+    if (intent == null) return
+    if (intent.getBooleanExtra(KagazCallService.EXTRA_ANSWER, false)) {
+      KagazCallService.quiet(this)
+      KagazNative.send(KagazNative.ANSWER)
+    } else if (intent.getBooleanExtra(KagazCallService.EXTRA_CALL, false)) {
+      KagazNative.send(KagazNative.OPEN)
+    }
+    intent.removeExtra(KagazCallService.EXTRA_ANSWER)
+    intent.removeExtra(KagazCallService.EXTRA_CALL)
   }
 
   /** Opened from a ring: show the call even on the lock screen. */

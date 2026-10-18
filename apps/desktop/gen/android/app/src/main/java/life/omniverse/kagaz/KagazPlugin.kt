@@ -75,6 +75,8 @@ class CallArgs {
     var phase: String = "idle"
     var peer: String = ""
     var tone: String = ""
+    var silent: Boolean = false
+    var vibrate: Boolean = true
 }
 
 @InvokeArg
@@ -127,7 +129,7 @@ class KagazPlugin(private val first: Activity) : Plugin(first) {
     @Command
     fun callChanged(invoke: Invoke) {
         val args = invoke.parseArgs(CallArgs::class.java)
-        KagazCallService.ring(activity.applicationContext, if (args.phase == "ringing") args.peer else null, args.tone)
+        KagazCallService.ring(activity.applicationContext, if (args.phase == "ringing") args.peer else null, args.tone, args.silent, args.vibrate)
         invoke.resolve()
     }
 

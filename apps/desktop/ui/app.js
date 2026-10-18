@@ -2400,7 +2400,7 @@ function renderDoorbell() {
   } else {
     stopDoorClock();
   }
-  if (ringing) startChime(doorStationName(st.from) || st.caller || "", "local"); else stopChime();
+  if (ringing && !st.silent) startChime(doorStationName(st.from) || st.caller || "", "local"); else stopChime();
 
   // The sidebar entry says when it is ringing, so other views notice too.
   for (const el of document.querySelectorAll('#categories li[data-cat="doorbell"], #bottom-nav button[data-cat="doorbell"]')) {
@@ -2606,9 +2606,12 @@ for (const [id, cmd] of [["door-answer", "doorbell_answer"], ["door-decline", "d
   });
 }
 
+// A ring's notification was opened: show the ring.
+listen("show-ring", () => selectCategory("doorbell"));
+
 listen("doorbell-state", (e) => {
   doorStatus = e.payload;
-  if (doorStatus.phase === "ringing") selectCategory("doorbell");
+  if (doorStatus.phase === "ringing" && !doorStatus.silent) selectCategory("doorbell");
   renderDoorbell();
 });
 

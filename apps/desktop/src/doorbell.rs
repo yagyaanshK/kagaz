@@ -51,6 +51,8 @@ pub struct Status {
     pub since: i64,
     pub door_opened_at: Option<i64>,
     pub recent: Vec<Event>,
+    /// This ring shows as a notification only (Settings).
+    pub silent: bool,
 }
 
 pub struct DoorbellState {
@@ -85,12 +87,20 @@ fn now() -> i64 {
 
 fn update(app: &AppHandle, f: impl FnOnce(&mut Status)) {
     let state = app.state::<DoorbellState>();
-    let snapshot = {
+    let (was_ringing, snapshot) = {
         let mut guard = state.status.lock().unwrap();
+        let was = guard.phase == "ringing";
         f(&mut guard);
-        guard.clone()
+        (was, guard.clone())
     };
     let _ = app.emit("doorbell-state", &snapshot);
+    // A silent ring's notification goes when the ring does.
+    #[cfg(desktop)]
+    if was_ringing && snapshot.phase != "ringing" {
+        super::ring_notice::close();
+    }
+    #[cfg(mobile)]
+    let _ = was_ringing;
 }
 
 /// Bring the window forward for a ring.
@@ -219,8 +229,22 @@ fn handle_call(
         s.since = now();
         s.door_opened_at = None;
         s.message.clear();
+        s.silent = super::ringtones::load().silent;
     });
-    attention(app);
+    // Ring: the window comes forward. Silent: a notification that opens it.
+    let (silent, caller) = {
+        let s = app.state::<DoorbellState>();
+        let st = s.status.lock().unwrap();
+        (st.silent, st.caller.clone())
+    };
+    if !silent {
+        attention(app);
+    } else {
+        #[cfg(desktop)]
+        super::ring_notice::show(app, if caller.is_empty() { "A door station" } else { &caller });
+        #[cfg(mobile)]
+        let _ = caller;
+    }
 
     let started = Instant::now();
     let decision = loop {

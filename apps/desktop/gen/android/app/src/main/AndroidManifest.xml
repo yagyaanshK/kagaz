@@ -20,6 +20,8 @@
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- The ring vibrates when the person wants it to (doorbell settings). -->
+    <uses-permission android:name="android.permission.VIBRATE" />
 
     <!-- AndroidTV support -->
     <uses-feature android:name="android.software.leanback" android:required="false" />
@@ -51,6 +53,11 @@
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Keeps the video doorbell's call line signed in so a visitor's call rings this phone" />
         </service>
+
+        <!-- Decline on the ring notification, without opening Kagaz. -->
+        <receiver
+            android:name=".KagazRingReceiver"
+            android:exported="false" />
 
         <provider
           android:name="androidx.core.content.FileProvider"

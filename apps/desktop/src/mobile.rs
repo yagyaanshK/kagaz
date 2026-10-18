@@ -238,6 +238,9 @@ struct CallArgs<'a> {
     peer: &'a str,
     /// The tone's file to ring with; empty for the phone's own ringtone.
     tone: &'a str,
+    /// The notification only, no sound.
+    silent: bool,
+    vibrate: bool,
 }
 
 /// Keep the doorbell line alive in the background (a foreground service
@@ -249,8 +252,17 @@ pub fn keep_listening(app: &AppHandle, on: bool) {
 }
 
 /// Ring (a call notification that can light the screen) or stop ringing.
-pub fn call_changed(app: &AppHandle, phase: &str, peer: &str, tone: &str) {
+pub fn call_changed(app: &AppHandle, phase: &str, peer: &str, tone: &str, silent: bool, vibrate: bool) {
     if let Ok(p) = phone(app) {
-        let _ = p.run_mobile_plugin::<()>("callChanged", CallArgs { phase, peer, tone });
+        let _ = p.run_mobile_plugin::<()>(
+            "callChanged",
+            CallArgs {
+                phase,
+                peer,
+                tone,
+                silent,
+                vibrate,
+            },
+        );
     }
 }
