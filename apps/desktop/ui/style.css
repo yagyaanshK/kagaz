@@ -616,7 +616,8 @@ ul.cards li.add .name { color: var(--accent); }
   #sidebar { display: none; }
   #bottom-nav {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(0, 1fr);
     gap: 4px;
     padding: 6px 8px calc(6px + env(safe-area-inset-bottom));
     border-top: 1px solid var(--line);
@@ -812,3 +813,11 @@ input.toggle { width: 44px; height: 24px; min-height: 0; accent-color: var(--acc
 .home-group .home-tiles { padding: 0 12px 12px; }
 .home-group .home-tile { background: var(--panel); }
 .home-group:not(.open) .home-tiles { display: none; }
+
+/* The Doorbell's settings, shown in place of the rest of its page. */
+#doorbell.show-settings > *:not(.cam-head):not(#door-settings-view):not(.to-home) { display: none !important; }
+#doorbell.show-settings #door-listen { display: none; }
+#doorbell.show-settings #door-gear { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+.door-settings-title { margin: 6px 0 0; font-size: 16px; }
+#door-settings-local .set-control input[type="number"] { width: 7em; }
+#doorbell.show-settings .to-home { display: none !important; }

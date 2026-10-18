@@ -410,7 +410,7 @@ $('ot-recordings-tab').addEventListener('click', () => otRun(async () => {
   $('ot-legacy-history').classList.toggle('hidden', !legacy);
   $('ot-history').classList.toggle('hidden', legacy);
   if (legacy) await otLoadRecordings(1);
-  else KagazActivity.doorbell();
+  else KagazHistory.show();
 }, ''));
 $('ot-recordings-refresh').addEventListener('click', () => otRun(() => otLoadRecordings(otPage), 'Refreshing recordings…'));
 $('ot-prev').addEventListener('click', () => otRun(() => otLoadRecordings(Math.max(1, otPage - 1)), 'Loading recordings…'));

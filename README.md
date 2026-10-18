@@ -220,18 +220,17 @@ needs the webkit2gtk and gtk3 development packages to build.
 
 The window opens on **Home**: the devices set up on this computer or
 phone, grouped by kind (doorbell, security cameras, printers and
-scanners). **Add a device** starts from the kind of device, then its
-brand: brands Kagaz works with show in colour, the ones planned show
-greyed as "coming soon" (cameras such as DSLRs, robot vacuums, TVs,
-fridges, washing machines and air conditioners are listed the same way).
-**Activity** lists what happened, newest first: who rang the doorbell
-(with the station's picture of them), the calls, and rings from stations
-on the network. **Settings** holds what applies to the whole app: ring
-sounds (calm tones Kagaz makes itself, or your own songs; one per kind
-of ring and, if you like, one per device), ringing on this device, and
-the accounts Kagaz is signed in to. Each kind of device keeps its own
-settings on its page. Wide windows have a sidebar; phones a bottom bar
-with Home, Activity and Settings.
+scanners), each kind collapsed until you tap it. **Add a device** starts
+from the kind of device, then its brand: brands Kagaz works with show in
+colour, the ones planned show greyed as "coming soon" (cameras such as
+DSLRs, robot vacuums, TVs, fridges, washing machines and air conditioners
+are listed the same way). Each kind of device keeps its own settings on
+its page, behind its gear: the doorbell's hold the ring sounds (calm tones
+Kagaz makes itself, or your own songs), first for every doorbell, then
+each brand's own (OneTouch: ringing here, door stations, family, one
+device; stations on this network). The app's **Settings** holds what
+applies to the whole app: the accounts Kagaz is signed in to, and about.
+Wide windows have a sidebar; phones a bottom bar.
 
 On a phone, Kagaz keeps listening for doorbell calls after you close it,
 with a small "Ready for doorbell calls" notification; some phones stop
@@ -258,7 +257,9 @@ the Doorbell pane; ringing works without that. Sign out keeps the saved
 login; **Forget saved sign-in** removes it. Give each person in the home
 their own login (OneTouch's family accounts, up to ten): then nobody signs
 anyone else out, each is listed under the doorbell's devices with a Call
-button, and **History** shows the visitors and calls.
+button. The doorbell's **History** tab shows the visitors (with the
+station's picture of them) and the calls, by day, with filters for
+visitors, calls, missed calls and stations on this network.
 
 The integration builds and passes protocol/UI checks; authenticated playback
 still needs verification with a real account. See [protocol notes and limits](docs/onetouch.md).

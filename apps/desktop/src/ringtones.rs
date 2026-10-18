@@ -37,8 +37,9 @@ pub struct Custom {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct Settings {
-    /// Per kind of ring: "doorbell" (door stations, monitors, guard
-    /// phones), "family" (people on the home's account), "local" (a door
+    /// "all": every doorbell's tone. Then, overriding it, per kind of
+    /// ring: "doorbell" (OneTouch door stations, monitors, guard phones),
+    /// "family" (people on the home's OneTouch account), "local" (a door
     /// station ringing this device directly on the network).
     pub events: BTreeMap<String, String>,
     /// Per device, by its name in lower case; overrides the kind.
@@ -51,10 +52,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Settings {
-            events: ["doorbell", "family", "local"]
-                .into_iter()
-                .map(|k| (k.to_string(), DEFAULT.to_string()))
-                .collect(),
+            events: [("all".to_string(), DEFAULT.to_string())].into_iter().collect(),
             devices: BTreeMap::new(),
             volume: 0.8,
             custom: Vec::new(),
@@ -71,10 +69,17 @@ fn own_dir() -> PathBuf {
 }
 
 pub fn load() -> Settings {
-    std::fs::read(settings_path())
+    let mut s: Settings = std::fs::read(settings_path())
         .ok()
         .and_then(|b| serde_json::from_slice(&b).ok())
-        .unwrap_or_default()
+        .unwrap_or_default();
+    // The first version wrote each kind out with the default tone; those
+    // were never choices, so let every doorbell's tone apply to them.
+    if !s.events.contains_key("all") {
+        s.events.retain(|_, id| id != DEFAULT);
+        s.events.insert("all".into(), DEFAULT.into());
+    }
+    s
 }
 
 fn save(s: &Settings) -> Result<(), String> {
@@ -93,15 +98,19 @@ fn exists(s: &Settings, id: &str) -> bool {
     BUILT_IN.iter().any(|(b, _)| *b == id) || s.custom.iter().any(|c| c.id == id)
 }
 
-/// The tone for a ring from `peer` (a device's name) of `kind`.
+/// The tone for a ring from `peer` (a device's name) of `kind`: the
+/// device's own, else its kind's, else every doorbell's.
 pub fn tone_for(s: &Settings, peer: &str, kind: &str) -> String {
-    let device = s.devices.get(&peer.trim().to_lowercase());
-    let event = s.events.get(kind);
-    device
-        .or(event)
-        .filter(|id| exists(s, id))
-        .cloned()
-        .unwrap_or_else(|| DEFAULT.to_string())
+    [
+        s.devices.get(&peer.trim().to_lowercase()),
+        s.events.get(kind),
+        s.events.get("all"),
+    ]
+    .into_iter()
+    .flatten()
+    .find(|id| exists(s, id))
+    .cloned()
+    .unwrap_or_else(|| DEFAULT.to_string())
 }
 
 /// The kind of ring for a call device's kind ("door", "indoor", "apps"…).
@@ -432,5 +441,9 @@ mod tests {
         assert_eq!(tone_for(&s, "Asha", "family"), "harp");
         s.devices.insert("lobby".into(), "gone".into());
         assert_eq!(tone_for(&s, "Lobby", "doorbell"), DEFAULT);
+        // Every doorbell's tone, where the kind has none of its own.
+        s.events.insert("all".into(), "lullaby".into());
+        assert_eq!(tone_for(&s, "Side door", "local"), "lullaby");
+        assert_eq!(tone_for(&s, "Asha", "family"), "harp");
     }
 }

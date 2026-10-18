@@ -1,6 +1,8 @@
-// Settings for the whole app: ring sounds, ringing on this device, the
-// accounts Kagaz is signed in to, and about. A kind of device's own
-// settings stay on its page (its gear button).
+// Settings. The app's own (the accounts Kagaz is signed in to, and about)
+// are on the Settings page; each kind of device keeps its settings on its
+// own page, behind its gear: the doorbell's here are its ring sounds, for
+// every doorbell first and then per kind (OneTouch, stations on this
+// network; other brands add their own section).
 //
 // KagazRing plays the ring: the tone chosen for the caller (a device's
 // own, else its kind's), on a loop, until stopped.
@@ -30,7 +32,7 @@ const KagazRing = (() => {
 
   function toneFor(settings, peer, kind) {
     const own = settings.devices[(peer || "").trim().toLowerCase()];
-    return own || settings.events[kind] || "soft-chime";
+    return own || settings.events[kind] || settings.events.all || "soft-chime";
   }
 
   async function play(id, loop, volume) {
@@ -90,33 +92,43 @@ const KagazRing = (() => {
   return { start, stop, preview, tones, forget, toneFor, isPlaying: () => !!playing };
 })();
 
-const KagazSettings = (() => {
-  const KINDS = [
-    ["doorbell", "Door stations and monitors", "A ring from a door station, an indoor monitor or a guard phone on your OneTouch account."],
-    ["family", "Family", "A call from someone in your home with their own OneTouch login."],
-    ["local", "Door stations on this network", "A station ringing this device directly (Local intercom)."],
-  ];
-  let listing = null;
-  let devices = []; // [{ name, kind }] to set a tone for
-
+// Helpers shared by the settings pages.
+const KagazSet = (() => {
   function el(tag, cls, text) {
     const e = document.createElement(tag);
     if (cls) e.className = cls;
     if (text !== undefined) e.textContent = text;
     return e;
   }
-
   function section(title, note) {
     const box = el("section", "set-section");
     box.appendChild(el("h3", "", title));
     if (note) box.appendChild(el("p", "muted small", note));
     return box;
   }
+  // A row: a label (and its note) on the left, controls on the right.
+  function row(label, note, ...controls) {
+    const r = el("div", "set-row");
+    const l = el("label", "set-label");
+    l.appendChild(el("span", "", label));
+    if (note) l.appendChild(el("span", "muted small", note));
+    const c = el("span", "set-control");
+    c.append(...controls);
+    r.append(l, c);
+    return r;
+  }
+  return { el, section, row };
+})();
 
-  function toneSelect(value, withSame) {
+// The doorbell's settings page (its gear).
+const KagazDoorbellSettings = (() => {
+  const { el, section, row } = KagazSet;
+  let listing = null;
+
+  function toneSelect(value, same) {
     const sel = document.createElement("select");
-    if (withSame) {
-      const o = el("option", "", "Same as its kind");
+    if (same) {
+      const o = el("option", "", same);
       o.value = "";
       sel.appendChild(o);
     }
@@ -148,46 +160,36 @@ const KagazSettings = (() => {
     KagazRing.forget();
   }
 
-  // The devices that can ring: the account's call devices, family, stations.
-  async function ringers() {
-    const out = [];
-    const seen = new Set();
-    const add = (name, kind) => {
-      const key = (name || "").trim().toLowerCase();
-      if (!key || seen.has(key)) return;
-      seen.add(key);
-      out.push({ name, kind });
-    };
-    try {
-      const calls = await invoke("calls_status");
-      for (const d of calls.devices || []) if (d.kind !== "apps") add(d.name, d.kind === "family" ? "family" : "doorbell");
-    } catch (_) {}
-    if (typeof otPeople !== "undefined") for (const p of otPeople) add(p.name, "family");
-    try {
-      const st = await invoke("doorbell_stations");
-      for (const s of st.stations || []) add(s.name, "local");
-    } catch (_) {}
-    return out;
+  // A tone row for one kind (`key` in events), falling back to every doorbell's.
+  function kindTone(key, label, note) {
+    const s = listing.settings;
+    const sel = toneSelect(s.events[key] || "", key === "all" ? null : "Same as every doorbell");
+    if (key === "all") sel.value = s.events.all || "soft-chime";
+    sel.setAttribute("aria-label", `${label} tone`);
+    sel.addEventListener("change", async () => {
+      if (sel.value) s.events[key] = sel.value; else delete s.events[key];
+      await save();
+    });
+    return row(label, note, sel, playButton(() => sel.value || s.events.all || "soft-chime"));
   }
 
-  function drawTones(body) {
+  // One device's own tone.
+  function deviceTone(name, kindKey) {
     const s = listing.settings;
-    const box = section("Ringtones", "Calm tones made by Kagaz, or your own songs. A device can have its own tone; otherwise it rings with its kind's.");
-    for (const [kind, name, note] of KINDS) {
-      const row = el("div", "set-row");
-      const label = el("label", "set-label");
-      label.appendChild(el("span", "", name));
-      label.appendChild(el("span", "muted small", note));
-      const sel = toneSelect(s.events[kind] || "soft-chime", false);
-      sel.setAttribute("aria-label", `${name} tone`);
-      sel.addEventListener("change", async () => { s.events[kind] = sel.value; await save(); });
-      row.append(label, el("span", "set-control"));
-      row.lastChild.append(sel, playButton(() => sel.value));
-      box.appendChild(row);
-    }
-    const vol = el("div", "set-row");
-    const vl = el("label", "set-label");
-    vl.appendChild(el("span", "", "Ring volume"));
+    const key = name.trim().toLowerCase();
+    const sel = toneSelect(s.devices[key] || "", "Same as its kind");
+    sel.setAttribute("aria-label", `${name} tone`);
+    sel.addEventListener("change", async () => {
+      if (sel.value) s.devices[key] = sel.value; else delete s.devices[key];
+      await save();
+    });
+    return row(name, "", sel, playButton(() => sel.value || s.events[kindKey] || s.events.all || "soft-chime"));
+  }
+
+  function drawAll(box) {
+    const s = listing.settings;
+    const sec = section("Every doorbell", "The ring for any doorbell, unless its own section below says otherwise.");
+    sec.appendChild(kindTone("all", "Ringtone", "Calm tones made by Kagaz, or your own."));
     const range = document.createElement("input");
     range.type = "range";
     range.min = "0.1";
@@ -196,46 +198,13 @@ const KagazSettings = (() => {
     range.value = String(s.volume);
     range.setAttribute("aria-label", "Ring volume");
     range.addEventListener("change", async () => { s.volume = Number(range.value); await save(); });
-    vol.append(vl, el("span", "set-control"));
-    vol.lastChild.appendChild(range);
-    box.appendChild(vol);
-
-    if (devices.length) {
-      const per = el("details", "set-more");
-      per.appendChild(el("summary", "", "A tone for one device"));
-      for (const d of devices) {
-        const row = el("div", "set-row");
-        const label = el("label", "set-label");
-        label.appendChild(el("span", "", d.name));
-        label.appendChild(el("span", "muted small", KINDS.find((k) => k[0] === d.kind)?.[1] || ""));
-        const key = d.name.trim().toLowerCase();
-        const sel = toneSelect(s.devices[key] || "", true);
-        sel.setAttribute("aria-label", `${d.name} tone`);
-        sel.addEventListener("change", async () => {
-          if (sel.value) s.devices[key] = sel.value; else delete s.devices[key];
-          await save();
-        });
-        row.append(label, el("span", "set-control"));
-        row.lastChild.append(sel, playButton(() => sel.value || s.events[d.kind] || "soft-chime"));
-        per.appendChild(row);
-      }
-      box.appendChild(per);
-    }
-
+    sec.appendChild(row("Ring volume", "", range));
     // Own tones.
-    const own = el("div", "set-own");
-    const mine = listing.tones.filter((t) => t.own);
-    for (const t of mine) {
-      const row = el("div", "set-row");
-      row.appendChild(el("span", "set-label", t.name));
-      const ctl = el("span", "set-control");
-      ctl.appendChild(playButton(() => t.id));
+    for (const t of listing.tones.filter((t) => t.own)) {
       const rm = el("button", "", "Remove");
       rm.type = "button";
       rm.addEventListener("click", async () => { listing = await invoke("ringtone_remove", { id: t.id }); KagazRing.forget(); draw(); });
-      ctl.appendChild(rm);
-      row.appendChild(ctl);
-      own.appendChild(row);
+      sec.appendChild(row(t.name, "Your tone", playButton(() => t.id), rm));
     }
     const pick = document.createElement("input");
     pick.type = "file";
@@ -265,56 +234,117 @@ const KagazSettings = (() => {
         note.textContent = String(e);
       }
     });
+    const own = el("div", "set-own");
     own.append(add, pick, note);
-    box.appendChild(own);
-    body.appendChild(box);
+    sec.appendChild(own);
+    box.appendChild(sec);
   }
 
-  async function drawRinging(body) {
-    const box = section("Ringing on this device");
-    let calls = null;
-    try { calls = await invoke("calls_status"); } catch (_) {}
-    const row = el("div", "set-row");
-    const label = el("label", "set-label");
-    label.appendChild(el("span", "", "Ring me here"));
-    label.appendChild(el("span", "muted small", "Ring on this device when someone calls your OneTouch account. On a phone Kagaz keeps listening after you close it, with a small “Ready for doorbell calls” notification."));
+  async function drawOneTouch(box) {
+    const [calls, ot] = await Promise.all([invoke("calls_status").catch(() => null), invoke("onetouch_peek").catch(() => null)]);
+    if (!ot || !(ot.logged_in || ot.remembered || (calls && calls.devices && calls.devices.length))) return;
+    const sec = section("OneTouch", ot.logged_in ? `Signed in as ${ot.username}.` : "Your OneTouch account.");
     const sw = document.createElement("input");
     sw.type = "checkbox";
     sw.className = "toggle";
     sw.checked = !!(calls && calls.enabled);
     sw.setAttribute("aria-label", "Ring me here");
-    sw.addEventListener("change", () => invoke("calls_enable", { enabled: sw.checked }));
-    row.append(label, el("span", "set-control"));
-    row.lastChild.appendChild(sw);
-    box.appendChild(row);
-    if (/Android/i.test(navigator.userAgent)) {
-      box.appendChild(el("p", "muted small", "Some phones close apps to save battery. If Kagaz stops ringing after a while, allow it to run in the background in Android's battery settings for Kagaz."));
+    sw.addEventListener("change", async () => {
+      await invoke("calls_enable", { enabled: sw.checked });
+      if ($("calls-enabled")) $("calls-enabled").checked = sw.checked;
+    });
+    sec.appendChild(row("Ring me here", /Android/i.test(navigator.userAgent)
+      ? "Ring on this phone for calls to your OneTouch account, also after you close Kagaz (a small “Ready for doorbell calls” notification shows it is listening). If it stops after a while, let Kagaz run in the background in Android's battery settings."
+      : "Ring on this computer for calls to your OneTouch account.", sw));
+    sec.appendChild(kindTone("doorbell", "Door stations and monitors", "A ring from a door station, an indoor monitor or a guard phone."));
+    sec.appendChild(kindTone("family", "Family", "A call from someone in your home with their own login."));
+    // A tone per device.
+    const names = [];
+    for (const d of (calls && calls.devices) || []) if (d.kind !== "apps") names.push([d.name, "doorbell"]);
+    if (typeof otPeople !== "undefined") for (const p of otPeople) names.push([p.name, "family"]);
+    if (names.length) {
+      const per = el("details", "set-more");
+      per.appendChild(el("summary", "", "A tone for one device or person"));
+      for (const [name, kind] of names) per.appendChild(deviceTone(name, kind));
+      sec.appendChild(per);
     }
-    body.appendChild(box);
+    box.appendChild(sec);
   }
+
+  async function drawLocal() {
+    const slot = $("door-settings-local-tone");
+    slot.innerHTML = "";
+    slot.appendChild(kindTone("local", "Ringtone", ""));
+    try {
+      const st = await invoke("doorbell_stations");
+      if ((st.stations || []).length) {
+        const per = el("details", "set-more");
+        per.appendChild(el("summary", "", "A tone for one station"));
+        for (const s of st.stations) per.appendChild(deviceTone(s.name, "local"));
+        slot.appendChild(per);
+      }
+    } catch (_) {}
+  }
+
+  async function draw() {
+    const all = $("door-settings-all");
+    const one = $("door-settings-onetouch");
+    all.innerHTML = "";
+    one.innerHTML = "";
+    drawAll(all);
+    await drawOneTouch(one);
+    await drawLocal();
+  }
+
+  async function show() {
+    $("door-settings-all").innerHTML = '<p class="muted">Loading…</p>';
+    try {
+      listing = await invoke("ringtones_list");
+    } catch (e) {
+      $("door-settings-all").textContent = String(e);
+      return;
+    }
+    await draw();
+  }
+
+  return { show };
+})();
+
+// The app's Settings page: what applies to the whole app.
+const KagazSettings = (() => {
+  const { el, section, row } = KagazSet;
 
   async function drawAccounts(body) {
     const box = section("Accounts", "Kagaz signs in to each service the way its own app does. Passwords stay in this device's password store.");
-    const row = (name, state, action, go) => {
-      const r = el("div", "set-row");
-      const label = el("label", "set-label");
-      label.appendChild(el("span", "", name));
-      label.appendChild(el("span", "muted small", state));
-      const b = el("button", "", action);
+    const go = (label, cat) => {
+      const b = el("button", "", label);
       b.type = "button";
-      b.addEventListener("click", go);
-      r.append(label, el("span", "set-control"));
-      r.lastChild.appendChild(b);
-      box.appendChild(r);
+      b.addEventListener("click", () => selectCategory(cat));
+      return b;
     };
     try {
       const ot = await invoke("onetouch_peek");
-      row("OneTouch (doorbell)", ot.logged_in ? `Signed in as ${ot.username}` : ot.remembered ? `Saved sign-in: ${ot.remembered.username}` : "Not signed in", "Open", () => selectCategory("doorbell"));
+      box.appendChild(row("OneTouch (doorbell)", ot.logged_in ? `Signed in as ${ot.username}` : ot.remembered ? `Saved sign-in: ${ot.remembered.username}` : "Not signed in", go("Open", "doorbell")));
     } catch (_) {}
     try {
       const cam = await invoke("cameras_status");
-      row("Tapo (security cameras)", cam.logged_in ? "Signed in" : "Not signed in", "Open", () => selectCategory("cameras"));
+      box.appendChild(row("Tapo (security cameras)", cam.logged_in ? "Signed in" : "Not signed in", go("Open", "cameras")));
     } catch (_) {}
+    body.appendChild(box);
+  }
+
+  function drawDevices(body) {
+    const box = section("Device settings", "Each kind of device keeps its settings on its own page, behind its ⚙ button.");
+    const go = (label, cat) => {
+      const b = el("button", "", "Open");
+      b.type = "button";
+      b.addEventListener("click", () => {
+        selectCategory(cat);
+        if (cat === "doorbell") doorSettings(true);
+      });
+      return row(label, "", b);
+    };
+    box.append(go("Doorbell: ringtones, ringing here, stations on this network", "doorbell"));
     body.appendChild(box);
   }
 
@@ -324,25 +354,12 @@ const KagazSettings = (() => {
     body.appendChild(box);
   }
 
-  async function draw() {
+  async function show() {
     const body = $("settings-body");
     body.innerHTML = "";
-    drawTones(body);
-    await drawRinging(body);
     await drawAccounts(body);
+    drawDevices(body);
     drawAbout(body);
-  }
-
-  async function show() {
-    $("settings-body").innerHTML = '<p class="muted">Loading…</p>';
-    try {
-      listing = await invoke("ringtones_list");
-      devices = await ringers();
-    } catch (e) {
-      $("settings-body").textContent = String(e);
-      return;
-    }
-    await draw();
   }
 
   return { show };
