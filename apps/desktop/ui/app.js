@@ -446,11 +446,16 @@ function selectCategory(cat) {
   document.querySelectorAll(".kz-full").forEach((el) => KagazPlayer.fullscreen(el, false));
   if (cat !== "doorbell" && typeof stopOneTouch === "function") stopOneTouch();
   currentView = cat;
-  // The sidebar marks the view; the bottom bar marks Home for a device's page.
+  // The sidebar and the bottom bar mark the section on screen, and only it
+  // (Add a device is part of Home); on a device's page the bottom bar
+  // marks nothing, as that page has no button there.
   const navCat = cat === "add" ? "home" : cat;
-  document.querySelectorAll("#categories li[data-cat]").forEach((el) => el.classList.toggle("active", el.dataset.cat === navCat));
-  document.querySelectorAll("#bottom-nav button").forEach((el) =>
-    el.classList.toggle("active", el.dataset.cat === (cat === "settings" ? cat : "home")));
+  document.querySelectorAll("#categories li[data-cat], #bottom-nav button").forEach((el) => {
+    const on = el.dataset.cat === navCat;
+    el.classList.toggle("active", on);
+    if (on) el.setAttribute("aria-current", "page");
+    else el.removeAttribute("aria-current");
+  });
   if (cat === "cameras") {
     for (const id of PANES) $(id).classList.toggle("hidden", id !== "cameras");
     showCameras();
