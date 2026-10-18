@@ -435,10 +435,11 @@ function showCameras() {
   refreshCameras();
 }
 
-// The views: Home, Add a device, Activity, Settings, and one page per kind
-// of device. The sidebar (wide windows) and the bottom bar (phones) switch
-// between them; every kind's page has a way back to Home.
-const PANES = ["empty", "home", "add", "activity", "settings", "picker", "detail", "cameras", "doorbell"];
+// The views: Home, Add a device, Settings, and one page per kind of
+// device (each with its own settings). The sidebar (wide windows) and the
+// bottom bar (phones) switch between them; every kind's page has a way
+// back to Home.
+const PANES = ["empty", "home", "add", "settings", "picker", "detail", "cameras", "doorbell"];
 let currentView = null;
 
 function selectCategory(cat) {
@@ -446,10 +447,10 @@ function selectCategory(cat) {
   if (cat !== "doorbell" && typeof stopOneTouch === "function") stopOneTouch();
   currentView = cat;
   // The sidebar marks the view; the bottom bar marks Home for a device's page.
-  const navCat = ["home", "add", "activity", "settings"].includes(cat) ? (cat === "add" ? "home" : cat) : cat;
+  const navCat = cat === "add" ? "home" : cat;
   document.querySelectorAll("#categories li[data-cat]").forEach((el) => el.classList.toggle("active", el.dataset.cat === navCat));
   document.querySelectorAll("#bottom-nav button").forEach((el) =>
-    el.classList.toggle("active", el.dataset.cat === (["activity", "settings"].includes(cat) ? cat : "home")));
+    el.classList.toggle("active", el.dataset.cat === (cat === "settings" ? cat : "home")));
   if (cat === "cameras") {
     for (const id of PANES) $(id).classList.toggle("hidden", id !== "cameras");
     showCameras();
@@ -458,9 +459,8 @@ function selectCategory(cat) {
   const pane = { print: "picker" }[cat] || cat;
   for (const id of PANES) $(id).classList.toggle("hidden", id !== pane);
   if (cat === "print") { current = null; renderList(); if (!devices.length) rescan(); }
-  if (cat === "doorbell") refreshDoorbell();
+  if (cat === "doorbell") { doorSettings(false); refreshDoorbell(); }
   if (cat === "home" && typeof KagazHome !== "undefined") KagazHome.show();
-  if (cat === "activity" && typeof KagazActivity !== "undefined") KagazActivity.show();
   if (cat === "settings" && typeof KagazSettings !== "undefined") KagazSettings.show();
   $("main").scrollTop = 0;
 }
@@ -2291,7 +2291,7 @@ listen("cameras-progress", (e) => {
 });
 
 $("rescan").addEventListener("click", rescan);
-// After every script (home.js, activity.js…) has loaded.
+// After every script (home.js, history.js…) has loaded.
 window.addEventListener("DOMContentLoaded", () => invoke("startup_view").then((v) => {
   if (v === "cameras") {
     selectCategory("cameras");
@@ -2547,14 +2547,24 @@ $("door-station-check").addEventListener("click", async () => {
 });
 
 $("door-rescan").addEventListener("click", lookForStations);
-$("door-gear").addEventListener("click", () => $("door-settings").classList.toggle("hidden"));
+// The gear opens the Doorbell's settings in place of the page (settings.js).
+function doorSettings(on) {
+  $("doorbell").classList.toggle("show-settings", on);
+  $("door-settings-view").classList.toggle("hidden", !on);
+  if (on) {
+    if (typeof stopOneTouch === "function") stopOneTouch();
+    KagazDoorbellSettings.show();
+    $("main").scrollTop = 0;
+  }
+}
+$("door-gear").addEventListener("click", () => doorSettings(!$("doorbell").classList.contains("show-settings")));
+$("door-settings-back").addEventListener("click", () => doorSettings(false));
 $("door-port-go").addEventListener("click", async () => {
   const port = Number($("door-port").value);
   if (!(port >= 1 && port <= 65535)) { $("door-message").textContent = "The port must be 1 to 65535."; return; }
   try {
     await invoke("doorbell_listen", { port });
     doorStations.listen_port = port;
-    $("door-settings").classList.add("hidden");
   } catch (e) {
     $("door-message").textContent = "" + e;
   }

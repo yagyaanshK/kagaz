@@ -19,15 +19,10 @@
         <span class="cat-name">Home</span>
         <span class="cat-note muted">your devices</span>
       </li>
-      <li data-cat="activity">
-        <span class="cat-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 7v5l3 2M21 12a9 9 0 1 1-9-9 9 9 0 0 1 9 9z"/></svg></span>
-        <span class="cat-name">Activity</span>
-        <span class="cat-note muted">rings, calls, visitors</span>
-      </li>
       <li data-cat="settings">
         <span class="cat-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></span>
         <span class="cat-name">Settings</span>
-        <span class="cat-note muted">ringtones, accounts</span>
+        <span class="cat-note muted">accounts, about</span>
       </li>
       <li class="cat-label muted" aria-hidden="true">My devices</li>
       <li data-cat="doorbell">
@@ -74,18 +69,6 @@
       <p id="add-note" class="muted" role="status"></p>
     </section>
 
-    <!-- Activity: what happened, newest first, across devices. -->
-    <section id="activity" class="pane hidden">
-      <div class="pane-head">
-        <h2>Activity</h2>
-        <button id="activity-refresh" type="button" class="icon" title="Refresh" aria-label="Refresh">&#x21bb;</button>
-      </div>
-      <div id="activity-filters" class="chips" role="group" aria-label="Show"></div>
-      <div id="activity-list" class="activity-list"></div>
-      <p id="activity-note" class="muted" role="status"></p>
-      <div class="actions"><button id="activity-more" type="button" class="hidden">Show older</button></div>
-    </section>
-
     <section id="settings" class="pane hidden">
       <div class="pane-head"><h2>Settings</h2></div>
       <div id="settings-body"></div>
@@ -119,20 +102,30 @@
         <h2>Doorbell</h2>
         <div class="actions">
           <span id="door-listen" class="pill muted">…</span>
-          <div class="cam-menu">
-            <button id="door-gear" type="button" class="icon" title="Settings" aria-label="Doorbell settings">&#x2699;</button>
-            <div id="door-settings" class="cam-settings hidden">
-              <label>Listen on UDP port
-                <input id="door-port" type="number" min="1" max="65535" value="5060">
-              </label>
-              <div class="cam-settings-row">
-                <button id="door-port-go" type="button">Apply</button>
-                <button id="door-rescan" type="button" title="Look for door stations on this network">Look again</button>
-              </div>
-              <p class="muted small">Optional local calls use Direct IP, independently of your OneTouch account. On the station's web page, add <code id="door-local">this computer</code> as a Direct IP target.</p>
-            </div>
-          </div>
+          <button id="door-gear" type="button" class="icon" title="Doorbell settings" aria-label="Doorbell settings">&#x2699;</button>
         </div>
+      </div>
+      <!-- Doorbell settings (settings.js): what applies to every doorbell,
+           then each kind's own (OneTouch, stations on this network; other
+           brands add theirs). Shown instead of the rest of the page. -->
+      <div id="door-settings-view" class="hidden">
+        <button id="door-settings-back" type="button" class="back">&#x2190; Doorbell</button>
+        <h3 class="door-settings-title">Doorbell settings</h3>
+        <div id="door-settings-all"></div>
+        <div id="door-settings-onetouch"></div>
+        <section class="set-section" id="door-settings-local">
+          <h3>Door stations on this network</h3>
+          <p class="muted small">A station that rings this device directly (Direct IP), without your OneTouch account. On the station's web page, add <code id="door-local">this computer</code> as a Direct IP target.</p>
+          <div id="door-settings-local-tone"></div>
+          <div class="set-row">
+            <label class="set-label" for="door-port"><span>Listen on UDP port</span><span class="muted small">5060 unless the station is set to another.</span></label>
+            <span class="set-control"><input id="door-port" type="number" min="1" max="65535" value="5060"><button id="door-port-go" type="button">Apply</button></span>
+          </div>
+          <div class="set-row">
+            <span class="set-label"><span>Find stations</span><span class="muted small">Look for door stations on this network again.</span></span>
+            <span class="set-control"><button id="door-rescan" type="button">Look again</button></span>
+          </div>
+        </section>
       </div>
       <div id="ot-account" class="ot-panel">
         <div class="ot-heading">
@@ -188,6 +181,7 @@
           <div id="ot-devices" class="ot-devices"></div>
           <div id="ot-recordings-pane" class="hidden">
             <!-- Who rang (with their picture) and the calls (activity.js). -->
+            <div id="ot-history-filters" class="chips" role="group" aria-label="Show"></div>
             <div id="ot-history" class="activity-list"></div>
             <div class="actions"><button id="ot-history-more" type="button" class="hidden">Show older</button></div>
             <!-- An older OTIPVDP account keeps its own list. -->
@@ -608,7 +602,6 @@
   <!-- A phone: the three kinds of device along the bottom, under the thumb. -->
   <nav id="bottom-nav" aria-label="Kagaz">
     <button type="button" data-cat="home" class="active"><span class="cat-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 11l9-7 9 7M5 10v10h5v-6h4v6h5V10"/></svg></span><span>Home</span></button>
-    <button type="button" data-cat="activity"><span class="cat-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 7v5l3 2M21 12a9 9 0 1 1-9-9 9 9 0 0 1 9 9z"/></svg></span><span>Activity</span></button>
     <button type="button" data-cat="settings"><span class="cat-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></span><span>Settings</span></button>
   </nav>
 
@@ -621,7 +614,7 @@
   <script src="onetouch.js"></script>
   <script src="calls.js"></script>
   <script src="brands.js"></script>
-  <script src="activity.js"></script>
+  <script src="history.js"></script>
   <script src="settings.js"></script>
   <script src="home.js"></script>
 </body>

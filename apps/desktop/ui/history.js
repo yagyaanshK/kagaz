@@ -1,11 +1,9 @@
-// Activity: what happened, newest first, grouped by day. Today it holds the
-// doorbell: who rang (with the station's picture of them), the calls
-// (answered, missed, made) and rings from door stations on this network;
-// other kinds of device add their events here as they arrive. The same
-// list shows on the Doorbell page's History tab.
-// Uses app.js's globals: $, invoke, selectCategory.
+// The doorbell's History tab: what happened, newest first, grouped by day:
+// who rang (with the station's picture of them), the calls (answered,
+// missed, made) and rings from door stations on this network.
+// Uses app.js's globals: $, invoke.
 
-const KagazActivity = (() => {
+const KagazHistory = (() => {
   const FILTERS = [
     ["all", "All"],
     ["door", "Visitors"],
@@ -13,11 +11,10 @@ const KagazActivity = (() => {
     ["missed", "Missed"],
     ["local", "On this network"],
   ];
-  // One feed per place on screen: the Activity page and the Doorbell tab.
   function feed() {
     return { entries: [], pages: { door: 0, calls: 0 }, more: { door: true, calls: true }, note: "", loading: false };
   }
-  const feeds = { page: feed(), doorbell: feed() };
+  const feed_ = feed();
   let filter = "all";
 
   // ---------- time ----------
@@ -197,57 +194,45 @@ const KagazActivity = (() => {
   $("viewer").addEventListener("click", (ev) => { if (ev.target.id === "viewer") closeViewer(); });
   document.addEventListener("keydown", (ev) => { if (ev.key === "Escape" && !$("viewer").classList.contains("hidden")) closeViewer(); });
 
-  // ---------- the Activity page ----------
+  // ---------- the Doorbell page's History tab ----------
 
   function drawFilters() {
-    const box = $("activity-filters");
+    const box = $("ot-history-filters");
     box.innerHTML = "";
     for (const [id, label] of FILTERS) {
       const c = document.createElement("button");
       c.type = "button";
       c.className = "chip" + (filter === id ? " active" : "");
       c.textContent = label;
-      c.addEventListener("click", () => { filter = id; drawPage(); });
+      c.addEventListener("click", () => { filter = id; draw(); });
       box.appendChild(c);
     }
   }
 
-  function drawPage() {
-    const f = feeds.page;
+  function draw() {
+    const f = feed_;
     drawFilters();
-    const n = render($("activity-list"), f);
-    $("activity-note").textContent = f.loading ? "Loading…" : f.note || (n ? "" : "Nothing here yet.");
-    $("activity-more").classList.toggle("hidden", !(f.more.door || f.more.calls) || f.loading);
-  }
-
-  async function show() {
-    feeds.page.loading = false;
-    $("activity-note").textContent = "Loading…";
-    await load(feeds.page, true, true);
-    drawPage();
-  }
-  $("activity-refresh").addEventListener("click", show);
-  $("activity-more").addEventListener("click", async () => { await load(feeds.page, false, false); drawPage(); });
-
-  // ---------- the Doorbell page's History tab ----------
-
-  async function doorbell(reset = true) {
-    const f = feeds.doorbell;
-    const saved = filter;
-    filter = "all";
-    $("ot-history").innerHTML = '<p class="muted">Loading…</p>';
-    await load(f, reset, false);
     const n = render($("ot-history"), f);
-    filter = saved;
-    if (!n || f.note) {
+    if (f.loading || !n || f.note) {
       const p = document.createElement("p");
       p.className = "muted";
-      p.textContent = f.note || "No rings or calls yet.";
+      p.textContent = f.loading ? "Loading\u2026" : f.note || (filter === "all" ? "No rings or calls yet." : "Nothing of this kind yet.");
       $("ot-history").prepend(p);
     }
-    $("ot-history-more").classList.toggle("hidden", !(f.more.door || f.more.calls));
+    $("ot-history-more").classList.toggle("hidden", f.loading || !(f.more.door || f.more.calls));
   }
-  $("ot-history-more").addEventListener("click", () => doorbell(false));
 
-  return { show, doorbell, when };
+  // Show the History tab: the first page, with rings from stations on
+  // this network among the account's.
+  async function show(reset = true) {
+    if (reset) feed_.loading = false;
+    feed_.loading = true;
+    draw();
+    feed_.loading = false;
+    await load(feed_, reset, reset);
+    draw();
+  }
+  $("ot-history-more").addEventListener("click", () => show(false));
+
+  return { show, when };
 })();
