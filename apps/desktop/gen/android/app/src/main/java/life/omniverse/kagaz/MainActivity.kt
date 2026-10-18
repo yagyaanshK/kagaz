@@ -10,8 +10,13 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 
 class MainActivity : TauriActivity() {
+  /** Rust (main.rs): give this activity the app's window again when the
+   *  app was closed while its process stayed (the doorbell line runs on). */
+  private external fun kagazShown()
+
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
+    kagazShown()
     showOverLockScreen(intent)
     // Android 15 and later draw apps under the status and navigation bars;
     // keep the page clear of them (and of the keyboard when it is up).

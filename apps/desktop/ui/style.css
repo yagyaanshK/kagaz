@@ -681,3 +681,115 @@ ul.cards li.add .name { color: var(--accent); }
   .cam-reload { width: 64px; height: 64px; }
   #categories li { min-height: 48px; }
 }
+
+/* ---- Home, Add a device, Activity, Settings ---- */
+#categories .cat-label { cursor: default; padding: 14px 12px 2px; font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; border: none; background: none; display: block; }
+#categories .cat-label:hover { background: none; }
+.back.to-home { display: none; }
+.empty-state { margin-top: 24px; padding: 24px; border: 1px dashed var(--line); border-radius: 12px; text-align: center; }
+.empty-state p { margin: 4px 0; }
+button.link { background: none; border: none; color: var(--accent); padding: 4px 6px; min-height: 0; font-weight: 600; }
+
+/* Kinds and brands to choose from: a grid of tiles. */
+.choice-grid { display: grid; gap: 10px; margin-top: 14px; }
+.choice-grid.kinds { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
+.choice-grid.brands { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
+.kind-tile { display: grid; grid-template-columns: auto 1fr; grid-template-rows: auto auto; column-gap: 12px; align-items: center; text-align: left; padding: 14px; border-radius: 12px; background: var(--bg); min-height: 72px; }
+.kind-tile .kind-icon { grid-row: 1 / span 2; color: var(--accent); }
+.kind-tile .kind-name { font-weight: 600; }
+.kind-tile .kind-note { font-size: 12px; }
+.kind-icon { display: inline-flex; }
+.kind-icon svg { width: 26px; height: 26px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.kind-tile.soon .kind-icon, .kind-tile.soon .kind-name { color: var(--muted); }
+.brand-tile { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 14px 10px; border-radius: 12px; background: var(--bg); min-height: 112px; position: relative; }
+.brand-tile:hover, .kind-tile:hover { border-color: var(--accent); }
+.brand-logo { display: flex; align-items: center; justify-content: center; width: 100%; height: 44px; padding: 6px 10px; border-radius: 8px; background: #fff; }
+.brand-logo img { max-width: 100%; max-height: 32px; object-fit: contain; }
+.brand-logo .wordmark { font-weight: 800; font-size: 18px; letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.brand-logo.brand-icon svg { width: 28px; height: 28px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.brand-name { font-size: 13px; text-align: center; }
+.brand-tile.soon .brand-logo { filter: grayscale(1); opacity: 0.45; }
+.brand-tile.soon .brand-name { color: var(--muted); }
+.soon-badge { font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
+.brands .brand-tile:not(.soon) { border-color: var(--accent); }
+#cam-signin { margin-top: 12px; }
+#devices li .brand-mark { float: right; height: 20px; max-width: 72px; object-fit: contain; margin-left: 8px; background: #fff; border-radius: 4px; padding: 2px 4px; }
+
+/* Chips: a row of filters. */
+.chips { display: flex; gap: 6px; flex-wrap: wrap; margin: 10px 0 4px; }
+.chips:empty { display: none; }
+.chip { border-radius: 999px; padding: 4px 12px; min-height: 32px; font-size: 13px; background: var(--panel); }
+.chip.active { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+
+/* Home: each kind with its devices. */
+.home-group { margin-top: 18px; }
+.home-group-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.home-group-head h3 { margin: 0; font-size: 16px; }
+.home-group-head .kind-icon { color: var(--accent); }
+.home-group-head .home-status { flex: 1 1 auto; }
+.home-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; }
+.home-tile { display: flex; align-items: center; gap: 12px; padding: 12px; border-radius: 12px; background: var(--bg); text-align: left; min-height: 64px; min-width: 0; }
+.home-tile:hover { border-color: var(--accent); }
+.tile-icon { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; border-radius: 10px; background: var(--panel); color: var(--accent); }
+.tile-icon svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.tile-icon.logo { background: #fff; padding: 4px; width: 56px; }
+.tile-icon.logo img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.tile-text { display: flex; flex-direction: column; min-width: 0; }
+.tile-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Activity: a list by day. */
+.activity-list { margin-top: 6px; }
+.act-day { font-size: 13px; color: var(--muted); margin: 18px 0 6px; font-weight: 600; }
+.act-item { display: flex; align-items: center; gap: 12px; width: 100%; padding: 8px 10px; border: none; border-bottom: 1px solid var(--line); border-radius: 0; background: none; text-align: left; min-height: 64px; }
+.act-item:disabled { opacity: 1; cursor: default; }
+.act-item:not(:disabled):hover { background: var(--panel); }
+.act-pic { position: relative; flex: 0 0 auto; width: 72px; height: 48px; border-radius: 8px; overflow: hidden; background: var(--panel); display: inline-flex; align-items: center; justify-content: center; color: var(--muted); }
+.act-pic img { width: 100%; height: 100%; object-fit: cover; }
+.act-pic.icon { width: 48px; }
+.act-pic svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.act-play { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #fff; text-shadow: 0 0 4px #000; font-size: 16px; }
+.act-text { display: flex; flex-direction: column; min-width: 0; flex: 1 1 auto; }
+.act-text strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.act-time { flex: 0 0 auto; }
+.act-item.missed .act-pic { color: var(--bad); }
+.act-item.unread strong::after { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--bad); margin-left: 8px; vertical-align: middle; }
+
+/* A picture or video over everything. */
+.viewer { position: fixed; inset: 0; z-index: 200; background: rgba(0, 0, 0, 0.92); display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 56px 12px calc(12px + env(safe-area-inset-bottom)); }
+.viewer-top { position: absolute; top: 0; left: 0; right: 0; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: calc(8px + env(safe-area-inset-top)) 12px 8px; color: #fff; }
+.viewer-top button { background: rgba(255, 255, 255, 0.15); color: #fff; border: none; }
+.viewer img, .viewer video { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 6px; }
+
+/* Settings: sections of rows, a label on the left and its control on the right. */
+.set-section { margin-top: 18px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg); }
+.set-section h3 { margin: 0 0 4px; font-size: 15px; }
+.set-section > p { margin: 0 0 6px; }
+.set-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 0; border-top: 1px solid var(--line); flex-wrap: wrap; }
+.set-label { display: flex; flex-direction: column; gap: 2px; color: var(--text); font-size: 14px; flex: 1 1 220px; min-width: 0; }
+.set-control { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.set-control select { max-width: 220px; }
+.set-control input[type="range"] { width: 180px; accent-color: var(--accent); }
+.set-more { margin-top: 6px; }
+.set-more summary { cursor: pointer; padding: 10px 0; color: var(--accent); }
+.set-own { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; }
+.set-own > button { align-self: flex-start; margin-top: 6px; }
+input.toggle { width: 44px; height: 24px; min-height: 0; accent-color: var(--accent); }
+
+@media (max-width: 599px) {
+  .back.to-home { display: inline-block; }
+  .choice-grid.kinds { grid-template-columns: 1fr; }
+  .choice-grid.brands { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .home-tiles { grid-template-columns: 1fr; }
+  .set-control select { max-width: 60vw; }
+}
+@media (pointer: coarse) {
+  .chip { min-height: 40px; padding: 6px 14px; }
+}
+
+/* Security cameras, signed out: Tapo's sign-in on top, full width. */
+#cam-signin #cam-login-form { padding: 14px 16px; border-radius: 12px; background: var(--bg); }
+#cam-signin #cam-login-form h3 { margin-top: 0; }
+#cam-signin .cam-login-row { flex-direction: column; align-items: stretch; max-width: 420px; }
+#cam-signin .cam-login-row input { min-width: 0; width: 100%; }
+#cam-signin #cam-login-cancel { display: none; }
+#cam-signin > h3 { margin-top: 22px; }

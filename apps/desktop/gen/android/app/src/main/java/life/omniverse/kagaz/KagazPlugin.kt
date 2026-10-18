@@ -47,6 +47,7 @@ import app.tauri.annotation.TauriPlugin
 import app.tauri.plugin.Invoke
 import app.tauri.plugin.JSObject
 import app.tauri.plugin.Plugin
+import app.tauri.plugin.PluginManager
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
@@ -73,6 +74,7 @@ class ListenArgs {
 class CallArgs {
     var phase: String = "idle"
     var peer: String = ""
+    var tone: String = ""
 }
 
 @InvokeArg
@@ -84,7 +86,12 @@ class SecretArgs {
 private const val SECRET_KEY = "kagaz-secrets"
 
 @TauriPlugin
-class KagazPlugin(private val activity: Activity) : Plugin(activity) {
+class KagazPlugin(private val first: Activity) : Plugin(first) {
+    // Kagaz outlives its window (the doorbell line keeps the process alive
+    // after the app is closed), so a later window is a new activity: use
+    // whichever one is on screen, not the one this plugin was made with.
+    private val activity: Activity
+        get() = PluginManager.activity ?: first
     private var multicast: WifiManager.MulticastLock? = null
 
     override fun load(webView: WebView) {
@@ -105,6 +112,7 @@ class KagazPlugin(private val activity: Activity) : Plugin(activity) {
             try {
                 if (args.on) {
                     askOnce()
+                    service.putExtra(KagazCallService.EXTRA_FROM_APP, true)
                     ContextCompat.startForegroundService(context, service)
                 } else {
                     context.stopService(service)
@@ -119,7 +127,7 @@ class KagazPlugin(private val activity: Activity) : Plugin(activity) {
     @Command
     fun callChanged(invoke: Invoke) {
         val args = invoke.parseArgs(CallArgs::class.java)
-        KagazCallService.ring(activity.applicationContext, if (args.phase == "ringing") args.peer else null)
+        KagazCallService.ring(activity.applicationContext, if (args.phase == "ringing") args.peer else null, args.tone)
         invoke.resolve()
     }
 

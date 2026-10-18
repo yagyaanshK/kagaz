@@ -425,6 +425,75 @@ pub async fn onetouch_stop(app: AppHandle) -> Result<(), String> {
     })
     .await
 }
+/// The account as last known, without signing in (Home asks this: a new
+/// sign-in would sign the person's other devices out of OneTouch).
+#[tauri::command]
+pub async fn onetouch_peek(app: AppHandle) -> Result<Status, String> {
+    super::blocking(move || {
+        let state = app.state::<OneTouchState>();
+        let mut s = state.0.lock().unwrap();
+        s.load()?;
+        Ok(s.status())
+    })
+    .await
+}
+
+/// The role and a usable session, refreshing the account when needed.
+fn with_session<T>(
+    app: &AppHandle,
+    f: impl Fn(&mut Session, &str) -> Result<T, onetouch::Error>,
+) -> Result<T, String> {
+    let state = app.state::<OneTouchState>();
+    let mut s = state.0.lock().unwrap();
+    s.load()?;
+    if s.session.is_none() {
+        return Err("Sign in to your OneTouch account first.".into());
+    }
+    if s.account.is_none() {
+        let account = match s.session.as_mut().unwrap().account() {
+            Ok(a) => a,
+            Err(e) => return Err(s.cloud_error(e)),
+        };
+        s.account = Some(account);
+    }
+    let role = s.account.as_ref().unwrap().role.clone();
+    let result = f(s.session.as_mut().unwrap(), &role);
+    match result {
+        Ok(v) => {
+            if let Some(session) = &s.session {
+                let _ = session.save();
+            }
+            Ok(v)
+        }
+        Err(e) => Err(s.cloud_error(e)),
+    }
+}
+
+/// One page of the account's history: "door" (rings with a picture of who
+/// was there), "calls" or "captures".
+#[tauri::command]
+pub async fn onetouch_history(
+    app: AppHandle,
+    log: String,
+    page: u32,
+) -> Result<onetouch::history::Page, String> {
+    use onetouch::history::Log;
+    let log = match log.as_str() {
+        "door" => Log::Door,
+        "calls" => Log::Calls,
+        "captures" => Log::Captures,
+        _ => return Err("Unknown history.".into()),
+    };
+    super::blocking(move || with_session(&app, |session, role| session.history(role, log, page)))
+        .await
+}
+
+/// The home's family members (each with their own login).
+#[tauri::command]
+pub async fn onetouch_people(app: AppHandle) -> Result<Vec<onetouch::history::Person>, String> {
+    super::blocking(move || with_session(&app, |session, role| session.people(role))).await
+}
+
 #[tauri::command]
 pub async fn onetouch_recordings(app: AppHandle, page: u32) -> Result<Recordings, String> {
     super::blocking(move || {

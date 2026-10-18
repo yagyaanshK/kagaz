@@ -77,7 +77,8 @@
     status = s;
     $("calls-enabled").checked = !!s.enabled;
     const base = LINE_TEXT[s.line] || s.line || "";
-    $("calls-line").textContent = s.detail && s.line !== "up" ? `${base} ${s.detail}`.trim() : base;
+    // The detail adds to the state's words; for "signed out" it only repeats them.
+    $("calls-line").textContent = s.detail && !["up", "signed_out"].includes(s.line) ? `${base} ${s.detail}`.trim() : base;
     $("calls-line").classList.toggle("cap-ok", s.line === "up");
     $("calls-line").classList.toggle("cap-warn", ["down", "expired", "signed_out"].includes(s.line));
     $("calls-retry-row").classList.toggle("hidden", !["down", "expired", "signed_out"].includes(s.line) || !s.enabled);
@@ -145,7 +146,13 @@
     if (phase === "ringing" && !ringing) {
       ringing = true;
       if (typeof selectCategory === "function") selectCategory("doorbell");
-      if (typeof startChime === "function") startChime();
+      // The caller's tone (Settings). On a phone the ring notification
+      // plays it, also when the window is closed; the page stays quiet.
+      const peer = (s.peer || "").trim().toLowerCase();
+      const dev = (s.devices || []).find((d) => d.name.trim().toLowerCase() === peer);
+      const family = typeof otPeople !== "undefined" && otPeople.some((p) => p.name.trim().toLowerCase() === peer);
+      const kind = (dev && dev.kind === "apps") || family ? "family" : "doorbell";
+      if (typeof startChime === "function" && !/Android/i.test(navigator.userAgent)) startChime(s.peer, kind);
       $("call-video-note").textContent = s.video ? "Answer to see the camera" : "";
       card.dataset.ended = "";
     }

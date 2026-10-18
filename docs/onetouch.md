@@ -106,7 +106,32 @@ Video:
   Account tokens are never forwarded to media hosts. Refresh history if signed
   media URLs expire.
 
-## Live view and sound
+## History and family
+
+The Smart Cloud's own Activities page reads four lists. The current page
+asks `/web-server/v4/smartplus/<single|community>/log/<master|member>/get{Door,Call,Capture}Log`
+(camelCase fields under `data.list`); older builds asked
+`/web-server/v3/app/<single|community>/log/get{Door,Call,Capture}Log`
+(PascalCase fields as `data`). Both take `page` and `row` and return one
+look-ahead row when there are more. Kagaz tries the newer list, then the
+older one, and reads either shape.
+
+- Door log: each ring or door opening (`captureTime`, `deviceName`,
+  `captureType` such as `Call`, `response`, `picUrl`/`smallPicUrl`, and a
+  video link when the station records one).
+- Call log: `startTime`, `isCallee`/`isAnswer` (v3: `Type` 1 missed,
+  2 answered, 3 outgoing), the other side's name, `isRead`, `isGroupCall`.
+- Capture log: pictures taken by hand during live view. This is the list
+  the window used to show as "Recordings & snapshots"; it is empty on the
+  test account (code 0) while the door and call logs hold the rings, which
+  is why that tab looked broken. Measured 2026-10-18 on the v3 lists: 21
+  door entries, all `Call` with pictures, and 21 calls.
+
+Family members (each with their own login) come from
+`/web-server/v3/app/<project>/user/getSubList`; the test account has none,
+so the member fields are read loosely (name, `SipAccount`).
+
+
 
 The relay's live view (DESCRIBE with `Account` and `Manual: 1`) offers one
 H.264 video track and no audio, for door stations and indoor monitors alike

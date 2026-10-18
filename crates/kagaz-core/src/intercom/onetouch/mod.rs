@@ -1,6 +1,7 @@
 //! OneTouch Smart Cloud, successor to OTIPVDP. See docs/onetouch.md.
 //! Account tokens never appear in webview models or errors.
 pub mod calls;
+pub mod history;
 mod legacy;
 mod rtp;
 pub mod live;

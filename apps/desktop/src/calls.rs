@@ -88,7 +88,31 @@ fn update(app: &AppHandle, f: impl FnOnce(&mut Status)) {
     };
     let _ = app.emit("call-event", &snapshot);
     #[cfg(mobile)]
-    super::mobile::call_changed(app, &snapshot.phase, &snapshot.peer);
+    {
+        // The ring notification plays the person's chosen tone.
+        let tone = if snapshot.phase == "ringing" {
+            ring_file(&snapshot)
+        } else {
+            String::new()
+        };
+        super::mobile::call_changed(app, &snapshot.phase, &snapshot.peer, &tone);
+    }
+}
+
+/// The tone file for the current ring: the peer's own, else its kind's.
+#[cfg_attr(not(mobile), allow(dead_code))]
+fn ring_file(status: &Status) -> String {
+    use super::ringtones;
+    let kind = status
+        .devices
+        .iter()
+        .find(|d| d.name.eq_ignore_ascii_case(status.peer.trim()))
+        .map(|d| ringtones::kind_of(&d.kind))
+        .unwrap_or("doorbell");
+    let id = ringtones::tone_for(&ringtones::load(), &status.peer, kind);
+    ringtones::file_for(&id)
+        .map(|p| p.display().to_string())
+        .unwrap_or_default()
 }
 
 fn device_for<'a>(status: &'a Status, number: &str) -> Option<&'a CallDevice> {
@@ -201,6 +225,12 @@ fn allow_microphone(app: &AppHandle) {
             });
         });
     });
+}
+
+/// Whether the person wants this device to ring ("Ring me here").
+#[cfg_attr(not(target_os = "android"), allow(dead_code))]
+pub fn wanted() -> bool {
+    load_settings().enabled
 }
 
 /// Start or restart the line from the saved OneTouch session; stop it when
