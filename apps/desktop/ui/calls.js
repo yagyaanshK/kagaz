@@ -1,7 +1,8 @@
 // Doorbell calls through the OneTouch cloud: the account's app line rings
 // here. A ring brings up the call card; a call shows the caller's camera,
-// plays their voice and sends the microphone. Each device of the account
-// has a Call button. Uses app.js's globals: $, invoke, listen,
+// plays their voice (levelled) and sends the microphone. Each device of the
+// account has a Call button. The picture and voice go through the window's
+// player (player.js). Uses app.js's globals: $, invoke, listen,
 // selectCategory, startChime, stopChime.
 
 (() => {
@@ -20,8 +21,7 @@
         <button id="calls-retry" type="button">Try again</button>
       </div>
       <div id="call-card" class="hidden">
-        <div class="call-video">
-          <canvas id="call-canvas" class="hidden"></canvas>
+        <div id="call-video" class="call-video">
           <div id="call-video-note" class="call-video-note"></div>
           <span id="call-clock" class="call-clock hidden">0:00</span>
         </div>
@@ -94,7 +94,7 @@
       const b = li.querySelector("button");
       b.disabled = busy || s.line !== "up";
       b.addEventListener("click", () => {
-        audioContext(); // a click is what lets the page make sound
+        KagazPlayer.audioContext(); // a click is what lets the page make sound
         invoke("calls_call", { number: d.sip }).catch((e) => note(String(e)));
       });
       ul.appendChild(li);
@@ -131,7 +131,7 @@
     if (phase === "talking") {
       startClock(s.since);
       startAudio();
-      watchVideo();
+      startPlayer();
       if (!s.video) $("call-video-note").textContent = "No camera on this call";
     } else {
       stopClock();
@@ -141,7 +141,7 @@
       card.dataset.active = "";
       card.dataset.ended = "1";
       stopAudio();
-      stopVideo();
+      stopPlayer();
       $("call-state").textContent = s.detail || "call ended";
       setTimeout(() => {
         card.dataset.ended = "";
@@ -174,80 +174,47 @@
     clockTimer = null;
   }
 
-  // ---------- voice ----------
+  // ---------- their picture and voice ----------
 
-  let actx = null;
-  let playAt = 0;
-  let mic = null; // { stream, node, source, sink }
-  let muted = false;
-  let micStarting = false;
-
-  function audioContext() {
-    if (!actx) actx = new (window.AudioContext || window.webkitAudioContext)();
-    if (actx.state === "suspended") actx.resume().catch(() => {});
-    return actx;
-  }
-
-  // Their voice is levelled before it plays: an automatic gain lifts quiet
-  // speech towards a steady loudness (but not the hiss between words), a
-  // compressor holds loud bursts down, and the volume slider sits on top.
-  const TARGET_RMS = 0.12; // about -18 dBFS: comfortable speech
-  const NOISE_RMS = 0.006; // quieter than this is the line's hiss, not speech
-  const MAX_GAIN = 8; // +18 dB at most
-  let voice = null; // { level: GainNode, out: GainNode }
-  let speech = TARGET_RMS; // smoothed loudness of recent speech
+  let player = null; // the call's picture and voice, while talking
+  let videoWatch = null;
   let userVolume = 1;
   try {
     userVolume = Number(localStorage.getItem("kagaz-call-volume")) || 1;
   } catch (e) {}
   $("call-volume").value = userVolume;
 
-  function voiceChain() {
-    if (voice) return voice;
-    const level = actx.createGain();
-    const comp = actx.createDynamicsCompressor();
-    comp.threshold.value = -20;
-    comp.knee.value = 10;
-    comp.ratio.value = 8;
-    comp.attack.value = 0.003;
-    comp.release.value = 0.25;
-    const out = actx.createGain();
-    out.gain.value = userVolume;
-    level.connect(comp);
-    comp.connect(out);
-    out.connect(actx.destination);
-    voice = { level, out };
-    return voice;
+  function startPlayer() {
+    if (player) return;
+    player = new KagazPlayer.Player($("call-video"), { sound: true, level: true, volume: userVolume, label: "call" });
+    // What happened to the camera on this call, said on the card when no
+    // picture shows: nothing arrived, or it arrived and could not be shown.
+    videoWatch = setInterval(() => {
+      if (!player || !status || status.phase !== "talking" || !status.video) return;
+      $("call-video-note").textContent = player.note();
+    }, 1000);
   }
 
-  function levelVoice(samples) {
-    let sum = 0;
-    for (let i = 0; i < samples.length; i++) sum += samples[i] * samples[i];
-    const rms = Math.sqrt(sum / samples.length);
-    if (rms < NOISE_RMS) return; // keep the gain; don't chase the hiss
-    speech = speech * 0.9 + rms * 0.1;
-    const gain = Math.max(0.5, Math.min(MAX_GAIN, TARGET_RMS / speech));
-    voiceChain().level.gain.setTargetAtTime(gain, actx.currentTime, 0.4);
+  function stopPlayer() {
+    clearInterval(videoWatch);
+    videoWatch = null;
+    if (player) player.stop();
+    player = null;
+    $("call-video-note").textContent = "";
   }
 
-  function playVoice(bytes) {
-    if (!actx) return;
-    const n = bytes.byteLength >> 1;
-    if (!n) return;
-    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-    const buf = actx.createBuffer(1, n, 8000);
-    const ch = buf.getChannelData(0);
-    for (let i = 0; i < n; i++) ch[i] = view.getInt16(i * 2, true) / 32768;
-    levelVoice(ch);
-    const src = actx.createBufferSource();
-    src.buffer = buf;
-    src.connect(voiceChain().level);
-    const now = actx.currentTime;
-    // A small cushion against network jitter; catch up when it grows.
-    if (playAt < now + 0.02 || playAt > now + 0.4) playAt = now + 0.08;
-    src.start(playAt);
-    playAt += n / 8000;
-  }
+  // The media channel stays open across calls; packets go to the current player.
+  const channel = new window.__TAURI__.core.Channel();
+  channel.onmessage = (msg) => {
+    if (player) player.feed(msg);
+  };
+  invoke("calls_media", { channel }).catch(() => {});
+
+  // ---------- the microphone ----------
+
+  let mic = null; // { stream, node, source, sink }
+  let muted = false;
+  let micStarting = false;
 
   function bytesToBase64(u8) {
     let s = "";
@@ -256,7 +223,7 @@
   }
 
   async function startAudio() {
-    audioContext();
+    const actx = KagazPlayer.audioContext();
     if (mic || micStarting) return;
     micStarting = true;
     try {
@@ -303,126 +270,14 @@
     }
     muted = false;
     $("call-mute").textContent = "Mute";
-    playAt = 0;
   }
-
-  // ---------- camera ----------
-
-  let decoder = null;
-  let canvasCtx = null;
-  // What happened to the camera on this call, said on the card when no
-  // picture shows: nothing arrived, or it arrived and could not be shown.
-  const video = { received: 0, keys: 0, shown: 0, problem: "" };
-  let videoWatch = null;
-
-  function watchVideo() {
-    if (videoWatch) return;
-    videoWatch = setInterval(() => {
-      if (!status || status.phase !== "talking" || video.shown > 0) return;
-      $("call-video-note").textContent = !video.received
-        ? "No camera pictures have arrived yet"
-        : video.problem
-          ? `Pictures arrive (${video.received}) but cannot be shown: ${video.problem}`
-          : `Pictures arrive (${video.received}, ${video.keys} full) but none has been shown yet`;
-    }, 1000);
-  }
-
-  function nalOf(data, kind) {
-    for (let i = 0; i + 4 < data.length; i++) {
-      if (data[i] === 0 && data[i + 1] === 0 && data[i + 2] === 0 && data[i + 3] === 1 && (data[i + 4] & 0x1f) === kind) {
-        return data.subarray(i + 4, i + 8);
-      }
-    }
-    return null;
-  }
-
-  function hex2(n) {
-    return n.toString(16).padStart(2, "0").toUpperCase();
-  }
-
-  function showVideo(key, ts, data) {
-    video.received++;
-    if (key) video.keys++;
-    if (typeof VideoDecoder === "undefined") {
-      video.problem = "this window has no video decoder (WebCodecs)";
-      return;
-    }
-    if (!decoder || decoder.state === "closed") {
-      if (!key) return;
-      const sps = nalOf(data, 7);
-      if (!sps) {
-        video.problem = "the first full picture came without its stream settings (SPS)";
-        return;
-      }
-      const codec = `avc1.${hex2(sps[1])}${hex2(sps[2])}${hex2(sps[3])}`;
-      const canvas = $("call-canvas");
-      canvasCtx = canvas.getContext("2d");
-      decoder = new VideoDecoder({
-        output: (frame) => {
-          if (canvas.width !== frame.displayWidth) canvas.width = frame.displayWidth;
-          if (canvas.height !== frame.displayHeight) canvas.height = frame.displayHeight;
-          canvasCtx.drawImage(frame, 0, 0);
-          frame.close();
-          video.shown++;
-          canvas.classList.remove("hidden");
-          $("call-video-note").textContent = "";
-        },
-        error: (e) => {
-          video.problem = `the decoder failed (${(e && e.message) || e})`;
-          decoder = null;
-        },
-      });
-      try {
-        decoder.configure({ codec, optimizeForLatency: true });
-      } catch (e) {
-        decoder = null;
-        video.problem = `the decoder refused ${codec} (${e.message || e})`;
-        return;
-      }
-    }
-    if (decoder.decodeQueueSize > 10 && !key) return; // fall behind gracefully
-    try {
-      decoder.decode(new EncodedVideoChunk({ type: key ? "key" : "delta", timestamp: Math.round((ts * 1000) / 90), data }));
-    } catch (e) {
-      video.problem = `decoding failed (${e.message || e})`;
-      decoder = null;
-    }
-  }
-
-  function stopVideo() {
-    clearInterval(videoWatch);
-    videoWatch = null;
-    Object.assign(video, { received: 0, keys: 0, shown: 0, problem: "" });
-    if (decoder && decoder.state !== "closed") {
-      try {
-        decoder.close();
-      } catch (e) {}
-    }
-    decoder = null;
-    $("call-canvas").classList.add("hidden");
-    $("call-video-note").textContent = "";
-  }
-
-  // ---------- media channel ----------
-
-  const channel = new window.__TAURI__.core.Channel();
-  channel.onmessage = (msg) => {
-    const u8 = msg instanceof ArrayBuffer ? new Uint8Array(msg) : msg instanceof Uint8Array ? msg : Array.isArray(msg) ? new Uint8Array(msg) : null;
-    if (!u8 || u8.length < 5) return;
-    const kind = u8[0];
-    const ts = ((u8[1] << 24) >>> 0) + (u8[2] << 16) + (u8[3] << 8) + u8[4];
-    const body = u8.subarray(5);
-    if (kind === 1) playVoice(body);
-    else showVideo(kind === 2, ts, body);
-  };
-  invoke("calls_media", { channel }).catch(() => {});
 
   // ---------- buttons ----------
 
   $("calls-enabled").addEventListener("change", (e) => invoke("calls_enable", { enabled: e.target.checked }));
   $("calls-retry").addEventListener("click", () => invoke("calls_restart"));
   $("call-answer").addEventListener("click", () => {
-    audioContext(); // a click is what lets the page make sound
+    KagazPlayer.audioContext(); // a click is what lets the page make sound
     invoke("calls_answer").catch((e) => note(String(e)));
   });
   $("call-decline").addEventListener("click", () => invoke("calls_decline").catch((e) => note(String(e))));
@@ -442,12 +297,12 @@
       note("Enter the number to call.");
       return;
     }
-    audioContext();
+    KagazPlayer.audioContext();
     invoke("calls_call", { number }).catch((err) => note(String(err)));
   });
   $("call-volume").addEventListener("input", (e) => {
     userVolume = Number(e.target.value) || 1;
-    if (voice) voice.out.gain.setTargetAtTime(userVolume, actx.currentTime, 0.05);
+    if (player) player.volume = userVolume;
     try {
       localStorage.setItem("kagaz-call-volume", String(userVolume));
     } catch (err) {}

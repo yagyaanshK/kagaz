@@ -310,6 +310,9 @@ enum IntercomCommand {
         /// Press this key once the call connects (# opens most doors)
         #[arg(long)]
         press: Option<char>,
+        /// Watch this device's live video (its name, or part of it) for --seconds, by the window's own route (no helper), and report what arrives
+        #[arg(long, conflicts_with_all = ["call", "number", "listen"])]
+        watch: Option<String>,
     },
     /// Wait for an incoming call (the doorbell) and report each ring; for Direct IP use port 5060
     Listen {
@@ -2408,8 +2411,12 @@ fn intercom_command(cmd: IntercomCommand) -> Result<()> {
             number,
             seconds,
             press,
+            watch,
         } => {
             use kagaz_core::intercom::onetouch::Session;
+            if let Some(name) = &watch {
+                return watch_onetouch_live(name, seconds);
+            }
             use kagaz_core::intercom::phone::{Event as PhoneEvent, MediaOut, Phone};
             use std::sync::atomic::{AtomicUsize, Ordering};
             use std::sync::Arc;
@@ -2789,4 +2796,77 @@ fn unix_now() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0)
+}
+
+/// Live view of a OneTouch device by the window's own route: Kagaz speaks
+/// RTSP to the relay itself and reports the pictures and sound that arrive.
+fn watch_onetouch_live(name: &str, seconds: u64) -> anyhow::Result<()> {
+    use kagaz_core::intercom::onetouch::{live::Live, Session};
+    use kagaz_core::media::Media;
+    let mut session = Session::load()
+        .map_err(|e| anyhow::anyhow!("{e}"))?
+        .ok_or_else(|| anyhow::anyhow!("not signed in to OneTouch; sign in from the Doorbell pane first"))?;
+    let account = session.account().map_err(|e| anyhow::anyhow!("{e}"))?;
+    let wanted = name.to_lowercase();
+    let device = account
+        .devices
+        .iter()
+        .find(|d| d.name.to_lowercase().contains(&wanted))
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "no device named like {name:?}; the account has: {}",
+                account
+                    .devices
+                    .iter()
+                    .map(|d| d.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        })?;
+    let target = session
+        .live_target(&account, device)
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    println!(
+        "Watching {} for {seconds} s (diary: {})",
+        device.name,
+        kagaz_core::paths::cache_dir().join("onetouch-live.log").display()
+    );
+    let (tx, rx) = std::sync::mpsc::channel();
+    let _live = Live::start(target, Box::new(move |m| tx.send(m).is_ok()));
+    let start = std::time::Instant::now();
+    let (mut pictures, mut keys, mut sound, mut first) = (0u64, 0u64, 0usize, false);
+    while start.elapsed().as_secs() < seconds {
+        match rx.recv_timeout(std::time::Duration::from_millis(200)) {
+            Ok(Media::Video { data, key, .. }) => {
+                pictures += 1;
+                if key {
+                    keys += 1;
+                }
+                if !first {
+                    first = true;
+                    println!(
+                        "  first picture after {:.1} s ({} bytes{})",
+                        start.elapsed().as_secs_f32(),
+                        data.len(),
+                        if key { ", a keyframe" } else { "" }
+                    );
+                }
+            }
+            Ok(Media::Audio { pcm, .. }) => sound += pcm.len(),
+            Ok(Media::Ended(why)) => {
+                println!(
+                    "  ended: {}",
+                    if why.is_empty() { "closed".to_string() } else { why }
+                );
+                break;
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+            Err(_) => break,
+        }
+    }
+    println!(
+        "{pictures} pictures ({keys} keyframes), {:.1} s of sound",
+        sound as f64 / 8000.0
+    );
+    Ok(())
 }
