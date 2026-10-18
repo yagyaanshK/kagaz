@@ -172,8 +172,9 @@ kagaz cameras
 
 Tapo cameras anywhere in the world, through your own TP-Link account and
 TP-Link's relay, exactly as the Tapo app reaches them, but shown the way
-you want: `kagaz tapo login` once (email code supported), then the
-window's "Cameras" view shows every camera on the account side by side,
+you want: sign in once in the window's **Security cameras** page (or
+`kagaz tapo login`; email code supported), and it shows every camera on
+the account side by side,
 any number, tap to enlarge, on the desktop and on a phone alike. The
 window plays the video itself: Kagaz takes the relay's stream apart into
 pictures and sound and the page decodes them with the browser's own
@@ -215,6 +216,28 @@ The desktop window (`cargo run -p kagaz-desktop`) shows the same devices,
 the same plain-words explanation and the same scan options; on Linux it
 needs the webkit2gtk and gtk3 development packages to build.
 
+## The app
+
+The window opens on **Home**: the devices set up on this computer or
+phone, grouped by kind (doorbell, security cameras, printers and
+scanners). **Add a device** starts from the kind of device, then its
+brand: brands Kagaz works with show in colour, the ones planned show
+greyed as "coming soon" (cameras such as DSLRs, robot vacuums, TVs,
+fridges, washing machines and air conditioners are listed the same way).
+**Activity** lists what happened, newest first: who rang the doorbell
+(with the station's picture of them), the calls, and rings from stations
+on the network. **Settings** holds what applies to the whole app: ring
+sounds (calm tones Kagaz makes itself, or your own songs; one per kind
+of ring and, if you like, one per device), ringing on this device, and
+the accounts Kagaz is signed in to. Each kind of device keeps its own
+settings on its page. Wide windows have a sidebar; phones a bottom bar
+with Home, Activity and Settings.
+
+On a phone, Kagaz keeps listening for doorbell calls after you close it,
+with a small "Ready for doorbell calls" notification; some phones stop
+background apps to save battery, so allow Kagaz to run in the background
+there.
+
 ## OneTouch doorbell accounts
 
 In the app, open **Doorbell → Sign in**. Select **OneTouch Smart Cloud**
@@ -232,7 +255,10 @@ Enable **Remember sign-in securely** to keep the login in your password
 store (the desktop's vault, or the Android Keystore on a phone). OneTouch
 allows one session per account, so Kagaz signs in again only when you open
 the Doorbell pane; ringing works without that. Sign out keeps the saved
-login; **Forget saved sign-in** removes it.
+login; **Forget saved sign-in** removes it. Give each person in the home
+their own login (OneTouch's family accounts, up to ten): then nobody signs
+anyone else out, each is listed under the doorbell's devices with a Call
+button, and **History** shows the visitors and calls.
 
 The integration builds and passes protocol/UI checks; authenticated playback
 still needs verification with a real account. See [protocol notes and limits](docs/onetouch.md).
@@ -262,6 +288,9 @@ still needs verification with a real account. See [protocol notes and limits](do
   (ONVIF, RTSP), and onward as contributors bring devices. Tapo cameras over
   the TP-Link cloud are in (pulled forward by need); local ONVIF/RTSP cameras
   next.
+- **Print from anywhere.** Send a document to your own printer at home
+  from a phone or laptop elsewhere, through a Kagaz device on the printer's
+  network that you set up for it; no vendor cloud.
 - **M8 AI assistant module.** Configurable model backends (local servers,
   OpenRouter, OpenAI-compatible and Anthropic endpoints, the Claude Agent SDK
   as the agent runtime), used to draft, test and package a module for a

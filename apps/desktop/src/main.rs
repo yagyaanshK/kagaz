@@ -19,6 +19,7 @@ mod onetouch;
 #[cfg(mobile)]
 mod mobile;
 mod printing;
+mod ringtones;
 
 /// Run a blocking core call off the UI thread.
 async fn blocking<T: Send + 'static>(
@@ -305,7 +306,7 @@ fn cameras_status(state: tauri::State<CameraState>) -> CamerasStatus {
             message: if logged_in {
                 String::new()
             } else {
-                "Not logged in to TP-Link: run `kagaz tapo login` in a terminal once.".into()
+                "Sign in to your Tapo (TP-Link) account to see your cameras.".into()
             },
         },
     }
@@ -324,7 +325,7 @@ async fn cameras_start(
     }
     let built = blocking(move || {
         let mut session = Session::load(&Session::default_path()).map_err(|_| {
-            "Not logged in to TP-Link: use \"Log in\" here or `kagaz tapo login` in a terminal."
+            "Sign in to your Tapo (TP-Link) account first."
                 .to_string()
         })?;
         let cameras = match session.cameras() {
@@ -1171,6 +1172,47 @@ fn main() {
     run()
 }
 
+/// Android: closing Kagaz (swiping it away) destroys its window, which
+/// would end the app and with it the doorbell line. While the person wants
+/// to be rung, the process stays (the line's foreground service keeps it),
+/// and the next time Kagaz is opened its new activity gets a new window.
+#[cfg(target_os = "android")]
+mod reopen {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::OnceLock;
+    use tauri::{AppHandle, Manager};
+
+    pub static APP: OnceLock<AppHandle> = OnceLock::new();
+    pub static CLOSED: AtomicBool = AtomicBool::new(false);
+
+    /// Called by MainActivity.onCreate (after the activity is registered).
+    #[no_mangle]
+    pub extern "system" fn Java_life_omniverse_kagaz_MainActivity_kagazShown(
+        _env: *mut std::ffi::c_void,
+        _this: *mut std::ffi::c_void,
+    ) {
+        if !CLOSED.swap(false, Ordering::AcqRel) {
+            return;
+        }
+        let Some(app) = APP.get().cloned() else {
+            return;
+        };
+        // Not on Android's UI thread: building a window waits for it.
+        std::thread::spawn(move || {
+            if !app.webview_windows().is_empty() {
+                return;
+            }
+            let Some(config) = app.config().app.windows.first().cloned() else {
+                return;
+            };
+            match tauri::WebviewWindowBuilder::from_config(&app, &config).and_then(|b| b.build()) {
+                Ok(_) => eprintln!("kagaz: window opened again"),
+                Err(e) => eprintln!("kagaz: could not open the window again: {e}"),
+            }
+        });
+    }
+}
+
 /// The app. The desktop starts it from `main`; Android and iOS load the
 /// library (lib.rs) and start it here.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -1201,6 +1243,8 @@ pub fn run() {
                     p.app_data_dir()?,
                 );
                 mobile::remember_handle(app.handle());
+                #[cfg(target_os = "android")]
+                let _ = reopen::APP.set(app.handle().clone());
             }
             // Listen for the doorbell from the start: that is what it is for.
             let port = kagaz_core::intercom::stations::Stations::load().listen_port;
@@ -1279,11 +1323,29 @@ pub fn run() {
             onetouch::onetouch_live,
             onetouch::onetouch_stop,
             onetouch::onetouch_recordings,
+            onetouch::onetouch_peek,
+            ringtones::ringtones_list,
+            ringtones::ringtones_set,
+            ringtones::ringtone_audio,
+            ringtones::ringtone_add,
+            ringtones::ringtone_remove,
+            onetouch::onetouch_history,
+            onetouch::onetouch_people,
             onetouch::onetouch_recording_media
         ])
         .build(tauri::generate_context!())
         .expect("error while building the Kagaz window")
         .run(|app, event| {
+            // Android: the window was closed; keep the doorbell line.
+            #[cfg(target_os = "android")]
+            if let tauri::RunEvent::ExitRequested { code: None, api, .. } = &event {
+                if calls::wanted() {
+                    api.prevent_exit();
+                    reopen::CLOSED.store(true, std::sync::atomic::Ordering::Release);
+                    eprintln!("kagaz: window closed; the doorbell line stays");
+                    return;
+                }
+            }
             // Stop the camera engine when the window goes away.
             if let tauri::RunEvent::Exit = event {
                 if let Some(state) = app.try_state::<CameraState>() {

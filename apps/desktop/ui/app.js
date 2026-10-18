@@ -55,10 +55,39 @@ function capLine(d) {
   return [print, scan].filter(Boolean);
 }
 
+// The brand chosen (Add a device, or the chips above the list); null for all.
+let printBrand = null;
+
+function brandOf(d) {
+  return typeof KagazBrands === "undefined" ? null : KagazBrands.match("print", [d.manufacturer, d.model, title(d)].join(" "));
+}
+
+function renderBrandChips() {
+  const box = $("print-brands");
+  if (!box) return;
+  box.innerHTML = "";
+  const seen = new Map();
+  for (const d of devices) { const b = brandOf(d); if (b) seen.set(b.id, b); }
+  if (printBrand && typeof KagazBrands !== "undefined") { const b = KagazBrands.byId("print", printBrand); if (b) seen.set(b.id, b); }
+  if (seen.size < 1) return;
+  const chip = (label, id) => {
+    const c = document.createElement("button");
+    c.type = "button";
+    c.className = "chip" + (printBrand === id ? " active" : "");
+    c.textContent = label;
+    c.addEventListener("click", () => { printBrand = id; renderList(); });
+    box.appendChild(c);
+  };
+  chip("All", null);
+  for (const b of seen.values()) chip(b.name, b.id);
+}
+
 function renderList() {
   const ul = $("devices");
   ul.innerHTML = "";
+  renderBrandChips();
   devices.forEach((d, i) => {
+    if (printBrand && (brandOf(d) || {}).id !== printBrand) return;
     const li = document.createElement("li");
     li.dataset.index = i;
     if (current === i) li.classList.add("active");
@@ -67,6 +96,14 @@ function renderList() {
       .join(" · ");
     li.innerHTML = `<div class="name"></div><div class="where"></div><div class="caps">${caps}</div>`;
     li.querySelector(".name").textContent = title(d);
+    const brand = brandOf(d);
+    if (brand && brand.logo) {
+      const img = document.createElement("img");
+      img.className = "brand-mark";
+      img.src = brand.logo;
+      img.alt = "";
+      li.prepend(img);
+    }
     li.querySelector(".where").textContent = where(d);
     li.addEventListener("click", () => select(i));
     ul.appendChild(li);
@@ -79,9 +116,13 @@ async function rescan() {
   $("search-note").classList.remove("hidden");
   try {
     devices = await invoke("discover", { timeout: 3 });
+    const shown = printBrand ? devices.filter((d) => (brandOf(d) || {}).id === printBrand).length : devices.length;
     $("search-note").textContent = devices.length
-      ? `${devices.length} found`
+      ? printBrand && !shown
+        ? `No ${(KagazBrands.byId("print", printBrand) || {}).name || "such"} printer answered; ${devices.length} other${devices.length === 1 ? "" : "s"} found (All).`
+        : `${shown} found`
       : "Nothing answered. Is the device on and on the same network?";
+    if (typeof KagazHome !== "undefined") KagazHome.devicesChanged();
   } catch (e) {
     devices = [];
     $("search-note").textContent = "Could not search: " + e;
@@ -101,11 +142,9 @@ async function select(i) {
   current = i;
   const d = devices[i];
   renderList();
-  $("empty").classList.add("hidden");
-  $("picker").classList.add("hidden");
-  $("cameras").classList.add("hidden");
-  $("doorbell").classList.add("hidden");
-  $("detail").classList.remove("hidden");
+  for (const id of PANES) $(id).classList.toggle("hidden", id !== "detail");
+  document.querySelectorAll("#categories li[data-cat]").forEach((el) => el.classList.toggle("active", el.dataset.cat === "print"));
+  $("main").scrollTop = 0;
   $("d-title").textContent = title(d);
   $("d-sub").textContent = [d.manufacturer, d.model, where(d)].filter(Boolean).join(" · ");
   $("scan-log").innerHTML = "";
@@ -393,33 +432,42 @@ let pbOffset = 0;     // the cameras' clock, minutes east of UTC (first camera a
 function showCameras() {
   current = null;
   renderList();
-  $("empty").classList.add("hidden");
-  $("picker").classList.add("hidden");
-  $("doorbell").classList.add("hidden");
-  $("detail").classList.add("hidden");
-  $("cameras").classList.remove("hidden");
   refreshCameras();
 }
 
-// The left-hand categories drive the main area.
+// The views: Home, Add a device, Activity, Settings, and one page per kind
+// of device. The sidebar (wide windows) and the bottom bar (phones) switch
+// between them; every kind's page has a way back to Home.
+const PANES = ["empty", "home", "add", "activity", "settings", "picker", "detail", "cameras", "doorbell"];
+let currentView = null;
+
 function selectCategory(cat) {
   document.querySelectorAll(".kz-full").forEach((el) => KagazPlayer.fullscreen(el, false));
   if (cat !== "doorbell" && typeof stopOneTouch === "function") stopOneTouch();
-  document.querySelectorAll("#categories li, #bottom-nav button").forEach((el) =>
-    el.classList.toggle("active", el.dataset.cat === cat));
-  $("empty").classList.add("hidden");
-  if (cat === "cameras") { showCameras(); return; }
-  // Leaving the cameras view: stop showing its pane.
-  $("cameras").classList.add("hidden");
-  $("detail").classList.add("hidden");
-  $("picker").classList.toggle("hidden", cat !== "print");
-  $("doorbell").classList.toggle("hidden", cat !== "doorbell");
-  if (cat === "print" && !devices.length) rescan();
+  currentView = cat;
+  // The sidebar marks the view; the bottom bar marks Home for a device's page.
+  const navCat = ["home", "add", "activity", "settings"].includes(cat) ? (cat === "add" ? "home" : cat) : cat;
+  document.querySelectorAll("#categories li[data-cat]").forEach((el) => el.classList.toggle("active", el.dataset.cat === navCat));
+  document.querySelectorAll("#bottom-nav button").forEach((el) =>
+    el.classList.toggle("active", el.dataset.cat === (["activity", "settings"].includes(cat) ? cat : "home")));
+  if (cat === "cameras") {
+    for (const id of PANES) $(id).classList.toggle("hidden", id !== "cameras");
+    showCameras();
+    return;
+  }
+  const pane = { print: "picker" }[cat] || cat;
+  for (const id of PANES) $(id).classList.toggle("hidden", id !== pane);
+  if (cat === "print") { current = null; renderList(); if (!devices.length) rescan(); }
   if (cat === "doorbell") refreshDoorbell();
+  if (cat === "home" && typeof KagazHome !== "undefined") KagazHome.show();
+  if (cat === "activity" && typeof KagazActivity !== "undefined") KagazActivity.show();
+  if (cat === "settings" && typeof KagazSettings !== "undefined") KagazSettings.show();
+  $("main").scrollTop = 0;
 }
 
-document.querySelectorAll("#categories li, #bottom-nav button").forEach((el) =>
+document.querySelectorAll("#categories li[data-cat], #bottom-nav button").forEach((el) =>
   el.addEventListener("click", () => selectCategory(el.dataset.cat)));
+document.querySelectorAll(".to-home").forEach((el) => el.addEventListener("click", () => selectCategory("home")));
 
 async function refreshCameras() {
   try {
@@ -435,6 +483,18 @@ async function refreshCameras() {
   for (const o of $("cam-mode").options) o.disabled = !helper && o.value !== "builtin";
   if (!helper) $("cam-mode").value = "builtin";
   $("cam-login").classList.toggle("hidden", camStatus.logged_in);
+  // Signed out: the brands to choose from, and Tapo's sign-in right there.
+  $("cam-signin").classList.toggle("hidden", camStatus.logged_in);
+  $("cam-when").classList.toggle("hidden", !camStatus.logged_in);
+  if (!camStatus.logged_in) {
+    // Tapo's sign-in first, the brands (most coming soon) under it.
+    $("cam-signin").prepend($("cam-login-form"));
+    if (typeof KagazBrands !== "undefined") KagazBrands.fill($("cam-brands"), "security", (b) => {
+      if (b.id === "tapo") showLogin(true, "");
+    });
+    showLogin(true, $("cam-login-note").textContent);
+    $("cam-message").textContent = "";
+  }
   $("cam-logout").classList.toggle("hidden", !camStatus.logged_in || camStatus.running);
   if (camStatus.running) {
     await loadLayout();
@@ -2219,14 +2279,15 @@ listen("cameras-progress", (e) => {
 });
 
 $("rescan").addEventListener("click", rescan);
-invoke("startup_view").then((v) => {
+// After every script (home.js, activity.js…) has loaded.
+window.addEventListener("DOMContentLoaded", () => invoke("startup_view").then((v) => {
   if (v === "cameras") {
     selectCategory("cameras");
     setTimeout(() => $("cam-start").click(), 800);
-  } else {
-    selectCategory("print");
+  } else if (!currentView) {
+    selectCategory("home");
   }
-}).catch(() => { selectCategory("print"); });
+}).catch(() => { if (!currentView) selectCategory("home"); }));
 $("scan-form").addEventListener("change", () => {
   renderResolutions();
   Pictures.update($("scan-form"));
@@ -2301,7 +2362,7 @@ function renderDoorbell() {
   } else {
     stopDoorClock();
   }
-  if (ringing) startChime(); else stopChime();
+  if (ringing) startChime(doorStationName(st.from) || st.caller || "", "local"); else stopChime();
 
   // The sidebar entry says when it is ringing, so other views notice too.
   for (const el of document.querySelectorAll('#categories li[data-cat="doorbell"], #bottom-nav button[data-cat="doorbell"]')) {
@@ -2338,33 +2399,17 @@ function stopDoorClock() {
 }
 
 // A two-note chime, repeated while the bell rings. Made here, no file needed.
-function startChime() {
+// The ring: the tone chosen in Settings (settings.js), for this caller.
+// `kind` is "doorbell", "family" or "local".
+function startChime(peer = "", kind = "doorbell") {
   if (doorChime) return;
-  let ctx;
-  try { ctx = new (window.AudioContext || window.webkitAudioContext)(); } catch (_) { return; }
-  const ding = () => {
-    const t = ctx.currentTime;
-    for (const [freq, at, len] of [[784, 0, 0.5], [622, 0.35, 0.8]]) {
-      const o = ctx.createOscillator();
-      const g = ctx.createGain();
-      o.type = "sine";
-      o.frequency.value = freq;
-      g.gain.setValueAtTime(0.0001, t + at);
-      g.gain.exponentialRampToValueAtTime(0.4, t + at + 0.02);
-      g.gain.exponentialRampToValueAtTime(0.0001, t + at + len);
-      o.connect(g).connect(ctx.destination);
-      o.start(t + at);
-      o.stop(t + at + len + 0.05);
-    }
-  };
-  ding();
-  doorChime = { ctx, timer: setInterval(ding, 2500) };
+  doorChime = true;
+  if (typeof KagazRing !== "undefined") KagazRing.start(peer, kind);
 }
 function stopChime() {
   if (!doorChime) return;
-  clearInterval(doorChime.timer);
-  try { doorChime.ctx.close(); } catch (_) {}
   doorChime = null;
+  if (typeof KagazRing !== "undefined") KagazRing.stop();
 }
 
 function renderDoorStations() {

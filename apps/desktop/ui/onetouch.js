@@ -69,14 +69,16 @@ function otRender() {
 // under the picture. The call itself (calls.js) then plays in the same
 // card. Calls arrive whether or not a card is open.
 
-const OT_KIND = { door: "Door station", indoor: "Indoor monitor", guard: "Guard phone", apps: "Your other phones", other: "Device" };
+const OT_KIND = { door: "Door station", indoor: "Indoor monitor", guard: "Guard phone", apps: "They ring all at once", family: "Family member", other: "Device" };
 const OT_LIVE_KIND = { "0": "door", "1": "door", "2": "indoor", "3": "guard" };
-const OT_ORDER = { door: 0, indoor: 1, guard: 2, other: 3, apps: 4 };
+const OT_ORDER = { door: 0, indoor: 1, guard: 2, other: 3, family: 4, apps: 5 };
+let otPeople = []; // the home's family members (their own logins)
 const OT_ICON = {
   door: '<svg viewBox="0 0 24 24"><path d="M6 3h12v18H6zM10 8h4M12 13a1.5 1.5 0 1 0 0 .01M9 18h6"/></svg>',
   indoor: '<svg viewBox="0 0 24 24"><path d="M3 5h18v11H3zM8 20h8M12 16v4"/></svg>',
   guard: '<svg viewBox="0 0 24 24"><path d="M12 3l8 3v6c0 4.5-3.5 8-8 9-4.5-1-8-4.5-8-9V6z"/></svg>',
   apps: '<svg viewBox="0 0 24 24"><path d="M8 3h8v18H8zM11 18h2"/></svg>',
+  family: '<svg viewBox="0 0 24 24"><path d="M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM2 21v-1a7 7 0 0 1 14 0v1M17 11a3 3 0 1 0 0-6M19 21v-1a5 5 0 0 0-3-4.6"/></svg>',
   other: '<svg viewBox="0 0 24 24"><path d="M4 4h16v16H4z"/></svg>',
 };
 let otOpen = null; // the key of the open card
@@ -95,8 +97,14 @@ function otCards() {
     cards.push(card);
     byName.set(norm(d.name), card);
   }
+  // Family members, each with their own number (when the cloud gives it).
+  for (const p of otPeople) {
+    cards.push({ key: `person:${p.id || p.name}`, name: p.name, live: null, call: p.sip ? { sip: p.sip, name: p.name, kind: "family" } : null, kind: "family", online: true, person: true });
+  }
   const calls = otCallStatus();
-  for (const d of (calls && calls.devices) || []) {
+  for (let d of (calls && calls.devices) || []) {
+    // The account's own number rings every phone signed in with this login.
+    if (d.kind === "apps") d = { ...d, name: "Phones on my login" };
     const card = byName.get(norm(d.name));
     if (card && !card.call) {
       card.call = d;
@@ -175,7 +183,7 @@ function otRenderDevices() {
         const call = document.createElement("button");
         call.type = "button";
         call.className = "accent big";
-        call.textContent = c.kind === "apps" ? "Ring them" : "Call";
+        call.textContent = c.kind === "apps" ? "Ring them" : c.kind === "family" ? `Call ${c.name.split(" ")[0]}` : "Call";
         call.disabled = !lineUp || busy;
         call.addEventListener("click", () => window.KagazCalls.call(c.call.sip, c.key));
         actions.append(call);
@@ -184,7 +192,11 @@ function otRenderDevices() {
       if (watching) {
         note.textContent = [note.textContent, "Live view is picture only: the door sends its sound in a call."].filter(Boolean).join(" ");
       } else if (!canWatch) {
-        note.textContent = [note.textContent, c.live ? "OneTouch does not allow live view of this device." : c.kind === "apps" ? "Rings the other phones and tablets signed in to this account." : ""].filter(Boolean).join(" ");
+        note.textContent = [note.textContent,
+          c.live ? "OneTouch does not allow live view of this device."
+          : c.kind === "apps" ? "Every phone and tablet signed in with your own login shares one number, so they ring together. Family members with their own login are listed separately and ring on their own."
+          : c.kind === "family" && !c.call ? "OneTouch did not give a call number for this member yet."
+          : ""].filter(Boolean).join(" ");
       }
       actions.append(note);
       el.append(actions);
@@ -203,6 +215,14 @@ async function otOpenCard(card) {
   // The open card comes to the top, so its picture has the screen.
   const el = document.querySelector(`.dev-card[data-key="${CSS.escape(card.key)}"]`);
   if (el) el.scrollIntoView({ block: "start", behavior: "smooth" });
+}
+
+// Home: open a device's card by its name once the account is loaded.
+async function otOpenByName(name) {
+  const want = (name || "").trim().toLowerCase();
+  for (let i = 0; i < 40 && !(otStatus && otStatus.devices); i++) await new Promise((r) => setTimeout(r, 150));
+  const card = otCards().find((c) => c.name.trim().toLowerCase() === want);
+  if (card) await otOpenCard(card);
 }
 
 async function otClose() {
@@ -231,6 +251,12 @@ async function refreshOneTouch() {
     }
     $('ot-message').textContent = otStatus?.notice || '';
   });
+  otLoadPeople();
+}
+async function otLoadPeople() {
+  if (!otStatus?.logged_in) { otPeople = []; return; }
+  try { otPeople = await invoke('onetouch_people'); } catch (_) { otPeople = []; }
+  otRenderDevices();
 }
 $('ot-signin').addEventListener('click', () => {
   if (otStatus?.remembered) {
@@ -376,7 +402,16 @@ async function otLoadRecordings(page) {
   $('ot-message').textContent = list.message || (list.entries.length ? '' : 'No cloud recordings or snapshots on this page. Footage stored only on an indoor monitor is not included.');
 }
 $('ot-live-tab').addEventListener('click', () => otRun(async () => { await stopOneTouch(); otTab = 'live'; }));
-$('ot-recordings-tab').addEventListener('click', () => otRun(async () => { otTab = 'recordings'; await otLoadRecordings(1); }, 'Loading recordings…'));
+$('ot-recordings-tab').addEventListener('click', () => otRun(async () => {
+  otTab = 'recordings';
+  await stopOneTouch();
+  // An older OTIPVDP account has its own list; Smart Cloud shows the history.
+  const legacy = otStatus?.provider === 'otipvdp';
+  $('ot-legacy-history').classList.toggle('hidden', !legacy);
+  $('ot-history').classList.toggle('hidden', legacy);
+  if (legacy) await otLoadRecordings(1);
+  else KagazActivity.doorbell();
+}, ''));
 $('ot-recordings-refresh').addEventListener('click', () => otRun(() => otLoadRecordings(otPage), 'Refreshing recordings…'));
 $('ot-prev').addEventListener('click', () => otRun(() => otLoadRecordings(Math.max(1, otPage - 1)), 'Loading recordings…'));
 $('ot-next').addEventListener('click', () => otRun(() => otLoadRecordings(otPage + 1), 'Loading recordings…'));

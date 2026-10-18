@@ -14,39 +14,107 @@
       <h1>Kagaz</h1>
     </header>
     <ul id="categories">
-      <li data-cat="print" class="active">
-        <span class="cat-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M6 9V3h12v6M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2M6 14h12v7H6z"/></svg></span>
-        <span class="cat-name">Print &amp; scan</span>
-        <span class="cat-note muted">on the network and USB</span>
+      <li data-cat="home" class="active">
+        <span class="cat-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 11l9-7 9 7M5 10v10h5v-6h4v6h5V10"/></svg></span>
+        <span class="cat-name">Home</span>
+        <span class="cat-note muted">your devices</span>
       </li>
-      <li data-cat="cameras">
-        <span class="cat-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 7h11a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2zM16 10l6-3v10l-6-3z"/></svg></span>
-        <span class="cat-name">Cameras</span>
-        <span class="cat-note muted">Tapo, through your account</span>
+      <li data-cat="activity">
+        <span class="cat-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 7v5l3 2M21 12a9 9 0 1 1-9-9 9 9 0 0 1 9 9z"/></svg></span>
+        <span class="cat-name">Activity</span>
+        <span class="cat-note muted">rings, calls, visitors</span>
       </li>
+      <li data-cat="settings">
+        <span class="cat-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></span>
+        <span class="cat-name">Settings</span>
+        <span class="cat-note muted">ringtones, accounts</span>
+      </li>
+      <li class="cat-label muted" aria-hidden="true">My devices</li>
       <li data-cat="doorbell">
         <span class="cat-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M6 8a6 6 0 0 1 12 0v5l2 3H4l2-3zM10 19a2 2 0 0 0 4 0"/></svg></span>
         <span class="cat-name">Doorbell</span>
         <span class="cat-note muted">video intercom</span>
       </li>
+      <li data-cat="cameras">
+        <span class="cat-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 6h12l-1 6H5zM10 12v4M6 20h8M18 8l3-1"/></svg></span>
+        <span class="cat-name">Security cameras</span>
+        <span class="cat-note muted">Tapo, through your account</span>
+      </li>
+      <li data-cat="print">
+        <span class="cat-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M6 9V3h12v6M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2M6 14h12v7H6z"/></svg></span>
+        <span class="cat-name">Printers &amp; scanners</span>
+        <span class="cat-note muted">on the network and USB</span>
+      </li>
     </ul>
   </aside>
 
   <main id="main">
-    <section id="empty" class="pane">
+    <!-- Home: the devices set up here, by kind; Add a device starts from a kind, then a brand. -->
+    <section id="home" class="pane hidden">
+      <div class="pane-head">
+        <h2>My devices</h2>
+        <button id="home-add" type="button" class="accent">+ Add a device</button>
+      </div>
+      <div id="home-groups"></div>
+      <div id="home-empty" class="empty-state hidden">
+        <p>Nothing set up yet.</p>
+        <p class="muted">Add a doorbell, security cameras or a printer to see them here.</p>
+      </div>
+    </section>
+
+    <section id="add" class="pane hidden">
+      <div class="pane-head">
+        <div>
+          <button id="add-back" type="button" class="back">&#x2190; Home</button>
+          <h2 id="add-title">Add a device</h2>
+          <p id="add-sub" class="muted">What kind of device?</p>
+        </div>
+      </div>
+      <div id="add-grid" class="choice-grid"></div>
+      <p id="add-note" class="muted" role="status"></p>
+    </section>
+
+    <!-- Activity: what happened, newest first, across devices. -->
+    <section id="activity" class="pane hidden">
+      <div class="pane-head">
+        <h2>Activity</h2>
+        <button id="activity-refresh" type="button" class="icon" title="Refresh" aria-label="Refresh">&#x21bb;</button>
+      </div>
+      <div id="activity-filters" class="chips" role="group" aria-label="Show"></div>
+      <div id="activity-list" class="activity-list"></div>
+      <p id="activity-note" class="muted" role="status"></p>
+      <div class="actions"><button id="activity-more" type="button" class="hidden">Show older</button></div>
+    </section>
+
+    <section id="settings" class="pane hidden">
+      <div class="pane-head"><h2>Settings</h2></div>
+      <div id="settings-body"></div>
+    </section>
+
+    <!-- A picture or video from the history, over everything. -->
+    <div id="viewer" class="viewer hidden" role="dialog" aria-modal="true" aria-label="Picture">
+      <div class="viewer-top"><span id="viewer-title"></span><button id="viewer-close" type="button" class="icon" aria-label="Close">&#x2715;</button></div>
+      <img id="viewer-img" alt="">
+      <video id="viewer-video" class="hidden" controls playsinline></video>
+    </div>
+
+    <section id="empty" class="pane hidden">
       <p class="muted">Pick a kind of device.</p>
     </section>
 
     <section id="picker" class="pane hidden">
+      <button type="button" class="back to-home">&#x2190; Home</button>
       <div class="pane-head">
         <h2>Printers &amp; scanners</h2>
         <button id="rescan" type="button" title="Look again on the network and USB">Look again</button>
       </div>
+      <div id="print-brands" class="chips" role="group" aria-label="Brand"></div>
       <p id="search-note" class="muted">Looking for printers and scanners…</p>
       <ul id="devices"></ul>
     </section>
 
     <section id="doorbell" class="pane hidden">
+      <button type="button" class="back to-home">&#x2190; Home</button>
       <div class="cam-head pane-head">
         <h2>Doorbell</h2>
         <div class="actions">
@@ -113,13 +181,17 @@
         <div id="ot-connected" class="hidden">
           <div class="tabs" role="group" aria-label="Doorbell view">
             <button id="ot-live-tab" type="button" class="tab active" aria-pressed="true">Devices</button>
-            <button id="ot-recordings-tab" type="button" class="tab" aria-pressed="false">Recordings &amp; snapshots</button>
+            <button id="ot-recordings-tab" type="button" class="tab" aria-pressed="false">History</button>
           </div>
           <!-- Each device is one card (onetouch.js): a tap opens it and starts its
                live view inside it; its Call button sits under the picture. -->
           <div id="ot-devices" class="ot-devices"></div>
           <div id="ot-recordings-pane" class="hidden">
-            <p class="muted small">History saved to your OneTouch account. Entries with video include a Play button.</p>
+            <!-- Who rang (with their picture) and the calls (activity.js). -->
+            <div id="ot-history" class="activity-list"></div>
+            <div class="actions"><button id="ot-history-more" type="button" class="hidden">Show older</button></div>
+            <!-- An older OTIPVDP account keeps its own list. -->
+            <div id="ot-legacy-history" class="hidden">
             <div id="ot-player" class="hidden">
               <div class="ot-heading"><h3 id="ot-playing-title"></h3><button id="ot-stop" type="button">Close</button></div>
               <video id="ot-video" autoplay controls playsinline></video>
@@ -128,6 +200,7 @@
             </div>
             <div id="ot-recordings" class="ot-recordings"></div>
             <div class="actions"><button id="ot-prev" type="button">Previous</button><span id="ot-page">Page 1</span><button id="ot-next" type="button">Next</button><button id="ot-recordings-refresh" type="button">Refresh</button></div>
+            </div>
           </div>
         </div>
       </div>
@@ -199,8 +272,9 @@
     </section>
 
     <section id="cameras" class="pane hidden">
+      <button type="button" class="back to-home">&#x2190; Home</button>
       <div class="cam-head pane-head">
-        <h2>Cameras</h2>
+        <h2>Security cameras</h2>
         <div class="actions">
           <select id="cam-when" title="Live view, or recorded footage from the cameras' SD cards">
             <option value="live" selected>Live</option>
@@ -261,7 +335,13 @@
         </label>
       </div>
       <p id="cam-message" class="muted"></p>
+      <div id="cam-signin" class="hidden">
+        <h3>Brands</h3>
+        <p class="muted small">Kagaz works with Tapo cameras today; the others are coming.</p>
+        <div id="cam-brands" class="choice-grid brands"></div>
+      </div>
       <div id="cam-login-form" class="hidden">
+        <h3>Sign in with Tapo</h3>
         <p class="muted">Your TP-Link (Tapo) account. The password is sent to TP-Link only, the same way the Tapo app does; Kagaz keeps the session token in a private file, never the password.</p>
         <div class="cam-login-row">
           <input type="email" id="cam-login-email" placeholder="email" autocomplete="username">
@@ -526,10 +606,10 @@
   </main>
 
   <!-- A phone: the three kinds of device along the bottom, under the thumb. -->
-  <nav id="bottom-nav" aria-label="Kinds of device">
-    <button type="button" data-cat="print" class="active"><span class="cat-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M6 9V3h12v6M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2M6 14h12v7H6z"/></svg></span><span>Print &amp; scan</span></button>
-    <button type="button" data-cat="cameras"><span class="cat-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 7h11a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2zM16 10l6-3v10l-6-3z"/></svg></span><span>Cameras</span></button>
-    <button type="button" data-cat="doorbell"><span class="cat-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M6 8a6 6 0 0 1 12 0v5l2 3H4l2-3zM10 19a2 2 0 0 0 4 0"/></svg></span><span>Doorbell</span></button>
+  <nav id="bottom-nav" aria-label="Kagaz">
+    <button type="button" data-cat="home" class="active"><span class="cat-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 11l9-7 9 7M5 10v10h5v-6h4v6h5V10"/></svg></span><span>Home</span></button>
+    <button type="button" data-cat="activity"><span class="cat-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 7v5l3 2M21 12a9 9 0 1 1-9-9 9 9 0 0 1 9 9z"/></svg></span><span>Activity</span></button>
+    <button type="button" data-cat="settings"><span class="cat-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></span><span>Settings</span></button>
   </nav>
 
   <script src="pictures.js"></script>
@@ -539,5 +619,9 @@
   <script src="printing.js"></script>
   <script src="onetouch.js"></script>
   <script src="calls.js"></script>
+  <script src="brands.js"></script>
+  <script src="activity.js"></script>
+  <script src="settings.js"></script>
+  <script src="home.js"></script>
 </body>
 </html>
