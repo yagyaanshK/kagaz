@@ -508,7 +508,21 @@ function showLogin(show, note) {
   $("cam-login-form").classList.toggle("hidden", !show);
   if (!show) KagazReveal.hide($("cam-login-password"));
   $("cam-login-note").textContent = note || "";
-  $("cam-login-code-row").classList.add("hidden");
+  loginStep("account");
+}
+
+// The sign-in's steps. "account": email and password, Log in. "code":
+// TP-Link sent a code; the account is locked in and only Confirm is
+// offered. "code-failed": the code was refused; try it again, or Log in
+// again for a new one.
+function loginStep(step) {
+  const code = step !== "account";
+  $("cam-login-code-row").classList.toggle("hidden", !code);
+  $("cam-login-go").classList.toggle("hidden", step === "code");
+  $("cam-login-go").textContent = step === "code-failed" ? "Log in again" : "Log in";
+  // After a refused code, Confirm stays the main button.
+  $("cam-login-go").classList.toggle("accent", step === "account");
+  for (const id of ["cam-login-email", "cam-login-password"]) $(id).disabled = step === "code";
 }
 
 $("cam-login").addEventListener("click", () => showLogin(true, ""));
@@ -534,7 +548,8 @@ $("cam-login-go").addEventListener("click", async () => {
     const r = await invoke("tapo_login", { email, password });
     if (r.code_needed) {
       $("cam-login-note").textContent = r.message;
-      $("cam-login-code-row").classList.remove("hidden");
+      $("cam-login-code").value = "";
+      loginStep("code");
       $("cam-login-code").focus();
     } else {
       showLogin(false, "");
@@ -550,6 +565,7 @@ $("cam-login-code-go").addEventListener("click", async () => {
   const code = $("cam-login-code").value.trim();
   if (!code) return;
   $("cam-login-code-go").disabled = true;
+  $("cam-login-note").textContent = "checking the code\u2026";
   try {
     await invoke("tapo_login_code", { code });
     showLogin(false, "");
@@ -557,7 +573,9 @@ $("cam-login-code-go").addEventListener("click", async () => {
     $("cam-login-code").value = "";
     refreshCameras();
   } catch (e) {
-    $("cam-login-note").textContent = "" + e;
+    $("cam-login-note").textContent = `${e} Check the code and confirm again, or log in again for a new code.`;
+    loginStep("code-failed");
+    $("cam-login-code").select();
   }
   $("cam-login-code-go").disabled = false;
 });
