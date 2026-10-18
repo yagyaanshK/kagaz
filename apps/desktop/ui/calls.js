@@ -216,6 +216,7 @@
   let stage = null; // the call's picture and voice, while talking
   let player = null;
   let videoWatch = null;
+  let videoStats = null; // how the call's video is doing, from the line (every 2 s)
   let userVolume = 1;
   try {
     userVolume = Number(localStorage.getItem("kagaz-call-volume")) || 1;
@@ -235,8 +236,23 @@
     // picture shows: nothing arrived, or it arrived and could not be shown.
     videoWatch = setInterval(() => {
       if (!player || !status || status.phase !== "talking" || !status.video) return;
-      $("call-video-note").textContent = player.note();
+      $("call-video-note").textContent = videoNote();
     }, 1000);
+  }
+
+  // Why no picture shows, in words: the page's own view once pictures
+  // reach it, else what the line saw on the network.
+  function videoNote() {
+    if (player.stats.shown > 0) return "";
+    if (player.stats.received) return player.note();
+    const v = videoStats;
+    const who = (status && status.peer) || "the caller";
+    if (!v || v.seconds < 2) return "Waiting for the camera\u2026";
+    const asked = v.asked ? ` Asked for a picture ${v.asked} time${v.asked === 1 ? "" : "s"}.` : "";
+    if (!v.packets) return `No video from ${who} has reached this device.${asked}`;
+    if (v.other_payload >= v.packets) return `Video arrives (${v.packets} packets) in a format Kagaz does not read.`;
+    if (v.damaged && !v.pictures) return `Video arrives (${v.packets} packets), but each full picture lost part on the way (${v.damaged}).${asked}`;
+    return `Video arrives (${v.packets} packets), but no full picture yet.${asked}`;
   }
 
   function stopPlayer() {
@@ -245,6 +261,7 @@
     if (stage) stage.stop();
     stage = null;
     player = null;
+    videoStats = null;
     $("call-video").classList.remove("has-stage");
     $("call-video-note").textContent = "";
   }
@@ -358,5 +375,8 @@
   });
 
   listen("call-event", (e) => render(e.payload));
+  listen("call-video", (e) => {
+    videoStats = e.payload;
+  });
   invoke("calls_status").then(render).catch(() => {});
 })();

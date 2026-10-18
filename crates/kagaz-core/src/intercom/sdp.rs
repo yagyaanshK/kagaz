@@ -18,6 +18,8 @@ pub struct Stream {
     pub fmtp: Vec<(u8, String)>,
     /// sendrecv, sendonly, recvonly or inactive.
     pub direction: String,
+    /// `a=rtcp:` (RFC 3605); RTCP is on the next port up when absent.
+    pub rtcp: Option<u16>,
 }
 
 impl Stream {
@@ -52,6 +54,12 @@ impl Stream {
 
     pub fn addr(&self) -> Option<SocketAddr> {
         (self.port != 0).then_some(SocketAddr::new(self.ip?, self.port))
+    }
+
+    /// Where this stream's RTCP goes.
+    pub fn rtcp_addr(&self) -> Option<SocketAddr> {
+        let port = self.rtcp.or_else(|| self.port.checked_add(1))?;
+        (self.port != 0).then_some(SocketAddr::new(self.ip?, port))
     }
 
     /// Whether the other side will send on this stream.
@@ -132,6 +140,8 @@ pub fn parse(sdp: &str) -> Description {
                             s.fmtp.push((pt, f.trim().to_string()));
                         }
                     }
+                } else if let Some(rest) = value.strip_prefix("rtcp:") {
+                    s.rtcp = rest.split_whitespace().next().and_then(|p| p.parse().ok());
                 } else if matches!(value, "sendrecv" | "sendonly" | "recvonly" | "inactive") {
                     s.direction = value.to_string();
                 }
@@ -153,6 +163,8 @@ pub struct Agreed {
     /// Where the video comes from (and where to send keep-alives).
     pub video: Option<SocketAddr>,
     pub video_pt: Option<u8>,
+    /// Where the video's RTCP goes (to ask for a full picture).
+    pub video_rtcp: Option<SocketAddr>,
     /// `sprop-parameter-sets` of the H.264 stream, when given.
     pub sprop: Option<String>,
 }
@@ -206,6 +218,7 @@ pub fn agreed_from_answer(answer: &Description) -> Agreed {
         a.video_pt = s.find("H264");
         if a.video_pt.is_some() && s.they_send() {
             a.video = s.addr();
+            a.video_rtcp = s.rtcp_addr();
             a.sprop = sprop(a.video_pt.and_then(|pt| s.fmtp_of(pt)));
         }
     }
@@ -259,6 +272,7 @@ pub fn answer(
             Some(pt) => {
                 agreed.video_pt = Some(pt);
                 agreed.video = v.addr();
+                agreed.video_rtcp = v.rtcp_addr();
                 agreed.sprop = sprop(v.fmtp_of(pt));
                 s.push_str(&format!("m=video {video_port} RTP/AVP {pt}\r\n"));
                 s.push_str(&format!("a=rtpmap:{pt} H264/90000\r\n"));
@@ -304,6 +318,7 @@ m=video 12002 RTP/AVP 104\r\na=rtpmap:104 H264/90000\r\na=fmtp:104 profile-level
         assert_eq!(agreed.audio.unwrap().to_string(), "203.0.113.10:12000");
         assert_eq!(agreed.video_pt, Some(104));
         assert_eq!(agreed.sprop.as_deref(), Some("Z0LgH6o=,aM48gA=="));
+        assert_eq!(agreed.video_rtcp.unwrap().to_string(), "203.0.113.10:12003");
         assert!(sdp.contains("c=IN IP4 192.0.2.6"));
         assert!(sdp.contains("m=audio 40000 RTP/AVP 0 101"));
         assert!(sdp.contains("m=video 40002 RTP/AVP 104"));
@@ -329,6 +344,9 @@ m=video 12002 RTP/AVP 104\r\na=rtpmap:104 H264/90000\r\na=fmtp:104 profile-level
         assert_eq!(a.law, Some(Law::A));
         assert_eq!(a.dtmf_pt, Some(101));
         assert_eq!(a.video.unwrap().port(), 7002);
+        assert_eq!(a.video_rtcp.unwrap().port(), 7003);
+        let named = parse("v=0\r\nc=IN IP4 203.0.113.10\r\nm=video 7002 RTP/AVP 96\r\na=rtcp:7100 IN IP4 203.0.113.10\r\n");
+        assert_eq!(named.video.unwrap().rtcp_addr().unwrap().port(), 7100);
         assert!(offer("192.0.2.6", 1, 2).contains("a=recvonly"));
     }
 }

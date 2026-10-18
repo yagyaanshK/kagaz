@@ -57,6 +57,12 @@ impl Depacketizer {
         }
     }
 
+    /// No picture can be shown until a keyframe comes (at the start, and
+    /// after a lost packet): the time to ask the sender for one.
+    pub fn waiting_for_key(&self) -> bool {
+        self.need_key
+    }
+
     /// Parameter sets from SDP `sprop-parameter-sets` (base64, comma separated).
     pub fn set_parameter_sets(&mut self, sprop: &str) {
         use base64::Engine as _;

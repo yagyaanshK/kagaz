@@ -2524,6 +2524,7 @@ fn intercom_command(cmd: IntercomCommand) -> Result<()> {
                             k.fetch_add(1, Ordering::Relaxed);
                         }
                     }
+                    MediaOut::VideoStats(_) => {}
                 },
             );
             let name_of = |number: &str| {

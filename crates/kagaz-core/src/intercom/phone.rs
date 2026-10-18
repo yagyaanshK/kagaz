@@ -49,10 +49,32 @@ pub enum Event {
     Others { contacts: Vec<String> },
 }
 
-/// Media for the app: decoded voice (8 kHz mono) or a whole picture.
+/// Media for the app: decoded voice (8 kHz mono) or a whole picture, and
+/// every two seconds how the video is doing.
 pub enum MediaOut {
     Audio(Vec<i16>),
     Video(AccessUnit),
+    VideoStats(VideoStats),
+}
+
+/// How a call's video is doing, so the app can say why no picture shows:
+/// nothing arrives, or it arrives damaged, or no full picture came yet.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct VideoStats {
+    pub seconds: u64,
+    /// RTP packets on the video port.
+    pub packets: u64,
+    /// Of those, packets in a format other than the agreed H.264.
+    pub other_payload: u64,
+    /// Whole pictures handed to the app, and how many were full ones.
+    pub pictures: u64,
+    pub keyframes: u64,
+    /// Pictures that lost a packet on the way.
+    pub damaged: u64,
+    /// Pictures dropped while waiting for a full one.
+    pub waiting: u64,
+    /// Times Kagaz asked the other side for a full picture.
+    pub asked: u64,
 }
 
 enum Command {
@@ -203,19 +225,64 @@ impl AudioOut {
 struct Media {
     audio: UdpSocket,
     video: UdpSocket,
+    /// The video's RTCP, on the port after the video's (what peers assume
+    /// when the SDP names none); None when that port was taken.
+    video_rtcp: Option<UdpSocket>,
     stop: Arc<AtomicBool>,
+    /// Set by the video thread when it needs a full picture; the
+    /// signalling thread then asks over SIP.
+    key_wanted: Arc<AtomicBool>,
+}
+
+/// SIP INFO asking a video phone for a full picture (RFC 5168).
+const PICTURE_FAST_UPDATE: &str = "<?xml version=\"1.0\" encoding=\"utf-8\" ?>\r\n<media_control><vc_primitive><to_encoder><picture_fast_update/></to_encoder></vc_primitive></media_control>\r\n";
+
+/// A video socket on an even port and its RTCP socket on the next one.
+fn video_pair() -> std::io::Result<(UdpSocket, Option<UdpSocket>)> {
+    for _ in 0..20 {
+        let rtp = UdpSocket::bind("0.0.0.0:0")?;
+        let port = rtp.local_addr()?.port();
+        if port % 2 == 0 {
+            if let Ok(rtcp) = UdpSocket::bind(("0.0.0.0", port + 1)) {
+                return Ok((rtp, Some(rtcp)));
+            }
+        }
+    }
+    Ok((UdpSocket::bind("0.0.0.0:0")?, None))
+}
+
+/// RTCP asking for a full picture: an empty receiver report (a compound
+/// packet starts with one), then PLI and FIR (RFC 4585, 5104).
+fn key_request(own: u32, media: u32, seq: u8) -> Vec<u8> {
+    let mut p = vec![0x80, 201, 0, 1];
+    p.extend_from_slice(&own.to_be_bytes());
+    p.extend_from_slice(&[0x81, 206, 0, 2]);
+    p.extend_from_slice(&own.to_be_bytes());
+    p.extend_from_slice(&media.to_be_bytes());
+    p.extend_from_slice(&[0x84, 206, 0, 4]);
+    p.extend_from_slice(&own.to_be_bytes());
+    p.extend_from_slice(&0u32.to_be_bytes());
+    p.extend_from_slice(&media.to_be_bytes());
+    p.extend_from_slice(&[seq, 0, 0, 0]);
+    p
 }
 
 impl Media {
     fn open() -> std::io::Result<Media> {
         let audio = UdpSocket::bind("0.0.0.0:0")?;
-        let video = UdpSocket::bind("0.0.0.0:0")?;
+        let (video, video_rtcp) = video_pair()?;
         audio.set_read_timeout(Some(Duration::from_millis(250)))?;
         video.set_read_timeout(Some(Duration::from_millis(250)))?;
+        // A full picture comes as a burst of a hundred packets or more;
+        // a small receive buffer (64 KB on Windows) drops some of them,
+        // and one lost packet spoils the picture. The system may cap this.
+        let _ = socket2::SockRef::from(&video).set_recv_buffer_size(4 << 20);
         Ok(Media {
             audio,
             video,
+            video_rtcp,
             stop: Arc::new(AtomicBool::new(false)),
+            key_wanted: Arc::new(AtomicBool::new(false)),
         })
     }
 
@@ -295,6 +362,14 @@ impl Media {
                 let stop = self.stop.clone();
                 let sprop = agreed.sprop.clone();
                 let diag = diag.clone();
+                let key_wanted = self.key_wanted.clone();
+                // RTCP from its own port when there is one, else from the video's.
+                let rtcp = self
+                    .video_rtcp
+                    .as_ref()
+                    .and_then(|s| s.try_clone().ok())
+                    .or_else(|| sock.try_clone().ok());
+                let rtcp_dest = agreed.video_rtcp;
                 std::thread::spawn(move || {
                     let mut depack = Depacketizer::new();
                     if let Some(s) = &sprop {
@@ -308,9 +383,40 @@ impl Media {
                     let mut other_pt = 0u64;
                     let mut from = None;
                     let mut last_log = Instant::now();
+                    let started = Instant::now();
+                    let mut their_ssrc = 0u32;
+                    let mut asked = 0u64;
+                    let mut last_ask: Option<Instant> = None;
                     while !stop.load(Ordering::SeqCst) {
+                        // No picture can show until a full one comes: ask for
+                        // one shortly after the start, and again while none
+                        // has (every 2 s, then every 5 s), over RTCP here and
+                        // over SIP by the signalling thread.
+                        let gap = if asked < 5 { 2 } else { 5 };
+                        let due = match last_ask {
+                            None => started.elapsed() > Duration::from_millis(300),
+                            Some(t) => t.elapsed() > Duration::from_secs(gap),
+                        };
+                        if due && depack.waiting_for_key() {
+                            if let (Some(r), Some(to)) = (&rtcp, rtcp_dest) {
+                                let _ = r.send_to(&key_request(ssrc, their_ssrc, asked as u8), to);
+                            }
+                            key_wanted.store(true, Ordering::SeqCst);
+                            asked += 1;
+                            last_ask = Some(Instant::now());
+                        }
                         if last_log.elapsed() > Duration::from_secs(2) {
                             let st = &depack.stats;
+                            sink(MediaOut::VideoStats(VideoStats {
+                                seconds: started.elapsed().as_secs(),
+                                packets: seen,
+                                other_payload: other_pt,
+                                pictures: st.units,
+                                keyframes: st.keyframes,
+                                damaged: st.damaged,
+                                waiting: st.waiting,
+                                asked,
+                            }));
                             let types: Vec<String> = st
                                 .nal_types
                                 .iter()
@@ -319,7 +425,7 @@ impl Media {
                                 .map(|(t, n)| format!("{t}:{n}"))
                                 .collect();
                             diag.line(&format!(
-                                "video: {seen} packets from {from:?} ({other_pt} other payload types); depacketized {} packets into {} pictures ({} keyframes), dropped {} damaged and {} waiting for a keyframe; NAL types {}",
+                                "video: {seen} packets from {from:?} ({other_pt} other payload types); depacketized {} packets into {} pictures ({} keyframes), dropped {} damaged and {} waiting for a keyframe; asked for a full picture {asked} times; NAL types {}",
                                 st.packets, st.units, st.keyframes, st.damaged, st.waiting, types.join(" ")
                             ));
                             last_log = Instant::now();
@@ -350,6 +456,7 @@ impl Media {
                             other_pt += 1;
                             continue;
                         }
+                        their_ssrc = u32::from_be_bytes([buf[8], buf[9], buf[10], buf[11]]);
                         if let Some(unit) = depack.push(&buf[..n]) {
                             sink(MediaOut::Video(unit));
                         }
@@ -366,15 +473,18 @@ impl Drop for Media {
     }
 }
 
-/// A per-call diagnostic log in the system temp folder (`kagaz-call.log`),
-/// replaced by each call: the media descriptions and what arrived. It
-/// stays on this device; it holds addresses, never passwords.
+/// A per-call diagnostic log in Kagaz's cache folder (`kagaz-call.log`;
+/// the system temp folder is out of reach on Android), replaced by each
+/// call: the media descriptions and what arrived. It stays on this device;
+/// it holds addresses, never passwords.
 #[derive(Clone)]
 struct Diag(Arc<Mutex<Option<std::fs::File>>>);
 
 impl Diag {
     fn new() -> Diag {
-        let file = std::fs::File::create(std::env::temp_dir().join("kagaz-call.log")).ok();
+        let dir = crate::paths::cache_dir();
+        let _ = std::fs::create_dir_all(&dir);
+        let file = std::fs::File::create(dir.join("kagaz-call.log")).ok();
         Diag(Arc::new(Mutex::new(file)))
     }
 
@@ -712,6 +822,9 @@ impl Line {
                 if let Err(e) = self.send("\r\n\r\n") {
                     return Served::Dropped(e);
                 }
+            }
+            if let Err(e) = self.ask_for_picture() {
+                return Served::Dropped(e);
             }
             if let Some(d) = &self.call {
                 if d.state == State::Calling && d.started.elapsed() > Duration::from_secs(60) {
@@ -1320,6 +1433,25 @@ impl Line {
         format!("{}\r\n\r\n{content}", lines.join("\r\n"))
     }
 
+    /// The video thread wants a full picture: ask over SIP as well, which
+    /// door stations follow more often than RTCP.
+    fn ask_for_picture(&mut self) -> Result<(), String> {
+        let wanted = self
+            .call
+            .as_ref()
+            .filter(|d| d.state == State::Confirmed)
+            .and_then(|d| d.media.as_ref())
+            .is_some_and(|m| m.key_wanted.swap(false, Ordering::SeqCst));
+        if !wanted {
+            return Ok(());
+        }
+        let info = self.in_dialog(
+            "INFO",
+            Some(("application/media_control+xml", PICTURE_FAST_UPDATE)),
+        );
+        self.send(&info)
+    }
+
     fn start_media(&mut self) {
         let Some(d) = self.call.as_mut() else {
             return;
@@ -1454,6 +1586,65 @@ fn caller(m: &Message) -> (String, String) {
 
 #[cfg(test)]
 mod tests {
+    use super::key_request;
+
+    #[test]
+    fn a_call_without_a_picture_asks_for_one_and_says_so() {
+        use super::{Agreed, Diag, Media, MediaOut};
+        use std::net::UdpSocket;
+        use std::sync::atomic::Ordering;
+        use std::sync::{Arc, Mutex};
+        use std::time::Duration;
+        // A stand-in door station: video and RTCP ports on this machine.
+        let station = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let station_rtcp = UdpSocket::bind("127.0.0.1:0").unwrap();
+        station_rtcp
+            .set_read_timeout(Some(Duration::from_secs(3)))
+            .unwrap();
+        let media = Media::open().unwrap();
+        let agreed = Agreed {
+            video: Some(station.local_addr().unwrap()),
+            video_pt: Some(104),
+            video_rtcp: Some(station_rtcp.local_addr().unwrap()),
+            ..Default::default()
+        };
+        let stats = Arc::new(Mutex::new(Vec::new()));
+        let seen = stats.clone();
+        let sink: super::MediaSink = Arc::new(move |m| {
+            if let MediaOut::VideoStats(v) = m {
+                seen.lock().unwrap().push(v);
+            }
+        });
+        media.begin(
+            &agreed,
+            sink,
+            &Arc::new(Mutex::new(None)),
+            Diag(Arc::new(Mutex::new(None))),
+        );
+        let mut buf = [0u8; 256];
+        let (n, _) = station_rtcp.recv_from(&mut buf).unwrap();
+        assert_eq!(n, 40);
+        assert_eq!((buf[9], buf[8] & 0x1F), (206, 1));
+        assert!(media.key_wanted.load(Ordering::SeqCst));
+        std::thread::sleep(Duration::from_millis(2300));
+        let v = stats.lock().unwrap().last().cloned().unwrap();
+        assert_eq!((v.packets, v.pictures), (0, 0));
+        assert!(v.asked >= 1);
+    }
+
+    #[test]
+    fn asks_for_a_full_picture_over_rtcp() {
+        let p = key_request(0x0102_0304, 0x0A0B_0C0D, 7);
+        assert_eq!(p.len(), 8 + 12 + 20);
+        // Receiver report, then PLI (206/1), then FIR (206/4), each with
+        // its length in 32-bit words less one.
+        assert_eq!((p[0], p[1], p[3]), (0x80, 201, 1));
+        assert_eq!((p[8], p[9], p[11]), (0x81, 206, 2));
+        assert_eq!(&p[16..20], &[0x0A, 0x0B, 0x0C, 0x0D]);
+        assert_eq!((p[20], p[21], p[23]), (0x84, 206, 4));
+        assert_eq!(p[36], 7);
+    }
+
     use super::*;
 
     #[test]
