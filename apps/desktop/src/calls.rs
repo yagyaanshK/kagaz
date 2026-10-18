@@ -172,6 +172,15 @@ fn on_event(app: &AppHandle, e: Event) {
 /// Media to the page: one byte of kind (1 voice, 2 keyframe, 3 frame),
 /// four bytes of RTP timestamp, then 8 kHz 16-bit voice or Annex-B video.
 fn on_media(app: &AppHandle, m: MediaOut) {
+    // How the video is doing goes as an event: the page says why no
+    // picture shows.
+    let m = match m {
+        MediaOut::VideoStats(stats) => {
+            let _ = app.emit("call-video", &stats);
+            return;
+        }
+        m => m,
+    };
     let state = app.state::<CallsState>();
     let guard = state.media.lock().unwrap();
     let Some(channel) = guard.as_ref() else {
@@ -194,6 +203,7 @@ fn on_media(app: &AppHandle, m: MediaOut) {
             p.extend_from_slice(&unit.data);
             p
         }
+        MediaOut::VideoStats(_) => return,
     };
     let _ = channel.send(InvokeResponseBody::Raw(packet));
 }
