@@ -17,20 +17,49 @@ const KagazHome = (() => {
     return e;
   }
 
+  // Kinds start collapsed; one opens when the person taps it (kept while
+  // the app runs).
+  const expanded = new Set();
+
   function group(kindId, title, status, open) {
     const box = el("section", "home-group");
     const head = el("div", "home-group-head");
+    const toggle = el("button", "home-group-toggle");
+    toggle.type = "button";
     const icon = el("span", "kind-icon");
     icon.innerHTML = KagazBrands.ICON[kindId];
-    const h = el("h3", "", title);
+    const words = el("span", "home-group-words");
+    const h = el("span", "home-group-title", title);
     const st = el("span", "muted small home-status", status || "");
-    const go = el("button", "link", "Open ›");
+    words.append(h, st);
+    const chevron = el("span", "home-chevron");
+    chevron.setAttribute("aria-hidden", "true");
+    toggle.append(icon, words, chevron);
+    const go = el("button", "link", "Open \u203A");
     go.type = "button";
     go.addEventListener("click", open);
-    head.append(icon, h, st, go);
+    head.append(toggle, go);
     const tiles = el("div", "home-tiles");
+    tiles.id = `home-tiles-${kindId}`;
+    toggle.setAttribute("aria-controls", tiles.id);
+    const show = (on) => {
+      box.classList.toggle("open", on);
+      tiles.hidden = !on;
+      toggle.setAttribute("aria-expanded", String(on));
+    };
+    show(expanded.has(kindId));
+    toggle.addEventListener("click", () => {
+      const on = !expanded.has(kindId);
+      if (on) expanded.add(kindId); else expanded.delete(kindId);
+      show(on);
+    });
     box.append(head, tiles);
-    return { box, tiles };
+    // The count joins the status once the tiles are in.
+    const count = () => {
+      const n = tiles.childElementCount;
+      st.textContent = [status, `${n} device${n === 1 ? "" : "s"}`].filter(Boolean).join(" \u00B7 ");
+    };
+    return { box, tiles, count };
   }
 
   function tile(name, sub, iconHtml, onClick, logo) {
@@ -95,6 +124,7 @@ const KagazHome = (() => {
     if (!items.size) {
       g.tiles.appendChild(tile("OneTouch", ot && ot.logged_in ? "Signed in" : "Open to sign in again", DOOR_ICON.door, () => selectCategory("doorbell")));
     }
+    g.count();
     root.appendChild(g.box);
     return true;
   }
@@ -102,20 +132,21 @@ const KagazHome = (() => {
   async function camerasGroup(root) {
     const cam = await invoke("cameras_status").catch(() => null);
     if (!cam || !cam.logged_in) return false;
-    const g = group("security", "Security cameras", cam.running ? `${cam.cameras.length} camera${cam.cameras.length === 1 ? "" : "s"}` : "Tapo", () => selectCategory("cameras"));
+    const g = group("security", "Security cameras", "Tapo", () => selectCategory("cameras"));
     const tapo = KagazBrands.byId("security", "tapo");
     if (cam.cameras && cam.cameras.length) {
       for (const c of cam.cameras) g.tiles.appendChild(tile(c.name, "Tapo", "", () => selectCategory("cameras"), tapo.logo));
     } else {
       g.tiles.appendChild(tile("Tapo cameras", "Open to watch", "", () => selectCategory("cameras"), tapo.logo));
     }
+    if (cam.cameras && cam.cameras.length) g.count();
     root.appendChild(g.box);
     return true;
   }
 
   function printersGroup(root) {
     if (!devices.length) return false;
-    const g = group("print", "Printers & scanners", `${devices.length} found`, () => { printBrand = null; selectCategory("print"); });
+    const g = group("print", "Printers & scanners", "", () => { printBrand = null; selectCategory("print"); });
     devices.forEach((d, i) => {
       const b = brandOf(d);
       g.tiles.appendChild(tile(title(d), [d.manufacturer, d.model].filter(Boolean).join(" ") || "Printer", KagazBrands.ICON.print, () => {
@@ -124,6 +155,7 @@ const KagazHome = (() => {
         select(i);
       }, b && b.logo));
     });
+    g.count();
     root.appendChild(g.box);
     return true;
   }
