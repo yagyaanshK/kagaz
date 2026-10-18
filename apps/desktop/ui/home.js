@@ -182,6 +182,7 @@ const KagazHome = (() => {
 
   function showKinds() {
     addKind = null;
+    KagazNav.pop("add-brands");
     $("add-title").textContent = "Add a device";
     $("add-sub").textContent = "What kind of device?";
     $("add-back").textContent = "← Home";
@@ -199,6 +200,7 @@ const KagazHome = (() => {
 
   function showBrands(kind) {
     addKind = kind;
+    KagazNav.push("add-brands", showKinds);
     $("add-title").textContent = kind.name;
     $("add-sub").textContent = kind.supported ? "Choose the brand." : "Coming soon. These are the brands planned first.";
     $("add-back").textContent = "← All kinds";

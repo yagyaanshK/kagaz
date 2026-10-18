@@ -210,6 +210,7 @@ async function otOpenCard(card) {
   KagazPlayer.audioContext(); // a tap is what lets the page make sound later
   await otStopLive();
   otOpen = card.key;
+  KagazNav.push("ot-card", otClose);
   if (card.live && card.live.can_monitor) await otWatch(card);
   else otRenderDevices();
   // The open card comes to the top, so its picture has the screen.
@@ -227,6 +228,7 @@ async function otOpenByName(name) {
 
 async function otClose() {
   otOpen = null;
+  KagazNav.pop("ot-card");
   await otStopLive();
   otRenderDevices();
 }
@@ -266,9 +268,11 @@ $('ot-signin').addEventListener('click', () => {
     $('ot-provider').dispatchEvent(new Event('change'));
   }
   otPasswordVisible(false); $('ot-login').classList.remove('hidden'); $('ot-message').textContent = ''; $('ot-username').focus();
+  KagazNav.push('ot-login', () => $('ot-login-cancel').click());
 });
 $('ot-login-cancel').addEventListener('click', () => {
   $('ot-password').value = ''; otPasswordVisible(false); $('ot-login').classList.add('hidden'); $('ot-message').textContent = '';
+  KagazNav.pop('ot-login');
 });
 $('ot-login').addEventListener('submit', async e => {
   e.preventDefault();
@@ -279,7 +283,7 @@ $('ot-login').addEventListener('submit', async e => {
     try { otStatus = await invoke('onetouch_login', { username, password, provider: $('ot-provider').value, legacyDevice: $('ot-legacy-device').value.trim(), remember: otStatus?.remember_supported !== false && $('ot-remember').checked }); }
     finally { $('ot-password').value = ''; otPasswordVisible(false); }
     otInitialized = true; otTab = 'live'; otPage = 1;
-    $('ot-login').classList.add('hidden'); $('ot-message').textContent = otStatus?.notice || '';
+    $('ot-login').classList.add('hidden'); $('ot-message').textContent = otStatus?.notice || ''; KagazNav.pop('ot-login');
   }, `Signing in to ${$('ot-provider').selectedOptions[0].textContent}…`);
 });
 $('ot-signout').addEventListener('click', () => otRun(async () => {

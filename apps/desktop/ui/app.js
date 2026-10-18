@@ -144,6 +144,7 @@ async function select(i) {
   renderList();
   for (const id of PANES) $(id).classList.toggle("hidden", id !== "detail");
   document.querySelectorAll("#categories li[data-cat]").forEach((el) => el.classList.toggle("active", el.dataset.cat === "print"));
+  KagazNav.push("print-detail", () => $("detail-back").click());
   $("main").scrollTop = 0;
   $("d-title").textContent = title(d);
   $("d-sub").textContent = [d.manufacturer, d.model, where(d)].filter(Boolean).join(" · ");
@@ -446,6 +447,8 @@ function selectCategory(cat) {
   document.querySelectorAll(".kz-full").forEach((el) => KagazPlayer.fullscreen(el, false));
   if (cat !== "doorbell" && typeof stopOneTouch === "function") stopOneTouch();
   currentView = cat;
+  // Back from any page goes to Home.
+  KagazNav.root(cat === "home" ? null : cat, () => selectCategory("home"));
   // The sidebar and the bottom bar mark the section on screen, and only it
   // (Add a device is part of Home); on a device's page the bottom bar
   // marks nothing, as that page has no button there.
@@ -2578,6 +2581,9 @@ function doorSettings(on) {
     if (typeof stopOneTouch === "function") stopOneTouch();
     KagazDoorbellSettings.show();
     $("main").scrollTop = 0;
+    KagazNav.push("door-settings", () => doorSettings(false));
+  } else {
+    KagazNav.pop("door-settings");
   }
 }
 $("door-gear").addEventListener("click", () => doorSettings(!$("doorbell").classList.contains("show-settings")));
