@@ -37,6 +37,52 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
         .build()
 }
 
+/// The plugin, for code that has no AppHandle (the saved sign-in).
+static HANDLE: std::sync::OnceLock<PluginHandle<Wry>> = std::sync::OnceLock::new();
+
+/// Keep the plugin's handle for [`secret_get`] and friends; called at start-up.
+pub fn remember_handle(app: &AppHandle) {
+    if let Some(p) = app.try_state::<Phone<Wry>>() {
+        let _ = HANDLE.set(p.inner().0.clone());
+    }
+}
+
+#[derive(Serialize)]
+struct SecretArgs<'a> {
+    name: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    value: Option<&'a str>,
+}
+
+#[derive(Deserialize)]
+struct Secret {
+    value: Option<String>,
+}
+
+fn handle() -> Result<&'static PluginHandle<Wry>, String> {
+    HANDLE.get().ok_or_else(|| "this phone's secure storage is not available".to_string())
+}
+
+/// A remembered secret, from the Android Keystore-sealed store.
+pub fn secret_get(name: &str) -> Result<Option<String>, String> {
+    let s: Secret = handle()?
+        .run_mobile_plugin("secretGet", SecretArgs { name, value: None })
+        .map_err(|e| e.to_string())?;
+    Ok(s.value)
+}
+
+pub fn secret_set(name: &str, value: &str) -> Result<(), String> {
+    handle()?
+        .run_mobile_plugin::<()>("secretSet", SecretArgs { name, value: Some(value) })
+        .map_err(|e| e.to_string())
+}
+
+pub fn secret_delete(name: &str) -> Result<(), String> {
+    handle()?
+        .run_mobile_plugin::<()>("secretDelete", SecretArgs { name, value: None })
+        .map_err(|e| e.to_string())
+}
+
 fn phone(app: &AppHandle) -> Result<&PluginHandle<Wry>, String> {
     app.try_state::<Phone<Wry>>()
         .map(|s| &s.inner().0)

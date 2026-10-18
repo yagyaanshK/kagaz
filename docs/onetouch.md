@@ -106,6 +106,26 @@ Video:
   Account tokens are never forwarded to media hosts. Refresh history if signed
   media URLs expire.
 
+## Live view and sound
+
+The relay's live view (DESCRIBE with `Account` and `Manual: 1`) offers one
+H.264 video track and no audio, for door stations and indoor monitors alike
+(measured 2026-10-18). The official app's RTSP client has one more request for
+sound during monitoring, sent on the monitor address without a session header:
+
+```
+AK_OPER rtsp://<relay>/<device> RTSP/1.0
+Transport: RTP/AVP;unicast;client_port=<a>-<b>
+Audio-Intercom:1
+```
+
+Its answer's Transport would carry the relay's `server_port` and the sound's
+SSRCs. The app sends it only for smart locks; both door stations on the test
+account answered `486 Busy Here`, with or without a session header. Kagaz keeps
+the request (`Live::set_sound`, `kagaz intercom cloud --watch NAME --sound`)
+for devices that accept it; for a door station the sound comes in a call,
+which the window offers under the picture.
+
 ## Session and lifecycle
 
 `<config>/onetouch-session.json` stores the selected service, username and tokens,
@@ -115,10 +135,17 @@ login separately in the OS credential store: Secret Service on Linux, Keychain
 on macOS, Credential Manager on Windows. The implementation uses
 [keyring](https://docs.rs/keyring/3.6.3/keyring/). No plaintext-file fallback is used;
 if the vault is unavailable, sign-in can succeed with a notice that remembering
-failed. This feature is not yet offered on mobile builds.
+failed. On Android the same record is sealed with AES-GCM under a key kept in
+the Android Keystore, and only the sealed bytes sit in the app's private
+preferences.
 
-Expiration and startup do not replay passwords. **Reconnect** makes one login
-attempt only when clicked, using the saved provider and legacy discovery input.
+OneTouch keeps one session per account: each new sign-in ends the session of
+every other app or computer on that account. So Kagaz signs in again from the
+saved login only when the person uses the doorbell here: opening the Doorbell
+pane, or pressing **Reconnect**. Starting the app does not sign in; the call
+line rings from the line kept from its last setup (`onetouch-line.json`), which
+needs no live session. A refused saved password is not tried again until the
+person signs in by hand.
 The webview receives remembered-account metadata, never the saved password.
 **Sign out** preserves the remembered login; **Forget saved sign-in** removes it
 from the vault without ending an active session.
@@ -165,8 +192,9 @@ containing credentials. Network errors omit request URLs and response bodies.
 - A stalled browser `play()` promise no longer blocks navigation or retry controls;
   the UI check covers an indefinitely pending playback promise.
 - Smart Cloud two-factor accounts and non-resident account roles are reported as
-  unsupported. Local indoor-monitor recordings, two-way cloud audio, cloud call answering,
-  and cloud door release are not implemented by this account integration.
+  unsupported. Local indoor-monitor recordings are not available. Calls (with
+  two-way sound and the door key) go through the account's own call line; see
+  the Doorbell pane's device cards.
 
 ### Authentication verification
 

@@ -488,38 +488,28 @@ fn signed_out_marker() -> std::path::PathBuf {
 }
 
 /// A live session for the call line: the window's own session, checked
-/// with the cloud (renewing its token, or signing in again from the saved
-/// login when it has expired). All under the account lock, so the window's
-/// copy never goes stale. Ok(None) when there is no session and no saved
-/// login to make one.
+/// with the cloud (renewing its token). Never a new sign-in: OneTouch keeps
+/// one session per account, so signing in here would sign the person's
+/// phone out each time this app starts. A new sign-in happens only when the
+/// person opens the Doorbell pane (`onetouch_status`) or presses Reconnect.
+/// Ok(None) when there is no session; the line then uses the setup kept
+/// from last time.
 pub fn session_for_calls(app: &AppHandle) -> Result<Option<Session>, String> {
     let state = app.state::<OneTouchState>();
     let mut s = state.0.lock().unwrap();
     s.load()?;
-    if !s.auto_reconnect()? {
+    let Some(session) = s.session.as_mut() else {
         return Ok(None);
-    }
-    for attempt in 0..2 {
-        let Some(session) = s.session.as_mut() else {
-            return Ok(None);
-        };
-        match session.account() {
-            Ok(account) => {
-                let _ = session.save();
-                let fresh = session.clone();
-                s.account = Some(account);
-                return Ok(Some(fresh));
-            }
-            Err(e) => {
-                let network = matches!(e, onetouch::Error::Network);
-                let message = s.cloud_error(e);
-                if network || attempt == 1 || !s.sign_in_again() {
-                    return Err(message);
-                }
-            }
+    };
+    match session.account() {
+        Ok(account) => {
+            let _ = session.save();
+            let fresh = session.clone();
+            s.account = Some(account);
+            Ok(Some(fresh))
         }
+        Err(e) => Err(s.cloud_error(e)),
     }
-    Ok(None)
 }
 
 #[cfg(test)]

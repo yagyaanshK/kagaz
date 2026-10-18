@@ -20,6 +20,7 @@ use std::time::{Duration, Instant};
 /// A running live view; dropping it ends the session.
 pub struct Live {
     stop: Arc<AtomicBool>,
+    sound: Arc<AtomicBool>,
 }
 
 impl Live {
@@ -27,11 +28,13 @@ impl Live {
     /// `Media::Ended`; it returns false to stop.
     pub fn start(target: Target, mut sink: Box<dyn FnMut(Media) -> bool + Send>) -> Live {
         let stop = Arc::new(AtomicBool::new(false));
+        let sound = Arc::new(AtomicBool::new(false));
         let flag = stop.clone();
+        let wanted = sound.clone();
         let _ = std::thread::Builder::new()
             .name("onetouch-live".into())
             .spawn(move || {
-                let why = match run(&target, &flag, &mut *sink) {
+                let why = match run(&target, &flag, &wanted, &mut *sink) {
                     Ok(()) => String::new(),
                     Err(e) => e.to_string(),
                 };
@@ -43,7 +46,17 @@ impl Live {
                     sink(Media::Ended(why));
                 }
             });
-        Live { stop }
+        Live { stop, sound }
+    }
+
+    /// Ask for the door's sound, or let it go. The relay's monitoring
+    /// offers pictures only; the official app opens the sound with its own
+    /// request (`AK_OPER` with `Audio-Intercom: 1`), which rings nothing,
+    /// but only for smart locks: door stations answer it with 486 (busy),
+    /// with or without the session header (measured 2026-10-18), so their
+    /// sound comes only in a call.
+    pub fn set_sound(&self, on: bool) {
+        self.sound.store(on, Ordering::Release);
     }
 }
 
@@ -256,12 +269,7 @@ struct Track {
 }
 
 fn setup(rtsp: &mut Rtsp, control: &str, peer: IpAddr) -> io::Result<Track> {
-    let bind_ip = if peer.is_ipv4() {
-        IpAddr::V4(Ipv4Addr::UNSPECIFIED)
-    } else {
-        IpAddr::V6(Ipv6Addr::UNSPECIFIED)
-    };
-    let sockets = [UdpSocket::bind((bind_ip, 0))?, UdpSocket::bind((bind_ip, 0))?];
+    let sockets = udp_pair(peer)?;
     let local = [
         sockets[0].local_addr()?.port(),
         sockets[1].local_addr()?.port(),
@@ -289,17 +297,121 @@ fn setup(rtsp: &mut Rtsp, control: &str, peer: IpAddr) -> io::Result<Track> {
     let transport = header_value(&head, "Transport").ok_or_else(|| invalid("no transport"))?;
     let server = ports(transport, "server_port")?;
     // Open the NAT mapping from our ports, as the phone does.
-    for (i, socket) in sockets.iter().enumerate() {
-        let mut probe = [0u8; 12];
-        probe[0] = 0x80;
-        probe[1] = 96;
-        probe[8..12].copy_from_slice(&ssrc.to_be_bytes());
-        let _ = socket.send_to(&probe, SocketAddr::new(peer, server[i]));
-    }
+    probe(&sockets, peer, server, 96, ssrc);
     Ok(Track { sockets })
 }
 
-fn run(target: &Target, stop: &AtomicBool, sink: &mut dyn FnMut(Media) -> bool) -> io::Result<()> {
+/// Open or close the door's sound on a monitoring session, as the
+/// official app does: its own `AK_OPER` request on the monitor address,
+/// with our audio ports and no session header. The answer's Transport
+/// says where the relay takes our sound (`server_port`).
+fn intercom(rtsp: &mut Rtsp, uri: &str, local: [u16; 2], on: bool) -> io::Result<String> {
+    let session = rtsp.session.take();
+    let answer = rtsp.request(
+        "AK_OPER",
+        uri,
+        &[
+            format!(
+                "Transport: RTP/AVP;unicast;client_port={}-{}",
+                local[0], local[1]
+            ),
+            format!("Audio-Intercom:{}", u8::from(on)),
+        ],
+    );
+    rtsp.session = session;
+    let (head, _) = answer?;
+    for line in head.lines().skip(1) {
+        let name = line.split(':').next().unwrap_or("").trim();
+        if !matches!(name, "CSeq" | "Date" | "Server" | "Session" | "") {
+            log(&format!("sound answer: {line}"));
+        }
+    }
+    Ok(header_value(&head, "Transport").unwrap_or("").to_string())
+}
+
+/// The sound's sockets, read in the background: G.711 by its payload type.
+fn sound_reader(
+    sockets: [UdpSocket; 2],
+    only: Option<(u8, Law)>,
+    tx: mpsc::Sender<Media>,
+    flag: Arc<AtomicBool>,
+) -> io::Result<()> {
+    std::thread::Builder::new()
+        .name("onetouch-live-audio".into())
+        .spawn(move || {
+            let _keep = &sockets[1];
+            let socket = &sockets[0];
+            let _ = socket.set_read_timeout(Some(Duration::from_millis(200)));
+            let mut buffer = [0u8; 4096];
+            let mut first = true;
+            while !flag.load(Ordering::Acquire) {
+                match socket.recv_from(&mut buffer) {
+                    Ok((n, _)) => {
+                        let Some((_, ts, _, payload)) = parse_rtp(&buffer[..n]) else {
+                            continue;
+                        };
+                        let pt = buffer[1] & 0x7F;
+                        let law = match only {
+                            Some((want, law)) if want == pt => law,
+                            Some(_) => continue,
+                            None => match Law::from_payload_type(pt) {
+                                Some(law) => law,
+                                None => continue,
+                            },
+                        };
+                        if payload.is_empty() {
+                            continue;
+                        }
+                        if first {
+                            first = false;
+                            log(&format!("first sound, pt {pt}"));
+                        }
+                        if tx
+                            .send(Media::Audio {
+                                pcm: law.decode(payload),
+                                timestamp: ts,
+                            })
+                            .is_err()
+                        {
+                            return;
+                        }
+                    }
+                    Err(e) if matches!(
+                        e.kind(),
+                        io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
+                    ) => {}
+                    Err(_) => break,
+                }
+            }
+        })?;
+    Ok(())
+}
+
+fn udp_pair(peer: IpAddr) -> io::Result<[UdpSocket; 2]> {
+    let bind_ip = if peer.is_ipv4() {
+        IpAddr::V4(Ipv4Addr::UNSPECIFIED)
+    } else {
+        IpAddr::V6(Ipv6Addr::UNSPECIFIED)
+    };
+    Ok([UdpSocket::bind((bind_ip, 0))?, UdpSocket::bind((bind_ip, 0))?])
+}
+
+fn probe(sockets: &[UdpSocket; 2], peer: IpAddr, server: [u16; 2], pt: u8, ssrc: u32) {
+    for (i, socket) in sockets.iter().enumerate() {
+        let mut packet = [0u8; 12];
+        packet[0] = 0x80;
+        packet[1] = pt;
+        packet[8..12].copy_from_slice(&ssrc.to_be_bytes());
+        let _ = socket.send_to(&packet, SocketAddr::new(peer, server[i]));
+    }
+}
+
+fn run(
+    target: &Target,
+    stop: &AtomicBool,
+    sound: &AtomicBool,
+    sink: &mut dyn FnMut(Media) -> bool,
+) -> io::Result<()> {
     log(&format!("start {}:{}", target.host, target.port));
     let addresses = crate::dns::resolve(&target.host, target.port)?;
     let mut tcp = None;
@@ -340,6 +452,12 @@ fn run(target: &Target, stop: &AtomicBool, sink: &mut dyn FnMut(Media) -> bool) 
     let base = header_value(&head, "Content-Base")
         .map(|b| b.trim_end_matches('/').to_string())
         .unwrap_or_else(|| target.remote.clone());
+    // The diary keeps what the relay offers (media lines only: no addresses).
+    for line in text.lines().map(str::trim) {
+        if line.starts_with("m=") || line.starts_with("a=rtpmap") || line.starts_with("a=control") {
+            log(&format!("offer {line}"));
+        }
+    }
     let desc = sdp::parse(&text);
     let ctl = controls(&text);
     let control_of = |kind: &str| {
@@ -428,44 +546,21 @@ fn run(target: &Target, stop: &AtomicBool, sink: &mut dyn FnMut(Media) -> bool) 
                 ));
             })?;
     }
-    if let (Some((audio_pt, law)), Some(Track { sockets })) = (audio, audio_track) {
-        let tx = tx.clone();
-        let flag = readers_stop.clone();
-        std::thread::Builder::new()
-            .name("onetouch-live-audio".into())
-            .spawn(move || {
-                let _keep = &sockets[1];
-                let socket = &sockets[0];
-                let _ = socket.set_read_timeout(Some(Duration::from_millis(200)));
-                let mut buffer = [0u8; 4096];
-                while !flag.load(Ordering::Acquire) {
-                    match socket.recv_from(&mut buffer) {
-                        Ok((n, _)) => {
-                            let Some((_, ts, _, payload)) = parse_rtp(&buffer[..n]) else {
-                                continue;
-                            };
-                            if buffer[1] & 0x7F != audio_pt || payload.is_empty() {
-                                continue;
-                            }
-                            if tx
-                                .send(Media::Audio {
-                                    pcm: law.decode(payload),
-                                    timestamp: ts,
-                                })
-                                .is_err()
-                            {
-                                return;
-                            }
-                        }
-                        Err(e) if matches!(
-                            e.kind(),
-                            io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
-                        ) => {}
-                        Err(_) => break,
-                    }
-                }
-            })?;
+    if let (Some(only), Some(Track { sockets })) = (audio, audio_track) {
+        sound_reader(sockets, Some(only), tx.clone(), readers_stop.clone())?;
     }
+    // Without sound in the offer, sound comes on request (see `intercom`):
+    // its ports are ready, and their reader runs, from the start.
+    let mut door_sound = None;
+    if audio.is_none() {
+        let sockets = udp_pair(peer)?;
+        let local = [sockets[0].local_addr()?.port(), sockets[1].local_addr()?.port()];
+        let probes = [sockets[0].try_clone()?, sockets[1].try_clone()?];
+        sound_reader(sockets, None, tx.clone(), readers_stop.clone())?;
+        door_sound = Some((probes, local));
+    }
+    let mut sound_on = false;
+    let mut sound_server: Option<[u16; 2]> = None;
     drop(tx);
 
     let keepalive = Duration::from_secs((rtsp.timeout / 2).clamp(10, 25));
@@ -485,10 +580,28 @@ fn run(target: &Target, stop: &AtomicBool, sink: &mut dyn FnMut(Media) -> bool) 
                 break Err(io::Error::other("the relay stopped sending"));
             }
         }
+        let wanted = sound.load(Ordering::Acquire);
+        if wanted != sound_on {
+            sound_on = wanted;
+            if let Some((sockets, local)) = &door_sound {
+                match intercom(&mut rtsp, &target.remote, *local, wanted) {
+                    Ok(transport) => {
+                        sound_server = ports(&transport, "server_port").ok();
+                        if let (true, Some(server)) = (wanted, sound_server) {
+                            probe(sockets, peer, server, 0, 0);
+                        }
+                    }
+                    Err(e) => log(&format!("sound request failed: {e}")),
+                }
+            }
+        }
         if last.elapsed() >= keepalive {
             last = Instant::now();
             if let Err(e) = rtsp.request("OPTIONS", &play_uri, &[]) {
                 break Err(e);
+            }
+            if let (true, Some((sockets, _)), Some(server)) = (sound_on, &door_sound, sound_server) {
+                probe(sockets, peer, server, 0, 0);
             }
         }
     };

@@ -234,30 +234,70 @@ button.icon { font-size: 16px; padding: 4px 9px; min-width: 36px; }
 .kz-player { position: relative; width: 100%; height: 100%; }
 .kz-canvas { display: block; width: 100%; height: 100%; object-fit: contain; background: #000; }
 
+/* A stage (player.js): one picture with its controls over it, laid out by
+   the picture's shape as the big video apps do. Wide (YouTube): the full
+   width, title along the top, a button bar along the bottom over a shade.
+   Tall (TikTok, Reels): as tall as the screen allows, centred, the buttons
+   in a column down the right edge. Controls show while nothing plays, on
+   hover with a mouse, and for a few seconds after a tap. */
+.kz-stage { position: relative; width: 100%; aspect-ratio: var(--ar, 16 / 9); max-height: 78vh; background: #000; border-radius: 10px; overflow: hidden; color: #fff; user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent; cursor: pointer; }
+.kz-stage .kz-player { position: absolute; inset: 0; }
+.kz-stage[data-shape="tall"] { width: auto; height: min(78vh, 760px); max-width: 100%; margin: 0 auto; }
+.kz-note { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center; padding: 48px 24px; color: #ddd; font-size: 13px; pointer-events: none; }
+.kz-top, .kz-bar { position: absolute; left: 0; right: 0; display: flex; align-items: center; gap: 8px; padding: 10px 12px; opacity: 0; transition: opacity 0.2s; pointer-events: none; }
+.kz-stage.show .kz-top, .kz-stage.show .kz-bar { opacity: 1; pointer-events: auto; }
+@media (hover: hover) {
+  .kz-stage:hover .kz-top, .kz-stage:hover .kz-bar { opacity: 1; pointer-events: auto; }
+}
+.kz-top { top: 0; background: linear-gradient(rgba(0, 0, 0, 0.55), transparent); font-size: 14px; font-weight: 600; }
+.kz-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-shadow: 0 0 4px #000; }
+.kz-badge { flex: 0 0 auto; font-size: 11px; font-weight: 700; letter-spacing: 0.05em; padding: 2px 6px; border-radius: 4px; background: #d93025; color: #fff; }
+.kz-bar { bottom: 0; justify-content: flex-end; background: linear-gradient(transparent, rgba(0, 0, 0, 0.6)); }
+.kz-tools { margin-right: auto; display: flex; gap: 8px; align-items: center; }
+.kz-button { width: 40px; height: 40px; min-height: 0; padding: 0; border-radius: 50%; border: none; background: rgba(0, 0, 0, 0.45); color: #fff; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; }
+.kz-button svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.kz-button:hover { background: rgba(255, 255, 255, 0.22); }
+.kz-button.kz-word { width: auto; border-radius: 999px; padding: 0 16px; font-weight: 600; }
+.kz-button.kz-danger { background: var(--bad); }
+.kz-button.kz-open { background: var(--accent); color: var(--accent-text); }
+.kz-stage:not(.kz-full) .kz-full-only { display: none; }
+.kz-stage[data-shape="tall"] .kz-bar { left: auto; top: auto; flex-direction: column; justify-content: flex-end; background: none; padding: 12px 10px 16px; }
+.kz-stage[data-shape="tall"] .kz-tools { margin: 0; flex-direction: column; }
+.kz-stage[data-shape="tall"] .kz-button { background: rgba(0, 0, 0, 0.35); width: 46px; height: 46px; }
+.kz-stage[data-shape="tall"] .kz-button.kz-word { width: auto; }
+
+/* Full screen (player.js): the picture fills the window; on an upright
+   phone a wide picture is turned on its side to use the whole screen. */
+.kz-full { position: fixed !important; inset: 0 !important; z-index: 100 !important; width: 100vw !important; height: 100vh !important; max-width: none !important; max-height: none !important; margin: 0 !important; border-radius: 0 !important; aspect-ratio: auto !important; background: #000; }
+.kz-full .kz-bar { padding-bottom: calc(12px + env(safe-area-inset-bottom)); padding-right: calc(12px + env(safe-area-inset-right)); }
+.kz-full .kz-top { padding-top: calc(12px + env(safe-area-inset-top)); }
+@media (orientation: portrait) and (pointer: coarse) {
+  .kz-full[data-shape="wide"] { inset: auto !important; top: 50% !important; left: 50% !important; width: 100vh !important; height: 100vw !important; transform: translate(-50%, -50%) rotate(90deg); }
+}
+body.kz-has-full { overflow: hidden; }
+
 /* Doorbell calls through the OneTouch cloud */
-.calls-panel { margin: 14px 0 6px; padding: 16px; border: 1px solid var(--line); border-radius: 10px; }
-.calls-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
-.calls-head h3 { margin: 0 0 4px; }
-.calls-head p { margin: 0; }
+.calls-panel { margin: 10px 0 4px; padding: 10px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.calls-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+.calls-head p { margin: 0; flex: 1 1 200px; }
+#calls-retry-row { margin-top: 8px; }
 .switch { flex-direction: row; align-items: center; gap: 8px; color: var(--text); cursor: pointer; white-space: nowrap; }
 .switch input { width: 18px; height: 18px; min-height: 0; accent-color: var(--accent); }
-.calls-devices { list-style: none; margin: 12px 0 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; }
-.calls-devices li { display: grid; grid-template-columns: 1fr auto; grid-template-rows: auto auto; column-gap: 8px; align-items: center; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
-.calls-devices .name { font-weight: 600; }
-.calls-devices .small { grid-row: 2; }
-.calls-devices button { grid-row: 1 / span 2; grid-column: 2; }
 #call-card { margin-top: 12px; display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 16px; padding: 14px; border: 1px solid var(--accent); border-radius: 12px; background: var(--bg); }
 #call-card.ringing { animation: call-pulse 1.2s ease-in-out infinite; }
 @keyframes call-pulse { 50% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent) 35%, transparent); } }
-.call-video { position: relative; aspect-ratio: 16 / 9; background: #111; border-radius: 8px; overflow: hidden; display: flex; align-items: center; justify-content: center; }
-.call-video .kz-player { position: absolute; inset: 0; }
-.call-video-note { position: absolute; z-index: 1; color: #ddd; font-size: 13px; padding: 0 12px; text-align: center; }
-.call-clock { position: absolute; z-index: 1; top: 8px; right: 10px; color: #fff; font-size: 12px; background: rgba(0, 0, 0, 0.45); padding: 2px 8px; border-radius: 999px; }
+.call-video { position: relative; aspect-ratio: 16 / 9; background: #111; border-radius: 10px; overflow: hidden; min-width: 0; }
+.call-video.has-stage { aspect-ratio: auto; background: none; }
+.call-video-note { position: absolute; inset: 0; z-index: 1; display: flex; align-items: center; justify-content: center; color: #ddd; font-size: 13px; padding: 0 12px; text-align: center; pointer-events: none; }
+.call-video-note:empty { display: none; }
+.call-clock { position: absolute; z-index: 1; top: 44px; right: 10px; color: #fff; font-size: 12px; background: rgba(0, 0, 0, 0.45); padding: 2px 8px; border-radius: 999px; }
 .call-who { display: flex; flex-direction: column; gap: 2px; }
 .call-who #call-peer { font-size: 20px; font-weight: 600; }
 .call-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
 button.danger { background: var(--bad); color: #fff; border-color: var(--bad); }
-.calls-dial { display: flex; gap: 8px; margin-top: 10px; }
+.calls-more { margin-top: 12px; }
+.calls-more summary { cursor: pointer; color: var(--muted); padding: 8px 0; font-size: 13px; }
+.calls-dial { display: flex; gap: 8px; margin-top: 4px; }
 .calls-dial input { flex: 1; min-width: 0; }
 .call-volume { flex-direction: row; align-items: center; gap: 8px; margin-top: 12px; }
 .call-volume input { flex: 1; max-width: 220px; min-height: 0; accent-color: var(--accent); }
@@ -288,17 +328,26 @@ button.danger { background: var(--bad); color: #fff; border-color: var(--bad); }
 .ot-heading .actions { margin: 0; flex-wrap: wrap; }
 #ot-login label { display: flex; flex-direction: column; gap: 4px; }
 #ot-connected .tabs { margin-top: 10px; }
-/* Each device is a card; Watch live plays inside it, and the card takes the whole row. */
-.ot-devices { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin-top: 14px; }
-.ot-device { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 4px 10px; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
-.ot-device .ot-device-note { grid-column: 1; }
-.ot-device .ot-device-buttons { grid-column: 2; grid-row: 1 / span 2; display: flex; gap: var(--gap); }
-.ot-device.watching { grid-column: 1 / -1; }
-.ot-device .ot-live { grid-column: 1 / -1; position: relative; width: 100%; aspect-ratio: 16 / 9; background: #111; border-radius: 8px; overflow: hidden; margin-top: 6px; }
-.ot-device .ot-live-note { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center; padding: 12px; color: #ddd; font-size: 13px; pointer-events: none; }
-.ot-device .ot-live-tools { position: absolute; right: 8px; bottom: 8px; display: flex; gap: 6px; }
-.ot-device .ot-live-tools button { background: rgba(0,0,0,0.55); color: #fff; border-color: rgba(255,255,255,0.5); }
-.ot-device .ot-live-tools button.on { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+/* The account's devices, one card each (onetouch.js). A tap opens a card:
+   it takes the whole row, its live view and calls play inside it, and
+   its Call button sits under the picture. */
+.ot-devices { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; margin-top: 14px; }
+.dev-card { border: 1px solid var(--line); border-radius: 10px; background: var(--bg); min-width: 0; }
+.dev-card.open { grid-column: 1 / -1; border-color: var(--accent); }
+.dev-head { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 60px; padding: 10px 14px; background: none; border: none; border-radius: 10px; text-align: left; color: var(--text); }
+.dev-head:hover { background: var(--panel); }
+.dev-icon { display: inline-flex; flex: 0 0 auto; color: var(--accent); }
+.dev-card.offline .dev-icon { color: var(--muted); }
+.dev-icon svg { width: 26px; height: 26px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.dev-text { display: flex; flex-direction: column; min-width: 0; flex: 1 1 auto; }
+.dev-text strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dev-go { flex: 0 0 auto; width: 36px; height: 36px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; background: var(--panel); border: 1px solid var(--line); color: var(--accent); font-size: 13px; }
+.dev-slot { padding: 0 14px; }
+.dev-slot:empty { display: none; }
+.dev-slot #call-card { margin-top: 0; padding: 0; border: none; background: none; }
+.dev-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 12px 14px 14px; }
+.dev-actions .dev-note { margin: 0; flex: 1 1 220px; }
+.dev-actions .dev-note:empty { display: none; }
 .ot-recording { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 12px 0; border-bottom: 1px solid var(--line); }
 .ot-recording span { flex: 1 1 200px; }
 #ot-player { margin: 10px 0 14px; }
@@ -437,6 +486,12 @@ label small { font-size: 12px; min-height: 1.2em; }
 .cam-tile:hover .cam-size, .cam-tile.big .cam-size { opacity: 1; }
 .cam-tile .cam-size:hover { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
 .cam-tile.placeholder .cam-size { display: none; }
+.cam-tile .cam-full { position: absolute; top: 6px; right: 52px; z-index: 2; width: 34px; height: 30px; min-height: 0; padding: 0; display: inline-flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.55); color: #fff; border: 1px solid rgba(255,255,255,0.5); border-radius: 6px; opacity: 0; transition: opacity 0.15s; }
+.cam-tile .cam-full svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+.cam-tile:hover .cam-full, .cam-tile.big .cam-full, .cam-tile.kz-full .cam-full { opacity: 1; }
+.cam-tile.placeholder .cam-full { display: none; }
+.cam-tile.kz-full .cam-size { display: none; }
+.cam-tile.kz-full .cam-full { right: calc(8px + env(safe-area-inset-right)); top: calc(8px + env(safe-area-inset-top)); width: 44px; height: 40px; }
 /* Pause and speed for a camera, and a group's playback row */
 .pb-row .tile-pause, .grp-controls .grp-pause { padding: 2px 8px; font-size: 13px; }
 .pb-row .tile-speed { width: 70px; min-height: 0; accent-color: var(--accent); }
@@ -587,8 +642,19 @@ ul.cards li.add .name { color: var(--accent); }
   .actions.bar button.accent { flex: 1 1 auto; min-height: 48px; font-size: 16px; }
   .call-actions button.big { flex: 1 1 45%; min-height: 52px; }
   .door-call-actions button.big { flex: 1 1 45%; }
-  .calls-devices { grid-template-columns: 1fr; }
   .ot-devices { grid-template-columns: 1fr; }
+  /* The account panel sits flat on the page, so an open card can run edge
+     to edge with its picture, as on a video app. */
+  .ot-panel { padding: 0; border: none; }
+  .dev-card.open { margin: 0 calc(-1 * var(--edge)); border-radius: 0; border-left: none; border-right: none; background: var(--panel); }
+  .dev-card.open .dev-head { border-radius: 0; }
+  .dev-card.open .dev-slot { padding: 0; }
+  .dev-card.open .kz-stage[data-shape="wide"], .dev-card.open .call-video { border-radius: 0; }
+  .dev-card.open #call-card { border: none; border-radius: 0; padding: 0 0 12px; background: none; }
+  .dev-card.open .call-body { padding: 0 var(--edge); }
+  .dev-actions { padding: 12px var(--edge) 16px; }
+  .dev-actions button.big { flex: 1 1 100%; min-height: 52px; }
+  .kz-stage[data-shape="tall"] { height: min(68vh, 720px); }
   .pb-bar-row { gap: 6px; }
   #pb-speed { width: 90px; }
   .thumbs { grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); }
@@ -607,6 +673,8 @@ ul.cards li.add .name { color: var(--accent); }
   button.icon { min-width: 44px; }
   .tab { padding: 12px 12px; }
   .cam-tile .cam-size, .cam-tile .cam-volume { opacity: 1; display: block; }
+  .cam-tile .cam-full { opacity: 1; width: 44px; height: 40px; right: 60px; }
+  .kz-button { width: 48px; height: 48px; }
   .cam-tile .cam-quality, .cam-tile .cam-speaker { padding: 6px 10px; font-size: 12px; }
   .cam-tile .cam-speaker { right: 64px; }
   .cam-tile .cam-volume { right: 112px; bottom: 12px; }

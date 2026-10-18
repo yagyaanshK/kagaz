@@ -403,6 +403,7 @@ function showCameras() {
 
 // The left-hand categories drive the main area.
 function selectCategory(cat) {
+  document.querySelectorAll(".kz-full").forEach((el) => KagazPlayer.fullscreen(el, false));
   if (cat !== "doorbell" && typeof stopOneTouch === "function") stopOneTouch();
   document.querySelectorAll("#categories li, #bottom-nav button").forEach((el) =>
     el.classList.toggle("active", el.dataset.cat === cat));
@@ -1080,8 +1081,26 @@ function buildTile(cam) {
   size.innerHTML = "&#x2922;";
   size.addEventListener("click", (ev) => { ev.stopPropagation(); setBig(tile, cam, !tile.classList.contains("big")); });
   tile.appendChild(size);
+  // Full screen, in HD; a wide picture turns on its side on an upright phone.
+  const full = document.createElement("button");
+  full.type = "button";
+  full.className = "cam-full";
+  full.title = "Full screen";
+  full.setAttribute("aria-label", "Full screen");
+  full.innerHTML = KagazPlayer.ICON.full;
+  full.addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    tile.dataset.shape = (tile._player && tile._player.box.dataset.shape) || "wide";
+    if (KagazPlayer.fullscreen(tile) && !tile.classList.contains("big")) setBig(tile, cam, true);
+  });
+  tile._onfull = (on) => {
+    full.innerHTML = on ? KagazPlayer.ICON.unfull : KagazPlayer.ICON.full;
+    full.title = on ? "Leave full screen (Esc)" : "Full screen";
+  };
+  tile.appendChild(full);
   tile.addEventListener("click", (ev) => {
     if (ev.target.closest(".cam-reload")) return;
+    if (tile.classList.contains("kz-full")) return;
     setBig(tile, cam, !tile.classList.contains("big"));
   });
   return tile;

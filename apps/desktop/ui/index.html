@@ -66,7 +66,6 @@
           </div>
         </div>
       </div>
-      <!-- The Calls panel (calls.js) goes here, first: it is what rings. -->
       <div id="ot-account" class="ot-panel">
         <div class="ot-heading">
           <div><h3 id="ot-service-name">OneTouch</h3><p id="ot-account-name" class="muted">Live video and recordings through your OneTouch account.</p></div>
@@ -83,6 +82,8 @@
             </div>
           </div>
         </div>
+        <!-- The call line and the ringing call card (calls.js): first, as it is what rings. -->
+        <div id="calls-host"></div>
         <p id="ot-remembered" class="muted small hidden"></p>
         <form id="ot-login" class="hidden">
           <label>Account service
@@ -111,10 +112,11 @@
         <p id="ot-message" class="muted" role="status" aria-live="polite"></p>
         <div id="ot-connected" class="hidden">
           <div class="tabs" role="group" aria-label="Doorbell view">
-            <button id="ot-live-tab" type="button" class="tab active" aria-pressed="true">Live</button>
+            <button id="ot-live-tab" type="button" class="tab active" aria-pressed="true">Devices</button>
             <button id="ot-recordings-tab" type="button" class="tab" aria-pressed="false">Recordings &amp; snapshots</button>
           </div>
-          <!-- Each device is a card; Watch live plays inside that card. -->
+          <!-- Each device is one card (onetouch.js): a tap opens it and starts its
+               live view inside it; its Call button sits under the picture. -->
           <div id="ot-devices" class="ot-devices"></div>
           <div id="ot-recordings-pane" class="hidden">
             <p class="muted small">History saved to your OneTouch account. Entries with video include a Play button.</p>

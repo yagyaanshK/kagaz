@@ -217,14 +217,22 @@ needs the webkit2gtk and gtk3 development packages to build.
 
 ## OneTouch doorbell accounts
 
-In the desktop app, open **Doorbell → Sign in**. Select **OneTouch Smart Cloud**
-for migrated accounts, or **OTIPVDP (legacy)** for an older account. After sign-in,
-choose a device for live video or open **Recordings & snapshots** for cloud
-history. Only entries with video have a Play button; snapshots remain pictures.
-Local intercom calls continue to work separately.
-Enable **Remember sign-in securely** to keep the login in your desktop password
-store. If the session expires, click **Reconnect** without retyping. Sign out
-keeps the saved login; **Forget saved sign-in** removes it.
+In the app, open **Doorbell → Sign in**. Select **OneTouch Smart Cloud**
+for migrated accounts, or **OTIPVDP (legacy)** for an older account. After
+sign-in, each device of the account is one card: tap it and its live view
+plays inside it, with a **Call** button under the picture. Live view is
+picture only (the relay sends no sound for it); a call brings the door's
+sound, your microphone and **Open door**. Wide pictures fill the width with
+their controls along the bottom, tall ones fill the height with their
+controls down the side, and full screen turns a wide picture on its side on
+an upright phone. **Ring me here** makes this device ring when someone calls
+the account. **Recordings & snapshots** shows cloud history. Local intercom
+calls continue to work separately.
+Enable **Remember sign-in securely** to keep the login in your password
+store (the desktop's vault, or the Android Keystore on a phone). OneTouch
+allows one session per account, so Kagaz signs in again only when you open
+the Doorbell pane; ringing works without that. Sign out keeps the saved
+login; **Forget saved sign-in** removes it.
 
 The integration builds and passes protocol/UI checks; authenticated playback
 still needs verification with a real account. See [protocol notes and limits](docs/onetouch.md).

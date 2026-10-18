@@ -313,6 +313,9 @@ enum IntercomCommand {
         /// Watch this device's live video (its name, or part of it) for --seconds, by the window's own route (no helper), and report what arrives
         #[arg(long, conflicts_with_all = ["call", "number", "listen"])]
         watch: Option<String>,
+        /// With --watch: ask for the door's sound too (the request the official app uses; nothing rings)
+        #[arg(long, requires = "watch")]
+        sound: bool,
     },
     /// Wait for an incoming call (the doorbell) and report each ring; for Direct IP use port 5060
     Listen {
@@ -2412,10 +2415,11 @@ fn intercom_command(cmd: IntercomCommand) -> Result<()> {
             seconds,
             press,
             watch,
+            sound,
         } => {
             use kagaz_core::intercom::onetouch::Session;
             if let Some(name) = &watch {
-                return watch_onetouch_live(name, seconds);
+                return watch_onetouch_live(name, seconds, sound);
             }
             use kagaz_core::intercom::phone::{Event as PhoneEvent, MediaOut, Phone};
             use std::sync::atomic::{AtomicUsize, Ordering};
@@ -2800,7 +2804,7 @@ fn unix_now() -> i64 {
 
 /// Live view of a OneTouch device by the window's own route: Kagaz speaks
 /// RTSP to the relay itself and reports the pictures and sound that arrive.
-fn watch_onetouch_live(name: &str, seconds: u64) -> anyhow::Result<()> {
+fn watch_onetouch_live(name: &str, seconds: u64, sound: bool) -> anyhow::Result<()> {
     use kagaz_core::intercom::onetouch::{live::Live, Session};
     use kagaz_core::media::Media;
     let mut session = Session::load()
@@ -2832,7 +2836,8 @@ fn watch_onetouch_live(name: &str, seconds: u64) -> anyhow::Result<()> {
         kagaz_core::paths::cache_dir().join("onetouch-live.log").display()
     );
     let (tx, rx) = std::sync::mpsc::channel();
-    let _live = Live::start(target, Box::new(move |m| tx.send(m).is_ok()));
+    let live = Live::start(target, Box::new(move |m| tx.send(m).is_ok()));
+    live.set_sound(sound);
     let start = std::time::Instant::now();
     let (mut pictures, mut keys, mut sound, mut first) = (0u64, 0u64, 0usize, false);
     while start.elapsed().as_secs() < seconds {

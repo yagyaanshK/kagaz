@@ -1,4 +1,5 @@
-//! One remembered doorbell account, held only in the operating system vault.
+//! One remembered doorbell account, held only in the operating system vault
+//! (on Android: sealed with a key kept in the Android Keystore).
 //! Secrets never enter Status, command errors, logs, or Kagaz's config files.
 use kagaz_core::intercom::onetouch::Provider;
 use serde::{Deserialize, Serialize};
@@ -20,8 +21,11 @@ pub(super) struct SavedLogin {
 pub(super) const SUPPORTED: bool = cfg!(any(
     target_os = "linux",
     target_os = "macos",
-    target_os = "windows"
+    target_os = "windows",
+    target_os = "android"
 ));
+#[cfg(target_os = "android")]
+const NAME: &str = "onetouch-remembered-account";
 const UNAVAILABLE: &str = "Could not access your system's password store. Unlock it and try again.";
 
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
@@ -39,7 +43,19 @@ pub(super) fn read() -> Result<Option<SavedLogin>, String> {
             Err(_) => Err(UNAVAILABLE.into()),
         }
     }
-    #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+    #[cfg(target_os = "android")]
+    {
+        match super::super::mobile::secret_get(NAME).map_err(|_| UNAVAILABLE.to_string())? {
+            Some(secret) => decode(&secret).map(Some),
+            None => Ok(None),
+        }
+    }
+    #[cfg(not(any(
+        target_os = "linux",
+        target_os = "macos",
+        target_os = "windows",
+        target_os = "android"
+    )))]
     {
         Ok(None)
     }
@@ -64,7 +80,18 @@ pub(super) fn save(saved: &SavedLogin) -> Result<(), String> {
             .set_password(&secret)
             .map_err(|_| UNAVAILABLE.to_string())
     }
-    #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+    #[cfg(target_os = "android")]
+    {
+        let secret =
+            serde_json::to_string(saved).map_err(|_| "Could not prepare the saved sign-in.")?;
+        super::super::mobile::secret_set(NAME, &secret).map_err(|_| UNAVAILABLE.to_string())
+    }
+    #[cfg(not(any(
+        target_os = "linux",
+        target_os = "macos",
+        target_os = "windows",
+        target_os = "android"
+    )))]
     {
         let _ = saved;
         Err("Remembering credentials is not available on this platform yet.".into())
@@ -79,7 +106,16 @@ pub(super) fn forget() -> Result<(), String> {
             Err(_) => Err(UNAVAILABLE.into()),
         }
     }
-    #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+    #[cfg(target_os = "android")]
+    {
+        super::super::mobile::secret_delete(NAME).map_err(|_| UNAVAILABLE.to_string())
+    }
+    #[cfg(not(any(
+        target_os = "linux",
+        target_os = "macos",
+        target_os = "windows",
+        target_os = "android"
+    )))]
     {
         Ok(())
     }
