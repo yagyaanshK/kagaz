@@ -506,11 +506,23 @@ async function refreshCameras() {
 
 function showLogin(show, note) {
   $("cam-login-form").classList.toggle("hidden", !show);
+  if (!show) KagazReveal.hide($("cam-login-password"));
   $("cam-login-note").textContent = note || "";
   $("cam-login-code-row").classList.add("hidden");
 }
 
 $("cam-login").addEventListener("click", () => showLogin(true, ""));
+// The keyboard's Enter key: email → password → sign in; the code → confirm.
+for (const [field, next] of [["cam-login-email", () => $("cam-login-password").focus()],
+                             ["cam-login-password", () => $("cam-login-go").click()],
+                             ["cam-login-code", () => $("cam-login-code-go").click()]]) {
+  $(field).addEventListener("keydown", (ev) => {
+    if (ev.key === "Enter") { ev.preventDefault(); next(); }
+  });
+}
+$("cam-login-email").setAttribute("enterkeyhint", "next");
+$("cam-login-password").setAttribute("enterkeyhint", "go");
+$("cam-login-code").setAttribute("enterkeyhint", "go");
 $("cam-login-cancel").addEventListener("click", () => showLogin(false, ""));
 $("cam-login-go").addEventListener("click", async () => {
   const email = $("cam-login-email").value.trim();
@@ -2559,4 +2571,48 @@ listen("doorbell-state", (e) => {
   doorStatus = e.payload;
   if (doorStatus.phase === "ringing") selectCategory("doorbell");
   renderDoorbell();
+});
+
+// ---------- out of sight ----------
+// When the window is out of sight (Home on a phone, another app, the screen
+// off, a minimised window), live pictures and sound stop, as video apps do;
+// they come back where they were when it is in sight again. A call keeps
+// going (calls.js does not listen to this), and so does a ring.
+let pausedOutOfSight = null; // what to bring back
+
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) {
+    const camerasShown = !$("cameras").classList.contains("hidden") && camStatus && camStatus.running;
+    const tiles = camerasShown ? allTiles() : [];
+    pausedOutOfSight = {
+      cameras: tiles.length > 0,
+      playback: isPlayback(),
+      live: typeof otLive !== "undefined" && otLive ? otLive.key : null,
+    };
+    if (tiles.length) {
+      // Recordings hold their place; live tiles just stop.
+      if (pausedOutOfSight.playback) pauseCells(cellsOf($("cam-grid")));
+      tiles.forEach(teardownTile);
+    }
+    if (pausedOutOfSight.live && typeof otStopLive === "function") otStopLive();
+    for (const id of ["ot-video", "viewer-video"]) {
+      const v = $(id);
+      if (v && !v.paused) v.pause();
+    }
+    return;
+  }
+  const back = pausedOutOfSight;
+  pausedOutOfSight = null;
+  if (!back) return;
+  if (back.cameras && !$("cameras").classList.contains("hidden") && camStatus && camStatus.running && isPlayback() === back.playback) {
+    for (const tile of allTiles()) {
+      const cam = camOf(tile);
+      if (cam) remount(tile, cam);
+    }
+    if (back.playback) resumeCells(cellsOf($("cam-grid")));
+  }
+  if (back.live && currentView === "doorbell" && typeof otCards === "function") {
+    const card = otCards().find((c) => c.key === back.live);
+    if (card) otOpenCard(card);
+  }
 });
