@@ -17,25 +17,41 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.database.ContentObserver
 import android.media.AudioAttributes
+import android.media.AudioManager
 import android.media.MediaPlayer
 import android.media.RingtoneManager
+import android.media.VolumeProvider
+import android.media.session.MediaSession
+import android.media.session.PlaybackState
 import android.net.Uri
 import java.io.File
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
+import android.provider.Settings
 import androidx.core.app.NotificationCompat
+import androidx.core.app.Person
 
 class KagazCallService : Service() {
     companion object {
         const val LINE_CHANNEL = "kagaz-line"
-        // The ring's sound is Kagaz's own (the person's chosen tone, played
-        // below), so this channel is silent; it still vibrates and wakes.
-        const val RING_CHANNEL = "kagaz-ring-tone"
+        // The ring's sound and vibration are Kagaz's own (the person's
+        // choice in the doorbell settings, played below), so this channel
+        // makes neither; it shows the card and wakes the screen.
+        const val RING_CHANNEL = "kagaz-calls"
         private var player: MediaPlayer? = null
+        private var vibrator: Vibrator? = null
+        private var ringing = false
         const val LINE_ID = 1
         const val RING_ID = 2
         const val EXTRA_CALL = "kagaz_call"
+        const val EXTRA_ANSWER = "kagaz_answer"
         const val EXTRA_FROM_APP = "kagaz_from_app"
         const val STOPPED_ID = 3
 
@@ -48,13 +64,14 @@ class KagazCallService : Service() {
                     setShowBadge(false)
                 }
             )
-            nm.deleteNotificationChannel("kagaz-ring") // the old one, with the system's sound
+            // Earlier ones: with the system's sound; with a fixed vibration.
+            nm.deleteNotificationChannel("kagaz-ring")
+            nm.deleteNotificationChannel("kagaz-ring-tone")
             nm.createNotificationChannel(
                 NotificationChannel(RING_CHANNEL, "Doorbell calls", NotificationManager.IMPORTANCE_HIGH).apply {
-                    description = "Rings when someone calls from a door station, a monitor or your family"
+                    description = "Shows who is calling from a door station, a monitor or your family. The ring sound and vibration are set in Kagaz's doorbell settings."
                     setSound(null, null)
-                    enableVibration(true)
-                    vibrationPattern = longArrayOf(0, 800, 600, 800, 600, 800)
+                    enableVibration(false)
                     lockscreenVisibility = Notification.VISIBILITY_PUBLIC
                 }
             )
@@ -89,6 +106,80 @@ class KagazCallService : Service() {
             player = null
         }
 
+        /** Vibrate as a phone call does, until stopped; not when the phone
+         *  itself is set to silent. */
+        private fun startVibration(context: Context) {
+            val audio = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+            if (audio.ringerMode == AudioManager.RINGER_MODE_SILENT) return
+            val v = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                (context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager).defaultVibrator
+            } else {
+                @Suppress("DEPRECATION") context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+            }
+            val pattern = longArrayOf(0, 800, 600)
+            val attrs = AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE).build()
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                v.vibrate(VibrationEffect.createWaveform(pattern, 0), attrs)
+            } else {
+                @Suppress("DEPRECATION") v.vibrate(pattern, 0, attrs)
+            }
+            vibrator = v
+        }
+
+        private fun stopVibration() {
+            vibrator?.cancel()
+            vibrator = null
+        }
+
+        /** The ring goes quiet (sound and vibration); its card stays. */
+        fun quiet(context: Context) {
+            stopTone()
+            stopVibration()
+            Silencer.stop(context)
+        }
+
+        /** A volume key quiets a ring, as on a phone call. While ringing,
+         *  Kagaz holds a media session whose volume is its own, so a press
+         *  reaches it instead of changing a volume. Where Android sends the
+         *  key elsewhere anyway, the volume it changed tells the same. */
+        private object Silencer {
+            private var session: MediaSession? = null
+            private var observer: ContentObserver? = null
+
+            fun start(context: Context) {
+                stop(context)
+                val app = context.applicationContext
+                val main = Handler(Looper.getMainLooper())
+                val press = Runnable { quiet(app) }
+                try {
+                    session = MediaSession(app, "kagaz-ring").apply {
+                        setPlaybackToRemote(object : VolumeProvider(VolumeProvider.VOLUME_CONTROL_RELATIVE, 1, 1) {
+                            override fun onAdjustVolume(direction: Int) { main.post(press) }
+                        })
+                        setPlaybackState(PlaybackState.Builder().setState(PlaybackState.STATE_PLAYING, 0, 1f).build())
+                        isActive = true
+                    }
+                } catch (e: Exception) {
+                    session = null
+                }
+                val audio = app.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+                val streams = intArrayOf(AudioManager.STREAM_RING, AudioManager.STREAM_MUSIC, AudioManager.STREAM_NOTIFICATION, AudioManager.STREAM_ALARM)
+                val before = streams.map { audio.getStreamVolume(it) }
+                observer = object : ContentObserver(main) {
+                    override fun onChange(selfChange: Boolean) {
+                        if (streams.map { audio.getStreamVolume(it) } != before) press.run()
+                    }
+                }.also { app.contentResolver.registerContentObserver(Settings.System.CONTENT_URI, true, it) }
+            }
+
+            fun stop(context: Context) {
+                session?.release()
+                session = null
+                observer?.let { context.applicationContext.contentResolver.unregisterContentObserver(it) }
+                observer = null
+            }
+        }
+
         private fun openApp(context: Context, call: Boolean): PendingIntent {
             val intent = Intent(context, MainActivity::class.java).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
@@ -110,27 +201,55 @@ class KagazCallService : Service() {
                 .setContentIntent(openApp(context, false))
                 .build()
 
-        /** Ring for `peer` with `tone`, or (peer null) stop ringing. */
-        fun ring(context: Context, peer: String?, tone: String = "") {
+        /** Ring for `peer`, or (peer null) stop ringing. The card is a
+         *  call's, as in WhatsApp: tapping it opens the ring in Kagaz without
+         *  answering; Decline and Answer act at once. `silent`: the card
+         *  only, no `tone` (empty: the phone's ringtone); `vibrate` either way. */
+        fun ring(context: Context, peer: String?, tone: String = "", silent: Boolean = false, vibrate: Boolean = true) {
             channels(context)
             val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             if (peer == null) {
                 nm.cancel(RING_ID)
-                stopTone()
+                ringing = false
+                quiet(context)
                 return
             }
-            if (player == null) startTone(context.applicationContext, tone)
+            val app = context.applicationContext
+            if (!ringing) {
+                // A new ring (the card is redrawn while it rings: only once).
+                ringing = true
+                if (!silent) startTone(app, tone)
+                if (vibrate) startVibration(app)
+                if (!silent || vibrate) Silencer.start(app)
+            }
             val open = openApp(context, true)
+            val answer = PendingIntent.getActivity(
+                context, 2,
+                Intent(context, MainActivity::class.java).apply {
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                    putExtra(EXTRA_CALL, true)
+                    putExtra(EXTRA_ANSWER, true)
+                },
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            val decline = PendingIntent.getBroadcast(
+                context, 3,
+                Intent(context, KagazRingReceiver::class.java).setAction(KagazRingReceiver.ACTION_DECLINE),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            val caller = Person.Builder().setName(peer).setImportant(true).build()
             val n = NotificationCompat.Builder(context, RING_CHANNEL)
                 .setSmallIcon(R.mipmap.ic_launcher_foreground)
-                .setContentTitle(peer)
-                .setContentText("is calling. Tap to answer.")
+                .setStyle(NotificationCompat.CallStyle.forIncomingCall(caller, decline, answer))
+                .setContentText("Doorbell")
                 .setCategory(NotificationCompat.CATEGORY_CALL)
                 .setPriority(NotificationCompat.PRIORITY_MAX)
                 .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
                 .setOngoing(true)
-                .setAutoCancel(true)
+                .setOnlyAlertOnce(true)
                 .setContentIntent(open)
+                // A call's card must have one (or come from a foreground
+                // service); on a locked phone it opens the ring full screen.
                 .setFullScreenIntent(open, true)
                 .build()
             nm.notify(RING_ID, n)

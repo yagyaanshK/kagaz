@@ -237,6 +237,15 @@ with a small "Ready for doorbell calls" notification; some phones stop
 background apps to save battery, so allow Kagaz to run in the background
 there.
 
+A ring shows as a call's notification, as in WhatsApp: **Decline** stops
+the ring on this device (the others ring on), **Answer** opens Kagaz and
+picks up, and tapping the card opens the ring without answering. A volume
+key quiets the ring. The doorbell's settings choose, for each device, what
+a ring does: **Notification and ring sound** (the default), or **Silent
+notification** (on a computer: a notification that opens the call when
+clicked, no chime, no window jumping forward); on a phone, **Vibrate**
+goes with either.
+
 ## OneTouch doorbell accounts
 
 In the app, open **Doorbell → Sign in**. Select **OneTouch Smart Cloud**

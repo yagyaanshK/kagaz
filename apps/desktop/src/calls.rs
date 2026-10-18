@@ -63,6 +63,11 @@ pub struct Status {
     since: u64,
     /// The door key of the peer, when it has a door.
     door_dtmf: String,
+    /// This ring shows as a notification only (Settings): the page does
+    /// not jump to it or chime.
+    silent: bool,
+    /// The person opened this ring (its notification): the page shows it.
+    focus: bool,
 }
 
 #[derive(Default)]
@@ -81,22 +86,60 @@ fn now() -> u64 {
 
 fn update(app: &AppHandle, f: impl FnOnce(&mut Status)) {
     let state = app.state::<CallsState>();
-    let snapshot = {
+    let (was_ringing, snapshot) = {
         let mut s = state.status.lock().unwrap();
+        let was = s.phase == "ringing";
         f(&mut s);
-        s.clone()
+        (was, s.clone())
     };
     let _ = app.emit("call-event", &snapshot);
     #[cfg(mobile)]
     {
-        // The ring notification plays the person's chosen tone.
-        let tone = if snapshot.phase == "ringing" {
+        // The ring notification plays the person's chosen tone, unless
+        // they want the notification only.
+        let style = super::ringtones::load();
+        let tone = if snapshot.phase == "ringing" && !style.silent {
             ring_file(&snapshot)
         } else {
             String::new()
         };
-        super::mobile::call_changed(app, &snapshot.phase, &snapshot.peer, &tone);
+        super::mobile::call_changed(
+            app,
+            &snapshot.phase,
+            &snapshot.peer,
+            &tone,
+            style.silent,
+            style.vibrate,
+        );
     }
+    // A silent ring's notification goes when the ring does.
+    #[cfg(desktop)]
+    if was_ringing && snapshot.phase != "ringing" {
+        super::ring_notice::close();
+    }
+    #[cfg(mobile)]
+    let _ = was_ringing;
+}
+
+/// The person opened the ring (its notification): bring the window up on it.
+pub fn open_ring(app: &AppHandle) {
+    super::doorbell::attention(app);
+    let _ = app.emit("show-ring", ());
+    update(app, |s| s.focus = true);
+}
+
+/// Answer from the ring notification.
+#[cfg_attr(not(mobile), allow(dead_code))]
+pub fn answer_here(app: &AppHandle) {
+    open_ring(app);
+    let _ = with_phone(app, Phone::answer);
+}
+
+/// Decline from the ring notification: this device stops ringing; the
+/// others ring on.
+#[cfg_attr(not(mobile), allow(dead_code))]
+pub fn decline_here(app: &AppHandle) {
+    let _ = with_phone(app, Phone::decline);
 }
 
 /// The tone file for the current ring: the peer's own, else its kind's.
@@ -131,7 +174,10 @@ fn on_event(app: &AppHandle, e: Event) {
             video,
             ..
         } => {
+            let silent = super::ringtones::load().silent;
             update(app, |s| {
+                s.silent = silent;
+                s.focus = false;
                 let dev = device_for(s, &number).cloned();
                 s.phase = "ringing".into();
                 s.peer = dev
@@ -143,7 +189,17 @@ fn on_event(app: &AppHandle, e: Event) {
                 s.video = video;
                 s.since = 0;
             });
-            super::doorbell::attention(app);
+            // Ring: the window comes forward (a phone shows its own ring
+            // notification). Silent: a notification that opens the ring.
+            if !silent {
+                super::doorbell::attention(app);
+            } else {
+                #[cfg(desktop)]
+                {
+                    let peer = app.state::<CallsState>().status.lock().unwrap().peer.clone();
+                    super::ring_notice::show(app, &peer);
+                }
+            }
         }
         Event::Outgoing { number, .. } => update(app, |s| {
             let dev = device_for(s, &number).cloned();
@@ -162,6 +218,7 @@ fn on_event(app: &AppHandle, e: Event) {
         Event::Others { .. } => {}
         Event::Ended { reason, .. } => update(app, |s| {
             s.phase = "idle".into();
+            s.focus = false;
             s.detail = reason;
             s.since = 0;
             s.video = false;

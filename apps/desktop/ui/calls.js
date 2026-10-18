@@ -61,6 +61,7 @@
   let status = null;
   let clockTimer = null;
   let ringing = false;
+  let focused = false; // the page went to this call because its notification was opened
 
   // ---------- status ----------
 
@@ -145,14 +146,16 @@
 
     if (phase === "ringing" && !ringing) {
       ringing = true;
-      if (typeof selectCategory === "function") selectCategory("doorbell");
+      // Ring mode brings the ring up; silent mode leaves the screen alone
+      // (its notification opens the ring when tapped: s.focus below).
+      if (!s.silent && typeof selectCategory === "function") selectCategory("doorbell");
       // The caller's tone (Settings). On a phone the ring notification
       // plays it, also when the window is closed; the page stays quiet.
       const peer = (s.peer || "").trim().toLowerCase();
       const dev = (s.devices || []).find((d) => d.name.trim().toLowerCase() === peer);
       const family = typeof otPeople !== "undefined" && otPeople.some((p) => p.name.trim().toLowerCase() === peer);
       const kind = (dev && dev.kind === "apps") || family ? "family" : "doorbell";
-      if (typeof startChime === "function" && !/Android/i.test(navigator.userAgent)) startChime(s.peer, kind);
+      if (!s.silent && typeof startChime === "function" && !/Android/i.test(navigator.userAgent)) startChime(s.peer, kind);
       $("call-video-note").textContent = s.video ? "Answer to see the camera" : "";
       card.dataset.ended = "";
     }
@@ -160,6 +163,12 @@
     // call's own picture shows.
     if (phase === "ringing" || (phase === "talking" && !(player && player.stats.shown))) startPreview();
     else stopPreview();
+    // The ring's notification was opened: show the ring (once per call).
+    if (s.focus && (phase === "ringing" || phase === "talking") && !focused) {
+      focused = true;
+      if (typeof selectCategory === "function") selectCategory("doorbell");
+    }
+    if (phase === "idle") focused = false;
     if (phase !== "ringing" && ringing) {
       ringing = false;
       if (typeof stopChime === "function") stopChime();

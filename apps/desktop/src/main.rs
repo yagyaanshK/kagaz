@@ -19,6 +19,8 @@ mod onetouch;
 #[cfg(mobile)]
 mod mobile;
 mod printing;
+#[cfg(desktop)]
+mod ring_notice;
 mod ringtones;
 
 /// Run a blocking core call off the UI thread.
@@ -1211,6 +1213,25 @@ mod reopen {
             }
         });
     }
+
+    /// The ring notification (KagazNative.kt): 0 its card was tapped (show
+    /// the ring), 1 Answer, 2 Decline.
+    #[no_mangle]
+    pub extern "system" fn Java_life_omniverse_kagaz_KagazNative_ring(
+        _env: *mut std::ffi::c_void,
+        _class: *mut std::ffi::c_void,
+        action: i32,
+    ) {
+        let Some(app) = APP.get().cloned() else {
+            return;
+        };
+        std::thread::spawn(move || match action {
+            0 => super::calls::open_ring(&app),
+            1 => super::calls::answer_here(&app),
+            2 => super::calls::decline_here(&app),
+            _ => {}
+        });
+    }
 }
 
 /// The app. The desktop starts it from `main`; Android and iOS load the
@@ -1326,6 +1347,7 @@ pub fn run() {
             onetouch::onetouch_peek,
             ringtones::ringtones_list,
             ringtones::ringtones_set,
+            ringtones::ring_style_set,
             ringtones::ringtone_audio,
             ringtones::ringtone_add,
             ringtones::ringtone_remove,
