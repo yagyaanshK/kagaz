@@ -14,6 +14,7 @@ use tauri_plugin_dialog::DialogExt;
 
 mod calls;
 mod doorbell;
+mod media;
 mod onetouch;
 #[cfg(mobile)]
 mod mobile;
@@ -207,7 +208,9 @@ struct CameraState {
 #[derive(Clone)]
 struct CameraEngine {
     _server: std::sync::Arc<kagaz_core::cameras::tapo::TsServer>,
-    engine: std::sync::Arc<kagaz_core::extras::go2rtc::Engine>,
+    /// The helper engine, for the fallback playback modes; there is no
+    /// build of it for phones, and the window's own player needs none.
+    engine: Option<std::sync::Arc<kagaz_core::extras::go2rtc::Engine>>,
     cameras: Vec<kagaz_core::cameras::tapo::Camera>,
     /// Cameras reached directly on this network (device id → address).
     local: std::collections::HashMap<String, String>,
@@ -252,8 +255,16 @@ fn camera_views(e: &CameraEngine) -> Vec<CameraView> {
             model: c.model.clone(),
             device_id: c.device_id.clone(),
             stream: kagaz_core::extras::go2rtc::yaml_key(&c.name),
-            ws_url: e.engine.ws_url(&c.name),
-            ws_url_vga: e.engine.ws_url(&format!("{} vga", c.name)),
+            ws_url: e
+                .engine
+                .as_ref()
+                .map(|g| g.ws_url(&c.name))
+                .unwrap_or_default(),
+            ws_url_vga: e
+                .engine
+                .as_ref()
+                .map(|g| g.ws_url(&format!("{} vga", c.name)))
+                .unwrap_or_default(),
             ts_url: e
                 ._server
                 .tile_url(i, &kagaz_core::extras::go2rtc::yaml_key(&c.name)),
@@ -276,8 +287,12 @@ fn cameras_status(state: tauri::State<CameraState>) -> CamerasStatus {
         Some(e) => CamerasStatus {
             logged_in,
             running: true,
-            api_port: e.engine.api_port,
-            player_script: format!("http://127.0.0.1:{}/video-stream.js", e.engine.api_port),
+            api_port: e.engine.as_ref().map(|g| g.api_port).unwrap_or(0),
+            player_script: e
+                .engine
+                .as_ref()
+                .map(|g| format!("http://127.0.0.1:{}/video-stream.js", g.api_port))
+                .unwrap_or_default(),
             cameras: camera_views(e),
             message: String::new(),
         },
@@ -325,7 +340,14 @@ async fn cameras_start(
             Err(e) => return Err(e.to_string()),
         };
         let server = TsServer::start(session, cameras.clone(), 0).map_err(|e| e.to_string())?;
-        let binary = go2rtc::ensure(&mut |ev| {
+        let local = kagaz_core::cameras::tapo::local_sources(&server, &cameras);
+        let _ = app.emit(
+            "cameras-progress",
+            format!("{} camera(s) on this network", local.local.len()),
+        );
+        // The helper engine, where a build of it exists: the fallback modes
+        // need it, the window's own player does not.
+        let engine = match go2rtc::ensure(&mut |ev| {
             let text = match ev {
                 go2rtc::Event::Downloading { bytes } => {
                     format!("downloading the video engine ({} MB)...", bytes / 1_000_000)
@@ -335,18 +357,22 @@ async fn cameras_start(
             };
             let _ = app.emit("cameras-progress", text);
         })
-        .map_err(|e| e.to_string())?;
-        let local = kagaz_core::cameras::tapo::local_sources(&server, &cameras);
-        let _ = app.emit(
-            "cameras-progress",
-            format!("{} camera(s) on this network", local.local.len()),
-        );
-        let engine =
-            go2rtc::Engine::start(&binary, 0, &local.streams).map_err(|e| e.to_string())?;
-        server.set_engine_port(engine.api_port);
+        .map_err(|e| e.to_string())
+        .and_then(|binary| {
+            go2rtc::Engine::start(&binary, 0, &local.streams).map_err(|e| e.to_string())
+        }) {
+            Ok(engine) => {
+                server.set_engine_port(engine.api_port);
+                Some(std::sync::Arc::new(engine))
+            }
+            Err(why) => {
+                let _ = app.emit("cameras-progress", format!("built-in player only ({why})"));
+                None
+            }
+        };
         Ok(CameraEngine {
             _server: server,
-            engine: std::sync::Arc::new(engine),
+            engine,
             cameras,
             local: local.local,
         })
@@ -746,7 +772,11 @@ async fn playback_start(
             ._server
             .playback_url_at(&cam.device_id, from, to, false, speed);
         let stream = format!("playback-{token}");
-        e.engine
+        let engine = e
+            .engine
+            .as_ref()
+            .ok_or("the helper is not running here; the built-in player plays recordings")?;
+        engine
             .add_stream(&stream, &url)
             .map_err(|e| e.to_string())?;
         let cached = kagaz_core::cameras::tapo::cache::find(
@@ -838,7 +868,9 @@ async fn playback_stop(
 ) -> Result<(), String> {
     let e = running(&state)?;
     blocking(move || {
-        e.engine.remove_stream(&stream);
+        if let Some(engine) = &e.engine {
+            engine.remove_stream(&stream);
+        }
         e._server.forget_playback(&token);
         Ok(())
     })
@@ -921,7 +953,11 @@ async fn download_recording(
             .map_err(|e| e.to_string()),
             Err(why) => {
                 report(0, &format!("no ffmpeg ({why}); saving the picture only"));
-                download::save_span(&e._server, &e.engine, &cam, from, to, &out, &mut progress)
+                let engine = e
+                    .engine
+                    .as_ref()
+                    .ok_or("neither ffmpeg nor the helper is available to save with")?;
+                download::save_span(&e._server, engine, &cam, from, to, &out, &mut progress)
                     .map_err(|e| e.to_string())
             }
         }
@@ -1151,6 +1187,7 @@ pub fn run() {
         .manage(printing::CopyState::default())
         .manage(calls::CallsState::default())
         .manage(onetouch::OneTouchState::default())
+        .manage(media::Watches::default())
         .plugin(tauri_plugin_dialog::init())
         .plugin(phone_plugin())
         .setup(|app| {
@@ -1223,6 +1260,11 @@ pub fn run() {
             calls::calls_press,
             calls::calls_audio,
             calls::calls_media,
+            media::camera_watch,
+            media::playback_watch,
+            media::media_unwatch,
+            media::page_log,
+            onetouch::onetouch_watch,
             printing::upload_document,
             printing::copy_scan,
             printing::copy_print,

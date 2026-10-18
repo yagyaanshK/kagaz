@@ -17,11 +17,11 @@ use url::Url;
 
 #[derive(Clone)]
 pub struct Target {
-    remote: String,
-    host: String,
-    port: u16,
-    password: String,
-    account: String,
+    pub(super) remote: String,
+    pub(super) host: String,
+    pub(super) port: u16,
+    pub(super) password: String,
+    pub(super) account: String,
     inband_h264: bool,
 }
 impl Target {
@@ -115,11 +115,11 @@ impl Drop for Bridge {
     }
 }
 
-enum Frame {
+pub(super) enum Frame {
     Binary(Vec<u8>),
     Message(String, Vec<u8>),
 }
-fn frame(reader: &mut impl BufRead) -> io::Result<Frame> {
+pub(super) fn frame(reader: &mut impl BufRead) -> io::Result<Frame> {
     let mut first = [0];
     reader.read_exact(&mut first)?;
     if first[0] == b'$' {
@@ -160,7 +160,7 @@ fn frame(reader: &mut impl BufRead) -> io::Result<Frame> {
     reader.read_exact(&mut body)?;
     Ok(Frame::Message(header, body))
 }
-fn parameter(header: &str, name: &str) -> Option<String> {
+pub(super) fn parameter(header: &str, name: &str) -> Option<String> {
     header
         .trim_start_matches("Digest ")
         .split(',')
@@ -289,7 +289,7 @@ fn rewrite_response(header: &str, body: &[u8], remote: &str, local: &str) -> (St
     out.push_str("\r\n");
     (out, body)
 }
-fn header_value<'a>(header: &'a str, name: &str) -> Option<&'a str> {
+pub(super) fn header_value<'a>(header: &'a str, name: &str) -> Option<&'a str> {
     header
         .lines()
         .filter_map(|line| line.split_once(':'))
@@ -310,7 +310,7 @@ fn set_header(header: &str, name: &str, value: &str) -> String {
     out.push_str(&format!("{name}: {value}\r\n\r\n"));
     out
 }
-fn ports(transport: &str, name: &str) -> io::Result<[u16; 2]> {
+pub(super) fn ports(transport: &str, name: &str) -> io::Result<[u16; 2]> {
     let value = transport
         .split(';')
         .filter_map(|part| part.trim().split_once('='))

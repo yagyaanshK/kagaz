@@ -5,6 +5,9 @@ const { invoke } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
 
 const $ = (id) => document.getElementById(id);
+// The page's player says in the stream log when it shows its first picture
+// or cannot, next to Rust's own lines, so a blank tile can be diagnosed.
+KagazPlayer.report = (line) => invoke("page_log", { line }).catch(() => {});
 
 let devices = [];
 let current = null;
@@ -401,8 +404,8 @@ function showCameras() {
 // The left-hand categories drive the main area.
 function selectCategory(cat) {
   if (cat !== "doorbell" && typeof stopOneTouch === "function") stopOneTouch();
-  document.querySelectorAll("#categories li").forEach((li) =>
-    li.classList.toggle("active", li.dataset.cat === cat));
+  document.querySelectorAll("#categories li, #bottom-nav button").forEach((el) =>
+    el.classList.toggle("active", el.dataset.cat === cat));
   $("empty").classList.add("hidden");
   if (cat === "cameras") { showCameras(); return; }
   // Leaving the cameras view: stop showing its pane.
@@ -414,8 +417,8 @@ function selectCategory(cat) {
   if (cat === "doorbell") refreshDoorbell();
 }
 
-document.querySelectorAll("#categories li").forEach((li) =>
-  li.addEventListener("click", () => selectCategory(li.dataset.cat)));
+document.querySelectorAll("#categories li, #bottom-nav button").forEach((el) =>
+  el.addEventListener("click", () => selectCategory(el.dataset.cat)));
 
 async function refreshCameras() {
   try {
@@ -426,6 +429,10 @@ async function refreshCameras() {
   }
   $("cam-message").textContent = camStatus.message || "";
   $("cam-start").classList.toggle("hidden", camStatus.running || !camStatus.logged_in);
+  // Without the helper (a phone), the window's own player is the only way.
+  const helper = !camStatus.running || !!camStatus.player_script;
+  for (const o of $("cam-mode").options) o.disabled = !helper && o.value !== "builtin";
+  if (!helper) $("cam-mode").value = "builtin";
   $("cam-login").classList.toggle("hidden", camStatus.logged_in);
   $("cam-logout").classList.toggle("hidden", !camStatus.logged_in || camStatus.running);
   if (camStatus.running) {
@@ -529,8 +536,11 @@ function teardownTile(tile) {
     try { vs.src = ""; } catch (_) {}
   }
   tile.querySelector("video, video-stream")?.remove();
-  tile._audioWanted = !!tile.querySelector("audio") || !!tile._fileSound;
+  tile._audioWanted = !!tile.querySelector("audio") || !!tile._fileSound || !!(tile._player && tile._player.sound);
   stopAudio(tile);
+  if (tile._watchHandle) { tile._watchHandle.stop(); tile._watchHandle = null; }
+  if (tile._player) { tile._player.stop(); tile._player = null; }
+  tile.querySelector(".kz-player")?.remove();
   if (tile._watch) { clearInterval(tile._watch); tile._watch = null; }
   if (tile._retryTimer) { clearTimeout(tile._retryTimer); tile._retryTimer = null; }
   if (tile._playback) {
@@ -540,11 +550,30 @@ function teardownTile(tile) {
   }
 }
 
+// What plays in a tile: the window's own player, or a <video>-like element.
+function tileVideo(tile) {
+  return tile._player || tile.querySelector("video") || tile.querySelector("video-stream")?.video;
+}
+
+// The window's own player in a tile (player.js): Rust takes the stream
+// apart, the page decodes the pictures. Works on every platform, no helper.
+function mountBuiltin(tile, cam, paced) {
+  const player = new KagazPlayer.Player(tile, { sound: !!tile._audioWanted, paced, volume: volumeOf(cam) / 100, level: false, label: cam.name });
+  tile.insertBefore(player.box, tile.firstChild);
+  tile._player = player;
+  player.onended = (why) => {
+    if (tile._player !== player) return;
+    if (why) setState(tile, "lost", why);
+    else if (paced) tile._ended = true;
+  };
+  return player;
+}
+
 // Watch the clock: if it stops advancing, say so over the last frame.
 function watchTile(tile, onTick) {
   let lastT = -1, stalledSince = 0, started = Date.now();
   tile._watch = setInterval(() => {
-    const v = tile.querySelector("video") || tile.querySelector("video-stream")?.video;
+    const v = tileVideo(tile);
     if (!v) return;
     const t = v.currentTime || 0;
     const now = Date.now();
@@ -568,9 +597,11 @@ function watchTile(tile, onTick) {
     if (!stalledSince) stalledSince = now;
     const quiet = (now - stalledSince) / 1000;
     const total = (now - started) / 1000;
-    if (lastT < 0 && total > 20) setState(tile, "lost", "no data from the camera");
+    // The window's own player can say what it got and could not show.
+    const why = tile._player ? tile._player.note() || "no data from the camera" : "no data from the camera";
+    if (lastT < 0 && total > 20) setState(tile, "lost", why);
     else if (lastT < 0) setState(tile, "connecting", "connecting…");
-    else if (quiet > 15) setState(tile, "lost", "no data from the camera");
+    else if (quiet > 15) setState(tile, "lost", why);
     else if (quiet > 2) setState(tile, "waiting", "waiting for the camera…");
   }, 1000);
 }
@@ -584,8 +615,13 @@ function mountTile(tile, cam, big) {
   teardownTile(tile);
   const mode = $("cam-mode").value;
   const hd = big || wantsHd(tile, cam);
-  let player;
-  if (mode === "ts") {
+  let player = null;
+  if (mode === "builtin") {
+    const p = mountBuiltin(tile, cam, false);
+    KagazPlayer.watch(p, "camera_watch", { deviceId: cam.device_id, hd })
+      .then((h) => { if (tile._player === p) tile._watchHandle = h; else h.stop(); })
+      .catch((e) => { if (tile._player === p) setState(tile, "lost", "could not start: " + e); });
+  } else if (mode === "ts") {
     // MPEG-TS over HTTP in a plain <video>: measured as the route this
     // webview decodes at real time (its MP4 input is refused).
     player = document.createElement("video");
@@ -598,7 +634,7 @@ function mountTile(tile, cam, big) {
     player.setAttribute("mode", mode);
     player.src = hd ? cam.ws_url : cam.ws_url_vga;
   }
-  tile.insertBefore(player, tile.firstChild);
+  if (player) tile.insertBefore(player, tile.firstChild);
   const q = tile.querySelector(".cam-quality");
   if (q) q.textContent = hd ? "HD" : "VGA";
   setState(tile, "connecting", "connecting…");
@@ -737,8 +773,16 @@ async function mountPlayback(tile, cam, from, opts = {}) {
   try { clip = await invoke("playback_clip", { deviceId: cam.device_id, at: from }); } catch (_) { clip = null; }
   if (tile._mountId !== mountId || !tile.isConnected) return;
   if (clip) { mountFile(tile, cam, from, clip, speed); return; }
+  const builtin = $("cam-mode").value === "builtin";
   try {
-    handle = await invoke("playback_start", { deviceId: cam.device_id, from, to, speed });
+    if (builtin) {
+      const p = mountBuiltin(tile, cam, true);
+      const h = await KagazPlayer.watch(p, "playback_watch", { deviceId: cam.device_id, from, to, speed });
+      handle = { token: h.result.token, stream: "", cached: h.result.cached, watch: h };
+      if (tile._player === p) tile._watchHandle = h; else h.stop();
+    } else {
+      handle = await invoke("playback_start", { deviceId: cam.device_id, from, to, speed });
+    }
   } catch (e) {
     if (tile._mountId !== mountId) return;
     failPlayback(tile, cam, "could not start: " + e, from);
@@ -746,6 +790,7 @@ async function mountPlayback(tile, cam, from, opts = {}) {
   }
   if (tile._mountId !== mountId || !tile.isConnected) {
     // Another seek came in meanwhile, or the grid was redrawn: drop this one.
+    if (handle.watch) handle.watch.stop();
     invoke("playback_stop", { token: handle.token, stream: handle.stream }).catch(() => {});
     return;
   }
@@ -753,12 +798,14 @@ async function mountPlayback(tile, cam, from, opts = {}) {
   setState(tile, "connecting", handle.cached ? "loading from your disk…"
     : clips ? "asking the camera for its recording…"
     : "no recording list for this camera; asking the camera whether it has this time…");
-  const player = document.createElement("video");
-  player.autoplay = true;
-  player.muted = true;
-  player.playsInline = true;
-  player.src = handle.ts_url;
-  tile.insertBefore(player, tile.firstChild);
+  if (!builtin) {
+    const player = document.createElement("video");
+    player.autoplay = true;
+    player.muted = true;
+    player.playsInline = true;
+    player.src = handle.ts_url;
+    tile.insertBefore(player, tile.firstChild);
+  }
   let finished = null, lastPoll = 0;
   watchTile(tile, (v, t, lastT) => {
     // The stream's clock runs at 1/speed of the camera's.
@@ -866,6 +913,7 @@ function audioBase(cam) {
 }
 
 function stopAudio(tile) {
+  if (tile._player) tile._player.sound = false;
   if (tile._fileSound) {
     const fv = tile.querySelector("video");
     if (fv) fv.muted = true;
@@ -888,6 +936,16 @@ function volumeOf(cam) {
 
 // Sound for one camera; any number of cameras can be heard at once.
 function startAudio(tile, cam) {
+  // The window's own player carries the sound with the picture.
+  if (tile._player) {
+    KagazPlayer.audioContext();
+    tile._player.volume = volumeOf(cam) / 100;
+    tile._player.sound = true;
+    const b = tile.querySelector(".cam-speaker");
+    if (b) { b.textContent = "\u{1F50A}"; b.classList.add("on"); }
+    tile.classList.add("sound-on");
+    return true;
+  }
   // A downloaded clip carries its sound: just turn it up (in step at any speed).
   const fv = tile._playback && tile._playback.kind === "file" ? tile.querySelector("video") : null;
   if (fv) {
@@ -916,7 +974,7 @@ function startAudio(tile, cam) {
 }
 
 function toggleAudio(tile, cam) {
-  if (tile.querySelector("audio") || tile._fileSound) { stopAudio(tile); tile._audioWanted = false; }
+  if (tile.querySelector("audio") || tile._fileSound || (tile._player && tile._player.sound)) { stopAudio(tile); tile._audioWanted = false; }
   else startAudio(tile, cam);
   refreshSoundAll();
 }
@@ -924,7 +982,7 @@ function toggleAudio(tile, cam) {
 // The top row's button: sound on every camera shown, or off on all.
 function refreshSoundAll() {
   const tiles = [...$("cam-grid").querySelectorAll(".cam-tile:not(.placeholder)")];
-  const anyOff = tiles.some((t) => !t.querySelector("audio") && !t._fileSound);
+  const anyOff = tiles.some((t) => !t.querySelector("audio") && !t._fileSound && !(t._player && t._player.sound));
   $("cam-sound-all").textContent = anyOff ? "\u{1F50A} Sound on all" : "\u{1F507} Mute all";
 }
 
@@ -991,6 +1049,7 @@ function buildTile(cam) {
     const v = Number(volume.value);
     const a = tile.querySelector("audio");
     if (a) a.volume = v / 100;
+    if (tile._player) tile._player.volume = v / 100;
     if (tile._fileSound) { const fv = tile.querySelector("video"); if (fv) fv.volume = v / 100; }
     layout.volume = layout.volume || {};
     layout.volume[cam.device_id] = v;
@@ -1310,7 +1369,7 @@ function buildGroup(g) {
 async function renderCameraGrid() {
   const grid = $("cam-grid");
   grid.style.setProperty("--cols", $("cam-layout").value);
-  if (!isPlayback() && !rearranging && $("cam-mode").value !== "ts") {
+  if (!isPlayback() && !rearranging && !["ts", "builtin"].includes($("cam-mode").value)) {
     try {
       await loadPlayer(camStatus.player_script);
     } catch (e) {
@@ -1566,6 +1625,12 @@ function freezeTile(tile) {
     const pb = tile._playback; tile._playback = null;
     invoke("playback_stop", { token: pb.token, stream: pb.stream }).catch(() => {});
   }
+  if (tile._watchHandle) {
+    const id = tile._watchHandle.id;
+    tile._watchHandle = null;
+    invoke("media_unwatch", { id }).catch(() => {});
+  }
+  if (tile._player) tile._player.freeze();
   tile._frozen = true;
 }
 
@@ -1577,7 +1642,7 @@ setInterval(() => {
     const mine = tiles.filter((t) => t._sync === c);
     if (c.paused) {
       for (const t of mine) {
-        const v = t.querySelector("video");
+        const v = tileVideo(t);
         if (v && !v.paused) { try { v.pause(); } catch (_) {} }
         t._held = true;
       }
@@ -1595,7 +1660,7 @@ setInterval(() => {
     // at 5x half a second of real time is 2.5 seconds of footage.
     const sp = c.speed || 1;
     for (const tile of mine) {
-      const v = tile.querySelector("video");
+      const v = tileVideo(tile);
       const pb = tile._playback;
       if (!v || !pb || !pb.firstFrame || tile._gap) continue;
       if (pb.kind === "file") {
@@ -2081,6 +2146,17 @@ $("detail-back").addEventListener("click", () => {
   selectCategory("print");
 });
 $("cam-layout").addEventListener("change", () => $("cam-grid").style.setProperty("--cols", $("cam-layout").value));
+// On a narrow window the three camera tools live in the gear menu.
+function placeCameraTools() {
+  const narrow = window.matchMedia("(max-width: 839px)").matches;
+  const dest = narrow ? $("cam-tools-menu") : $("cam-tools");
+  for (const id of ["cam-reload-all", "cam-sound-all", "cam-rearrange"]) {
+    const b = $(id);
+    if (b.parentElement !== dest) dest.appendChild(b);
+  }
+}
+window.addEventListener("resize", placeCameraTools);
+placeCameraTools();
 $("cam-mode").addEventListener("change", () => { if (camStatus && camStatus.running) renderCameraGrid(); });
 $("cam-reload-all").addEventListener("click", () => { if (camStatus && camStatus.running) renderCameraGrid(); });
 $("cam-when").addEventListener("change", () => { if (camStatus && camStatus.running) renderCameraGrid(); });
@@ -2097,7 +2173,7 @@ $("cam-add-group").addEventListener("click", () => {
 $("cam-show-all").addEventListener("click", () => { viewGroup = null; renderCameraGrid(); });
 $("cam-sound-all").addEventListener("click", () => {
   const tiles = [...$("cam-grid").querySelectorAll(".cam-cell")].map((c) => [c.querySelector(".cam-tile"), cameraById(c.dataset.id)]);
-  const anyOff = tiles.some(([t]) => !t.querySelector("audio") && !t._fileSound);
+  const anyOff = tiles.some(([t]) => !t.querySelector("audio") && !t._fileSound && !(t._player && t._player.sound));
   for (const [t, cam] of tiles) {
     if (anyOff) startAudio(t, cam); else { stopAudio(t); t._audioWanted = false; }
   }
@@ -2209,10 +2285,10 @@ function renderDoorbell() {
   if (ringing) startChime(); else stopChime();
 
   // The sidebar entry says when it is ringing, so other views notice too.
-  const li = document.querySelector('#categories li[data-cat="doorbell"]');
-  if (li) {
-    li.classList.toggle("ringing", ringing);
-    li.querySelector(".cat-note").textContent = ringing ? "ringing now" : inCall ? "in a call" : "video intercom";
+  for (const el of document.querySelectorAll('#categories li[data-cat="doorbell"], #bottom-nav button[data-cat="doorbell"]')) {
+    el.classList.toggle("ringing", ringing);
+    const note = el.querySelector(".cat-note");
+    if (note) note.textContent = ringing ? "ringing now" : inCall ? "in a call" : "video intercom";
   }
 
   const ul = $("door-recent");

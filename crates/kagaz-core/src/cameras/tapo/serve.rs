@@ -4,6 +4,7 @@
 //! session; the relay fans the camera's live stream out, so several
 //! viewers of one camera cost the camera nothing extra.
 
+use crate::media::Media;
 use super::cloud::{Camera, CloudError, Session};
 use super::recordings::Recordings;
 use super::relay::RelayError;
@@ -78,6 +79,24 @@ pub struct TsServer {
     feeding: Arc<Mutex<std::collections::HashSet<String>>>,
     /// Each camera's UTC offset in minutes, asked once (for the cache's day folders).
     offsets: Arc<Mutex<HashMap<String, i32>>>,
+    /// Watchers of pictures and sound for the window's own player, by
+    /// `<device id>:<HD|VGA>` (live) or playback token.
+    media_taps: Arc<Mutex<HashMap<String, Vec<MediaTap>>>>,
+    /// Live relay sessions open for watchers, by the same key.
+    media_sessions: Arc<Mutex<std::collections::HashSet<String>>>,
+}
+
+/// One watcher of a stream's pictures and sound.
+struct MediaTap {
+    tx: std::sync::mpsc::SyncSender<Media>,
+    /// Fell behind: no pictures until the next keyframe, so it never gets
+    /// one whose reference it missed.
+    skipping: bool,
+}
+
+/// Pictures and sound of one stream, for the window's own player.
+pub struct Watcher {
+    pub rx: std::sync::mpsc::Receiver<Media>,
 }
 
 /// How many extra loopback addresses to try (127.0.0.2 ...).
@@ -114,6 +133,8 @@ impl TsServer {
             taps: Arc::new(Mutex::new(HashMap::new())),
             feeding: Arc::new(Mutex::new(std::collections::HashSet::new())),
             offsets: Arc::new(Mutex::new(HashMap::new())),
+            media_taps: Arc::new(Mutex::new(HashMap::new())),
+            media_sessions: Arc::new(Mutex::new(std::collections::HashSet::new())),
         });
         for listener in listeners {
             let s = server.clone();
@@ -404,6 +425,234 @@ impl TsServer {
         ));
     }
 
+    /// Live pictures and sound of a camera for the window's own player.
+    /// The first watcher opens the relay session; the last one leaving ends it.
+    pub fn watch_live(&self, device_id: &str, hd: bool) -> Result<Watcher, String> {
+        let cam = self
+            .cameras()
+            .into_iter()
+            .find(|c| c.device_id == device_id)
+            .ok_or("no such camera")?;
+        let resolution = if hd { "HD" } else { "VGA" };
+        let key = format!("{device_id}:{resolution}");
+        let (tx, rx) = std::sync::mpsc::sync_channel::<Media>(256);
+        self.media_taps
+            .lock()
+            .map_err(|_| "state poisoned")?
+            .entry(key.clone())
+            .or_default()
+            .push(MediaTap {
+                tx,
+                skipping: false,
+            });
+        let fresh = self
+            .media_sessions
+            .lock()
+            .map_err(|_| "state poisoned")?
+            .insert(key.clone());
+        if fresh {
+            let server = self.clone_handle();
+            std::thread::Builder::new()
+                .name("kagaz-watch".into())
+                .spawn(move || server.media_session(&key, &cam, resolution))
+                .map_err(|e| e.to_string())?;
+        }
+        Ok(Watcher { rx })
+    }
+
+    /// Recorded footage between two unix times for the window's own player,
+    /// at `speed` (the timestamps are rescaled; the player paces by them).
+    /// The token answers `playback_state`.
+    pub fn watch_playback(
+        &self,
+        device_id: &str,
+        from: i64,
+        to: i64,
+        speed: f64,
+    ) -> Result<(String, Watcher), String> {
+        let cam = self
+            .cameras()
+            .into_iter()
+            .find(|c| c.device_id == device_id)
+            .ok_or("no such camera")?;
+        let token = uuid::Uuid::new_v4().simple().to_string();
+        if let Ok(mut p) = self.playbacks.lock() {
+            p.insert(
+                token.clone(),
+                PlaybackState {
+                    speed,
+                    ..PlaybackState::default()
+                },
+            );
+        }
+        let (tx, rx) = std::sync::mpsc::sync_channel::<Media>(256);
+        self.media_taps
+            .lock()
+            .map_err(|_| "state poisoned")?
+            .entry(token.clone())
+            .or_default()
+            .push(MediaTap {
+                tx,
+                skipping: false,
+            });
+        let span = Span {
+            from,
+            to,
+            token: token.clone(),
+            fast: speed > 1.0,
+            speed,
+        };
+        let server = self.clone_handle();
+        let session = self.session();
+        let key = token.clone();
+        std::thread::Builder::new()
+            .name("kagaz-watch-playback".into())
+            .spawn(move || {
+                let mut demux = super::demux::Demux::new();
+                server.run_playback(&session, &cam, &span, &mut |chunk| {
+                    server.fan_out(&key, demux.push(chunk))
+                });
+                server.end_taps(&key, String::new());
+            })
+            .map_err(|e| e.to_string())?;
+        Ok((token, Watcher { rx }))
+    }
+
+    /// Hand these pieces to everyone watching `key`; false once nobody does.
+    fn fan_out(&self, key: &str, items: Vec<Media>) -> bool {
+        let Ok(mut taps) = self.media_taps.lock() else {
+            return false;
+        };
+        let Some(list) = taps.get_mut(key) else {
+            return false;
+        };
+        for m in items {
+            let delta = matches!(&m, Media::Video { key: false, .. });
+            let keyframe = matches!(&m, Media::Video { key: true, .. });
+            list.retain_mut(|tap| {
+                if delta && tap.skipping {
+                    return true;
+                }
+                match tap.tx.try_send(m.clone()) {
+                    Ok(()) => {
+                        if keyframe {
+                            tap.skipping = false;
+                        }
+                        true
+                    }
+                    // A slow watcher misses this and every picture until the next keyframe.
+                    Err(std::sync::mpsc::TrySendError::Full(_)) => {
+                        if delta || keyframe {
+                            tap.skipping = true;
+                        }
+                        true
+                    }
+                    Err(std::sync::mpsc::TrySendError::Disconnected(_)) => false,
+                }
+            });
+        }
+        if list.is_empty() {
+            taps.remove(key);
+            return false;
+        }
+        true
+    }
+
+    /// Tell whoever still watches `key` that it is over, and forget them.
+    fn end_taps(&self, key: &str, why: String) {
+        let taps = self
+            .media_taps
+            .lock()
+            .ok()
+            .and_then(|mut t| t.remove(key))
+            .unwrap_or_default();
+        for tap in taps {
+            let _ = tap.tx.try_send(Media::Ended(why.clone()));
+        }
+    }
+
+    /// A relay session feeding the watchers of `key` until the last leaves.
+    fn media_session(&self, key: &str, cam: &Camera, resolution: &str) {
+        let why = self.media_session_inner(key, cam, resolution);
+        if let Ok(mut s) = self.media_sessions.lock() {
+            s.remove(key);
+        }
+        self.end_taps(key, why);
+    }
+
+    /// Why the session ended: empty when the watchers simply left.
+    fn media_session_inner(&self, key: &str, cam: &Camera, resolution: &str) -> String {
+        let (session, terminal) = match self.session.lock() {
+            Ok(s) => (s.clone(), s.terminal_uuid.clone()),
+            Err(_) => return "state poisoned".into(),
+        };
+        let track = format!("watch-{}-{}", cam.device_id, uuid::Uuid::new_v4().simple());
+        let relay = match request_relay(
+            &session,
+            &cam.device_id,
+            &cam.app_server,
+            &track,
+            resolution,
+        )
+        .or_else(|e| match e {
+            RelayError::Cloud(CloudError::Unauthorized) => {
+                let session = self.refresh_session()?;
+                request_relay(
+                    &session,
+                    &cam.device_id,
+                    &cam.app_server,
+                    &track,
+                    resolution,
+                )
+            }
+            other => Err(other),
+        }) {
+            Ok(r) => r,
+            Err(e) => {
+                log(&format!("watch {} {resolution}: relay refused: {e}", cam.name));
+                return e.to_string();
+            }
+        };
+        let started = Instant::now();
+        let mut total = 0u64;
+        log(&format!("watch {} {resolution}: start", cam.name));
+        if let Ok(mut f) = self.feeding.lock() {
+            f.insert(cam.device_id.clone());
+        }
+        let mut demux = super::demux::Demux::new();
+        let mut sound = super::audio::AudioDemux::default();
+        let mut watched = true;
+        let result = stream_preview(&relay, &terminal, &track, resolution, &mut |chunk| {
+            total += chunk.len() as u64;
+            self.feed_taps(&cam.device_id, &mut sound, chunk);
+            watched = self.fan_out(key, demux.push(chunk));
+            watched
+        });
+        if let Ok(mut f) = self.feeding.lock() {
+            f.remove(&cam.device_id);
+        }
+        let s = &demux.stats;
+        log(&format!(
+            "watch {} {resolution}: {} after {:.1} s, {} KB; {} pictures ({} key), {} held before the first keyframe",
+            cam.name,
+            match &result {
+                Ok(_) if !watched => "watchers left".to_string(),
+                Ok(_) => "the relay closed".to_string(),
+                Err(e) => format!("ended: {e}"),
+            },
+            started.elapsed().as_secs_f32(),
+            total / 1000,
+            s.units,
+            s.keyframes,
+            s.waiting
+        ));
+        match result {
+            Ok(_) if !watched => String::new(),
+            Ok(_) => "the camera stopped sending".into(),
+            Err(e) => e.to_string(),
+        }
+    }
+
     /// The camera's UTC offset, asked once and remembered.
     fn utc_offset(&self, recordings: &Recordings) -> i32 {
         let id = recordings.camera.device_id.clone();
@@ -429,6 +678,8 @@ impl TsServer {
             taps: self.taps.clone(),
             feeding: self.feeding.clone(),
             offsets: self.offsets.clone(),
+            media_taps: self.media_taps.clone(),
+            media_sessions: self.media_sessions.clone(),
         })
     }
 
@@ -796,16 +1047,8 @@ impl TsServer {
     }
 
     fn serve_playback(&self, mut stream: TcpStream, session: &Session, cam: &Camera, span: &Span) {
-        let Span {
-            from,
-            to,
-            token,
-            fast,
-            speed,
-        } = span;
-        let (from, to, fast, speed) = (*from, *to, *fast, *speed);
         let fresh = match self.playbacks.lock() {
-            Ok(mut p) => match p.get_mut(token) {
+            Ok(mut p) => match p.get_mut(&span.token) {
                 Some(st) if !st.started => {
                     st.started = true;
                     true
@@ -825,6 +1068,27 @@ impl TsServer {
         {
             return;
         }
+        self.run_playback(session, cam, span, &mut |chunk| stream.write_all(chunk).is_ok());
+    }
+
+    /// Pull the footage of `span` (from the disk when it was kept, else from
+    /// the camera, keeping it) and hand each part to `out`, retimed when the
+    /// speed is not 1; the token's state says how it went.
+    fn run_playback(
+        &self,
+        session: &Session,
+        cam: &Camera,
+        span: &Span,
+        out: &mut dyn FnMut(&[u8]) -> bool,
+    ) {
+        let Span {
+            from,
+            to,
+            token,
+            fast,
+            speed,
+        } = span;
+        let (from, to, fast, speed) = (*from, *to, *fast, *speed);
         let started = Instant::now();
         let mut total = 0u64;
         log(&format!(
@@ -861,7 +1125,7 @@ impl TsServer {
             } else {
                 chunk
             };
-            let ok = stream.write_all(chunk).is_ok();
+            let ok = out(chunk);
             self.update_playback(token, |st| st.bytes = total);
             ok
         };

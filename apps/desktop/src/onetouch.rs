@@ -371,6 +371,52 @@ pub async fn onetouch_live(app: AppHandle, device_id: String) -> Result<String, 
     })
     .await
 }
+/// Live view for the window's own player: Kagaz speaks to the relay
+/// itself, no helper. Returns the watch id (`media_unwatch` ends it).
+#[tauri::command]
+pub async fn onetouch_watch(
+    app: AppHandle,
+    device_id: String,
+    channel: tauri::ipc::Channel<tauri::ipc::InvokeResponseBody>,
+) -> Result<u64, String> {
+    super::blocking(move || {
+        let target = {
+            let state = app.state::<OneTouchState>();
+            let mut s = state.0.lock().unwrap();
+            // Refresh short-lived RTSP credentials immediately before opening video.
+            let session = s
+                .session
+                .as_mut()
+                .ok_or("Sign in to your OneTouch account first.")?;
+            let account = match session.account() {
+                Ok(a) => a,
+                Err(e) => return Err(s.cloud_error(e)),
+            };
+            let device = account
+                .devices
+                .iter()
+                .find(|d| d.id == device_id)
+                .ok_or("This doorbell is no longer on your account.")?;
+            let target = s
+                .session
+                .as_ref()
+                .unwrap()
+                .live_target(&account, device)
+                .map_err(|e| e.to_string())?;
+            s.account = Some(account);
+            target
+        };
+        let live = onetouch::live::Live::start(
+            target,
+            Box::new(move |m| super::media::send(&channel, &m)),
+        );
+        Ok(app
+            .state::<super::media::Watches>()
+            .add(super::media::Watch::Live(live)))
+    })
+    .await
+}
+
 #[tauri::command]
 pub async fn onetouch_stop(app: AppHandle) -> Result<(), String> {
     super::blocking(move || {

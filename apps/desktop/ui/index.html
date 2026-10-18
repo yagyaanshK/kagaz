@@ -2,26 +2,30 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Kagaz</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
+  <!-- The kinds of device: a sidebar on a wide window, a rail on a tablet,
+       a bar along the bottom on a phone (the same three entries). -->
   <aside id="sidebar">
     <header>
       <h1>Kagaz</h1>
-      <button id="rescan" title="Look again on the network and USB">Look again</button>
     </header>
     <ul id="categories">
       <li data-cat="print" class="active">
-        <span class="cat-name">Printers &amp; Scanners</span>
+        <span class="cat-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M6 9V3h12v6M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2M6 14h12v7H6z"/></svg></span>
+        <span class="cat-name">Print &amp; scan</span>
         <span class="cat-note muted">on the network and USB</span>
       </li>
       <li data-cat="cameras">
+        <span class="cat-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 7h11a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2zM16 10l6-3v10l-6-3z"/></svg></span>
         <span class="cat-name">Cameras</span>
         <span class="cat-note muted">Tapo, through your account</span>
       </li>
       <li data-cat="doorbell">
+        <span class="cat-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M6 8a6 6 0 0 1 12 0v5l2 3H4l2-3zM10 19a2 2 0 0 0 4 0"/></svg></span>
         <span class="cat-name">Doorbell</span>
         <span class="cat-note muted">video intercom</span>
       </li>
@@ -30,44 +34,53 @@
 
   <main id="main">
     <section id="empty" class="pane">
-      <p class="muted">Pick a kind of device on the left.</p>
+      <p class="muted">Pick a kind of device.</p>
     </section>
 
     <section id="picker" class="pane hidden">
-      <h2>Printers &amp; Scanners</h2>
+      <div class="pane-head">
+        <h2>Printers &amp; scanners</h2>
+        <button id="rescan" type="button" title="Look again on the network and USB">Look again</button>
+      </div>
       <p id="search-note" class="muted">Looking for printers and scanners…</p>
       <ul id="devices"></ul>
     </section>
 
     <section id="doorbell" class="pane hidden">
-      <div class="cam-head">
+      <div class="cam-head pane-head">
         <h2>Doorbell</h2>
         <div class="actions">
           <span id="door-listen" class="pill muted">…</span>
-          <button id="door-rescan" type="button" title="Look for door stations on this network">Look again</button>
           <div class="cam-menu">
-            <button id="door-gear" type="button" title="Settings" aria-label="Settings">&#x2699;</button>
+            <button id="door-gear" type="button" class="icon" title="Settings" aria-label="Doorbell settings">&#x2699;</button>
             <div id="door-settings" class="cam-settings hidden">
               <label>Listen on UDP port
                 <input id="door-port" type="number" min="1" max="65535" value="5060">
               </label>
               <div class="cam-settings-row">
                 <button id="door-port-go" type="button">Apply</button>
+                <button id="door-rescan" type="button" title="Look for door stations on this network">Look again</button>
               </div>
               <p class="muted small">Optional local calls use Direct IP, independently of your OneTouch account. On the station's web page, add <code id="door-local">this computer</code> as a Direct IP target.</p>
             </div>
           </div>
         </div>
       </div>
+      <!-- The Calls panel (calls.js) goes here, first: it is what rings. -->
       <div id="ot-account" class="ot-panel">
         <div class="ot-heading">
           <div><h3 id="ot-service-name">OneTouch</h3><p id="ot-account-name" class="muted">Live video and recordings through your OneTouch account.</p></div>
           <div class="actions">
             <button id="ot-reconnect" type="button" class="accent hidden">Reconnect</button>
             <button id="ot-signin" type="button">Sign in</button>
-            <button id="ot-forget" type="button" class="hidden">Forget saved sign-in</button>
-            <button id="ot-refresh" type="button" class="hidden">Refresh devices</button>
-            <button id="ot-signout" type="button" class="hidden">Sign out</button>
+            <div class="cam-menu" id="ot-menu-box">
+              <button id="ot-menu" type="button" class="icon hidden" title="Account" aria-label="Account menu" aria-haspopup="true">&#x22EF;</button>
+              <div id="ot-actions" class="cam-settings menu hidden">
+                <button id="ot-refresh" type="button" class="hidden">Refresh devices</button>
+                <button id="ot-signout" type="button" class="hidden">Sign out</button>
+                <button id="ot-forget" type="button" class="hidden">Forget saved sign-in</button>
+              </div>
+            </div>
           </div>
         </div>
         <p id="ot-remembered" class="muted small hidden"></p>
@@ -90,29 +103,29 @@
             </div>
           </div>
           <p id="ot-username-help" class="muted small">Use the login username from your phone app or welcome email. It may differ from your contact email address.</p>
-          <label id="ot-remember-label" class="ot-remember"><input id="ot-remember" type="checkbox" checked> Remember sign-in securely on this computer</label>
-          <p id="ot-remember-help" class="muted small">If your session expires, click Reconnect without retyping. Signing out keeps the saved sign-in; Forget saved sign-in removes it.</p>
+          <label id="ot-remember-label" class="ot-remember"><input id="ot-remember" type="checkbox" checked> Remember sign-in securely on this device</label>
+          <p id="ot-remember-help" class="muted small">If your session expires, Kagaz signs in again by itself. Signing out keeps the saved sign-in; Forget saved sign-in removes it.</p>
           <p id="ot-session-note" class="muted small">OneTouch may sign you out of the phone app when you sign in here.</p>
           <div class="actions"><button id="ot-login-submit" class="accent" type="submit">Sign in</button><button id="ot-login-cancel" type="button">Cancel</button></div>
         </form>
         <p id="ot-message" class="muted" role="status" aria-live="polite"></p>
         <div id="ot-connected" class="hidden">
-          <div class="actions" role="group" aria-label="Doorbell view">
-            <button id="ot-live-tab" type="button" aria-pressed="true">Live</button>
-            <button id="ot-recordings-tab" type="button" aria-pressed="false">Recordings &amp; snapshots</button>
+          <div class="tabs" role="group" aria-label="Doorbell view">
+            <button id="ot-live-tab" type="button" class="tab active" aria-pressed="true">Live</button>
+            <button id="ot-recordings-tab" type="button" class="tab" aria-pressed="false">Recordings &amp; snapshots</button>
           </div>
+          <!-- Each device is a card; Watch live plays inside that card. -->
           <div id="ot-devices" class="ot-devices"></div>
           <div id="ot-recordings-pane" class="hidden">
             <p class="muted small">History saved to your OneTouch account. Entries with video include a Play button.</p>
+            <div id="ot-player" class="hidden">
+              <div class="ot-heading"><h3 id="ot-playing-title"></h3><button id="ot-stop" type="button">Close</button></div>
+              <video id="ot-video" autoplay controls playsinline></video>
+              <img id="ot-picture" class="hidden" alt="Doorbell snapshot">
+              <p id="ot-player-note" class="muted" role="status"></p>
+            </div>
             <div id="ot-recordings" class="ot-recordings"></div>
-            <div class="actions"><button id="ot-prev" type="button">Previous</button><span id="ot-page">Page 1</span><button id="ot-next" type="button">Next</button><button id="ot-recordings-refresh" type="button">Refresh recordings</button></div>
-          </div>
-          <div id="ot-player" class="hidden">
-            <div class="ot-heading"><h3 id="ot-playing-title"></h3><button id="ot-stop" type="button">Close video</button></div>
-            <div id="ot-live-video" class="hidden"></div>
-            <video id="ot-video" autoplay controls playsinline></video>
-            <img id="ot-picture" class="hidden" alt="Doorbell snapshot">
-            <p id="ot-player-note" class="muted" role="status"></p>
+            <div class="actions"><button id="ot-prev" type="button">Previous</button><span id="ot-page">Page 1</span><button id="ot-next" type="button">Next</button><button id="ot-recordings-refresh" type="button">Refresh</button></div>
           </div>
         </div>
       </div>
@@ -184,29 +197,34 @@
     </section>
 
     <section id="cameras" class="pane hidden">
-      <div class="cam-head">
+      <div class="cam-head pane-head">
         <h2>Cameras</h2>
         <div class="actions">
           <select id="cam-when" title="Live view, or recorded footage from the cameras' SD cards">
             <option value="live" selected>Live</option>
             <option value="playback">Playback</option>
           </select>
-          <button id="cam-start" type="button">Start</button>
-          <button id="cam-reload-all" type="button" title="Reconnect every tile">&#x21bb; Reload all</button>
-          <button id="cam-sound-all" type="button" title="Hear every camera shown at once, or mute them all">&#x1F50A; Sound on all</button>
-          <button id="cam-rearrange" type="button" title="Make groups and drag cameras between them">Rearrange</button>
+          <button id="cam-start" type="button" class="accent">Start</button>
           <span id="cam-state" class="muted"></span>
+          <!-- These three move into the menu on a narrow window (app.js). -->
+          <span id="cam-tools" class="cam-tools">
+            <button id="cam-reload-all" type="button" title="Reconnect every tile">&#x21bb; Reload all</button>
+            <button id="cam-sound-all" type="button" title="Hear every camera shown at once, or mute them all">&#x1F50A; Sound on all</button>
+            <button id="cam-rearrange" type="button" title="Make groups and drag cameras between them">Rearrange</button>
+          </span>
           <div class="cam-menu">
-            <button id="cam-gear" type="button" title="Settings" aria-label="Settings">&#x2699;</button>
+            <button id="cam-gear" type="button" class="icon" title="Settings" aria-label="Camera settings">&#x2699;</button>
             <div id="cam-settings" class="cam-settings hidden">
+              <div id="cam-tools-menu" class="cam-settings-tools"></div>
               <label>Playback method
                 <select id="cam-mode" title="How the window plays the video">
-                  <option value="ts" selected>direct</option>
-                  <option value="mse">MSE</option>
-                  <option value="webrtc">WebRTC</option>
+                  <option value="builtin" selected>built-in</option>
+                  <option value="ts">helper, direct</option>
+                  <option value="mse">helper, MSE</option>
+                  <option value="webrtc">helper, WebRTC</option>
                 </select>
               </label>
-              <label>Tiles per row
+              <label id="cam-layout-label">Tiles per row
                 <select id="cam-layout">
                   <option value="2">2</option>
                   <option value="3" selected>3</option>
@@ -230,7 +248,7 @@
           <select id="pb-ap"><option value="AM">AM</option><option value="PM">PM</option></select>
         </span>
         <input type="hidden" id="pb-date"><input type="hidden" id="pb-time">
-        <button id="pb-play" type="button" title="Play every camera shown from this time">Play all</button>
+        <button id="pb-play" type="button" class="accent" title="Play every camera shown from this time">Play all</button>
         <button id="pb-pause" type="button" title="Pause or resume every camera">&#x23F8; Pause all</button>
         <div id="pb-seek" title="Every camera shown: recordings, and what the cameras detected. Click or drag to move all of them; scroll to zoom, shift + scroll to move along"></div>
         <span id="pb-seek-at" class="muted">—</span>
@@ -246,19 +264,19 @@
         <div class="cam-login-row">
           <input type="email" id="cam-login-email" placeholder="email" autocomplete="username">
           <input type="password" id="cam-login-password" placeholder="password" autocomplete="current-password">
-          <button id="cam-login-go" type="button">Log in</button>
+          <button id="cam-login-go" type="button" class="accent">Log in</button>
           <button id="cam-login-cancel" type="button">Cancel</button>
         </div>
         <div class="cam-login-row hidden" id="cam-login-code-row">
           <input type="text" id="cam-login-code" placeholder="code from the email" inputmode="numeric" autocomplete="one-time-code">
-          <button id="cam-login-code-go" type="button">Confirm</button>
+          <button id="cam-login-code-go" type="button" class="accent">Confirm</button>
         </div>
         <p id="cam-login-note" class="muted"></p>
       </div>
       <div id="cam-rearrange-bar" class="hidden">
         <span class="muted">Drag a camera onto a group. </span>
         <button id="cam-add-group" type="button">Add group</button>
-        <button id="cam-rearrange-done" type="button">Done</button>
+        <button id="cam-rearrange-done" type="button" class="accent">Done</button>
       </div>
       <div id="cam-viewing" class="hidden">
         <span class="muted">Showing one group. </span>
@@ -336,7 +354,7 @@
               <input name="pages" type="text" placeholder="all, or like 1-3, 5" autocomplete="off">
             </label>
           </div>
-          <div class="actions">
+          <div class="actions bar">
             <button type="submit" id="print-go" class="accent">Print</button>
             <button type="button" id="print-check" title="Ask the printer whether it takes these settings, without printing">Check settings</button>
             <span id="print-state" class="muted"></span>
@@ -409,8 +427,8 @@
               </select>
             </label>
           </div>
-          <div class="actions">
-            <button type="submit" id="scan-go">Scan…</button>
+          <div class="actions bar">
+            <button type="submit" id="scan-go" class="accent">Scan…</button>
             <span id="scan-state" class="muted"></span>
           </div>
         </form>
@@ -480,7 +498,7 @@
               <select name="target" id="copy-target"></select>
             </label>
           </div>
-          <div class="actions">
+          <div class="actions bar">
             <button type="submit" id="copy-go" class="accent big">Copy</button>
             <button type="button" id="copy-preview" title="Scan first, look at the pages, then print">Scan and look first</button>
             <span id="copy-state" class="muted"></span>
@@ -505,8 +523,16 @@
     </section>
   </main>
 
+  <!-- A phone: the three kinds of device along the bottom, under the thumb. -->
+  <nav id="bottom-nav" aria-label="Kinds of device">
+    <button type="button" data-cat="print" class="active"><span class="cat-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M6 9V3h12v6M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2M6 14h12v7H6z"/></svg></span><span>Print &amp; scan</span></button>
+    <button type="button" data-cat="cameras"><span class="cat-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 7h11a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2zM16 10l6-3v10l-6-3z"/></svg></span><span>Cameras</span></button>
+    <button type="button" data-cat="doorbell"><span class="cat-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M6 8a6 6 0 0 1 12 0v5l2 3H4l2-3zM10 19a2 2 0 0 0 4 0"/></svg></span><span>Doorbell</span></button>
+  </nav>
+
   <script src="pictures.js"></script>
   <script src="timeline.js"></script>
+  <script src="player.js"></script>
   <script src="app.js"></script>
   <script src="printing.js"></script>
   <script src="onetouch.js"></script>
