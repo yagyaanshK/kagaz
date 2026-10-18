@@ -181,6 +181,7 @@ const KagazHistory = (() => {
       img.src = e.picture;
     }
     $("viewer").classList.remove("hidden");
+    KagazNav.push("viewer", closeViewer);
   }
   function closeViewer() {
     const video = $("viewer-video");
@@ -189,6 +190,7 @@ const KagazHistory = (() => {
     video.load();
     $("viewer-img").removeAttribute("src");
     $("viewer").classList.add("hidden");
+    KagazNav.pop("viewer");
   }
   $("viewer-close").addEventListener("click", closeViewer);
   $("viewer").addEventListener("click", (ev) => { if (ev.target.id === "viewer") closeViewer(); });

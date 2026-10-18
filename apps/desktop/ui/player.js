@@ -448,6 +448,11 @@ const KagazPlayer = (() => {
     if (on === was) return on;
     el.classList.toggle("kz-full", on);
     document.body.classList.toggle("kz-has-full", on);
+    // Back leaves full screen first.
+    if (typeof KagazNav !== "undefined") {
+      if (on) KagazNav.push("full", () => fullscreen(el, false));
+      else KagazNav.pop("full");
+    }
     try {
       if (on && document.documentElement.requestFullscreen && !document.fullscreenElement) {
         document.documentElement.requestFullscreen().catch(() => {});
