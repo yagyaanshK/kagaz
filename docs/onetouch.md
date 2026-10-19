@@ -18,7 +18,7 @@ Local direct-IP SIP calls remain independent of account sign-in.
 
 ## Protocol evidence
 
-Implemented from the user-supplied APKs in `installations/doorbell-analysis`,
+Implemented from the user-supplied APKs in `doorbell-analysis/` (git-ignored),
 inspected on 2026-10-13; APKs, account data and device captures are not committed.
 The relevant classes in both APKs are `LoginModel`, `UrlDefine`, `UrlTools`
 (`URLTools` in the legacy app), `ApiDataModel`, and `AkcsStringRequset`.

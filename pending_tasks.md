@@ -212,7 +212,7 @@ with the commit that closes them.
       enlarged tiles are always HD.
 - [ ] The Tapo APK static analysis and the emulator capture are no longer
       needed; the protocol came from public sources and works. Keep the tools
-      under installations/tapo-analysis/ in case TP-Link changes the relay.
+      under tapo-analysis/ (git-ignored) in case TP-Link changes the relay.
 
 ## Roadmap, not yet started
 
