@@ -13,3 +13,6 @@ tapo-*.ts
 # Research material: doorbell and Tapo app APKs, decompiled source, logs (private, not part of Kagaz)
 /doorbell-analysis/
 /tapo-analysis/
+
+# Kagaz release signing key and its passwords (private, never commit)
+/.signing/
