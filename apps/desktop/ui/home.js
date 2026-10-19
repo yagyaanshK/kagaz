@@ -37,6 +37,7 @@ const KagazHome = (() => {
     toggle.append(icon, words, chevron);
     const go = el("button", "link", "Open \u203A");
     go.type = "button";
+    go.setAttribute("aria-label", `Open ${title}`);
     go.addEventListener("click", open);
     head.append(toggle, go);
     const tiles = el("div", "home-tiles");
@@ -188,18 +189,13 @@ const KagazHome = (() => {
     $("add-back").textContent = "← Home";
     $("add-note").textContent = "";
     $("add-grid").className = "choice-grid kinds";
-    KagazBrands.fillKinds($("add-grid"), (k) => {
-      if (!k.supported) {
-        $("add-note").textContent = `Kagaz does not work with ${k.name.toLowerCase()} yet. They are planned; the brands people use most will come first.`;
-        showBrands(k);
-        return;
-      }
-      showBrands(k);
-    });
+    // A kind not supported yet opens its planned brands; their page says so.
+    KagazBrands.fillKinds($("add-grid"), (k) => showBrands(k));
   }
 
   function showBrands(kind) {
     addKind = kind;
+    $("add-note").textContent = "";
     KagazNav.push("add-brands", showKinds);
     $("add-title").textContent = kind.name;
     $("add-sub").textContent = kind.supported ? "Choose the brand." : "Coming soon. These are the brands planned first.";

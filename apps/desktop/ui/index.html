@@ -14,28 +14,28 @@
       <h1>Kagaz</h1>
     </header>
     <ul id="categories">
-      <li data-cat="home" class="active">
+      <li data-cat="home" tabindex="0" role="button" class="active">
         <span class="cat-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 11l9-7 9 7M5 10v10h5v-6h4v6h5V10"/></svg></span>
         <span class="cat-name">Home</span>
         <span class="cat-note muted">your devices</span>
       </li>
-      <li data-cat="settings">
+      <li data-cat="settings" tabindex="0" role="button">
         <span class="cat-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></span>
         <span class="cat-name">Settings</span>
         <span class="cat-note muted">accounts, about</span>
       </li>
       <li class="cat-label muted" aria-hidden="true">My devices</li>
-      <li data-cat="doorbell">
+      <li data-cat="doorbell" tabindex="0" role="button">
         <span class="cat-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M6 8a6 6 0 0 1 12 0v5l2 3H4l2-3zM10 19a2 2 0 0 0 4 0"/></svg></span>
         <span class="cat-name">Doorbell</span>
         <span class="cat-note muted">video intercom</span>
       </li>
-      <li data-cat="cameras">
+      <li data-cat="cameras" tabindex="0" role="button">
         <span class="cat-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 6h12l-1 6H5zM10 12v4M6 20h8M18 8l3-1"/></svg></span>
         <span class="cat-name">Security cameras</span>
         <span class="cat-note muted">Tapo, through your account</span>
       </li>
-      <li data-cat="print">
+      <li data-cat="print" tabindex="0" role="button">
         <span class="cat-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M6 9V3h12v6M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2M6 14h12v7H6z"/></svg></span>
         <span class="cat-name">Printers &amp; scanners</span>
         <span class="cat-note muted">on the network and USB</span>
@@ -65,8 +65,9 @@
           <p id="add-sub" class="muted">What kind of device?</p>
         </div>
       </div>
+      <!-- Above the tiles: on a phone a note under them is off screen. -->
+      <p id="add-note" class="cap-warn" role="status"></p>
       <div id="add-grid" class="choice-grid"></div>
-      <p id="add-note" class="muted" role="status"></p>
     </section>
 
     <section id="settings" class="pane hidden">
@@ -121,12 +122,35 @@
             <label class="set-label" for="door-port"><span>Listen on UDP port</span><span class="muted small">5060 unless the station is set to another.</span></label>
             <span class="set-control"><input id="door-port" type="number" min="1" max="65535" value="5060"><button id="door-port-go" type="button">Apply</button></span>
           </div>
+          <p id="door-port-note" class="small" role="status"></p>
           <div class="set-row">
             <span class="set-label"><span>Find stations</span><span class="muted small">Look for door stations on this network again.</span></span>
             <span class="set-control"><button id="door-rescan" type="button">Look again</button></span>
           </div>
         </section>
       </div>
+      <!-- A ring from a door station on this network: at the top, where it is seen. -->
+      <div id="door-call" class="hidden">
+        <div class="door-video">
+          <video id="door-video" class="hidden" autoplay playsinline muted></video>
+          <div id="door-video-note" class="door-video-note"></div>
+          <span id="door-call-clock" class="door-clock">0:00</span>
+        </div>
+        <div class="door-call-body">
+          <div class="door-who">
+            <span id="door-caller"></span>
+            <span id="door-call-sub" class="muted"></span>
+          </div>
+          <div class="door-call-actions">
+            <button id="door-answer" type="button" class="big ok">Answer</button>
+            <button id="door-decline" type="button" class="big">Decline</button>
+            <button id="door-open" type="button" class="big accent">Open door</button>
+            <button id="door-hangup" type="button" class="big">Hang up</button>
+          </div>
+          <p id="door-call-note" class="muted"></p>
+        </div>
+      </div>
+
       <div id="ot-account" class="ot-panel">
         <div class="ot-heading">
           <div><h3 id="ot-service-name">OneTouch</h3><p id="ot-account-name" class="muted">Live video and recordings through your OneTouch account.</p></div>
@@ -155,7 +179,7 @@
             <p class="muted small">Leave blank to use OTIPVDP’s default server discovery. Legacy sign-in uses the older service’s HTTP protocol.</p>
           </div>
           <div class="cam-login-row">
-            <label>Account username <input id="ot-username" autocomplete="username" aria-describedby="ot-username-help" required></label>
+            <label>Account username <input id="ot-username" autocomplete="username" autocapitalize="none" spellcheck="false" aria-describedby="ot-username-help" required></label>
             <div class="ot-password-field">
               <label for="ot-password">Password</label>
               <div class="ot-password-row">
@@ -200,27 +224,6 @@
       </div>
       <h3 class="ot-local-heading">Local intercom</h3>
       <p id="door-message" class="muted"></p>
-
-      <div id="door-call" class="hidden">
-        <div class="door-video">
-          <video id="door-video" class="hidden" autoplay playsinline muted></video>
-          <div id="door-video-note" class="door-video-note"></div>
-          <span id="door-call-clock" class="door-clock">0:00</span>
-        </div>
-        <div class="door-call-body">
-          <div class="door-who">
-            <span id="door-caller"></span>
-            <span id="door-call-sub" class="muted"></span>
-          </div>
-          <div class="door-call-actions">
-            <button id="door-answer" type="button" class="big ok">Answer</button>
-            <button id="door-decline" type="button" class="big">Decline</button>
-            <button id="door-open" type="button" class="big accent">Open door</button>
-            <button id="door-hangup" type="button" class="big">Hang up</button>
-          </div>
-          <p id="door-call-note" class="muted"></p>
-        </div>
-      </div>
 
       <div id="door-list">
         <h3>Door stations</h3>
@@ -270,7 +273,7 @@
       <div class="cam-head pane-head">
         <h2>Security cameras</h2>
         <div class="actions">
-          <select id="cam-when" title="Live view, or recorded footage from the cameras' SD cards">
+          <select id="cam-when" aria-label="Show" title="Live view, or recorded footage from the cameras' SD cards">
             <option value="live" selected>Live</option>
             <option value="playback">Playback</option>
           </select>
@@ -311,11 +314,11 @@
       </div>
       <div id="pb-controls" class="pb-bar-row hidden">
         <span class="pb-pick" title="Day, on the cameras' own clock (dd/mm/yyyy); a dot marks days with footage">
-          <select id="pb-dd"></select><span class="sep">/</span><select id="pb-mm"></select><span class="sep">/</span><select id="pb-yy"></select>
+          <select id="pb-dd" aria-label="Day"></select><span class="sep">/</span><select id="pb-mm" aria-label="Month"></select><span class="sep">/</span><select id="pb-yy" aria-label="Year"></select>
         </span>
         <span class="pb-pick" title="Time of day, on the cameras' own clock">
-          <select id="pb-h"></select><span class="sep">:</span><select id="pb-m"></select><span class="sep">:</span><select id="pb-s"></select>
-          <select id="pb-ap"><option value="AM">AM</option><option value="PM">PM</option></select>
+          <select id="pb-h" aria-label="Hour"></select><span class="sep">:</span><select id="pb-m" aria-label="Minute"></select><span class="sep">:</span><select id="pb-s" aria-label="Second"></select>
+          <select id="pb-ap" aria-label="AM or PM"><option value="AM">AM</option><option value="PM">PM</option></select>
         </span>
         <input type="hidden" id="pb-date"><input type="hidden" id="pb-time">
         <button id="pb-play" type="button" class="accent" title="Play every camera shown from this time">Play all</button>
@@ -324,7 +327,7 @@
         <span id="pb-seek-at" class="muted">—</span>
         <span class="tl-legend"><i class="tl-key tl-key-rec"></i>recording <i class="tl-key tl-key-motion"></i>motion <i class="tl-key tl-key-person"></i>person <i class="tl-key tl-key-unsure"></i>clock unsure after a restart <i class="tl-key tl-key-fixed"></i>clock corrected</span>
         <label id="pb-speed-box" title="Playback speed; sound plays at 1x only">
-          <input type="range" id="pb-speed" min="-2" max="3" step="0.05" value="0">
+          <input type="range" id="pb-speed" aria-label="Playback speed" min="-2" max="3" step="0.05" value="0">
           <span id="pb-speed-label">1x</span>
         </label>
       </div>
@@ -338,16 +341,17 @@
         <h3>Sign in with Tapo</h3>
         <p class="muted">Your TP-Link (Tapo) account. The password is sent to TP-Link only, the same way the Tapo app does; Kagaz keeps the session token in a private file, never the password.</p>
         <div class="cam-login-row">
-          <input type="email" id="cam-login-email" placeholder="email" autocomplete="username">
-          <input type="password" id="cam-login-password" placeholder="password" autocomplete="current-password">
+          <span class="cam-field"><label for="cam-login-email">Email</label><input type="email" id="cam-login-email" autocomplete="username" autocapitalize="none" spellcheck="false"></span>
+          <span class="cam-field"><label for="cam-login-password">Password</label><input type="password" id="cam-login-password" autocomplete="current-password"></span>
           <button id="cam-login-go" type="button" class="accent">Log in</button>
           <button id="cam-login-cancel" type="button">Cancel</button>
         </div>
         <div class="cam-login-row hidden" id="cam-login-code-row">
-          <input type="text" id="cam-login-code" placeholder="code from the email" inputmode="numeric" autocomplete="one-time-code">
+          <span class="cam-field"><label for="cam-login-code">Code from TP-Link's email</label><input type="text" id="cam-login-code" inputmode="numeric" autocomplete="one-time-code"></span>
           <button id="cam-login-code-go" type="button" class="accent">Confirm</button>
+          <button id="cam-login-other" type="button" class="link">Use another account</button>
         </div>
-        <p id="cam-login-note" class="muted"></p>
+        <p id="cam-login-note" class="muted" role="status"></p>
       </div>
       <div id="cam-rearrange-bar" class="hidden">
         <span class="muted">Drag a camera onto a group. </span>
@@ -366,11 +370,11 @@
       <h2 id="d-title"></h2>
       <p id="d-sub" class="muted"></p>
 
-      <nav class="tabs">
-        <button class="tab active" data-tab="about">About</button>
-        <button class="tab" data-tab="print">Print</button>
-        <button class="tab" data-tab="scan">Scan</button>
-        <button class="tab" data-tab="copy">Copy</button>
+      <nav class="tabs" role="tablist" aria-label="What to do with this device">
+        <button class="tab active" type="button" role="tab" aria-selected="true" data-tab="about">About</button>
+        <button class="tab" type="button" role="tab" aria-selected="false" data-tab="print">Print</button>
+        <button class="tab" type="button" role="tab" aria-selected="false" data-tab="scan">Scan</button>
+        <button class="tab" type="button" role="tab" aria-selected="false" data-tab="copy">Copy</button>
       </nav>
 
       <div id="tab-about" class="tab-pane">
@@ -394,7 +398,7 @@
         <form id="print-form">
           <div class="file-drop" id="print-drop">
             <button type="button" id="print-pick">Choose a document…</button>
-            <span id="print-file" class="muted">PDF, JPEG or PNG. You can also drop a file on the window.</span>
+            <span id="print-file" class="muted">PDF, JPEG or PNG.<span class="desktop-only"> You can also drop a file on the window.</span></span>
           </div>
           <div class="grid">
             <label>Print with
@@ -606,6 +610,7 @@
   </nav>
 
   <script src="nav.js"></script>
+  <script src="ask.js"></script>
   <script src="reveal.js"></script>
   <script src="pictures.js"></script>
   <script src="timeline.js"></script>

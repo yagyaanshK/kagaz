@@ -16,6 +16,7 @@
             <input id="calls-enabled" type="checkbox"> <span>Ring me here</span>
           </label>
         </div>
+        <p id="calls-note" class="small cap-warn" role="alert"></p>
         <div id="calls-retry-row" class="actions hidden">
           <button id="calls-retry" type="button">Try again</button>
         </div>
@@ -49,9 +50,11 @@
       <details id="ot-dial-box" class="calls-more">
         <summary>Call another number</summary>
         <form id="calls-dial" class="calls-dial">
-          <input id="calls-number" type="text" inputmode="numeric" autocomplete="off" placeholder="A OneTouch number, e.g. a family member's app">
+          <label for="calls-number" class="small">Number</label>
+          <input id="calls-number" type="text" inputmode="numeric" autocomplete="off" placeholder="e.g. a family member's app">
           <button type="submit">Call</button>
         </form>
+        <p id="calls-dial-note" class="small cap-warn" role="alert"></p>
       </details>`;
 
   $("calls-host").innerHTML = PANEL;
@@ -77,6 +80,8 @@
   function render(s) {
     status = s;
     $("calls-enabled").checked = !!s.enabled;
+    // Ringing here needs the account: nothing to turn on while signed out.
+    $("calls-enabled").disabled = s.line === "signed_out" && !s.enabled;
     const base = LINE_TEXT[s.line] || s.line || "";
     // The detail adds to the state's words; for "signed out" it only repeats them.
     $("calls-line").textContent = s.detail && !["up", "signed_out"].includes(s.line) ? `${base} ${s.detail}`.trim() : base;
@@ -108,8 +113,10 @@
     const phase = (status && status.phase) || "idle";
     let slot = null;
     if (phase === "calling" || phase === "talking" || card.dataset.ended) {
+      // Only into a card that is open (full width): a closed one is a small
+      // grid cell, too narrow for the picture and the call's buttons.
       const key = callKey || keyForPeer(status && status.peer);
-      if (key) slot = document.querySelector(`.dev-card[data-key="${CSS.escape(key)}"] .dev-slot`);
+      if (key) slot = document.querySelector(`.dev-card.open[data-key="${CSS.escape(key)}"] .dev-slot`);
     }
     slot = slot || $("call-slot");
     if (card.parentElement !== slot) slot.appendChild(card);
@@ -120,6 +127,7 @@
     callKey = key || null;
     // The relay cannot show the live view and a call at once.
     if (typeof otStopLive === "function") otStopLive();
+    $("calls-dial-note").textContent = "";
     invoke("calls_call", { number }).catch((e) => {
       callKey = null;
       note(String(e));
@@ -205,8 +213,11 @@
     $(id).classList.toggle("hidden", !on);
   }
 
+  // Under the call when it shows; else at the top of the pane, where it is seen.
   function note(text) {
-    $("call-note").textContent = text;
+    const shown = !$("call-card").classList.contains("hidden");
+    $("call-note").textContent = shown ? text : "";
+    $("calls-note").textContent = shown ? "" : text;
   }
 
   function startClock(since) {
@@ -413,7 +424,14 @@
       mic = { stream, node, source, sink };
       note("");
     } catch (e) {
-      note("The microphone is not available, so they cannot hear you: " + (e.message || e));
+      if (e && e.name === "NotAllowedError") {
+        const where = /Android/i.test(navigator.userAgent)
+          ? "Settings › Apps › Kagaz › Permissions"
+          : "the system's privacy settings";
+        note(`Kagaz may not use the microphone, so they cannot hear you. Allow it in ${where}, then call again.`);
+      } else {
+        note("The microphone is not available, so they cannot hear you: " + (e.message || e));
+      }
     } finally {
       micStarting = false;
     }
@@ -435,7 +453,16 @@
 
   // ---------- buttons ----------
 
-  $("calls-enabled").addEventListener("change", (e) => invoke("calls_enable", { enabled: e.target.checked }));
+  $("calls-enabled").addEventListener("change", async (e) => {
+    const on = e.target.checked;
+    try {
+      await invoke("calls_enable", { enabled: on });
+      $("calls-note").textContent = "";
+    } catch (err) {
+      e.target.checked = !on;
+      $("calls-note").textContent = `Could not turn ringing ${on ? "on" : "off"}: ${err}`;
+    }
+  });
   $("calls-retry").addEventListener("click", () => invoke("calls_restart"));
   $("call-answer").addEventListener("click", () => {
     KagazPlayer.audioContext(); // a click is what lets the page make sound
@@ -455,7 +482,8 @@
     e.preventDefault();
     const number = $("calls-number").value.replace(/\s+/g, "");
     if (!/^[0-9A-Za-z*#+]+$/.test(number)) {
-      note("Enter the number to call.");
+      $("calls-dial-note").textContent = "Enter the number to call: digits, * or #.";
+      $("calls-number").focus();
       return;
     }
     call(number, null);

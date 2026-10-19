@@ -22,9 +22,21 @@ $('ot-password-toggle').addEventListener('click', () => {
 });
 
 // The rarely used account actions sit behind one ⋯ button.
-$('ot-menu').addEventListener('click', (ev) => { ev.stopPropagation(); $('ot-actions').classList.toggle('hidden'); });
+// Back, Escape or a click elsewhere closes it.
+function otMenu(open) {
+  const was = !$('ot-actions').classList.contains('hidden');
+  if (open === was) return;
+  $('ot-actions').classList.toggle('hidden', !open);
+  $('ot-menu').setAttribute('aria-expanded', String(open));
+  if (open) KagazNav.push('ot-menu', () => otMenu(false));
+  else KagazNav.pop('ot-menu');
+}
+$('ot-menu').addEventListener('click', (ev) => { ev.stopPropagation(); otMenu($('ot-actions').classList.contains('hidden')); });
 document.addEventListener('click', (ev) => {
-  if (!ev.target.closest('#ot-menu-box')) $('ot-actions').classList.add('hidden');
+  if (!ev.target.closest('#ot-menu-box')) otMenu(false);
+});
+document.addEventListener('keydown', (ev) => {
+  if (ev.key === 'Escape' && !$('ot-actions').classList.contains('hidden')) { otMenu(false); $('ot-menu').focus(); }
 });
 
 function otRender() {
@@ -38,7 +50,8 @@ function otRender() {
   $('ot-signin').textContent = saved ? 'Use another account' : 'Sign in';
   $('ot-remember-label').classList.toggle('hidden', !canRemember);
   $('ot-remember-help').classList.toggle('hidden', !canRemember);
-  $('ot-signin').classList.toggle('hidden', signed);
+  // While the form is open its own Sign in is the one to press.
+  $('ot-signin').classList.toggle('hidden', signed || !$('ot-login').classList.contains('hidden'));
   $('ot-signout').classList.toggle('hidden', !signed);
   $('ot-refresh').classList.toggle('hidden', !signed);
   $('ot-menu').classList.toggle('hidden', !signed && !saved);
@@ -267,17 +280,22 @@ $('ot-signin').addEventListener('click', () => {
     $('ot-legacy-device').value = otStatus.remembered.legacy_device || '';
     $('ot-provider').dispatchEvent(new Event('change'));
   }
-  otPasswordVisible(false); $('ot-login').classList.remove('hidden'); $('ot-message').textContent = ''; $('ot-username').focus();
+  otPasswordVisible(false); $('ot-login').classList.remove('hidden'); $('ot-signin').classList.add('hidden'); $('ot-message').textContent = ''; $('ot-username').focus();
   KagazNav.push('ot-login', () => $('ot-login-cancel').click());
 });
 $('ot-login-cancel').addEventListener('click', () => {
   $('ot-password').value = ''; otPasswordVisible(false); $('ot-login').classList.add('hidden'); $('ot-message').textContent = '';
+  $('ot-signin').classList.toggle('hidden', !!otStatus?.logged_in);
   KagazNav.pop('ot-login');
 });
 $('ot-login').addEventListener('submit', async e => {
   e.preventDefault();
   const username = $('ot-username').value.trim(); const password = $('ot-password').value;
-  if (!username || !password) { $('ot-message').textContent = 'Enter your OneTouch username and password.'; return; }
+  if (!username || !password) {
+    $('ot-message').textContent = !username ? 'Enter your OneTouch username.' : 'Enter your OneTouch password.';
+    $(!username ? 'ot-username' : 'ot-password').focus();
+    return;
+  }
   otPasswordVisible(false);
   await otRun(async () => {
     try { otStatus = await invoke('onetouch_login', { username, password, provider: $('ot-provider').value, legacyDevice: $('ot-legacy-device').value.trim(), remember: otStatus?.remember_supported !== false && $('ot-remember').checked }); }
@@ -352,7 +370,8 @@ async function otPlayVideo(url, generation) {
 // view; the door's sound comes in a call.
 async function otWatch(card) {
   const device = card.live;
-  const stage = new KagazPlayer.Stage(document.createDocumentFragment(), { title: device.name, badge: "LIVE", sound: false, label: `doorbell ${device.name}` });
+  // LIVE once a picture shows, not while it is still connecting.
+  const stage = new KagazPlayer.Stage(document.createDocumentFragment(), { title: device.name, badge: "", sound: false, label: `doorbell ${device.name}` });
   stage.setNote("Connecting…");
   const live = { key: card.key, deviceId: device.id, stage, handle: null, timer: null };
   otLive = live;
@@ -361,20 +380,29 @@ async function otWatch(card) {
   live.timer = setInterval(() => {
     if (otLive !== live) return;
     if (live.stage.player.stats.shown === 0) stage.setNote(live.stage.player.note());
+    else stage.setBadge("LIVE");
   }, 500);
   stage.player.onended = (why) => {
     if (otLive !== live) return;
     clearInterval(live.timer);
     stage.setIdle(true);
     stage.setBadge("");
-    stage.setNote(why ? `Live view ended: ${why}. Tap ▶ to watch again.` : "Live view ended.");
+    stage.setNote(why ? `Live view ended: ${why}.` : "Live view ended.");
+    watchAgain();
+  };
+  let again = null;
+  const watchAgain = () => {
+    if (again) return;
+    again = stage.button("Watch again", "Watch again", () => {
+      if (otLive === live) otWatch(card);
+    }, "kz-word");
   };
   $('ot-message').textContent = '';
   try {
     live.handle = await KagazPlayer.watch(stage.player, 'onetouch_watch', { deviceId: device.id });
     if (otLive !== live) live.handle.stop();
   } catch (e) {
-    if (otLive === live) { clearInterval(live.timer); stage.setIdle(true); stage.setBadge(""); stage.setNote(String(e)); }
+    if (otLive === live) { clearInterval(live.timer); stage.setIdle(true); stage.setBadge(""); stage.setNote(String(e)); watchAgain(); }
   }
 }
 async function otLoadRecordings(page) {

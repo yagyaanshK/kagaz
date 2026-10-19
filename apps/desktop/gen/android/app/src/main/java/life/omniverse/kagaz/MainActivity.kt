@@ -45,12 +45,7 @@ class MainActivity : TauriActivity() {
     // Android 15 and later draw apps under the status and navigation bars;
     // keep the page clear of them (and of the keyboard when it is up).
     val content = findViewById<View>(android.R.id.content)
-    // Dark status and navigation icons on the light page, light ones in dark mode.
-    val dark = (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
-    WindowCompat.getInsetsController(window, content).apply {
-      isAppearanceLightStatusBars = !dark
-      isAppearanceLightNavigationBars = !dark
-    }
+    barIcons(resources.configuration)
     ViewCompat.setOnApplyWindowInsetsListener(content) { view, insets ->
       val bars = insets.getInsets(
         WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout() or WindowInsetsCompat.Type.ime()
@@ -58,6 +53,22 @@ class MainActivity : TauriActivity() {
       view.setPadding(bars.left, bars.top, bars.right, bars.bottom)
       WindowInsetsCompat.CONSUMED
     }
+  }
+
+  /** Dark status and navigation icons on the light page, light ones in dark
+   *  mode; again when the phone's theme changes while Kagaz is open (the
+   *  activity handles that change itself, so it is not recreated). */
+  private fun barIcons(config: Configuration) {
+    val dark = (config.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
+    WindowCompat.getInsetsController(window, findViewById<View>(android.R.id.content)).apply {
+      isAppearanceLightStatusBars = !dark
+      isAppearanceLightNavigationBars = !dark
+    }
+  }
+
+  override fun onConfigurationChanged(newConfig: Configuration) {
+    super.onConfigurationChanged(newConfig)
+    barIcons(newConfig)
   }
 
   override fun onNewIntent(intent: Intent) {

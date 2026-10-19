@@ -95,10 +95,20 @@ const KagazNav = (() => {
     sync();
   }
 
-  // A top-level place: Home (null), or a page one level above Home.
+  // A top-level place: Home (null), or a page one level above Home. What
+  // was open on the page left behind (a menu, rearranging) closes, so it is
+  // not still open on coming back.
   function root(id, close) {
     if (closing) return;
+    const left = stack.slice(1).reverse();
     stack = id ? [{ id, close }] : [];
+    closing = true;
+    for (const level of left) {
+      try {
+        level.close();
+      } catch (e) {}
+    }
+    closing = false;
     sync();
   }
 

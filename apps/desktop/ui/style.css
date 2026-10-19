@@ -5,10 +5,13 @@
   --text: #1d1d1b;
   --muted: #6b6a66;
   --line: #e2e0da;
+  /* Edges of fields, buttons and tracks: 3:1 against the page, so an empty
+     field still shows where it is. --line stays for dividers. */
+  --control: #8c8a84;
   --accent: #2f6f4e;
   --accent-text: #ffffff;
   --ok: #2f6f4e;
-  --warn: #9a6b00;
+  --warn: #8a5f00;
   --bad: #a3382c;
   --font: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", sans-serif;
   /* Spacing on a 4 px grid: 8 between controls, 12 between areas, 16 at the edge. */
@@ -24,6 +27,7 @@
     --text: #ebe9e3;
     --muted: #a09e97;
     --line: #35342f;
+    --control: #78766f;
     --accent: #6fbf93;
     --accent-text: #10201a;
     --ok: #6fbf93;
@@ -33,6 +37,11 @@
 }
 
 * { box-sizing: border-box; }
+
+/* Less movement for those who asked their system for it. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+}
 
 html, body {
   margin: 0;
@@ -149,7 +158,7 @@ h3 { font-size: 14px; margin: 18px 0 6px; }
 #main { padding: 22px 28px; overflow-y: auto; min-width: 0; }
 .pane { max-width: 760px; }
 
-.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin: 16px 0 14px; }
+.tabs { display: flex; flex-wrap: wrap; gap: 4px; border-bottom: 1px solid var(--line); margin: 16px 0 14px; }
 .tab {
   background: none;
   border: none;
@@ -170,7 +179,8 @@ ul.plain, #about-print-details, #about-scan-details, #about-notes, #scan-log {
 
 .grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  /* minmax(0, …): a long option or large text never widens the page. */
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px 20px;
 }
 label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
@@ -178,10 +188,11 @@ select, button, input {
   font: inherit;
   color: var(--text);
   background: var(--panel);
-  border: 1px solid var(--line);
+  border: 1px solid var(--control);
   border-radius: 6px;
   padding: 6px 10px;
   min-height: 32px;
+  max-width: 100%;
 }
 /* Draw selects ourselves: the native look ignores our colours in dark mode. */
 select {
@@ -200,7 +211,8 @@ select option {
   color: var(--text);
   background: var(--panel);
 }
-select:focus-visible, button:focus-visible, input:focus-visible {
+select:focus-visible, button:focus-visible, input:focus-visible, summary:focus-visible,
+[role="button"]:focus-visible, [role="slider"]:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
@@ -230,7 +242,7 @@ button.icon { font-size: 16px; padding: 4px 9px; min-width: 36px; }
 .supplies .sup-bar i { display: block; height: 100%; background: var(--muted); }
 .supplies li.low .sup-level { color: var(--warn); }
 .file-drop { display: flex; align-items: center; gap: 12px; padding: 14px; margin-bottom: 14px; border: 1px dashed var(--line); border-radius: 10px; min-width: 0; flex-wrap: wrap; }
-.file-drop span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.file-drop span { overflow-wrap: anywhere; min-width: 0; }
 .file-note { margin: -6px 0 14px; color: var(--bad); }
 
 /* The window's own player: a picture on a canvas, filling its box. */
@@ -248,7 +260,8 @@ button.icon { font-size: 16px; padding: 4px 9px; min-width: 36px; }
 .kz-stage[data-shape="tall"] { width: auto; height: min(78vh, 760px); max-width: 100%; margin: 0 auto; }
 .kz-note { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center; padding: 48px 24px; color: #ddd; font-size: 13px; pointer-events: none; }
 .kz-top, .kz-bar { position: absolute; left: 0; right: 0; display: flex; align-items: center; gap: 8px; padding: 10px 12px; opacity: 0; transition: opacity 0.2s; pointer-events: none; }
-.kz-stage.show .kz-top, .kz-stage.show .kz-bar { opacity: 1; pointer-events: auto; }
+.kz-stage.show .kz-top, .kz-stage.show .kz-bar,
+.kz-stage:focus-within .kz-top, .kz-stage:focus-within .kz-bar { opacity: 1; pointer-events: auto; }
 @media (hover: hover) {
   .kz-stage:hover .kz-top, .kz-stage:hover .kz-bar { opacity: 1; pointer-events: auto; }
 }
@@ -295,14 +308,17 @@ body.kz-has-full { overflow: hidden; }
 .call-video-note:empty { display: none; }
 /* While the caller's live view shows, the call's own (still black) picture waits behind it. */
 .call-video.previewing > .call-stage { display: none; }
-.call-clock { position: absolute; z-index: 1; top: 44px; right: 10px; color: #fff; font-size: 12px; background: rgba(0, 0, 0, 0.45); padding: 2px 8px; border-radius: 999px; }
+.call-clock { position: absolute; z-index: 1; top: 44px; right: 10px; color: #fff; font-size: 12px; background: rgba(0, 0, 0, 0.7); padding: 2px 8px; border-radius: 999px; }
 .call-who { display: flex; flex-direction: column; gap: 2px; }
 .call-who #call-peer { font-size: 20px; font-weight: 600; }
 .call-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
 button.danger { background: var(--bad); color: #fff; border-color: var(--bad); }
+@media (prefers-color-scheme: dark) {
+  button.danger { color: #1b1b19; } /* white on the light red is 2.9:1 */
+}
 .calls-more { margin-top: 12px; }
 .calls-more summary { cursor: default; color: var(--muted); padding: 8px 0; font-size: 13px; }
-.calls-dial { display: flex; gap: 8px; margin-top: 4px; }
+.calls-dial { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
 .calls-dial input { flex: 1; min-width: 0; }
 .call-volume { flex-direction: row; align-items: center; gap: 8px; margin-top: 12px; }
 .call-volume input { flex: 1; max-width: 220px; min-height: 0; accent-color: var(--accent); }
@@ -345,7 +361,7 @@ button.danger { background: var(--bad); color: #fff; border-color: var(--bad); }
 .dev-card.offline .dev-icon { color: var(--muted); }
 .dev-icon svg { width: 26px; height: 26px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .dev-text { display: flex; flex-direction: column; min-width: 0; flex: 1 1 auto; }
-.dev-text strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dev-text strong { overflow-wrap: anywhere; }
 .dev-go { flex: 0 0 auto; width: 36px; height: 36px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; background: var(--panel); border: 1px solid var(--line); color: var(--accent); font-size: 13px; }
 .dev-slot { padding: 0 14px; }
 .dev-slot:empty { display: none; }
@@ -361,7 +377,7 @@ button.danger { background: var(--bad); color: #fff; border-color: var(--bad); }
 
 .ot-password-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; max-width: 100%; }
 .ot-password-row { display: flex; align-items: stretch; gap: 6px; min-width: 0; }
-.ot-password-row input { min-width: 0; width: 14em; flex: 1 1 auto; }
+.ot-password-row input, .cam-login-row .ot-password-row input { min-width: 0; width: 14em; flex: 1 1 auto; }
 .ot-password-row button { flex: 0 0 auto; min-width: 4.5em; padding: 4px 8px; }
 
 #ot-login .ot-remember { flex-direction: row; align-items: center; gap: 8px; margin-top: 12px; }
@@ -429,6 +445,11 @@ label small { font-size: 12px; min-height: 1.2em; }
 .cam-grid-inner.drop-target { outline: 2px dashed var(--accent); outline-offset: 4px; border-radius: 8px; }
 .cam-tile.placeholder { aspect-ratio: 16 / 5; display: flex; align-items: center; justify-content: center; color: #fff; cursor: grab; background: #333; }
 .cam-tile.placeholder.dragging { opacity: 0.4; }
+.cam-move { width: 100%; font-size: 13px; }
+.thumb-move { display: flex; justify-content: space-between; gap: 6px; }
+/* Something is under way (a scan): a small spinner before its words. */
+.working::before { content: ""; display: inline-block; width: 12px; height: 12px; margin-right: 6px; vertical-align: -2px; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.9s linear infinite; }
+@media (pointer: coarse) { .desktop-only { display: none; } }
 #cam-rearrange-bar, #cam-viewing { margin-top: 10px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 #pb-controls { display: inline-flex; gap: 6px; align-items: center; }
 #pb-controls input { padding: 4px 6px; }
@@ -451,7 +472,10 @@ label small { font-size: 12px; min-height: 1.2em; }
 .cam-tile .cam-quality:hover { background: rgba(0,0,0,0.8); }
 #cam-login-form { margin-top: 10px; padding: 10px; border: 1px solid var(--line); border-radius: 8px; }
 .cam-login-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-top: 6px; }
-.cam-login-row input { padding: 4px 6px; min-width: 14em; }
+.cam-login-row input { padding: 4px 6px; min-width: min(14em, 100%); }
+.cam-login-row > label, .cam-login-row > .ot-password-field, .cam-login-row > .cam-field { min-width: 0; max-width: 100%; }
+.cam-field { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
+.cam-login-row { align-items: flex-end; }
 .cam-grid-inner { position: relative; }
 .cam-grid-inner .drop-line { position: absolute; width: 4px; background: var(--accent); border-radius: 2px; pointer-events: none; box-shadow: 0 0 6px var(--accent); }
 .cam-group-head[draggable="true"] { cursor: grab; }
@@ -464,7 +488,7 @@ label small { font-size: 12px; min-height: 1.2em; }
 
 /* Camera controls: a gear menu for the rarely-changed settings, a playback row */
 .pb-bar-row { display: flex; align-items: center; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
-#pb-seek { position: relative; flex: 1 1 260px; height: 22px; background: var(--line); border-radius: 6px; cursor: default; overflow: hidden; }
+#pb-seek { position: relative; flex: 1 1 260px; cursor: default; }
 #pb-seek-clips { position: absolute; inset: 0; }
 #pb-seek-clips .clip { position: absolute; top: 0; bottom: 0; background: var(--accent); opacity: 0.55; }
 #pb-seek-pos { position: absolute; top: 0; bottom: 0; width: 3px; background: #fff; box-shadow: 0 0 4px #000; }
@@ -482,18 +506,20 @@ label small { font-size: 12px; min-height: 1.2em; }
 .pb-ends { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); margin-top: 1px; }
 .pb-bar .pos { width: 3px; background: #fff; box-shadow: 0 0 3px #000; mix-blend-mode: normal; }
 .cam-tile[data-state="lost"] .cam-overlay, .cam-tile[data-state="ended"] .cam-overlay { cursor: default; }
+/* The tile's own buttons stay above its overlay (playback's gaps cover the picture). */
+.cam-tile .cam-quality, .cam-tile .cam-speaker, .cam-tile .cam-volume { z-index: 2; }
 /* Per-camera volume: shown while the camera's sound is on, or on hover */
 .cam-tile .cam-volume { position: absolute; right: 92px; bottom: 9px; width: 80px; display: none; min-height: 0; accent-color: var(--accent); }
 .cam-tile.sound-on .cam-volume, .cam-tile:hover .cam-volume { display: block; }
 .cam-tile.placeholder .cam-volume { display: none; }
 /* Enlarge / back-to-grid control, top right of every tile */
 .cam-tile .cam-size { position: absolute; top: 6px; right: 8px; z-index: 2; font-size: 16px; line-height: 1; padding: 4px 8px; min-height: 0; background: rgba(0,0,0,0.55); color: #fff; border: 1px solid rgba(255,255,255,0.5); border-radius: 6px; opacity: 0; transition: opacity 0.15s; }
-.cam-tile:hover .cam-size, .cam-tile.big .cam-size { opacity: 1; }
+.cam-tile:hover .cam-size, .cam-tile.big .cam-size, .cam-tile:focus-within .cam-size { opacity: 1; }
 .cam-tile .cam-size:hover { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
 .cam-tile.placeholder .cam-size { display: none; }
 .cam-tile .cam-full { position: absolute; top: 6px; right: 52px; z-index: 2; width: 34px; height: 30px; min-height: 0; padding: 0; display: inline-flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.55); color: #fff; border: 1px solid rgba(255,255,255,0.5); border-radius: 6px; opacity: 0; transition: opacity 0.15s; }
 .cam-tile .cam-full svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
-.cam-tile:hover .cam-full, .cam-tile.big .cam-full, .cam-tile.kz-full .cam-full { opacity: 1; }
+.cam-tile:hover .cam-full, .cam-tile.big .cam-full, .cam-tile.kz-full .cam-full, .cam-tile:focus-within .cam-full { opacity: 1; }
 .cam-tile.placeholder .cam-full { display: none; }
 .cam-tile.kz-full .cam-size { display: none; }
 .cam-tile.kz-full .cam-full { right: calc(8px + env(safe-area-inset-right)); top: calc(8px + env(safe-area-inset-top)); width: 44px; height: 40px; }
@@ -513,11 +539,20 @@ label small { font-size: 12px; min-height: 1.2em; }
 .tl { position: relative; user-select: none; }
 .tl-events { position: relative; height: 7px; margin-bottom: 2px; }
 .tl-det { position: absolute; top: 0; bottom: 0; border-radius: 2px; cursor: default; }
-.tl-motion { background: #e8892f; }
-.tl-person { background: #3d8bfd; }
+.tl-motion { background: #c26a12; }
+.tl-person { background: #2f74e0; }
 .tl-detection { background: #b48ce0; }
 .tl-det:hover { outline: 1px solid #fff; z-index: 2; }
-.tl-track { position: relative; height: 16px; background: var(--line); border-radius: 4px; cursor: crosshair; overflow: visible; }
+.tl-track { position: relative; height: 16px; background: var(--line); box-shadow: inset 0 0 0 1px var(--control); border-radius: 4px; cursor: crosshair; overflow: visible; }
+/* Room to aim around the thin bar and marks: 24 px with a mouse, 48 with a finger.
+   A finger dragging along it seeks; up and down still scroll the page. */
+.tl-track { touch-action: pan-y; }
+.tl-track::before { content: ""; position: absolute; left: 0; right: 0; top: -4px; bottom: -4px; }
+.tl-det::before { content: ""; position: absolute; top: -4px; bottom: -4px; left: -8px; right: -8px; }
+@media (pointer: coarse) {
+  .tl-track::before { top: -16px; bottom: -16px; }
+  .tl-det::before { top: -8px; bottom: -8px; left: -14px; right: -14px; }
+}
 .tl-spans { position: absolute; inset: 0; overflow: hidden; border-radius: 4px; }
 .tl-span { position: absolute; top: 0; bottom: 0; background: var(--accent); opacity: 0.6; }
 .tl-span.tl-event-rec { background: #e8892f; opacity: 0.45; }
@@ -534,7 +569,7 @@ label small { font-size: 12px; min-height: 1.2em; }
 .tl-ghost { position: absolute; top: -4px; bottom: -4px; width: 1px; background: rgba(255,255,255,0.75); pointer-events: none; z-index: 4; }
 .tl-ghost.tl-drag { width: 3px; margin-left: -1px; background: #ffd24a; box-shadow: 0 0 4px #000; }
 .tl-tip { position: absolute; bottom: calc(100% + 4px); left: 50%; transform: translateX(-50%); white-space: nowrap; font-size: 11px; padding: 1px 6px; border-radius: 4px; background: #000; color: #fff; }
-.tl-scale { position: relative; height: 15px; font-size: 10px; color: var(--muted); }
+.tl-scale { position: relative; height: 15px; font-size: 11px; color: var(--text); }
 .tl-tick { position: absolute; top: 2px; transform: translateX(-50%); white-space: nowrap; }
 .tl-tick::before { content: ""; position: absolute; left: 50%; top: -3px; width: 1px; height: 3px; background: var(--muted); }
 #pb-seek { flex: 1 1 320px; }
@@ -543,11 +578,11 @@ label small { font-size: 12px; min-height: 1.2em; }
 .tl-legend { font-size: 11px; color: var(--muted); display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; }
 .tl-key { display: inline-block; width: 10px; height: 8px; border-radius: 2px; margin-left: 6px; }
 .tl-key-rec { background: var(--accent); }
-.tl-key-motion { background: #e8892f; }
-.tl-key-person { background: #3d8bfd; }
+.tl-key-motion { background: #c26a12; }
+.tl-key-person { background: #2f74e0; }
 /* The camera's controls wrap; its summary line sits on its own row under them. */
 .pb-row { flex-wrap: wrap; row-gap: 2px; }
-.pb-row .pb-note { flex-basis: 100%; margin-left: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pb-row .pb-note { flex-basis: 100%; margin-left: 0; overflow-wrap: anywhere; }
 
 /* Doorbell */
 #doorbell.pane { max-width: 980px; }
@@ -595,8 +630,9 @@ ul.cards li.add .name { color: var(--accent); }
 .door-howto li { margin: 4px 0; }
 .door-howto p { margin: 0; font-size: 13px; }
 
-/* ---- Medium windows (600 to 839 px): a narrow rail, two tiles per row ---- */
-@media (max-width: 839px) {
+/* ---- Medium windows (600 to 839 px), and phones on their side: a narrow
+   rail, two tiles per row ---- */
+@media (max-width: 839px), (max-height: 500px) and (pointer: coarse) {
   body { grid-template-columns: 88px 1fr; }
   #sidebar header { justify-content: center; padding: 12px 6px 4px; }
   #sidebar header h1 { font-size: 15px; }
@@ -611,7 +647,6 @@ ul.cards li.add .name { color: var(--accent); }
   .cam-tools { display: none; }
   #call-card { grid-template-columns: 1fr; }
   #door-call { grid-template-columns: 1fr; }
-  .tl-legend { display: none; }
   #cam-state { display: none; }
 }
 
@@ -637,8 +672,10 @@ ul.cards li.add .name { color: var(--accent); }
   #main { padding: 12px var(--edge) 24px; }
   .pane { max-width: none; }
   h2 { font-size: 18px; }
-  .grid { grid-template-columns: 1fr; }
+  .grid { grid-template-columns: minmax(0, 1fr); }
   .cam-grid-inner { grid-template-columns: minmax(0, 1fr); }
+  /* Tabbing to a field never leaves it under the sticky action bar. */
+  #main { scroll-padding-bottom: 96px; }
   /* The main action of a form stays within reach while the page scrolls. */
   .actions.bar {
     position: sticky; bottom: 0; z-index: 3;
@@ -675,8 +712,14 @@ ul.cards li.add .name { color: var(--accent); }
 
 /* ---- Touch: finger-sized targets, nothing hidden behind hover ---- */
 @media (pointer: coarse) {
-  select, button, input:not([type="range"]):not([type="checkbox"]) { min-height: 44px; }
-  button.icon { min-width: 44px; }
+  /* 48: Android's size, and over Apple's 44. */
+  select, button, input:not([type="range"]):not([type="checkbox"]) { min-height: 48px; }
+  button.icon { min-width: 48px; }
+  button.link { min-height: 48px; }
+  .switch, .set-row label { min-height: 48px; }
+  input[type="range"] { min-height: 40px; }
+  .cam-group-head button, .pb-row button, .cam-tile button:not(.cam-reload), .pb-form button { min-height: 44px; min-width: 44px; }
+  .calls-more summary { padding: 14px 0; }
   .tab { padding: 12px 12px; }
   .cam-tile .cam-size, .cam-tile .cam-volume { opacity: 1; display: block; }
   .cam-tile .cam-full { opacity: 1; width: 44px; height: 40px; right: 60px; }
@@ -748,6 +791,9 @@ button.link { background: none; border: none; color: var(--accent); padding: 4px
 .act-day { font-size: 13px; color: var(--muted); margin: 18px 0 6px; font-weight: 600; }
 .act-item { display: flex; align-items: center; gap: 12px; width: 100%; padding: 8px 10px; border: none; border-bottom: 1px solid var(--line); border-radius: 0; background: none; text-align: left; min-height: 64px; }
 .act-item:disabled { opacity: 1; cursor: default; }
+.act-go { flex: 0 0 auto; font-size: 20px; color: var(--muted); }
+/* Words for screen readers only. */
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .act-item:not(:disabled):hover { background: var(--panel); }
 .act-pic { position: relative; flex: 0 0 auto; width: 72px; height: 48px; border-radius: 8px; overflow: hidden; background: var(--panel); display: inline-flex; align-items: center; justify-content: center; color: var(--muted); }
 .act-pic img { width: 100%; height: 100%; object-fit: cover; }
@@ -789,7 +835,7 @@ input.toggle { width: 44px; height: 24px; min-height: 0; accent-color: var(--acc
   .set-control select { max-width: 60vw; }
 }
 @media (pointer: coarse) {
-  .chip { min-height: 40px; padding: 6px 14px; }
+  .chip { min-height: 48px; padding: 6px 14px; }
 }
 
 /* Security cameras, signed out: Tapo's sign-in on top, full width. */
@@ -797,6 +843,8 @@ input.toggle { width: 44px; height: 24px; min-height: 0; accent-color: var(--acc
 #cam-signin #cam-login-form h3 { margin-top: 0; }
 #cam-signin .cam-login-row { flex-direction: column; align-items: stretch; max-width: 420px; }
 #cam-signin .cam-login-row input { min-width: 0; width: 100%; }
+#cam-signin .cam-field { width: 100%; }
+#cam-signin #cam-login-other { align-self: flex-start; }
 #cam-signin #cam-login-cancel { display: none; }
 #cam-signin > h3 { margin-top: 22px; }
 
@@ -812,7 +860,7 @@ input.toggle { width: 44px; height: 24px; min-height: 0; accent-color: var(--acc
 .home-group-toggle { display: flex; align-items: center; gap: 12px; flex: 1 1 auto; min-width: 0; min-height: 56px; padding: 8px 10px; border: none; background: none; text-align: left; color: var(--text); }
 .home-group-words { display: flex; flex-direction: column; min-width: 0; flex: 1 1 auto; }
 .home-group-title { font-size: 16px; font-weight: 600; }
-.home-group-toggle .home-status { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.home-group-toggle .home-status { overflow-wrap: anywhere; }
 .home-chevron { flex: 0 0 auto; width: 10px; height: 10px; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: rotate(45deg); margin: 0 6px 4px; transition: transform 0.15s; }
 .home-group.open .home-chevron { transform: rotate(-135deg); margin-bottom: -4px; }
 .home-group .home-tiles { padding: 0 12px 12px; }
@@ -826,3 +874,27 @@ input.toggle { width: 44px; height: 24px; min-height: 0; accent-color: var(--acc
 .door-settings-title { margin: 6px 0 0; font-size: 16px; }
 #door-settings-local .set-control input[type="number"] { width: 7em; }
 #doorbell.show-settings .to-home { display: none !important; }
+
+/* Small controls on a computer: never under 24 px (WCAG 2.5.8). */
+@media (pointer: fine) {
+  .cam-group-head button, .pb-row button, .cam-tile button, .pb-form button, button.link { min-height: 24px; min-width: 24px; }
+}
+
+/* A question the page asks (ask.js). */
+dialog.ask { max-width: min(420px, calc(100vw - 32px)); border: 1px solid var(--control); border-radius: 12px; padding: 18px 20px; background: var(--panel); color: var(--text); }
+dialog.ask::backdrop { background: rgba(0, 0, 0, 0.45); }
+dialog.ask .ask-title { margin: 0 0 8px; font-size: 16px; font-weight: 600; color: var(--text); }
+dialog.ask label.ask-title input { margin-top: 8px; font-weight: 400; }
+dialog.ask .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
+
+/* Target sizes that must win over the tighter rules above (they set
+   min-height: 0 on small buttons): 48 px with a finger, 24 with a mouse. */
+@media (pointer: coarse) {
+  #main button.link, #main .cam-group-head button, #main .pb-row button, #main .pb-form button,
+  #main .cam-tile button:not(.cam-reload), #main .calls-dial button, #main .chip { min-height: 48px; min-width: 48px; }
+  #main .cam-tile input[type="range"] { min-height: 40px; }
+  #main .calls-more summary, #main .set-more summary { min-height: 48px; display: flex; align-items: center; }
+}
+@media (pointer: fine) {
+  #main .cam-group-head button, #main .pb-row button, #main .pb-form button, #main .cam-tile button, #main button.link { min-height: 24px; min-width: 24px; }
+}
