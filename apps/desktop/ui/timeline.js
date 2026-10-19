@@ -5,8 +5,11 @@
 //   - A time scale under the bar labels the window, finer as you zoom.
 //   - Scrolling over the bar zooms around the pointer; shift + scroll (or a
 //     sideways scroll) moves the window.
-//   - Pointing shows the time under the pointer; holding and dragging shows
-//     where the cursor will drop, and letting go seeks there.
+//   - Pointing shows the time under the pointer; holding and dragging (a
+//     mouse or a finger) shows where the cursor will drop, and letting go
+//     seeks there. Two fingers pinch to zoom.
+//   - From the keyboard (Tab to the bar): Left and Right move the cursor,
+//     + and - zoom.
 //   - Recordings are drawn in the bar; detections the camera reported sit on
 //     a lane above it (motion orange, person blue). Clicking one seeks to
 //     its start.
@@ -157,24 +160,81 @@ function makeTimeline(el, opts) {
     ghost.classList.toggle("tl-drag", dragging);
   }
 
-  track.addEventListener("mousemove", (ev) => showGhost(ev.clientX));
-  track.addEventListener("mouseleave", () => { if (!dragging) ghost.classList.add("hidden"); });
-  track.addEventListener("mousedown", (ev) => {
+  // Zoom by `factor` around the time at `clientX` (or the window's middle).
+  function zoom(factor, clientX) {
+    const r = track.getBoundingClientRect();
+    const f = clientX === undefined ? 0.5 : Math.min(1, Math.max(0, (clientX - r.left) / r.width));
+    const at = view.from + f * view.len;
+    view.len *= factor;
+    clampView();
+    view.from = at - f * view.len;
+    clampView();
+    view.follow = false; // the user is looking somewhere on purpose (for a while)
+    view.touched = Date.now();
+    view.key = "";
+    draw();
+  }
+
+  // Mouse, pen or finger: drag to choose, let go to seek; two fingers zoom.
+  const fingers = new Map();
+  let pinch = null;
+  track.addEventListener("pointermove", (ev) => {
+    if (fingers.has(ev.pointerId)) fingers.set(ev.pointerId, ev.clientX);
+    if (pinch && fingers.size === 2) {
+      const [a, b] = [...fingers.values()];
+      const span = Math.max(8, Math.abs(a - b));
+      zoom(pinch / span, (a + b) / 2);
+      pinch = span;
+      return;
+    }
+    if (ev.pointerType === "mouse" || dragging) showGhost(ev.clientX);
+  });
+  track.addEventListener("pointerleave", () => { if (!dragging) ghost.classList.add("hidden"); });
+  track.addEventListener("pointerdown", (ev) => {
     if (ev.button !== 0 || view.day === null) return;
     ev.preventDefault();
-    dragging = true;
-    showGhost(ev.clientX);
-    const move = (e) => showGhost(e.clientX);
-    const up = (e) => {
-      window.removeEventListener("mousemove", move);
-      window.removeEventListener("mouseup", up);
+    track.setPointerCapture(ev.pointerId);
+    fingers.set(ev.pointerId, ev.clientX);
+    if (fingers.size === 2) {
+      // A second finger: a pinch, not a seek.
       dragging = false;
       ghost.classList.add("hidden");
-      view.follow = true;
-      opts.onSeek(Math.floor(timeAt(e.clientX)));
-    };
-    window.addEventListener("mousemove", move);
-    window.addEventListener("mouseup", up);
+      const [a, b] = [...fingers.values()];
+      pinch = Math.max(8, Math.abs(a - b));
+      return;
+    }
+    dragging = true;
+    showGhost(ev.clientX);
+  });
+  const lift = (ev, seek) => {
+    fingers.delete(ev.pointerId);
+    if (pinch) {
+      if (!fingers.size) pinch = null;
+      return;
+    }
+    if (!dragging) return;
+    dragging = false;
+    ghost.classList.add("hidden");
+    view.follow = true;
+    if (seek) opts.onSeek(Math.floor(timeAt(ev.clientX)));
+  };
+  track.addEventListener("pointerup", (ev) => lift(ev, true));
+  track.addEventListener("pointercancel", (ev) => lift(ev, false));
+
+  track.tabIndex = 0;
+  track.setAttribute("role", "slider");
+  track.setAttribute("aria-label", opts.label || "Recordings: Left and Right move, + and - zoom");
+  track.addEventListener("keydown", (ev) => {
+    if (view.day === null) return;
+    const at = opts.cursor();
+    const step = Math.max(1, Math.round(view.len / 48));
+    if (ev.key === "ArrowLeft" || ev.key === "ArrowRight") {
+      const from = at === null || at === undefined ? view.day + view.from : at;
+      opts.onSeek(Math.floor(from + (ev.key === "ArrowLeft" ? -step : step)));
+    } else if (ev.key === "+" || ev.key === "=") zoom(0.8);
+    else if (ev.key === "-" || ev.key === "_") zoom(1.25);
+    else return;
+    ev.preventDefault();
   });
   el.addEventListener("wheel", (ev) => {
     if (view.day === null) return;
@@ -184,13 +244,7 @@ function makeTimeline(el, opts) {
       const d = ev.shiftKey ? ev.deltaY : ev.deltaX;
       view.from += (d / 100) * view.len * 0.15;
     } else {
-      // Zoom around the time under the pointer.
-      const at = timeAt(ev.clientX) - view.day;
-      const r = track.getBoundingClientRect();
-      const f = Math.min(1, Math.max(0, (ev.clientX - r.left) / r.width));
-      view.len *= ev.deltaY > 0 ? 1.25 : 0.8;
-      clampView();
-      view.from = at - f * view.len;
+      zoom(ev.deltaY > 0 ? 1.25 : 0.8, ev.clientX);
     }
     clampView();
     view.follow = false; // the user is looking somewhere on purpose (for a while)

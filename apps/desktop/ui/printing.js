@@ -359,6 +359,7 @@
     busy = on;
     for (const id of ["copy-go", "copy-preview", "copy-print", "copy-more", "copy-clear"]) $(id).disabled = on;
     $("copy-state").textContent = text || "";
+    $("copy-state").classList.toggle("working", on);
   }
 
   async function scanPages(keep) {
@@ -422,6 +423,8 @@
   $("copy-preview").addEventListener("click", () => preview(false));
   $("copy-more").addEventListener("click", () => preview(true));
   $("copy-clear").addEventListener("click", async () => {
+    const n = order.length;
+    if (n && !(await KagazAsk.confirm(`Discard ${n} scanned page${n === 1 ? "" : "s"}?`, "Discard pages", "They are not printed or saved."))) return;
     await invoke("copy_discard").catch(() => {});
     order = [];
     thumbs = new Map();
@@ -456,7 +459,23 @@
       const li = document.createElement("li");
       li.draggable = true;
       li.classList.toggle("dropped", !t.keep);
-      li.innerHTML = `<img alt=""><label><input type="checkbox"> <span></span></label>`;
+      li.innerHTML = `<img alt=""><label><input type="checkbox"> <span></span></label>`
+        + `<span class="thumb-move"><button type="button" class="icon" data-by="-1">\u2190</button><button type="button" class="icon" data-by="1">\u2192</button></span>`;
+      // Dragging needs a mouse; the arrows move a page with a finger or the keyboard.
+      li.querySelectorAll(".thumb-move button").forEach((b) => {
+        const by = Number(b.dataset.by);
+        const to = pos + by;
+        b.disabled = to < 0 || to >= order.length;
+        b.title = by < 0 ? "Earlier" : "Later";
+        b.setAttribute("aria-label", `Move page ${pos + 1} ${by < 0 ? "earlier" : "later"}`);
+        b.addEventListener("click", () => {
+          const [moved] = order.splice(pos, 1);
+          order.splice(to, 0, moved);
+          renderThumbs();
+          const again = $("copy-thumbs").children[to];
+          if (again) again.querySelector(`.thumb-move button[data-by="${by}"]`)?.focus();
+        });
+      });
       li.querySelector("img").src = t.src;
       li.querySelector("img").alt = `Scanned page ${pos + 1}`;
       li.querySelector("span").textContent = `Page ${pos + 1}`;

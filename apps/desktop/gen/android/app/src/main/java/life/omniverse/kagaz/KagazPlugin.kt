@@ -161,12 +161,16 @@ class KagazPlugin(private val first: Activity) : Plugin(first) {
 
     /** Notifications (Android 13+), and leaving battery optimisation, asked once. */
     private fun askOnce() {
+        // Once: the line starts at every launch, and asking again each time
+        // would nag someone who said no (Settings can still turn it on).
+        val prefs = activity.getSharedPreferences("kagaz", Context.MODE_PRIVATE)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-            activity.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+            activity.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED &&
+            !prefs.getBoolean("asked_notifications", false)
         ) {
+            prefs.edit().putBoolean("asked_notifications", true).apply()
             activity.requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 41)
         }
-        val prefs = activity.getSharedPreferences("kagaz", Context.MODE_PRIVATE)
         val power = activity.getSystemService(Context.POWER_SERVICE) as PowerManager
         if (!power.isIgnoringBatteryOptimizations(activity.packageName) && !prefs.getBoolean("asked_battery", false)) {
             prefs.edit().putBoolean("asked_battery", true).apply()

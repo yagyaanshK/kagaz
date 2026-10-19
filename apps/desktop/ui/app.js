@@ -82,6 +82,15 @@ function renderBrandChips() {
   for (const b of seen.values()) chip(b.name, b.id);
 }
 
+// List entries that open something (the sidebar, printers, stations) are
+// buttons to the keyboard as well: Tab reaches them, Enter or Space opens.
+document.addEventListener("keydown", (ev) => {
+  const li = ev.target.closest && ev.target.closest('li[role="button"]');
+  if (!li || ev.target !== li || (ev.key !== "Enter" && ev.key !== " ")) return;
+  ev.preventDefault();
+  li.click();
+});
+
 function renderList() {
   const ul = $("devices");
   ul.innerHTML = "";
@@ -105,6 +114,8 @@ function renderList() {
       li.prepend(img);
     }
     li.querySelector(".where").textContent = where(d);
+    li.tabIndex = 0;
+    li.setAttribute("role", "button");
     li.addEventListener("click", () => select(i));
     ul.appendChild(li);
   });
@@ -195,7 +206,10 @@ function fillList(id, items) {
 }
 
 function showTab(name) {
-  document.querySelectorAll(".tab").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
+  document.querySelectorAll(".tab").forEach((b) => {
+    b.classList.toggle("active", b.dataset.tab === name);
+    b.setAttribute("aria-selected", String(b.dataset.tab === name));
+  });
   document.querySelectorAll("#detail .tab-pane").forEach((p) => p.classList.toggle("hidden", p.id !== "tab-" + name));
   document.dispatchEvent(new CustomEvent("kagaz-tab", { detail: name }));
 }
@@ -214,11 +228,11 @@ function renderButtonSettings(list) {
       values.map((v) => `<option value="${v}" ${String(v) === String(current) ? "selected" : ""}>${v}</option>`).join("");
     const origin = { User: "your setting", System: "Brother's default", BuiltIn: "built-in default" }[a.origin] || a.origin;
     tr.innerHTML = `<td>${a.action}</td>
-      <td><select data-key="resolution">${opts(RESOLUTIONS.includes(a.resolution) ? RESOLUTIONS : [a.resolution, ...RESOLUTIONS], a.resolution)}</select> dpi</td>
-      <td><select data-key="size">${opts(SIZES.includes(a.size) ? SIZES : [a.size, ...SIZES], a.size)}</select></td>
-      <td><select data-key="duplex"><option value="false" ${!a.duplex ? "selected" : ""}>no</option><option value="true" ${a.duplex ? "selected" : ""}>yes</option></select></td>
+      <td><select data-key="resolution" aria-label="Resolution for ${a.action}">${opts(RESOLUTIONS.includes(a.resolution) ? RESOLUTIONS : [a.resolution, ...RESOLUTIONS], a.resolution)}</select> dpi</td>
+      <td><select data-key="size" aria-label="Paper size for ${a.action}">${opts(SIZES.includes(a.size) ? SIZES : [a.size, ...SIZES], a.size)}</select></td>
+      <td><select data-key="duplex" aria-label="Both sides for ${a.action}"><option value="false" ${!a.duplex ? "selected" : ""}>no</option><option value="true" ${a.duplex ? "selected" : ""}>yes</option></select></td>
       <td class="muted">${origin}</td>
-      <td>${a.origin === "User" ? '<button type="button" data-reset>Brother default</button>' : ""}</td>`;
+      <td>${a.origin === "User" ? '<button type="button" data-reset>Reset to Brother’s default</button>' : ""}</td>`;
     tr.querySelectorAll("select").forEach((sel) =>
       sel.addEventListener("change", async () => {
         const get = (k) => tr.querySelector(`select[data-key="${k}"]`).value;
@@ -387,6 +401,7 @@ $("scan-form").addEventListener("submit", async (ev) => {
   $("scan-log").innerHTML = "";
   $("scan-go").disabled = true;
   $("scan-state").textContent = "Scanning…";
+  $("scan-state").classList.add("working");
   try {
     const written = await invoke("scan", {
       device: d,
@@ -414,6 +429,7 @@ $("scan-form").addEventListener("submit", async (ev) => {
     log("Failed: " + err, "bad");
     $("scan-state").textContent = "";
   }
+  $("scan-state").classList.remove("working");
   $("scan-go").disabled = false;
 });
 
@@ -477,6 +493,15 @@ document.querySelectorAll("#categories li[data-cat], #bottom-nav button").forEac
   el.addEventListener("click", () => selectCategory(el.dataset.cat)));
 document.querySelectorAll(".to-home").forEach((el) => el.addEventListener("click", () => selectCategory("home")));
 
+// Reload all, Sound on all and Rearrange: only with cameras showing, and
+// not while rearranging (Reload not in playback).
+function camToolsShown() {
+  const on = !!(camStatus && camStatus.running) && !rearranging;
+  $("cam-reload-all").classList.toggle("hidden", !on || isPlayback());
+  $("cam-sound-all").classList.toggle("hidden", !on);
+  $("cam-rearrange").classList.toggle("hidden", !on);
+}
+
 async function refreshCameras() {
   try {
     camStatus = await invoke("cameras_status");
@@ -504,6 +529,7 @@ async function refreshCameras() {
     $("cam-message").textContent = "";
   }
   $("cam-logout").classList.toggle("hidden", !camStatus.logged_in || camStatus.running);
+  camToolsShown();
   if (camStatus.running) {
     await loadLayout();
     renderCameraGrid();
@@ -520,9 +546,9 @@ function showLogin(show, note) {
 }
 
 // The sign-in's steps. "account": email and password, Log in. "code":
-// TP-Link sent a code; the account is locked in and only Confirm is
-// offered. "code-failed": the code was refused; try it again, or Log in
-// again for a new one.
+// TP-Link sent a code; the account is locked in and Confirm is the one
+// action (with a quiet way back to another account). "code-failed": the
+// code was refused; try it again, or Log in again for a new one.
 function loginStep(step) {
   const code = step !== "account";
   $("cam-login-code-row").classList.toggle("hidden", !code);
@@ -531,7 +557,14 @@ function loginStep(step) {
   // After a refused code, Confirm stays the main button.
   $("cam-login-go").classList.toggle("accent", step === "account");
   for (const id of ["cam-login-email", "cam-login-password"]) $(id).disabled = step === "code";
+  $("cam-login-other").classList.toggle("hidden", step !== "code");
 }
+$("cam-login-other").addEventListener("click", () => {
+  $("cam-login-code").value = "";
+  $("cam-login-note").textContent = "";
+  loginStep("account");
+  $("cam-login-email").focus();
+});
 
 $("cam-login").addEventListener("click", () => showLogin(true, ""));
 // The keyboard's Enter key: email → password → sign in; the code → confirm.
@@ -549,7 +582,11 @@ $("cam-login-cancel").addEventListener("click", () => showLogin(false, ""));
 $("cam-login-go").addEventListener("click", async () => {
   const email = $("cam-login-email").value.trim();
   const password = $("cam-login-password").value;
-  if (!email || !password) { $("cam-login-note").textContent = "Email and password, please."; return; }
+  if (!email || !password) {
+    $("cam-login-note").textContent = !email ? "Enter your TP-Link email." : "Enter your TP-Link password.";
+    $(!email ? "cam-login-email" : "cam-login-password").focus();
+    return;
+  }
   $("cam-login-go").disabled = true;
   $("cam-login-note").textContent = "asking TP-Link…";
   try {
@@ -571,7 +608,11 @@ $("cam-login-go").addEventListener("click", async () => {
 });
 $("cam-login-code-go").addEventListener("click", async () => {
   const code = $("cam-login-code").value.trim();
-  if (!code) return;
+  if (!code) {
+    $("cam-login-note").textContent = "Enter the code from TP-Link's email.";
+    $("cam-login-code").focus();
+    return;
+  }
   $("cam-login-code-go").disabled = true;
   $("cam-login-note").textContent = "checking the code\u2026";
   try {
@@ -688,7 +729,8 @@ function watchTile(tile, onTick) {
       setState(tile, "lost", "no data from the camera");
       return;
     }
-    if (t > lastT + 0.05) {
+    // A clock still at 0 is no picture yet, not a live one.
+    if (t > 0 && t > lastT + 0.05) {
       lastT = t; stalledSince = 0;
       setState(tile, "live", "");
       return;
@@ -698,7 +740,10 @@ function watchTile(tile, onTick) {
     const total = (now - started) / 1000;
     // The window's own player can say what it got and could not show.
     const why = tile._player ? tile._player.note() || "no data from the camera" : "no data from the camera";
-    if (lastT < 0 && total > 20) setState(tile, "lost", why);
+    if (lastT < 0 && total > 20) {
+      const detail = why && !/^waiting|^no data/i.test(why) ? `: ${why}` : "";
+      setState(tile, "lost", `No picture from the camera${detail}. Tap to try again.`);
+    }
     else if (lastT < 0) setState(tile, "connecting", "connecting…");
     else if (quiet > 15) setState(tile, "lost", why);
     else if (quiet > 2) setState(tile, "waiting", "waiting for the camera…");
@@ -1081,7 +1126,7 @@ function toggleAudio(tile, cam) {
 // The top row's button: sound on every camera shown, or off on all.
 function refreshSoundAll() {
   const tiles = [...$("cam-grid").querySelectorAll(".cam-tile:not(.placeholder)")];
-  const anyOff = tiles.some((t) => !t.querySelector("audio") && !t._fileSound && !(t._player && t._player.sound));
+  const anyOff = !tiles.length || tiles.some((t) => !t.querySelector("audio") && !t._fileSound && !(t._player && t._player.sound));
   $("cam-sound-all").textContent = anyOff ? "\u{1F50A} Sound on all" : "\u{1F507} Mute all";
 }
 
@@ -1142,6 +1187,7 @@ function buildTile(cam) {
   volume.min = "0"; volume.max = "100"; volume.step = "1";
   volume.value = String(volumeOf(cam));
   volume.title = `Volume for ${cam.name}`;
+  volume.setAttribute("aria-label", `Volume for ${cam.name}`);
   let saveTimer = null;
   volume.addEventListener("input", (ev) => {
     ev.stopPropagation();
@@ -1263,6 +1309,24 @@ function buildPlaceholder(cam) {
   });
   tile.addEventListener("dragend", () => tile.classList.remove("dragging"));
   cell.appendChild(tile);
+  // Dragging needs a mouse; this works with a finger and the keyboard too.
+  const move = document.createElement("select");
+  move.className = "cam-move";
+  move.setAttribute("aria-label", `Group for ${cam.name}`);
+  const here = layout.groups.findIndex((g) => g.cameras.includes(cam.device_id));
+  for (const [key, name] of [...layout.groups.map((g, i) => [i, g.name]), [-1, "Ungrouped"]]) {
+    const o = document.createElement("option");
+    o.value = String(key);
+    o.textContent = name;
+    o.selected = key === here;
+    move.appendChild(o);
+  }
+  move.addEventListener("change", () => {
+    moveCamera(cam.device_id, Number(move.value), null);
+    saveLayout();
+    renderCameraGrid();
+  });
+  cell.appendChild(move);
   return cell;
 }
 
@@ -1315,7 +1379,7 @@ function buildGroupControls(box) {
   row.innerHTML = '<button type="button" class="grp-pause" title="Pause or resume this group">\u23F8</button>'
     + '<div class="grp-tl" title="This group: recordings and detections. Click or drag to move its cameras together; scroll to zoom"></div>'
     + '<span class="grp-at muted">—</span>'
-    + '<input type="range" class="grp-speed" min="-2" max="3" step="0.05" value="0" title="Speed for this group">'
+    + '<input type="range" class="grp-speed" aria-label="Speed for this group" min="-2" max="3" step="0.05" value="0" title="Speed for this group">'
     + '<span class="grp-speed-label">1x</span>';
   row.querySelector(".grp-pause").addEventListener("click", () => togglePause(cellsOf(box)));
   const sl = row.querySelector(".grp-speed");
@@ -1385,15 +1449,21 @@ function buildGroup(g) {
   tools.className = "cam-group-tools";
   const small = (text, titleText, onClick) => {
     const b = document.createElement("button");
-    b.type = "button"; b.className = "small"; b.textContent = text; b.title = titleText;
+    b.type = "button"; b.className = "small"; b.textContent = text; b.title = titleText; b.setAttribute("aria-label", titleText);
     b.addEventListener("click", onClick);
     tools.appendChild(b);
   };
   if (rearranging) {
     if (g.key !== -1) {
-      small("Rename", "Rename this group", () => {
-        const name = prompt("Group name", g.name);
-        if (name && name.trim()) { layout.groups[g.key].name = name.trim(); saveLayout(); renderCameraGrid(); }
+      if (g.key > 0) small("\u2191", `Move ${g.name} up`, () => {
+        const [moved] = layout.groups.splice(g.key, 1);
+        layout.groups.splice(g.key - 1, 0, moved);
+        saveLayout();
+        renderCameraGrid();
+      });
+      small("Rename", "Rename this group", async () => {
+        const name = await KagazAsk.name("Group name", g.name, "Rename group");
+        if (name) { layout.groups[g.key].name = name; saveLayout(); renderCameraGrid(); }
       });
       small("Remove", "Remove the group; its cameras go back to Ungrouped", () => {
         layout.ungrouped.push(...layout.groups[g.key].cameras);
@@ -1498,10 +1568,21 @@ async function renderCameraGrid() {
   grid.innerHTML = "";
   $("cam-rearrange-bar").classList.toggle("hidden", !rearranging);
   $("cam-viewing").classList.toggle("hidden", viewGroup === null);
-  $("cam-rearrange").classList.toggle("hidden", rearranging);
   $("pb-controls").classList.toggle("hidden", !isPlayback());
   if (!isPlayback()) { pbMaster = null; updateSeekBar(); allTiles().forEach((t) => { t._sync = null; }); }
-  $("cam-reload-all").classList.toggle("hidden", isPlayback());
+  camToolsShown();
+  if (!camStatus.cameras.length && !rearranging) {
+    const empty = document.createElement("div");
+    empty.className = "empty-state";
+    empty.innerHTML = "<p><strong>No cameras on this TP-Link account</strong></p><p class=\"muted\">Add them in the Tapo app, then press Reload.</p>";
+    const reload = document.createElement("button");
+    reload.type = "button";
+    reload.textContent = "Reload";
+    reload.addEventListener("click", () => refreshCameras());
+    empty.appendChild(reload);
+    grid.appendChild(empty);
+    return;
+  }
   for (const g of visibleGroups()) grid.appendChild(buildGroup(g));
   if (!rearranging) {
     if (isPlayback()) {
@@ -1896,8 +1977,20 @@ function refreshPlaybackControls() {
 }
 
 // The gear menu.
-$("cam-gear").addEventListener("click", (ev) => { ev.stopPropagation(); $("cam-settings").classList.toggle("hidden"); });
-document.addEventListener("click", (ev) => { if (!ev.target.closest(".cam-menu")) $("cam-settings").classList.add("hidden"); });
+// The ⚙ menu: Back, Escape or a click elsewhere closes it.
+function camMenu(open) {
+  const was = !$("cam-settings").classList.contains("hidden");
+  if (open === was) return;
+  $("cam-settings").classList.toggle("hidden", !open);
+  $("cam-gear").setAttribute("aria-expanded", String(open));
+  if (open) KagazNav.push("cam-menu", () => camMenu(false));
+  else KagazNav.pop("cam-menu");
+}
+$("cam-gear").addEventListener("click", (ev) => { ev.stopPropagation(); camMenu($("cam-settings").classList.contains("hidden")); });
+document.addEventListener("click", (ev) => { if (!ev.target.closest(".cam-menu")) camMenu(false); });
+document.addEventListener("keydown", (ev) => {
+  if (ev.key === "Escape" && !$("cam-settings").classList.contains("hidden")) { camMenu(false); $("cam-gear").focus(); }
+});
 
 // The chosen date and time as a unix time on the cameras' clock, or null.
 function chosenTime() {
@@ -2090,7 +2183,7 @@ function buildTimeline(cam, tile) {
   row.className = "pb-row";
   row.innerHTML = '<span class="pb-at">—</span>'
     + '<button type="button" class="tile-pause" title="Pause or resume this camera">\u23F8</button>'
-    + '<input type="range" class="tile-speed" min="-2" max="3" step="0.05" value="0" title="Speed for this camera">'
+    + '<input type="range" class="tile-speed" aria-label="Speed for this camera" min="-2" max="3" step="0.05" value="0" title="Speed for this camera">'
     + '<span class="tile-speed-label">1x</span>'
     + '<button type="button" class="pb-download">Download…</button>'
     + '<button type="button" class="pb-clock" title="Correct this camera\'s times for the day, when its clock was wrong">Clock…</button>'
@@ -2233,6 +2326,8 @@ function clockForm(wrap, cam, tile) {
     } catch (e) { note.textContent = "failed: " + e; }
   });
   form.querySelectorAll(".ck-remove").forEach((btn) => btn.addEventListener("click", async () => {
+    const what = btn.parentElement.firstChild.textContent.split(":")[0].trim();
+    if (!(await KagazAsk.confirm(`Remove the clock correction for ${what}?`, "Remove correction", "Its recordings show the camera's own clock again."))) return;
     try {
       apply(await invoke("clock_uncorrect", { deviceId: cam.device_id, date, cameraFrom: Number(btn.dataset.from) }));
     } catch (e) { note.textContent = "failed: " + e; }
@@ -2265,7 +2360,7 @@ $("detail-back").addEventListener("click", () => {
 $("cam-layout").addEventListener("change", () => $("cam-grid").style.setProperty("--cols", $("cam-layout").value));
 // On a narrow window the three camera tools live in the gear menu.
 function placeCameraTools() {
-  const narrow = window.matchMedia("(max-width: 839px)").matches;
+  const narrow = window.matchMedia("(max-width: 839px), (max-height: 500px) and (pointer: coarse)").matches;
   const dest = narrow ? $("cam-tools-menu") : $("cam-tools");
   for (const id of ["cam-reload-all", "cam-sound-all", "cam-rearrange"]) {
     const b = $(id);
@@ -2278,12 +2373,20 @@ $("cam-mode").addEventListener("change", () => { if (camStatus && camStatus.runn
 $("cam-reload-all").addEventListener("click", () => { if (camStatus && camStatus.running) renderCameraGrid(); });
 $("cam-when").addEventListener("change", () => { if (camStatus && camStatus.running) renderCameraGrid(); });
 $("pb-play").addEventListener("click", () => playAll($("cam-grid")));
-$("cam-rearrange").addEventListener("click", () => { rearranging = true; viewGroup = null; renderCameraGrid(); });
-$("cam-rearrange-done").addEventListener("click", () => { rearranging = false; renderCameraGrid(); });
-$("cam-add-group").addEventListener("click", () => {
-  const name = prompt("Name of the new group (a room, a floor, a side of the house)", "");
-  if (!name || !name.trim()) return;
-  layout.groups.push({ name: name.trim(), cameras: [], collapsed: false });
+// Rearranging is a step of its own: Back (or Done) ends it.
+function setRearranging(on) {
+  if (rearranging === on) return;
+  rearranging = on;
+  if (on) { viewGroup = null; KagazNav.push("cam-rearrange", () => setRearranging(false)); }
+  else KagazNav.pop("cam-rearrange");
+  renderCameraGrid();
+}
+$("cam-rearrange").addEventListener("click", () => { camMenu(false); setRearranging(true); });
+$("cam-rearrange-done").addEventListener("click", () => setRearranging(false));
+$("cam-add-group").addEventListener("click", async () => {
+  const name = await KagazAsk.name("Name of the new group: a room, a floor, a side of the house", "", "Create group");
+  if (!name) return;
+  layout.groups.push({ name, cameras: [], collapsed: false });
   saveLayout();
   renderCameraGrid();
 });
@@ -2495,6 +2598,8 @@ function stationCard({ title, where, line, onClick }) {
     span.textContent = line[1];
     li.querySelector(".caps").appendChild(span);
   }
+  li.tabIndex = 0;
+  li.setAttribute("role", "button");
   li.addEventListener("click", onClick);
   return li;
 }
@@ -2516,6 +2621,7 @@ async function lookForStations() {
 }
 
 function openStation(s) {
+  KagazNav.push("door-station", closeStation);
   doorSelected = s;
   $("door-list").classList.add("hidden");
   $("door-recent-box").classList.add("hidden");
@@ -2530,6 +2636,7 @@ function openStation(s) {
 }
 
 function closeStation() {
+  KagazNav.pop("door-station");
   doorSelected = null;
   $("door-station").classList.add("hidden");
   $("door-list").classList.remove("hidden");
@@ -2551,7 +2658,8 @@ $("door-station-save").addEventListener("click", async () => {
 });
 $("door-station-remove").addEventListener("click", async () => {
   if (!doorSelected || !doorSelected.saved) return;
-  if (!confirm(`Forget "${doorSelected.name}" at ${doorSelected.address}?`)) return;
+  if (!(await KagazAsk.confirm(`Forget ${doorSelected.name}?`, "Forget station",
+    `Kagaz stops listing ${doorSelected.address}. Its rings still reach this device until you remove it from the station's Direct IP list.`))) return;
   try {
     doorStations = await invoke("doorbell_station_remove", { address: doorSelected.address });
     closeStation();
@@ -2590,14 +2698,24 @@ function doorSettings(on) {
 $("door-gear").addEventListener("click", () => doorSettings(!$("doorbell").classList.contains("show-settings")));
 $("door-settings-back").addEventListener("click", () => doorSettings(false));
 $("door-port-go").addEventListener("click", async () => {
+  const note = $("door-port-note");
   const port = Number($("door-port").value);
-  if (!(port >= 1 && port <= 65535)) { $("door-message").textContent = "The port must be 1 to 65535."; return; }
+  note.className = "small cap-warn";
+  if (!(port >= 1 && port <= 65535)) {
+    note.textContent = "The port must be a number from 1 to 65535.";
+    note.scrollIntoView({ block: "nearest" });
+    $("door-port").focus();
+    return;
+  }
   try {
     await invoke("doorbell_listen", { port });
     doorStations.listen_port = port;
+    note.className = "small cap-ok";
+    note.textContent = `Listening on ${port}.`;
   } catch (e) {
-    $("door-message").textContent = "" + e;
+    note.textContent = "Could not listen there: " + e;
   }
+  note.scrollIntoView({ block: "nearest" });
 });
 
 for (const [id, cmd] of [["door-answer", "doorbell_answer"], ["door-decline", "doorbell_decline"],

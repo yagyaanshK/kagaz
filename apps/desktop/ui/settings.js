@@ -47,7 +47,19 @@ const KagazRing = (() => {
     source.connect(gain);
     source.start();
     playing = { source, gain };
-    source.onended = () => { if (playing && playing.source === source) playing = null; };
+    source.onended = () => { if (playing && playing.source === source) ended(); };
+  }
+
+  // Told once when the tone playing now stops (a Listen button turns back).
+  let onStop = [];
+  function whenStopped(fn) {
+    onStop.push(fn);
+  }
+  function ended() {
+    playing = null;
+    const fns = onStop;
+    onStop = [];
+    for (const fn of fns) fn();
   }
 
   // Ring for `peer` (a device's or person's name) of `kind`.
@@ -81,7 +93,7 @@ const KagazRing = (() => {
     if (!playing) return;
     try { playing.source.stop(); } catch (_) {}
     try { playing.gain.disconnect(); } catch (_) {}
-    playing = null;
+    ended();
   }
 
   // Hear a tone once (Settings).
@@ -89,7 +101,7 @@ const KagazRing = (() => {
     try { await play(id, false, volume); } catch (e) { beep(); }
   }
 
-  return { start, stop, preview, tones, forget, toneFor, isPlaying: () => !!playing };
+  return { start, stop, preview, tones, forget, toneFor, whenStopped, isPlaying: () => !!playing };
 })();
 
 // Helpers shared by the settings pages.
@@ -106,7 +118,9 @@ const KagazSet = (() => {
     if (note) box.appendChild(el("p", "muted small", note));
     return box;
   }
-  // A row: a label (and its note) on the left, controls on the right.
+  // A row: a label (and its note) on the left, controls on the right. The
+  // label belongs to the row's first field, so tapping its words works too.
+  let ids = 0;
   function row(label, note, ...controls) {
     const r = el("div", "set-row");
     const l = el("label", "set-label");
@@ -114,15 +128,36 @@ const KagazSet = (() => {
     if (note) l.appendChild(el("span", "muted small", note));
     const c = el("span", "set-control");
     c.append(...controls);
+    const field = c.querySelector("input, select");
+    if (field) {
+      if (!field.id) field.id = `set-field-${++ids}`;
+      l.htmlFor = field.id;
+    }
     r.append(l, c);
     return r;
   }
-  return { el, section, row };
+  // Save a change; when it fails, put the control back and say so in its row.
+  async function attempt(r, work, undo) {
+    let err = r.querySelector(".set-error");
+    try {
+      await work();
+      if (err) err.remove();
+    } catch (e) {
+      if (undo) undo();
+      if (!err) {
+        err = el("span", "small cap-warn set-error");
+        err.setAttribute("role", "alert");
+        r.querySelector(".set-label").appendChild(err);
+      }
+      err.textContent = `Not saved: ${e}`;
+    }
+  }
+  return { el, section, row, attempt };
 })();
 
 // The doorbell's settings page (its gear).
 const KagazDoorbellSettings = (() => {
-  const { el, section, row } = KagazSet;
+  const { el, section, row, attempt } = KagazSet;
   let listing = null;
 
   function toneSelect(value, same) {
@@ -146,10 +181,20 @@ const KagazDoorbellSettings = (() => {
     b.type = "button";
     b.title = "Listen";
     b.setAttribute("aria-label", "Listen");
-    b.addEventListener("click", () => {
+    const shown = (on) => {
+      b.textContent = on ? "■" : "▶";
+      b.title = on ? "Stop" : "Listen";
+      b.setAttribute("aria-label", b.title);
+    };
+    b.addEventListener("click", async () => {
       if (KagazRing.isPlaying()) { KagazRing.stop(); return; }
       const id = getId();
-      if (id) KagazRing.preview(id, listing.settings.volume);
+      if (!id) return;
+      await KagazRing.preview(id, listing.settings.volume);
+      if (KagazRing.isPlaying()) {
+        shown(true);
+        KagazRing.whenStopped(() => shown(false));
+      }
     });
     return b;
   }
@@ -166,11 +211,17 @@ const KagazDoorbellSettings = (() => {
     const sel = toneSelect(s.events[key] || "", key === "all" ? null : "Same as every doorbell");
     if (key === "all") sel.value = s.events.all || "soft-chime";
     sel.setAttribute("aria-label", `${label} tone`);
-    sel.addEventListener("change", async () => {
+    const r = row(label, note, sel, playButton(() => sel.value || s.events.all || "soft-chime"));
+    let was = sel.value;
+    sel.addEventListener("change", () => {
+      const before = s.events[key];
       if (sel.value) s.events[key] = sel.value; else delete s.events[key];
-      await save();
+      attempt(r, async () => { await save(); was = sel.value; }, () => {
+        if (before) s.events[key] = before; else delete s.events[key];
+        sel.value = was;
+      });
     });
-    return row(label, note, sel, playButton(() => sel.value || s.events.all || "soft-chime"));
+    return r;
   }
 
   // One device's own tone.
@@ -179,11 +230,17 @@ const KagazDoorbellSettings = (() => {
     const key = name.trim().toLowerCase();
     const sel = toneSelect(s.devices[key] || "", "Same as its kind");
     sel.setAttribute("aria-label", `${name} tone`);
-    sel.addEventListener("change", async () => {
+    const r = row(name, "", sel, playButton(() => sel.value || s.events[kindKey] || s.events.all || "soft-chime"));
+    let was = sel.value;
+    sel.addEventListener("change", () => {
+      const before = s.devices[key];
       if (sel.value) s.devices[key] = sel.value; else delete s.devices[key];
-      await save();
+      attempt(r, async () => { await save(); was = sel.value; }, () => {
+        if (before) s.devices[key] = before; else delete s.devices[key];
+        sel.value = was;
+      });
     });
-    return row(name, "", sel, playButton(() => sel.value || s.events[kindKey] || s.events.all || "soft-chime"));
+    return r;
   }
 
   // How a ring shows on this device: the notification with the ring sound,
@@ -208,19 +265,21 @@ const KagazDoorbellSettings = (() => {
     box.appendChild(styleRow);
     const vibrate = document.createElement("input");
     vibrate.type = "checkbox";
+    vibrate.className = "toggle";
     vibrate.checked = s.vibrate !== false;
-    const save = async () => {
+    let vibrateRow = null;
+    const save = (r, undo) => attempt(r, async () => {
       listing = await invoke("ring_style_set", { silent: style.value === "silent", vibrate: vibrate.checked });
       const n = styleRow.querySelector(".set-label .muted");
       if (n) n.textContent = note();
-    };
-    style.addEventListener("change", save);
-    vibrate.addEventListener("change", save);
+    }, undo);
+    let wasStyle = style.value;
+    style.addEventListener("change", () => save(styleRow, () => { style.value = wasStyle; }).then(() => { wasStyle = style.value; }));
+    vibrate.addEventListener("change", () => save(vibrateRow, () => { vibrate.checked = !vibrate.checked; }));
     if (phone) {
       vibrate.setAttribute("aria-label", "Vibrate");
-      const sw = el("label", "switch");
-      sw.append(vibrate);
-      box.appendChild(row("Vibrate", "While it rings, in either case.", sw));
+      vibrateRow = row("Vibrate", "While it rings, in either case.", vibrate);
+      box.appendChild(vibrateRow);
     }
     return box;
   }
@@ -237,14 +296,31 @@ const KagazDoorbellSettings = (() => {
     range.step = "0.05";
     range.value = String(s.volume);
     range.setAttribute("aria-label", "Ring volume");
-    range.addEventListener("change", async () => { s.volume = Number(range.value); await save(); });
-    sec.appendChild(row("Ring volume", "", range));
+    const volumeRow = row("Ring volume", "", range);
+    let wasVolume = s.volume;
+    range.addEventListener("change", () => {
+      s.volume = Number(range.value);
+      attempt(volumeRow, async () => { await save(); wasVolume = s.volume; }, () => {
+        s.volume = wasVolume;
+        range.value = String(wasVolume);
+      });
+    });
+    sec.appendChild(volumeRow);
     // Own tones.
     for (const t of listing.tones.filter((t) => t.own)) {
       const rm = el("button", "", "Remove");
       rm.type = "button";
-      rm.addEventListener("click", async () => { listing = await invoke("ringtone_remove", { id: t.id }); KagazRing.forget(); draw(); });
-      sec.appendChild(row(t.name, "Your tone", playButton(() => t.id), rm));
+      rm.setAttribute("aria-label", `Remove ${t.name}`);
+      const r = row(t.name, "Your tone", playButton(() => t.id), rm);
+      rm.addEventListener("click", async () => {
+        if (!(await KagazAsk.confirm(`Remove the tone ${t.name}?`, "Remove tone", "Rings that use it go back to every doorbell's tone."))) return;
+        attempt(r, async () => {
+          listing = await invoke("ringtone_remove", { id: t.id });
+          KagazRing.forget();
+          draw();
+        });
+      });
+      sec.appendChild(r);
     }
     const pick = document.createElement("input");
     pick.type = "file";
@@ -289,11 +365,12 @@ const KagazDoorbellSettings = (() => {
     sw.className = "toggle";
     sw.checked = !!(calls && calls.enabled);
     sw.setAttribute("aria-label", "Ring me here");
-    sw.addEventListener("change", async () => {
+    let ringRow = null;
+    sw.addEventListener("change", () => attempt(ringRow, async () => {
       await invoke("calls_enable", { enabled: sw.checked });
       if ($("calls-enabled")) $("calls-enabled").checked = sw.checked;
-    });
-    sec.appendChild(row("Ring me here", /Android/i.test(navigator.userAgent)
+    }, () => { sw.checked = !sw.checked; }));
+    sec.appendChild(ringRow = row("Ring me here", /Android/i.test(navigator.userAgent)
       ? "Ring on this phone for calls to your OneTouch account, also after you close Kagaz (a small “Ready for doorbell calls” notification shows it is listening). If it stops after a while, let Kagaz run in the background in Android's battery settings."
       : "Ring on this computer for calls to your OneTouch account.", sw));
     sec.appendChild(kindTone("doorbell", "Door stations and monitors", "A ring from a door station, an indoor monitor or a guard phone."));
@@ -362,21 +439,24 @@ const KagazSettings = (() => {
       b.addEventListener("click", () => selectCategory(cat));
       return b;
     };
+    const loading = el("p", "muted", "Loading…");
+    body.appendChild(loading);
     try {
       const ot = await invoke("onetouch_peek");
-      box.appendChild(row("OneTouch (doorbell)", ot.logged_in ? `Signed in as ${ot.username}` : ot.remembered ? `Saved sign-in: ${ot.remembered.username}` : "Not signed in", go("Open", "doorbell")));
+      box.appendChild(row("OneTouch (doorbell)", ot.logged_in ? `Signed in as ${ot.username}` : ot.remembered ? `Saved sign-in: ${ot.remembered.username}` : "Not signed in", go("Open Doorbell", "doorbell")));
     } catch (_) {}
     try {
       const cam = await invoke("cameras_status");
-      box.appendChild(row("Tapo (security cameras)", cam.logged_in ? "Signed in" : "Not signed in", go("Open", "cameras")));
+      box.appendChild(row("Tapo (security cameras)", cam.logged_in ? "Signed in" : "Not signed in", go("Open Security cameras", "cameras")));
     } catch (_) {}
+    loading.remove();
     body.appendChild(box);
   }
 
   function drawDevices(body) {
     const box = section("Device settings", "Each kind of device keeps its settings on its own page, behind its ⚙ button.");
     const go = (label, cat) => {
-      const b = el("button", "", "Open");
+      const b = el("button", "", "Open doorbell settings");
       b.type = "button";
       b.addEventListener("click", () => {
         selectCategory(cat);

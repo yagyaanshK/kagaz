@@ -140,9 +140,23 @@ const KagazHistory = (() => {
     const time = document.createElement("span");
     time.className = "act-time muted small";
     time.textContent = timeText(e.date, e.at);
+    // New ones say so in words too, not only by the dot.
+    if (e.unread) {
+      const fresh = document.createElement("span");
+      fresh.className = "visually-hidden";
+      fresh.textContent = "New. ";
+      el.prepend(fresh);
+    }
     el.append(pic, text, time);
-    if (e.picture || e.video) el.addEventListener("click", () => view(e));
-    else el.disabled = true;
+    if (e.picture || e.video) {
+      // A chevron marks what opens; the rest are plain lines.
+      const go = document.createElement("span");
+      go.className = "act-go";
+      go.setAttribute("aria-hidden", "true");
+      go.textContent = "\u203A";
+      el.appendChild(go);
+      el.addEventListener("click", () => view(e));
+    } else el.disabled = true;
     return el;
   }
 
@@ -182,7 +196,11 @@ const KagazHistory = (() => {
     }
     $("viewer").classList.remove("hidden");
     KagazNav.push("viewer", closeViewer);
+    // Focus moves into the viewer, and back to the line it came from.
+    returnTo = document.activeElement;
+    $("viewer-close").focus();
   }
+  let returnTo = null;
   function closeViewer() {
     const video = $("viewer-video");
     video.pause();
@@ -191,7 +209,18 @@ const KagazHistory = (() => {
     $("viewer-img").removeAttribute("src");
     $("viewer").classList.add("hidden");
     KagazNav.pop("viewer");
+    if (returnTo && document.contains(returnTo)) returnTo.focus();
+    returnTo = null;
   }
+  // Tab stays inside the open viewer.
+  $("viewer").addEventListener("keydown", (ev) => {
+    if (ev.key !== "Tab") return;
+    const stops = [...$("viewer").querySelectorAll("button, video[controls]")].filter((x) => !x.classList.contains("hidden"));
+    if (!stops.length) return;
+    const first = stops[0], last = stops[stops.length - 1];
+    if (ev.shiftKey && document.activeElement === first) { ev.preventDefault(); last.focus(); }
+    else if (!ev.shiftKey && document.activeElement === last) { ev.preventDefault(); first.focus(); }
+  });
   $("viewer-close").addEventListener("click", closeViewer);
   $("viewer").addEventListener("click", (ev) => { if (ev.target.id === "viewer") closeViewer(); });
   document.addEventListener("keydown", (ev) => { if (ev.key === "Escape" && !$("viewer").classList.contains("hidden")) closeViewer(); });
@@ -205,6 +234,7 @@ const KagazHistory = (() => {
       const c = document.createElement("button");
       c.type = "button";
       c.className = "chip" + (filter === id ? " active" : "");
+      c.setAttribute("aria-pressed", String(filter === id));
       c.textContent = label;
       c.addEventListener("click", () => { filter = id; draw(); });
       box.appendChild(c);
