@@ -52,6 +52,32 @@ const KagazNav = (() => {
     sync(); // forward past what is open: step back to it
   });
 
+  // A computer's Back: Alt+Left (Windows, Linux), Cmd+[ (macOS) and the
+  // mouse's back button. The web view itself does not act on them (WebView2
+  // has its browser keys off), so they step back here, never past Home.
+  const mac = /Mac/.test(navigator.platform);
+  function back() {
+    if (depth > 0 && !pending) history.back();
+  }
+  window.addEventListener("keydown", (ev) => {
+    const isBack = mac
+      ? ev.metaKey && !ev.altKey && !ev.ctrlKey && ev.key === "["
+      : ev.altKey && !ev.ctrlKey && !ev.metaKey && !ev.shiftKey && ev.key === "ArrowLeft";
+    if (!isBack) return;
+    ev.preventDefault();
+    back();
+  });
+  // Button 3 is the mouse's back button; stopping it here keeps a web view
+  // that would also act on it from going back twice.
+  window.addEventListener("mousedown", (ev) => {
+    if (ev.button === 3) ev.preventDefault();
+  });
+  window.addEventListener("mouseup", (ev) => {
+    if (ev.button !== 3) return;
+    ev.preventDefault();
+    back();
+  });
+
   // A level opened on top of what shows.
   function push(id, close) {
     if (closing) return;

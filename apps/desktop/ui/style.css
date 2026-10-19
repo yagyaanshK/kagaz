@@ -89,7 +89,7 @@ h3 { font-size: 14px; margin: 18px 0 6px; }
 #categories li {
   padding: 10px 12px;
   border-radius: 8px;
-  cursor: pointer;
+  cursor: default;
   border: 1px solid transparent;
   display: grid;
   grid-template-columns: auto 1fr;
@@ -122,7 +122,7 @@ h3 { font-size: 14px; margin: 18px 0 6px; }
 #devices li {
   padding: 12px 14px;
   border-radius: 10px;
-  cursor: pointer;
+  cursor: default;
   border: 1px solid var(--line);
   background: var(--bg);
 }
@@ -136,7 +136,7 @@ h3 { font-size: 14px; margin: 18px 0 6px; }
   background: none;
   border: none;
   color: var(--accent);
-  cursor: pointer;
+  cursor: default;
   padding: 0;
   font-size: 13px;
   margin-bottom: 10px;
@@ -158,7 +158,7 @@ h3 { font-size: 14px; margin: 18px 0 6px; }
   color: var(--muted);
   padding: 8px 12px;
   font: inherit;
-  cursor: pointer;
+  cursor: default;
 }
 .tab.active, .tab[aria-pressed="true"] { color: var(--text); border-bottom-color: var(--accent); }
 
@@ -204,7 +204,9 @@ select:focus-visible, button:focus-visible, input:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
-button { cursor: pointer; }
+/* Arrow on buttons, as native apps do; the hand is for links only. */
+button { cursor: default; }
+a[href] { cursor: pointer; }
 button:disabled { opacity: 0.6; cursor: default; }
 input:disabled { opacity: 0.6; }
 button.icon { font-size: 16px; padding: 4px 9px; min-width: 36px; }
@@ -241,7 +243,7 @@ button.icon { font-size: 16px; padding: 4px 9px; min-width: 36px; }
    Tall (TikTok, Reels): as tall as the screen allows, centred, the buttons
    in a column down the right edge. Controls show while nothing plays, on
    hover with a mouse, and for a few seconds after a tap. */
-.kz-stage { position: relative; width: 100%; aspect-ratio: var(--ar, 16 / 9); max-height: 78vh; background: #000; border-radius: 10px; overflow: hidden; color: #fff; user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent; cursor: pointer; }
+.kz-stage { position: relative; width: 100%; aspect-ratio: var(--ar, 16 / 9); max-height: 78vh; background: #000; border-radius: 10px; overflow: hidden; color: #fff; user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent; cursor: default; }
 .kz-stage .kz-player { position: absolute; inset: 0; }
 .kz-stage[data-shape="tall"] { width: auto; height: min(78vh, 760px); max-width: 100%; margin: 0 auto; }
 .kz-note { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center; padding: 48px 24px; color: #ddd; font-size: 13px; pointer-events: none; }
@@ -282,7 +284,7 @@ body.kz-has-full { overflow: hidden; }
 .calls-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
 .calls-head p { margin: 0; flex: 1 1 200px; }
 #calls-retry-row { margin-top: 8px; }
-.switch { flex-direction: row; align-items: center; gap: 8px; color: var(--text); cursor: pointer; white-space: nowrap; }
+.switch { flex-direction: row; align-items: center; gap: 8px; color: var(--text); cursor: default; white-space: nowrap; }
 .switch input { width: 18px; height: 18px; min-height: 0; accent-color: var(--accent); }
 #call-card { margin-top: 12px; display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 16px; padding: 14px; border: 1px solid var(--accent); border-radius: 12px; background: var(--bg); }
 #call-card.ringing { animation: call-pulse 1.2s ease-in-out infinite; }
@@ -299,7 +301,7 @@ body.kz-has-full { overflow: hidden; }
 .call-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
 button.danger { background: var(--bad); color: #fff; border-color: var(--bad); }
 .calls-more { margin-top: 12px; }
-.calls-more summary { cursor: pointer; color: var(--muted); padding: 8px 0; font-size: 13px; }
+.calls-more summary { cursor: default; color: var(--muted); padding: 8px 0; font-size: 13px; }
 .calls-dial { display: flex; gap: 8px; margin-top: 4px; }
 .calls-dial input { flex: 1; min-width: 0; }
 .call-volume { flex-direction: row; align-items: center; gap: 8px; margin-top: 12px; }
@@ -398,7 +400,7 @@ label small { font-size: 12px; min-height: 1.2em; }
 /* Cameras */
 .cam-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 #cameras.pane { max-width: none; }
-.cam-tile { background: #000; border-radius: 8px; overflow: hidden; position: relative; aspect-ratio: 16 / 9; cursor: pointer; }
+.cam-tile { background: #000; border-radius: 8px; overflow: hidden; position: relative; aspect-ratio: 16 / 9; cursor: default; }
 .cam-tile video-stream, .cam-tile video, .cam-tile .kz-player { width: 100%; height: 100%; display: block; object-fit: contain; background: #000; }
 .cam-tile .cam-name { position: absolute; left: 8px; bottom: 6px; color: #fff; font-size: 12px; text-shadow: 0 0 4px #000; }
 .cam-tile.big { grid-column: 1 / -1; aspect-ratio: 16 / 9; }
@@ -407,7 +409,7 @@ label small { font-size: 12px; min-height: 1.2em; }
 .cam-overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; background: rgba(0,0,0,0.35); color: #fff; font-size: 13px; }
 .cam-overlay .spinner { width: 28px; height: 28px; border: 3px solid rgba(255,255,255,0.35); border-top-color: #fff; border-radius: 50%; animation: spin 0.9s linear infinite; }
 .cam-tile[data-state="lost"] .spinner, .cam-tile[data-state="ended"] .spinner { display: none; }
-.cam-reload { width: 56px; height: 56px; border-radius: 50%; font-size: 30px; line-height: 1; padding: 0; background: rgba(255,255,255,0.15); color: #fff; border: 2px solid rgba(255,255,255,0.7); cursor: pointer; }
+.cam-reload { width: 56px; height: 56px; border-radius: 50%; font-size: 30px; line-height: 1; padding: 0; background: rgba(255,255,255,0.15); color: #fff; border: 2px solid rgba(255,255,255,0.7); cursor: default; }
 .cam-reload:hover { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
 .cam-overlay-text { max-width: 90%; text-align: center; }
 @keyframes spin { to { transform: rotate(360deg); } }
@@ -416,7 +418,7 @@ label small { font-size: 12px; min-height: 1.2em; }
 #cam-grid { display: block; }
 .cam-group { margin-top: 10px; }
 .cam-group-head { display: flex; align-items: center; gap: 8px; margin: 6px 0; font-size: 14px; font-weight: 600; flex-wrap: wrap; }
-.cam-group-head .collapse { background: none; border: none; padding: 0 4px; font-size: 14px; cursor: pointer; min-height: 0; }
+.cam-group-head .collapse { background: none; border: none; padding: 0 4px; font-size: 14px; cursor: default; min-height: 0; }
 .cam-group-head .cam-group-tools { display: flex; gap: 6px; margin-left: auto; }
 .cam-group-head button.small { padding: 2px 8px; font-size: 12px; min-height: 0; }
 .cam-group.collapsed .cam-grid-inner { display: none; }
@@ -433,7 +435,7 @@ label small { font-size: 12px; min-height: 1.2em; }
 
 /* Playback timeline under a tile */
 .cam-cell { display: flex; flex-direction: column; gap: 4px; }
-.pb-bar { position: relative; height: 14px; background: var(--line); border-radius: 4px; cursor: pointer; overflow: hidden; }
+.pb-bar { position: relative; height: 14px; background: var(--line); border-radius: 4px; cursor: default; overflow: hidden; }
 .pb-bar .clip { position: absolute; top: 0; bottom: 0; background: var(--accent); opacity: 0.8; }
 .pb-bar .clip.event { background: #d9822b; }
 .pb-bar .pos { position: absolute; top: 0; bottom: 0; width: 2px; background: #fff; mix-blend-mode: difference; }
@@ -462,7 +464,7 @@ label small { font-size: 12px; min-height: 1.2em; }
 
 /* Camera controls: a gear menu for the rarely-changed settings, a playback row */
 .pb-bar-row { display: flex; align-items: center; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
-#pb-seek { position: relative; flex: 1 1 260px; height: 22px; background: var(--line); border-radius: 6px; cursor: pointer; overflow: hidden; }
+#pb-seek { position: relative; flex: 1 1 260px; height: 22px; background: var(--line); border-radius: 6px; cursor: default; overflow: hidden; }
 #pb-seek-clips { position: absolute; inset: 0; }
 #pb-seek-clips .clip { position: absolute; top: 0; bottom: 0; background: var(--accent); opacity: 0.55; }
 #pb-seek-pos { position: absolute; top: 0; bottom: 0; width: 3px; background: #fff; box-shadow: 0 0 4px #000; }
@@ -479,7 +481,7 @@ label small { font-size: 12px; min-height: 1.2em; }
 .cam-tile[data-state="gap"] .spinner, .cam-tile[data-state="gap"] .cam-reload { display: none; }
 .pb-ends { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); margin-top: 1px; }
 .pb-bar .pos { width: 3px; background: #fff; box-shadow: 0 0 3px #000; mix-blend-mode: normal; }
-.cam-tile[data-state="lost"] .cam-overlay, .cam-tile[data-state="ended"] .cam-overlay { cursor: pointer; }
+.cam-tile[data-state="lost"] .cam-overlay, .cam-tile[data-state="ended"] .cam-overlay { cursor: default; }
 /* Per-camera volume: shown while the camera's sound is on, or on hover */
 .cam-tile .cam-volume { position: absolute; right: 92px; bottom: 9px; width: 80px; display: none; min-height: 0; accent-color: var(--accent); }
 .cam-tile.sound-on .cam-volume, .cam-tile:hover .cam-volume { display: block; }
@@ -500,7 +502,7 @@ label small { font-size: 12px; min-height: 1.2em; }
 .pb-row .tile-speed { width: 70px; min-height: 0; accent-color: var(--accent); }
 .pb-row .tile-speed-label, .grp-speed-label { min-width: 34px; font-size: 12px; font-variant-numeric: tabular-nums; }
 .grp-controls { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; flex-wrap: wrap; }
-.grp-bar { position: relative; flex: 1 1 200px; height: 14px; background: var(--line); border-radius: 4px; cursor: pointer; overflow: hidden; }
+.grp-bar { position: relative; flex: 1 1 200px; height: 14px; background: var(--line); border-radius: 4px; cursor: default; overflow: hidden; }
 .grp-bar .grp-clips { position: absolute; inset: 0; }
 .grp-bar .clip { position: absolute; top: 0; bottom: 0; background: var(--accent); opacity: 0.55; }
 .grp-bar .grp-pos { position: absolute; top: 0; bottom: 0; width: 3px; background: #fff; box-shadow: 0 0 3px #000; }
@@ -510,7 +512,7 @@ label small { font-size: 12px; min-height: 1.2em; }
 /* Seek bars (timeline.js): detections lane, recordings track, time scale */
 .tl { position: relative; user-select: none; }
 .tl-events { position: relative; height: 7px; margin-bottom: 2px; }
-.tl-det { position: absolute; top: 0; bottom: 0; border-radius: 2px; cursor: pointer; }
+.tl-det { position: absolute; top: 0; bottom: 0; border-radius: 2px; cursor: default; }
 .tl-motion { background: #e8892f; }
 .tl-person { background: #3d8bfd; }
 .tl-detection { background: #b48ce0; }
@@ -578,7 +580,7 @@ button.accent { background: var(--accent); color: var(--accent-text); border-col
 
 /* The stations, as cards like the printers */
 ul.cards { list-style: none; margin: 10px 0 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
-ul.cards li { padding: 12px 14px; border-radius: 10px; cursor: pointer; border: 1px solid var(--line); background: var(--bg); }
+ul.cards li { padding: 12px 14px; border-radius: 10px; cursor: default; border: 1px solid var(--line); background: var(--bg); }
 ul.cards li:hover { border-color: var(--accent); }
 ul.cards .name { font-weight: 600; }
 ul.cards .where { font-size: 12px; color: var(--muted); margin-top: 2px; }
@@ -774,7 +776,7 @@ button.link { background: none; border: none; color: var(--accent); padding: 4px
 .set-control select { max-width: 220px; }
 .set-control input[type="range"] { width: 180px; accent-color: var(--accent); }
 .set-more { margin-top: 6px; }
-.set-more summary { cursor: pointer; padding: 10px 0; color: var(--accent); }
+.set-more summary { cursor: default; padding: 10px 0; color: var(--accent); }
 .set-own { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; }
 .set-own > button { align-self: flex-start; margin-top: 6px; }
 input.toggle { width: 44px; height: 24px; min-height: 0; accent-color: var(--accent); }
