@@ -6,8 +6,9 @@ package life.omniverse.kagaz
 // - opens Android's print dialog for a PDF, which prints through whatever
 //   print service (vendor plugin, Mopria) the phone has;
 // - copies a finished scan into Downloads/Kagaz;
-// - keeps the doorbell line alive in the background and rings for calls
-//   (KagazCallService);
+// - keeps the doorbell line alive in the background (KagazCallService);
+//   the ring itself goes through KagazNative, which works with the window
+//   closed, when plugin calls cannot run;
 // - keeps a remembered sign-in, encrypted with a key that never leaves the
 //   Android Keystore (the desktop's password vault does this elsewhere).
 
@@ -71,21 +72,53 @@ class ListenArgs {
 }
 
 @InvokeArg
-class CallArgs {
-    var phase: String = "idle"
-    var peer: String = ""
-    var tone: String = ""
-    var silent: Boolean = false
-    var vibrate: Boolean = true
-}
-
-@InvokeArg
 class SecretArgs {
     lateinit var name: String
     var value: String? = null
 }
 
 private const val SECRET_KEY = "kagaz-secrets"
+
+/** Remembered secrets: AES-GCM with a Keystore key; only the sealed bytes
+ *  (IV first) sit in the app's private preferences. Used by the plugin and,
+ *  with the window closed, by Rust through KagazNative. */
+object KagazSecrets {
+    private fun secretKey(): SecretKey {
+        val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+        (store.getKey(SECRET_KEY, null) as? SecretKey)?.let { return it }
+        val generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
+        generator.init(
+            KeyGenParameterSpec.Builder(SECRET_KEY, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
+                .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                .setKeySize(256)
+                .build()
+        )
+        return generator.generateKey()
+    }
+
+    private fun secrets(context: Context) =
+        context.applicationContext.getSharedPreferences("kagaz-secrets", Context.MODE_PRIVATE)
+
+    fun get(context: Context, name: String): String? {
+        val sealed = secrets(context).getString(name, null) ?: return null
+        val bytes = Base64.decode(sealed, Base64.NO_WRAP)
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(Cipher.DECRYPT_MODE, secretKey(), GCMParameterSpec(128, bytes, 0, 12))
+        return String(cipher.doFinal(bytes, 12, bytes.size - 12), Charsets.UTF_8)
+    }
+
+    fun set(context: Context, name: String, value: String) {
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(Cipher.ENCRYPT_MODE, secretKey())
+        val sealed = cipher.iv + cipher.doFinal(value.toByteArray(Charsets.UTF_8))
+        secrets(context).edit().putString(name, Base64.encodeToString(sealed, Base64.NO_WRAP)).apply()
+    }
+
+    fun delete(context: Context, name: String) {
+        secrets(context).edit().remove(name).apply()
+    }
+}
 
 @TauriPlugin
 class KagazPlugin(private val first: Activity) : Plugin(first) {
@@ -126,13 +159,6 @@ class KagazPlugin(private val first: Activity) : Plugin(first) {
         }
     }
 
-    @Command
-    fun callChanged(invoke: Invoke) {
-        val args = invoke.parseArgs(CallArgs::class.java)
-        KagazCallService.ring(activity.applicationContext, if (args.phase == "ringing") args.peer else null, args.tone, args.silent, args.vibrate)
-        invoke.resolve()
-    }
-
     /** Notifications (Android 13+), and leaving battery optimisation, asked once. */
     private fun askOnce() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
@@ -150,37 +176,12 @@ class KagazPlugin(private val first: Activity) : Plugin(first) {
         }
     }
 
-    // ---- Remembered secrets: AES-GCM with a Keystore key; only the sealed
-    // bytes (IV first) sit in the app's private preferences.
-
-    private fun secretKey(): SecretKey {
-        val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-        (store.getKey(SECRET_KEY, null) as? SecretKey)?.let { return it }
-        val generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
-        generator.init(
-            KeyGenParameterSpec.Builder(SECRET_KEY, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
-                .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
-                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
-                .setKeySize(256)
-                .build()
-        )
-        return generator.generateKey()
-    }
-
-    private fun secrets() = activity.getSharedPreferences("kagaz-secrets", Context.MODE_PRIVATE)
-
     @Command
     fun secretGet(invoke: Invoke) {
         val args = invoke.parseArgs(SecretArgs::class.java)
         val ret = JSObject()
         try {
-            val sealed = secrets().getString(args.name, null)
-            if (sealed != null) {
-                val bytes = Base64.decode(sealed, Base64.NO_WRAP)
-                val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-                cipher.init(Cipher.DECRYPT_MODE, secretKey(), GCMParameterSpec(128, bytes, 0, 12))
-                ret.put("value", String(cipher.doFinal(bytes, 12, bytes.size - 12), Charsets.UTF_8))
-            }
+            KagazSecrets.get(activity, args.name)?.let { ret.put("value", it) }
             invoke.resolve(ret)
         } catch (e: Exception) {
             invoke.reject("the saved sign-in could not be unlocked")
@@ -191,10 +192,7 @@ class KagazPlugin(private val first: Activity) : Plugin(first) {
     fun secretSet(invoke: Invoke) {
         val args = invoke.parseArgs(SecretArgs::class.java)
         try {
-            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-            cipher.init(Cipher.ENCRYPT_MODE, secretKey())
-            val sealed = cipher.iv + cipher.doFinal((args.value ?: "").toByteArray(Charsets.UTF_8))
-            secrets().edit().putString(args.name, Base64.encodeToString(sealed, Base64.NO_WRAP)).apply()
+            KagazSecrets.set(activity, args.name, args.value ?: "")
             invoke.resolve()
         } catch (e: Exception) {
             invoke.reject("the sign-in could not be saved on this phone")
@@ -204,7 +202,7 @@ class KagazPlugin(private val first: Activity) : Plugin(first) {
     @Command
     fun secretDelete(invoke: Invoke) {
         val args = invoke.parseArgs(SecretArgs::class.java)
-        secrets().edit().remove(args.name).apply()
+        KagazSecrets.delete(activity, args.name)
         invoke.resolve()
     }
 

@@ -2400,7 +2400,8 @@ function renderDoorbell() {
   } else {
     stopDoorClock();
   }
-  if (ringing && !st.silent) startChime(doorStationName(st.from) || st.caller || "", "local"); else stopChime();
+  // A phone rings with its notification (also with the window closed).
+  if (ringing && !st.silent && !/Android/i.test(navigator.userAgent)) startChime(doorStationName(st.from) || st.caller || "", "local"); else stopChime();
 
   // The sidebar entry says when it is ringing, so other views notice too.
   for (const el of document.querySelectorAll('#categories li[data-cat="doorbell"], #bottom-nav button[data-cat="doorbell"]')) {

@@ -85,7 +85,26 @@ fn now() -> i64 {
         .unwrap_or(0)
 }
 
+/// Held from a change to its ring on the phone, so changes reach it in order.
+static ORDER: Mutex<()> = Mutex::new(());
+
+/// Who rings, as the person knows it: the saved station's name, else what
+/// the station calls itself.
+fn ring_name(st: &Status) -> String {
+    let saved = stations::Stations::load()
+        .stations
+        .into_iter()
+        .find(|s| s.address == st.from)
+        .map(|s| s.name);
+    match saved {
+        Some(name) if !name.trim().is_empty() => name,
+        _ if !st.caller.trim().is_empty() => st.caller.clone(),
+        _ => "A door station".into(),
+    }
+}
+
 fn update(app: &AppHandle, f: impl FnOnce(&mut Status)) {
+    let _order = ORDER.lock().unwrap();
     let state = app.state::<DoorbellState>();
     let (was_ringing, snapshot) = {
         let mut guard = state.status.lock().unwrap();
@@ -97,10 +116,33 @@ fn update(app: &AppHandle, f: impl FnOnce(&mut Status)) {
     // A silent ring's notification goes when the ring does.
     #[cfg(desktop)]
     if was_ringing && snapshot.phase != "ringing" {
-        super::ring_notice::close();
+        super::ring_notice::close("door");
     }
+    // A phone rings with its call notification, as for OneTouch calls.
     #[cfg(mobile)]
-    let _ = was_ringing;
+    {
+        let _ = was_ringing;
+        let style = super::ringtones::load();
+        let peer = ring_name(&snapshot);
+        let tone = if snapshot.phase == "ringing" && !snapshot.silent {
+            let id = super::ringtones::tone_for(&style, &peer, "local");
+            super::ringtones::file_for(&id)
+                .map(|p| p.display().to_string())
+                .unwrap_or_default()
+        } else {
+            String::new()
+        };
+        super::mobile::call_changed(
+            super::mobile::Line::Door,
+            super::mobile::Ring {
+                phase: snapshot.phase.clone(),
+                peer,
+                tone,
+                silent: snapshot.silent,
+                vibrate: style.vibrate,
+            },
+        );
+    }
 }
 
 /// Bring the window forward for a ring.
@@ -232,18 +274,18 @@ fn handle_call(
         s.silent = super::ringtones::load().silent;
     });
     // Ring: the window comes forward. Silent: a notification that opens it.
-    let (silent, caller) = {
+    let (silent, name) = {
         let s = app.state::<DoorbellState>();
         let st = s.status.lock().unwrap();
-        (st.silent, st.caller.clone())
+        (st.silent, ring_name(&st))
     };
     if !silent {
         attention(app);
     } else {
         #[cfg(desktop)]
-        super::ring_notice::show(app, if caller.is_empty() { "A door station" } else { &caller });
+        super::ring_notice::show(app, "door", &name);
         #[cfg(mobile)]
-        let _ = caller;
+        let _ = name;
     }
 
     let started = Instant::now();
@@ -331,6 +373,19 @@ fn send(state: &tauri::State<'_, DoorbellState>, cmd: Command) -> Result<(), Str
 }
 
 // ---------- commands ----------
+
+/// Is a door station ringing (the phone's ring card then acts on it)?
+#[cfg_attr(not(mobile), allow(dead_code))]
+pub fn ringing(app: &AppHandle) -> bool {
+    app.state::<DoorbellState>().status.lock().unwrap().phase == "ringing"
+}
+
+/// Answer or decline from the phone's ring card.
+#[cfg_attr(not(mobile), allow(dead_code))]
+pub fn answer_here(app: &AppHandle, answer: bool) {
+    let state = app.state::<DoorbellState>();
+    let _ = send(&state, if answer { Command::Answer } else { Command::Decline });
+}
 
 #[tauri::command]
 pub fn doorbell_status(state: tauri::State<'_, DoorbellState>) -> Status {

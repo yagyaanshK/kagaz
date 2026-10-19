@@ -37,50 +37,127 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
         .build()
 }
 
-/// The plugin, for code that has no AppHandle (the saved sign-in).
-static HANDLE: std::sync::OnceLock<PluginHandle<Wry>> = std::sync::OnceLock::new();
+/// Kotlin's side of the ring and the saved sign-in (KagazNative.kt),
+/// called directly: plugin calls go through the app's window, and Android
+/// takes that away when the window closes while the doorbell line runs on.
+#[cfg(target_os = "android")]
+mod jvm {
+    use jni::objects::{GlobalRef, JClass, JObject, JString, JValue};
+    use jni::{JNIEnv, JavaVM};
+    use std::sync::OnceLock;
 
-/// Keep the plugin's handle for [`secret_get`] and friends; called at start-up.
-pub fn remember_handle(app: &AppHandle) {
-    if let Some(p) = app.try_state::<Phone<Wry>>() {
-        let _ = HANDLE.set(p.inner().0.clone());
+    static KAGAZ: OnceLock<(JavaVM, GlobalRef)> = OnceLock::new();
+
+    /// KagazNative.attach, from MainActivity before the app starts.
+    #[no_mangle]
+    pub extern "system" fn Java_life_omniverse_kagaz_KagazNative_hello(env: JNIEnv, class: JClass) {
+        if KAGAZ.get().is_some() {
+            return;
+        }
+        if let (Ok(vm), Ok(class)) = (env.get_java_vm(), env.new_global_ref(class)) {
+            let _ = KAGAZ.set((vm, class));
+        }
     }
-}
 
-#[derive(Serialize)]
-struct SecretArgs<'a> {
-    name: &'a str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    value: Option<&'a str>,
-}
+    /// Run `f` with this thread attached to Java; a Java exception becomes an error.
+    fn call<T>(f: impl FnOnce(&mut JNIEnv, &JClass) -> jni::errors::Result<T>) -> Result<T, String> {
+        let (vm, class) = KAGAZ.get().ok_or("Android is not reachable yet")?;
+        let mut env = vm.attach_current_thread().map_err(|e| e.to_string())?;
+        let class: &JClass = class.as_obj().into();
+        let out = f(&mut env, class);
+        if env.exception_check().unwrap_or(false) {
+            let _ = env.exception_clear();
+        }
+        out.map_err(|e| e.to_string())
+    }
 
-#[derive(Deserialize)]
-struct Secret {
-    value: Option<String>,
-}
+    pub fn call_changed(r: &super::Ring) {
+        let _ = call(|env, class| {
+            let phase = JObject::from(env.new_string(&r.phase)?);
+            let peer = JObject::from(env.new_string(&r.peer)?);
+            let tone = JObject::from(env.new_string(&r.tone)?);
+            env.call_static_method(
+                class,
+                "callChanged",
+                "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;ZZ)V",
+                &[
+                    JValue::Object(&phase),
+                    JValue::Object(&peer),
+                    JValue::Object(&tone),
+                    JValue::Bool(r.silent.into()),
+                    JValue::Bool(r.vibrate.into()),
+                ],
+            )?;
+            Ok(())
+        });
+    }
 
-fn handle() -> Result<&'static PluginHandle<Wry>, String> {
-    HANDLE.get().ok_or_else(|| "this phone's secure storage is not available".to_string())
+    pub fn secret_get(name: &str) -> Result<Option<String>, String> {
+        call(|env, class| {
+            let name = JObject::from(env.new_string(name)?);
+            let value = env
+                .call_static_method(class, "secretGet", "(Ljava/lang/String;)Ljava/lang/String;", &[JValue::Object(&name)])?
+                .l()?;
+            if value.is_null() {
+                return Ok(None);
+            }
+            let value: String = env.get_string(&JString::from(value))?.into();
+            Ok(Some(value))
+        })
+    }
+
+    pub fn secret_set(name: &str, value: &str) -> Result<(), String> {
+        call(|env, class| {
+            let name = JObject::from(env.new_string(name)?);
+            let value = JObject::from(env.new_string(value)?);
+            env.call_static_method(
+                class,
+                "secretSet",
+                "(Ljava/lang/String;Ljava/lang/String;)V",
+                &[JValue::Object(&name), JValue::Object(&value)],
+            )?;
+            Ok(())
+        })
+    }
+
+    pub fn secret_delete(name: &str) -> Result<(), String> {
+        call(|env, class| {
+            let name = JObject::from(env.new_string(name)?);
+            env.call_static_method(class, "secretDelete", "(Ljava/lang/String;)V", &[JValue::Object(&name)])?;
+            Ok(())
+        })
+    }
 }
 
 /// A remembered secret, from the Android Keystore-sealed store.
 pub fn secret_get(name: &str) -> Result<Option<String>, String> {
-    let s: Secret = handle()?
-        .run_mobile_plugin("secretGet", SecretArgs { name, value: None })
-        .map_err(|e| e.to_string())?;
-    Ok(s.value)
+    #[cfg(target_os = "android")]
+    return jvm::secret_get(name);
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = name;
+        Err("this phone's secure storage is not available".into())
+    }
 }
 
 pub fn secret_set(name: &str, value: &str) -> Result<(), String> {
-    handle()?
-        .run_mobile_plugin::<()>("secretSet", SecretArgs { name, value: Some(value) })
-        .map_err(|e| e.to_string())
+    #[cfg(target_os = "android")]
+    return jvm::secret_set(name, value);
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = (name, value);
+        Err("this phone's secure storage is not available".into())
+    }
 }
 
 pub fn secret_delete(name: &str) -> Result<(), String> {
-    handle()?
-        .run_mobile_plugin::<()>("secretDelete", SecretArgs { name, value: None })
-        .map_err(|e| e.to_string())
+    #[cfg(target_os = "android")]
+    return jvm::secret_delete(name);
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = name;
+        Err("this phone's secure storage is not available".into())
+    }
 }
 
 fn phone(app: &AppHandle) -> Result<&PluginHandle<Wry>, String> {
@@ -232,37 +309,64 @@ struct ListenArgs {
     on: bool,
 }
 
-#[derive(Serialize)]
-struct CallArgs<'a> {
-    phase: &'a str,
-    peer: &'a str,
-    /// The tone's file to ring with; empty for the phone's own ringtone.
-    tone: &'a str,
-    /// The notification only, no sound.
-    silent: bool,
-    vibrate: bool,
-}
-
 /// Keep the doorbell line alive in the background (a foreground service
-/// with its own small notification), or let it go.
+/// with its own small notification), or let it go. Only with the window
+/// open: the plugin needs it, and with the window closed the service is
+/// already what keeps Kagaz running.
 pub fn keep_listening(app: &AppHandle, on: bool) {
+    if app.webview_windows().is_empty() {
+        return;
+    }
     if let Ok(p) = phone(app) {
         let _ = p.run_mobile_plugin::<()>("keepListening", ListenArgs { on });
     }
 }
 
-/// Ring (a call notification that can light the screen) or stop ringing.
-pub fn call_changed(app: &AppHandle, phase: &str, peer: &str, tone: &str, silent: bool, vibrate: bool) {
-    if let Ok(p) = phone(app) {
-        let _ = p.run_mobile_plugin::<()>(
-            "callChanged",
-            CallArgs {
-                phase,
-                peer,
-                tone,
-                silent,
-                vibrate,
-            },
-        );
+/// One line's call, as the phone should show it.
+#[derive(Clone, Default, PartialEq)]
+pub struct Ring {
+    /// "ringing", "idle" or a call in progress ("talking", "in_call"…).
+    pub phase: String,
+    pub peer: String,
+    /// The tone's file to ring with; empty for the phone's own ringtone.
+    pub tone: String,
+    /// The notification only, no sound.
+    pub silent: bool,
+    pub vibrate: bool,
+}
+
+/// The lines that can ring: calls through OneTouch (calls.rs) and door
+/// stations on the network (doorbell.rs).
+#[derive(Clone, Copy)]
+pub enum Line {
+    Calls = 0,
+    Door = 1,
+}
+
+/// Each line's call, and what the phone shows now.
+static RINGS: std::sync::Mutex<([Option<Ring>; 2], Option<Ring>)> = std::sync::Mutex::new(([None, None], None));
+
+/// A line's call changed. The phone shows one: a ring first, then a call in
+/// progress; it stops ringing, and leaves the lock screen, only when both
+/// lines are quiet. Callers keep their changes in order (see their update).
+pub fn call_changed(line: Line, ring: Ring) {
+    let mut rings = RINGS.lock().unwrap();
+    rings.0[line as usize] = Some(ring);
+    let busy = |r: &&Ring| r.phase != "idle" && !r.phase.is_empty();
+    let all = rings.0.iter().flatten();
+    let shown = all
+        .clone()
+        .find(|r| r.phase == "ringing")
+        .or_else(|| all.clone().find(busy))
+        .cloned()
+        .unwrap_or_else(|| Ring {
+            phase: "idle".into(),
+            ..Default::default()
+        });
+    if rings.1.as_ref() == Some(&shown) {
+        return;
     }
+    rings.1 = Some(shown.clone());
+    #[cfg(target_os = "android")]
+    jvm::call_changed(&shown);
 }

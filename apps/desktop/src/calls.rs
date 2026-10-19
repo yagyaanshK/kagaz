@@ -84,7 +84,12 @@ fn now() -> u64 {
         .unwrap_or(0)
 }
 
+/// Held from a change to its ring on the phone, so two changes (a hang-up
+/// and a tap on the ring, say) reach it in the order they were made.
+static ORDER: Mutex<()> = Mutex::new(());
+
 fn update(app: &AppHandle, f: impl FnOnce(&mut Status)) {
+    let _order = ORDER.lock().unwrap();
     let state = app.state::<CallsState>();
     let (was_ringing, snapshot) = {
         let mut s = state.status.lock().unwrap();
@@ -104,18 +109,20 @@ fn update(app: &AppHandle, f: impl FnOnce(&mut Status)) {
             String::new()
         };
         super::mobile::call_changed(
-            app,
-            &snapshot.phase,
-            &snapshot.peer,
-            &tone,
-            style.silent,
-            style.vibrate,
+            super::mobile::Line::Calls,
+            super::mobile::Ring {
+                phase: snapshot.phase.clone(),
+                peer: snapshot.peer.clone(),
+                tone,
+                silent: style.silent,
+                vibrate: style.vibrate,
+            },
         );
     }
     // A silent ring's notification goes when the ring does.
     #[cfg(desktop)]
     if was_ringing && snapshot.phase != "ringing" {
-        super::ring_notice::close();
+        super::ring_notice::close("calls");
     }
     #[cfg(mobile)]
     let _ = was_ringing;
@@ -125,7 +132,12 @@ fn update(app: &AppHandle, f: impl FnOnce(&mut Status)) {
 pub fn open_ring(app: &AppHandle) {
     super::doorbell::attention(app);
     let _ = app.emit("show-ring", ());
-    update(app, |s| s.focus = true);
+    // Only a ringing call: a late tap must not mark the next call.
+    update(app, |s| {
+        if s.phase == "ringing" {
+            s.focus = true;
+        }
+    });
 }
 
 /// Answer from the ring notification.
@@ -197,7 +209,7 @@ fn on_event(app: &AppHandle, e: Event) {
                 #[cfg(desktop)]
                 {
                     let peer = app.state::<CallsState>().status.lock().unwrap().peer.clone();
-                    super::ring_notice::show(app, &peer);
+                    super::ring_notice::show(app, "calls", &peer);
                 }
             }
         }

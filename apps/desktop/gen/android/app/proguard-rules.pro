@@ -19,3 +19,11 @@
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
+# Kagaz's Rust code calls these by name (mobile.rs): the ring and the saved
+# sign-in, with the app's window closed.
+-keep class life.omniverse.kagaz.KagazNative {
+  public static *** callChanged(...);
+  public static *** secretGet(...);
+  public static *** secretSet(...);
+  public static *** secretDelete(...);
+}

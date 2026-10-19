@@ -54,6 +54,23 @@ class KagazCallService : Service() {
         const val EXTRA_ANSWER = "kagaz_answer"
         const val EXTRA_FROM_APP = "kagaz_from_app"
         const val STOPPED_ID = 3
+        private var running: KagazCallService? = null
+        private var lineText = "Ready for doorbell calls"
+
+        /** During an answered call the service also holds the microphone,
+         *  so the person is still heard after switching to another app.
+         *  Android allows that only while Kagaz is on screen, which it is
+         *  when a call is answered; otherwise this does nothing. */
+        fun microphone(on: Boolean) {
+            val service = running ?: return
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE) return
+            var types = ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+            if (on) types = types or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+            try {
+                service.startForeground(LINE_ID, lineNotification(service, lineText), types)
+            } catch (e: Exception) {
+            }
+        }
 
         fun channels(context: Context) {
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
@@ -237,7 +254,8 @@ class KagazCallService : Service() {
                 Intent(context, KagazRingReceiver::class.java).setAction(KagazRingReceiver.ACTION_DECLINE),
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
-            val caller = Person.Builder().setName(peer).setImportant(true).build()
+            // A call's card refuses a caller without a name.
+            val caller = Person.Builder().setName(peer.ifBlank { "Doorbell" }).setImportant(true).build()
             val n = NotificationCompat.Builder(context, RING_CHANNEL)
                 .setSmallIcon(R.mipmap.ic_launcher_foreground)
                 .setStyle(NotificationCompat.CallStyle.forIncomingCall(caller, decline, answer))
@@ -247,6 +265,9 @@ class KagazCallService : Service() {
                 .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
                 .setOngoing(true)
                 .setOnlyAlertOnce(true)
+                // Rings end within two minutes; should Kagaz be stopped
+                // mid-ring, the card must not stay (it cannot be swiped away).
+                .setTimeoutAfter(120_000)
                 .setContentIntent(open)
                 // A call's card must have one (or come from a foreground
                 // service); on a locked phone it opens the ring full screen.
@@ -261,7 +282,8 @@ class KagazCallService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         channels(this)
         val fromApp = intent?.getBooleanExtra(EXTRA_FROM_APP, false) == true
-        val n = lineNotification(this, if (fromApp) "Ready for doorbell calls" else "Starting\u2026")
+        running = this
+        val n = lineNotification(this, if (fromApp) lineText else "Starting\u2026")
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             startForeground(LINE_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
         } else {
@@ -291,6 +313,7 @@ class KagazCallService : Service() {
     }
 
     override fun onDestroy() {
+        if (running === this) running = null
         ring(this, null)
         super.onDestroy()
     }
