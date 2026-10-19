@@ -1225,11 +1225,20 @@ mod reopen {
         let Some(app) = APP.get().cloned() else {
             return;
         };
-        std::thread::spawn(move || match action {
-            0 => super::calls::open_ring(&app),
-            1 => super::calls::answer_here(&app),
-            2 => super::calls::decline_here(&app),
-            _ => {}
+        // A door station on the network, if one rings; else the OneTouch call.
+        std::thread::spawn(move || {
+            let door = super::doorbell::ringing(&app);
+            match (action, door) {
+                (0, _) => super::calls::open_ring(&app),
+                (1, true) => {
+                    super::calls::open_ring(&app);
+                    super::doorbell::answer_here(&app, true);
+                }
+                (2, true) => super::doorbell::answer_here(&app, false),
+                (1, false) => super::calls::answer_here(&app),
+                (2, false) => super::calls::decline_here(&app),
+                _ => {}
+            }
         });
     }
 }
@@ -1296,7 +1305,6 @@ pub fn run() {
                     p.app_cache_dir()?,
                     p.app_data_dir()?,
                 );
-                mobile::remember_handle(app.handle());
                 #[cfg(target_os = "android")]
                 let _ = reopen::APP.set(app.handle().clone());
             }

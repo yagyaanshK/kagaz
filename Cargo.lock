@@ -2529,6 +2529,7 @@ dependencies = [
  "base64 0.22.1",
  "gtk",
  "image",
+ "jni",
  "kagaz-core",
  "keyring",
  "notify-rust",
@@ -2537,9 +2538,9 @@ dependencies = [
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",
- "tauri-winrt-notification",
  "uuid",
  "webkit2gtk",
+ "windows",
 ]
 
 [[package]]

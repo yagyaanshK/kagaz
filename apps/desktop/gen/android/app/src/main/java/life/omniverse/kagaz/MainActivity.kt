@@ -8,17 +8,40 @@ import android.view.View
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
+import java.lang.ref.WeakReference
 
 class MainActivity : TauriActivity() {
+  companion object {
+    private var shown: WeakReference<MainActivity>? = null
+
+    /** The call is over: back behind the lock screen (a ring brought the
+     *  app over it; it must not stay usable there, open door and all). */
+    fun callOver() {
+      val activity = shown?.get() ?: return
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+        activity.setShowWhenLocked(false)
+        activity.setTurnScreenOn(false)
+      }
+    }
+  }
+
   /** Rust (main.rs): give this activity the app's window again when the
    *  app was closed while its process stayed (the doorbell line runs on). */
   private external fun kagazShown()
 
   override fun onCreate(savedInstanceState: Bundle?) {
+    KagazNative.attach(this)
     super.onCreate(savedInstanceState)
+    shown = WeakReference(this)
     kagazShown()
-    showOverLockScreen(intent)
-    fromRing(intent)
+    // A ring's intent counts once: not again when Android restores the
+    // activity, nor when Recents reopens a task that a ring started.
+    val fresh = savedInstanceState == null &&
+      (intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) == 0
+    if (fresh) {
+      showOverLockScreen(intent)
+      fromRing(intent)
+    }
     // Android 15 and later draw apps under the status and navigation bars;
     // keep the page clear of them (and of the keyboard when it is up).
     val content = findViewById<View>(android.R.id.content)

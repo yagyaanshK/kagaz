@@ -237,7 +237,8 @@ with a small "Ready for doorbell calls" notification; some phones stop
 background apps to save battery, so allow Kagaz to run in the background
 there.
 
-A ring shows as a call's notification, as in WhatsApp: **Decline** stops
+A ring (from OneTouch or from a door station on your network) shows as a
+call's notification, as in WhatsApp, also when Kagaz's window is closed: **Decline** stops
 the ring on this device (the others ring on), **Answer** opens Kagaz and
 picks up, and tapping the card opens the ring without answering. A volume
 key quiets the ring. The doorbell's settings choose, for each device, what
