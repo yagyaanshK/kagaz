@@ -9,3 +9,7 @@
 # Camera recordings made with `kagaz tapo record` (private)
 tapo-*.ts
 *.ts.part
+
+# Research material: doorbell and Tapo app APKs, decompiled source, logs (private, not part of Kagaz)
+/doorbell-analysis/
+/tapo-analysis/
