@@ -1234,6 +1234,37 @@ mod reopen {
     }
 }
 
+/// GNOME keeps its dark style in a setting GTK 3 windows do not read, so a
+/// dark desktop still got a light Kagaz. Hand it to GTK, which the window's
+/// web view follows (the page's prefers-color-scheme), now and whenever it
+/// changes. Desktops without that setting (KDE sets GTK's own) are left alone.
+#[cfg(target_os = "linux")]
+fn follow_dark_style() {
+    use gtk::gio::prelude::*;
+    use gtk::prelude::*;
+    let Some(schema) = gtk::gio::SettingsSchemaSource::default()
+        .and_then(|s| s.lookup("org.gnome.desktop.interface", true))
+    else {
+        return;
+    };
+    if !schema.has_key("color-scheme") {
+        return;
+    }
+    let settings = gtk::gio::Settings::new("org.gnome.desktop.interface");
+    let apply = |s: &gtk::gio::Settings| {
+        if let Some(gtk_settings) = gtk::Settings::default() {
+            gtk_settings
+                .set_gtk_application_prefer_dark_theme(s.string("color-scheme") == "prefer-dark");
+        }
+    };
+    if settings.string("color-scheme") == "prefer-dark" {
+        apply(&settings);
+    }
+    settings.connect_changed(Some("color-scheme"), move |s, _| apply(s));
+    // The signal lasts as long as the settings object: keep it for the app's life.
+    std::mem::forget(settings);
+}
+
 /// The app. The desktop starts it from `main`; Android and iOS load the
 /// library (lib.rs) and start it here.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -1254,6 +1285,8 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(phone_plugin())
         .setup(|app| {
+            #[cfg(target_os = "linux")]
+            follow_dark_style();
             // A phone hands out its own folders for settings and caches.
             #[cfg(mobile)]
             {

@@ -35,6 +35,8 @@ image = { version = "0.25", default-features = false, features = ["jpeg", "png"]
 keyring = { version = "3.6", features = ["sync-secret-service", "crypto-rust"] }
 # The window's WebKitGTK, to let the page use the microphone for calls.
 webkit2gtk = "2.0.2"
+# To hand GNOME's dark style to the window (GTK 3 does not read it).
+gtk = "0.18"
 # A silent ring's notification (the desktop's notification service).
 notify-rust = "4"
 
