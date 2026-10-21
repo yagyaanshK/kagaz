@@ -2716,7 +2716,7 @@ let doorStations = { listen_port: 5060, stations: [] };
 let doorFound = [];              // SIP endpoints seen on the network this time
 let doorSelected = null;         // the station being edited: { name, address, port, saved }
 let doorClockTimer = null;
-let doorChime = null;            // { ctx, timer } while ringing
+let doorChime = null;            // the two-minute cut-off timer while ringing
 
 function doorStationName(address) {
   const s = doorStations.stations.find((x) => x.address === address);
@@ -2814,13 +2814,16 @@ function stopDoorClock() {
 // A two-note chime, repeated while the bell rings. Made here, no file needed.
 // The ring: the tone chosen in Settings (settings.js), for this caller.
 // `kind` is "doorbell", "family" or "local".
+// A ring never sounds longer than two minutes, whatever is missed: the
+// server gives up on an unanswered call well before.
 function startChime(peer = "", kind = "doorbell") {
   if (doorChime) return;
-  doorChime = true;
+  doorChime = setTimeout(stopChime, 120000);
   if (typeof KagazRing !== "undefined") KagazRing.start(peer, kind);
 }
 function stopChime() {
   if (!doorChime) return;
+  clearTimeout(doorChime);
   doorChime = null;
   if (typeof KagazRing !== "undefined") KagazRing.stop();
 }
