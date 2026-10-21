@@ -23,6 +23,9 @@ pub struct Layout {
     pub ungrouped: Vec<String>,
     #[serde(default)]
     pub ungrouped_collapsed: bool,
+    /// Brands whose group of cameras (those in none of the person's groups) is folded.
+    #[serde(default)]
+    pub brand_collapsed: Vec<String>,
     /// Cameras shown in HD even as small tiles.
     #[serde(default)]
     pub hd: Vec<String>,
@@ -109,6 +112,7 @@ mod tests {
             }],
             ungrouped: vec!["b".into(), "a".into()],
             ungrouped_collapsed: false,
+            brand_collapsed: vec!["xiaomi".into()],
             hd: vec!["a".into()],
             volume: [("a".to_string(), 40u8), ("gone".to_string(), 10u8)].into(),
         };

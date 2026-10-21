@@ -460,6 +460,97 @@ impl TsServer {
         Ok(Watcher { rx })
     }
 
+    /// Pictures of a stream the video engine reaches by itself (a Xiaomi
+    /// camera through go2rtc's own source), for the window's own player:
+    /// the engine's MPEG-TS, split the same way as a Tapo relay's.
+    /// Watchers of the same `key` share one engine connection.
+    pub fn watch_engine(&self, key: &str, stream: &str) -> Result<Watcher, String> {
+        let port = self
+            .engine_port
+            .lock()
+            .ok()
+            .and_then(|p| *p)
+            .ok_or("the video engine is not running")?;
+        let (tx, rx) = std::sync::mpsc::sync_channel::<Media>(256);
+        self.media_taps
+            .lock()
+            .map_err(|_| "state poisoned")?
+            .entry(key.to_string())
+            .or_default()
+            .push(MediaTap {
+                tx,
+                skipping: false,
+            });
+        let fresh = self
+            .media_sessions
+            .lock()
+            .map_err(|_| "state poisoned")?
+            .insert(key.to_string());
+        if fresh {
+            let server = self.clone_handle();
+            let (key, stream) = (key.to_string(), stream.to_string());
+            std::thread::Builder::new()
+                .name("kagaz-watch-engine".into())
+                .spawn(move || {
+                    let why = server.engine_session(&key, &stream, port);
+                    if let Ok(mut s) = server.media_sessions.lock() {
+                        s.remove(&key);
+                    }
+                    server.end_taps(&key, why);
+                })
+                .map_err(|e| e.to_string())?;
+        }
+        Ok(Watcher { rx })
+    }
+
+    /// Why an engine session ended: empty when the watchers simply left.
+    fn engine_session(&self, key: &str, stream: &str, port: u16) -> String {
+        let safe: String = stream
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-')
+            .collect();
+        let url = format!("http://127.0.0.1:{port}/api/stream.ts?src={safe}");
+        let agent = ureq::AgentBuilder::new()
+            .timeout_connect(std::time::Duration::from_secs(5))
+            .timeout_read(std::time::Duration::from_secs(30))
+            .build();
+        let started = Instant::now();
+        log(&format!("watch {stream}: start (engine)"));
+        let resp = match agent.get(&url).call() {
+            Ok(r) => r,
+            Err(e) => {
+                log(&format!("watch {stream}: engine refused: {e}"));
+                return format!("the video engine could not open the camera: {e}");
+            }
+        };
+        let mut reader = resp.into_reader();
+        let mut demux = super::demux::Demux::new();
+        let mut buf = vec![0u8; 64 * 1024];
+        let mut total = 0u64;
+        let ended = loop {
+            match std::io::Read::read(&mut reader, &mut buf) {
+                Ok(0) => break "the camera stopped sending".to_string(),
+                Ok(n) => {
+                    total += n as u64;
+                    if !self.fan_out(key, demux.push(&buf[..n])) {
+                        break String::new();
+                    }
+                }
+                Err(e) => break format!("the camera stopped sending ({e})"),
+            }
+        };
+        let s = &demux.stats;
+        log(&format!(
+            "watch {stream}: {} after {:.1} s, {} KB; {} pictures ({} key)",
+            if ended.is_empty() { "watchers left" } else { ended.as_str() },
+            started.elapsed().as_secs_f32(),
+            total / 1000,
+            s.units,
+            s.keyframes,
+        ));
+        ended
+    }
+
     /// Recorded footage between two unix times for the window's own player,
     /// at `speed` (the timestamps are rescaled; the player paces by them).
     /// The token answers `playback_state`.

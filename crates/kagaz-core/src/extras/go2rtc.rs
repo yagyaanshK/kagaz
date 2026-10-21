@@ -156,6 +156,12 @@ pub struct StreamSource {
 
 /// go2rtc's configuration for the given streams; API on 127.0.0.1 only.
 pub fn config_yaml(api_port: u16, streams: &[StreamSource]) -> String {
+    config_yaml_with(api_port, streams, &[])
+}
+
+/// The same, with Xiaomi accounts (user ID, pass token) for `xiaomi://`
+/// streams: go2rtc fetches each connection's keys with them.
+pub fn config_yaml_with(api_port: u16, streams: &[StreamSource], xiaomi: &[(String, String)]) -> String {
     let level = std::env::var("KAGAZ_GO2RTC_LOG").unwrap_or_else(|_| "info".into());
     let mut y = format!("api:\n  listen: \"127.0.0.1:{api_port}\"\n  origin: \"*\"\nrtsp:\n  listen: \"\"\nwebrtc:\n  listen: \"\"\nlog:\n  level: {level}\n  format: text\nstreams:\n");
     for s in streams {
@@ -165,7 +171,59 @@ pub fn config_yaml(api_port: u16, streams: &[StreamSource]) -> String {
             s.url.replace('"', "")
         ));
     }
+    if !xiaomi.is_empty() {
+        y.push_str("xiaomi:\n");
+        for (user, token) in xiaomi {
+            let clean = |v: &str| v.chars().filter(|c| !matches!(c, '"' | '\\' | '\n' | '\r')).collect::<String>();
+            y.push_str(&format!("  \"{}\": \"{}\"\n", clean(user), clean(token)));
+        }
+    }
     y
+}
+
+/// Remove settings files left by engines that are no longer running (an
+/// earlier Kagaz that did not close cleanly); they can hold sign-ins.
+fn prune_stale_configs() {
+    let Ok(dir) = std::fs::read_dir(extras_dir()) else { return };
+    for entry in dir.flatten() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        let Some(port) = name
+            .strip_prefix("go2rtc-")
+            .and_then(|r| r.strip_suffix(".yaml"))
+            .and_then(|p| p.parse::<u16>().ok())
+        else {
+            continue;
+        };
+        let live = std::net::TcpStream::connect_timeout(
+            &std::net::SocketAddr::from(([127, 0, 0, 1], port)),
+            Duration::from_millis(100),
+        )
+        .is_ok();
+        if !live {
+            let _ = std::fs::remove_file(entry.path());
+            let _ = std::fs::remove_file(extras_dir().join(format!("go2rtc-{port}.log")));
+        }
+    }
+}
+
+/// Write a file only this user can read.
+fn write_private(path: &Path, text: &str) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::io::Write;
+        use std::os::unix::fs::OpenOptionsExt;
+        let mut f = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(path)?;
+        f.write_all(text.as_bytes())
+    }
+    #[cfg(not(unix))]
+    {
+        std::fs::write(path, text)
+    }
 }
 
 /// A safe stream name: letters, digits, underscores.
@@ -210,13 +268,25 @@ impl Engine {
         api_port: u16,
         streams: &[StreamSource],
     ) -> Result<Engine, ExtraError> {
+        Self::start_with(binary, api_port, streams, &[])
+    }
+
+    /// The same, with Xiaomi accounts for `xiaomi://` streams. The settings
+    /// file is private to this user and removed when the engine stops.
+    pub fn start_with(
+        binary: &Path,
+        api_port: u16,
+        streams: &[StreamSource],
+        xiaomi: &[(String, String)],
+    ) -> Result<Engine, ExtraError> {
+        prune_stale_configs();
         let api_port = if api_port == 0 {
             free_port().map_err(|e| ExtraError::Start(e.to_string()))?
         } else {
             api_port
         };
         let config_path = extras_dir().join(format!("go2rtc-{api_port}.yaml"));
-        std::fs::write(&config_path, config_yaml(api_port, streams)).map_err(|source| {
+        write_private(&config_path, &config_yaml_with(api_port, streams, xiaomi)).map_err(|source| {
             ExtraError::Io {
                 path: config_path.clone(),
                 source,
@@ -479,6 +549,8 @@ impl Drop for Engine {
         let _ = self.child.wait();
         // Release the keeper thread now that the engine is gone.
         self.keeper.take();
+        // Its settings can hold sign-ins (a Tapo password, a Xiaomi token).
+        let _ = std::fs::remove_file(&self.config_path);
     }
 }
 
@@ -505,6 +577,9 @@ mod tests {
         assert!(y.contains("  front_door: \"http://127.0.0.1:5000/tapo/X.ts\"\n"));
         assert!(y.contains("  stream: \"rtsp://u:p@10.0.0.2/stream1\"\n"));
         assert_eq!(yaml_key("Cam_2"), "Cam_2");
+        assert!(!y.contains("xiaomi:"));
+        let y = config_yaml_with(1984, &[], &[("1000".into(), "V1:t\"ok".into())]);
+        assert!(y.ends_with("xiaomi:\n  \"1000\": \"V1:tok\"\n"));
         assert!(asset_for("linux", "x86_64").is_some());
         assert!(asset_for("freebsd", "x86_64").is_none());
     }

@@ -57,6 +57,7 @@ const KagazBrands = (() => {
     ],
     security: [
       B("tapo", "Tapo", "tapo", "#1a1a1a", true),
+      B("xiaomi", "Xiaomi", "xiaomi", "#ff6900", true, /\b(xiaomi|mi home|mijia|imilab|xiaobai)\b/i),
       B("hikvision", "Hikvision", "hikvision", "#e3001b"),
       B("dahua", "Dahua", "dahua", "#e6001f"),
       B("cpplus", "CP Plus", "", "#e21e26"),

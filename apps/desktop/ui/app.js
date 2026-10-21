@@ -687,10 +687,11 @@ $("scan-form").addEventListener("submit", async (ev) => {
 // ---------- cameras (Tapo through the account, go2rtc as the engine) ----------
 
 let camStatus = null;
-// Groups ("rooms"): { groups: [{name, cameras: [id], collapsed}], ungrouped: [id], ungrouped_collapsed }
-let layout = { groups: [], ungrouped: [], ungrouped_collapsed: false };
+// Groups ("rooms"): { groups: [{name, cameras: [id], collapsed}], ungrouped: [id], brand_collapsed: [brand] }.
+// Cameras in none of the person's groups show in a group per brand.
+let layout = { groups: [], ungrouped: [], ungrouped_collapsed: false, brand_collapsed: [] };
 let rearranging = false;
-// null = every group; -1 = Ungrouped; otherwise an index into layout.groups
+// null = every group; "brand:<id>" = one brand's group; otherwise an index into layout.groups
 let viewGroup = null;
 // Playback: per camera, the clips of the chosen day; and each tile's running playback
 let pbDays = {};      // device_id -> { utc_offset_minutes, dates, today }
@@ -793,12 +794,16 @@ async function refreshCameras() {
     // Tapo's sign-in first, the brands (most coming soon) under it.
     $("cam-signin").prepend($("cam-login-form"));
     if (typeof KagazBrands !== "undefined") KagazBrands.fill($("cam-brands"), "security", (b) => {
-      if (b.id === "tapo") showLogin(true, "");
+      if (b.id === "tapo") { showXiaomi(false); showLogin(true, ""); }
+      if (b.id === "xiaomi") showXiaomi(true);
     });
     showLogin(true, $("cam-login-note").textContent);
     $("cam-message").textContent = "";
   }
   $("cam-logout").classList.toggle("hidden", !camStatus.logged_in || camStatus.running);
+  const xiaomi = await invoke("xiaomi_signed_in").catch(() => false);
+  $("xm-add").classList.toggle("hidden", xiaomi || !camStatus.logged_in);
+  $("xm-logout").classList.toggle("hidden", !xiaomi);
   camToolsShown();
   if (camStatus.running) {
     await loadLayout();
@@ -900,6 +905,189 @@ $("cam-login-code-go").addEventListener("click", async () => {
 });
 $("cam-logout").addEventListener("click", async () => {
   try { await invoke("tapo_logout"); } catch (e) { $("cam-message").textContent = "" + e; }
+  refreshCameras();
+});
+
+// ---- Xiaomi account: a texted code, a password or a QR code; Xiaomi's
+// own page in a window of its own when it wants one ----
+
+let xmWay = "phone";
+let xmPageUrl = "";
+
+function showXiaomi(show) {
+  $("xm-login-form").classList.toggle("hidden", !show);
+  if (!show) {
+    invoke("xiaomi_cancel").catch(() => {});
+    KagazReveal.hide($("xm-password"));
+    xmStep(null);
+    $("xm-note").textContent = "";
+    return;
+  }
+  $("cam-login-form").classList.add("hidden");
+  xmChoose(xmWay);
+  $("xm-login-form").scrollIntoView({ block: "nearest" });
+}
+
+function xmChoose(way) {
+  xmWay = way;
+  document.querySelectorAll("#xm-login-form .tab").forEach((t) => {
+    const on = t.dataset.way === way;
+    t.classList.toggle("active", on);
+    t.setAttribute("aria-selected", String(on));
+  });
+  document.querySelectorAll("#xm-login-form [data-pane]").forEach((p) => p.classList.toggle("hidden", p.dataset.pane !== way));
+  xmStep(null);
+  $("xm-note").textContent = "";
+  if (way === "qr") { xmQr(); return; }
+  invoke("xiaomi_cancel").catch(() => {});
+  $(way === "phone" ? "xm-phone" : "xm-user").focus();
+}
+document.querySelectorAll("#xm-login-form .tab").forEach((t) => t.addEventListener("click", () => xmChoose(t.dataset.way)));
+
+// The step after the first: a captcha, a code, or Xiaomi's own page.
+function xmStep(step, r) {
+  $("xm-captcha-row").classList.toggle("hidden", step !== "captcha");
+  $("xm-code-row").classList.toggle("hidden", step !== "code");
+  $("xm-page-row").classList.toggle("hidden", step !== "page");
+  // While a step is open, the first one's fields stay as they were sent.
+  for (const id of ["xm-phone", "xm-phone-go", "xm-user", "xm-password", "xm-password-go"]) $(id).disabled = step === "code" || step === "page";
+  if (step === "captcha") {
+    $("xm-captcha-image").src = r.image;
+    $("xm-captcha").value = "";
+    $("xm-note").textContent = "Xiaomi wants the characters in the picture first (capitals count).";
+    $("xm-captcha").focus();
+  } else if (step === "code") {
+    const to = r.to ? ` to ${r.to}` : "";
+    $("xm-code-label").textContent = r.by_email ? "Code from Xiaomi's email" : "Code from Xiaomi's text message";
+    $("xm-restart").textContent = xmWay === "phone" ? "Use another number" : "Use another account";
+    $("xm-note").textContent = `Xiaomi sent a code by ${r.by_email ? "email" : "text message"}${to}.`;
+    $("xm-code").value = "";
+    $("xm-code").focus();
+  } else if (step === "page") {
+    xmPageUrl = r.url;
+    $("xm-note").textContent = /security information/.test(r.title)
+      ? "Xiaomi wants an email address added to the account before it lets a new device in. Add it on Xiaomi's page; Kagaz carries on by itself when you are done."
+      : `Xiaomi wants this finished on its own page${r.title ? ` (${r.title})` : ""}; Kagaz carries on by itself when you are done.`;
+  }
+}
+
+async function xmRun(button, call, args, busy) {
+  button.disabled = true;
+  $("xm-note").textContent = busy;
+  try {
+    const r = await invoke(call, args);
+    if (r.step === "done") await xmSignedIn();
+    else xmStep(r.step, r);
+  } catch (e) {
+    $("xm-note").textContent = "" + e;
+  }
+  button.disabled = false;
+}
+
+async function xmSignedIn() {
+  showXiaomi(false);
+  $("xm-password").value = "";
+  $("xm-code").value = "";
+  $("cam-message").textContent = "Signed in to Xiaomi; looking for its cameras…";
+  if (camStatus && camStatus.running) {
+    grid().querySelectorAll(".cam-tile").forEach(teardownTile);
+    try {
+      camStatus = await invoke("cameras_restart");
+      await loadLayout();
+    } catch (e) {
+      $("cam-message").textContent = "Could not connect to the cameras: " + e;
+    }
+  }
+  refreshCameras();
+}
+function grid() { return $("cam-grid"); }
+
+$("xm-phone-go").addEventListener("click", () => {
+  const phone = $("xm-phone").value.trim();
+  if (!phone) { $("xm-note").textContent = "Enter the phone number, with its country code."; $("xm-phone").focus(); return; }
+  xmRun($("xm-phone-go"), "xiaomi_login_phone", { phone }, "asking Xiaomi to send a code…");
+});
+$("xm-password-go").addEventListener("click", () => {
+  const user = $("xm-user").value.trim();
+  const password = $("xm-password").value;
+  if (!user || !password) {
+    $("xm-note").textContent = !user ? "Enter the account's email, phone number or Xiaomi ID." : "Enter the password.";
+    $(!user ? "xm-user" : "xm-password").focus();
+    return;
+  }
+  xmRun($("xm-password-go"), "xiaomi_login_password", { user, password }, "asking Xiaomi…");
+});
+$("xm-captcha-go").addEventListener("click", () => {
+  const text = $("xm-captcha").value.trim();
+  if (!text) { $("xm-captcha").focus(); return; }
+  xmRun($("xm-captcha-go"), "xiaomi_login_captcha", { text }, "checking…");
+});
+$("xm-code-go").addEventListener("click", () => {
+  const code = $("xm-code").value.trim();
+  if (!code) { $("xm-code").focus(); return; }
+  xmRun($("xm-code-go"), "xiaomi_login_code", { code }, "checking the code…");
+});
+$("xm-page-go").addEventListener("click", async () => {
+  try {
+    await invoke("xiaomi_open_page", { url: xmPageUrl });
+    $("xm-note").textContent = "Finish on Xiaomi's page in the new window; Kagaz carries on by itself when it is done.";
+  } catch (e) {
+    $("xm-note").textContent = "" + e;
+  }
+});
+// Enter moves on: number → send; account → password → sign in; captcha and code → confirm.
+for (const [field, next] of [["xm-phone", () => $("xm-phone-go").click()],
+                             ["xm-user", () => $("xm-password").focus()],
+                             ["xm-password", () => $("xm-password-go").click()],
+                             ["xm-captcha", () => $("xm-captcha-go").click()],
+                             ["xm-code", () => $("xm-code-go").click()]]) {
+  $(field).addEventListener("keydown", (ev) => { if (ev.key === "Enter") { ev.preventDefault(); next(); } });
+  $(field).setAttribute("enterkeyhint", field === "xm-user" ? "next" : "go");
+}
+
+async function xmQr() {
+  $("xm-qr-image").removeAttribute("src");
+  $("xm-qr-tips").textContent = "";
+  $("xm-note").textContent = "asking Xiaomi for a code…";
+  try {
+    const r = await invoke("xiaomi_qr_start");
+    if (xmWay !== "qr") return;
+    $("xm-qr-image").src = r.image;
+    $("xm-qr-link").href = r.login_url;
+    $("xm-qr-tips").textContent = r.tips ? `Xiaomi says: ${r.tips}` : "";
+    $("xm-note").textContent = "Waiting for the scan…";
+  } catch (e) {
+    $("xm-note").textContent = "" + e;
+  }
+}
+$("xm-qr-new").addEventListener("click", xmQr);
+$("xm-qr-link").addEventListener("click", (ev) => {
+  ev.preventDefault();
+  if (navigator.clipboard) navigator.clipboard.writeText($("xm-qr-link").href).then(() => { $("xm-note").textContent = "Link copied."; }, () => {});
+});
+listen("xiaomi-signed-in", () => xmSignedIn());
+listen("xiaomi-qr-failed", (e) => {
+  if ($("xm-login-form").classList.contains("hidden")) return;
+  $("xm-note").textContent = `${e.payload} Press New code to try again.`;
+});
+$("xm-cancel").addEventListener("click", () => showXiaomi(false));
+// A different number or account: back to the first step.
+$("xm-restart").addEventListener("click", () => {
+  invoke("xiaomi_cancel").catch(() => {});
+  xmChoose(xmWay);
+});
+$("xm-add").addEventListener("click", () => showXiaomi(true));
+$("xm-logout").addEventListener("click", async () => {
+  try {
+    await invoke("xiaomi_logout");
+    if (camStatus && camStatus.running) {
+      grid().querySelectorAll(".cam-tile").forEach(teardownTile);
+      camStatus = await invoke("cameras_restart");
+      await loadLayout();
+    }
+  } catch (e) {
+    $("cam-message").textContent = "" + e;
+  }
   refreshCameras();
 });
 
@@ -1395,7 +1583,7 @@ function toggleAudio(tile, cam) {
 
 // The top row's button: sound on every camera shown, or off on all.
 function refreshSoundAll() {
-  const tiles = [...$("cam-grid").querySelectorAll(".cam-tile:not(.placeholder)")];
+  const tiles = [...$("cam-grid").querySelectorAll('.cam-tile:not(.placeholder)[data-brand="tapo"]')];
   const anyOff = !tiles.length || tiles.some((t) => !t.querySelector("audio") && !t._fileSound && !(t._player && t._player.sound));
   $("cam-sound-all").textContent = anyOff ? "\u{1F50A} Sound on all" : "\u{1F507} Mute all";
 }
@@ -1404,14 +1592,30 @@ function cameraById(id) {
   return camStatus.cameras.find((c) => c.device_id === id);
 }
 
-// The groups to show, in order: each as { key, name, ids, collapsed }.
+const BRAND_NAMES = { tapo: "Tapo", xiaomi: "Xiaomi" };
+function brandOf(id) { const c = cameraById(id); return (c && c.brand) || "other"; }
+function brandName(b) { return BRAND_NAMES[b] || "Other cameras"; }
+// A group's key for "View": the person's groups by index, brand groups by brand.
+function viewKey(g) { return g.key === -1 ? "brand:" + g.brand : g.key; }
+
+// The groups to show, in order: the person's own, then one per brand for
+// the cameras in none of them; each as { key, brand, name, ids, collapsed }
+// (key -1 for a brand's group). Playback shows only cameras whose
+// recordings Kagaz can play (Tapo's).
 function visibleGroups() {
-  const all = layout.groups.map((g, i) => ({ key: i, name: g.name, ids: g.cameras, collapsed: g.collapsed }));
-  if (layout.ungrouped.length || !all.length || rearranging) {
-    all.push({ key: -1, name: "Ungrouped", ids: layout.ungrouped, collapsed: layout.ungrouped_collapsed });
+  let all = layout.groups.map((g, i) => ({ key: i, name: g.name, ids: g.cameras, collapsed: g.collapsed }));
+  const brands = [...new Set(camStatus.cameras.map((c) => c.brand || "other"))];
+  for (const b of brands) {
+    const ids = layout.ungrouped.filter((id) => brandOf(id) === b);
+    if (ids.length || rearranging) {
+      all.push({ key: -1, brand: b, name: brandName(b), ids, collapsed: (layout.brand_collapsed || []).includes(b) });
+    }
+  }
+  if (isPlayback() && !rearranging) {
+    all = all.map((g) => ({ ...g, ids: g.ids.filter((id) => brandOf(id) === "tapo") })).filter((g) => g.ids.length);
   }
   if (viewGroup === null) return all;
-  return all.filter((g) => g.key === viewGroup);
+  return all.filter((g) => viewKey(g) === viewGroup);
 }
 
 function groupList(key) {
@@ -1423,6 +1627,7 @@ function groupList(key) {
 function buildTile(cam) {
   const tile = document.createElement("div");
   tile.className = "cam-tile";
+  tile.dataset.brand = cam.brand || "tapo";
   const name = document.createElement("div");
   name.className = "cam-name";
   name.textContent = cam.name;
@@ -1474,6 +1679,8 @@ function buildTile(cam) {
   volume.addEventListener("click", (ev) => ev.stopPropagation());
   volume.addEventListener("mousedown", (ev) => ev.stopPropagation());
   tile.appendChild(volume);
+  // Sound comes from Tapo's own stream; other brands' sound is not in Kagaz yet.
+  if (cam.brand && cam.brand !== "tapo") { speaker.classList.add("hidden"); volume.classList.add("hidden"); }
   const overlay = document.createElement("div");
   overlay.className = "cam-overlay hidden";
   overlay.innerHTML = '<div class="spinner"></div><button type="button" class="cam-reload" title="Reload this camera">&#x21bb;</button><div class="cam-overlay-text"></div>';
@@ -1584,7 +1791,7 @@ function buildPlaceholder(cam) {
   move.className = "cam-move";
   move.setAttribute("aria-label", `Group for ${cam.name}`);
   const here = layout.groups.findIndex((g) => g.cameras.includes(cam.device_id));
-  for (const [key, name] of [...layout.groups.map((g, i) => [i, g.name]), [-1, "Ungrouped"]]) {
+  for (const [key, name] of [...layout.groups.map((g, i) => [i, g.name]), [-1, `${brandName(cam.brand)} (no group)`]]) {
     const o = document.createElement("option");
     o.value = String(key);
     o.textContent = name;
@@ -1706,8 +1913,10 @@ function buildGroup(g) {
   collapse.textContent = g.collapsed ? "▸" : "▾";
   collapse.title = g.collapsed ? "Show this group" : "Hide this group";
   collapse.addEventListener("click", () => {
-    if (g.key === -1) layout.ungrouped_collapsed = !layout.ungrouped_collapsed;
-    else layout.groups[g.key].collapsed = !layout.groups[g.key].collapsed;
+    if (g.key === -1) {
+      const c = layout.brand_collapsed || [];
+      layout.brand_collapsed = c.includes(g.brand) ? c.filter((b) => b !== g.brand) : [...c, g.brand];
+    } else layout.groups[g.key].collapsed = !layout.groups[g.key].collapsed;
     saveLayout();
     renderCameraGrid();
   });
@@ -1735,7 +1944,7 @@ function buildGroup(g) {
         const name = await KagazAsk.name("Group name", g.name, "Rename group");
         if (name) { layout.groups[g.key].name = name; saveLayout(); renderCameraGrid(); }
       });
-      small("Remove", "Remove the group; its cameras go back to Ungrouped", () => {
+      small("Remove", "Remove the group; its cameras go back to their brand's group", () => {
         layout.ungrouped.push(...layout.groups[g.key].cameras);
         layout.groups.splice(g.key, 1);
         if (viewGroup === g.key) viewGroup = null;
@@ -1744,7 +1953,7 @@ function buildGroup(g) {
     }
   } else {
     if (viewGroup === null && visibleGroups().length > 1) {
-      small("View", "Show only this group", () => { viewGroup = g.key; renderCameraGrid(); });
+      small("View", "Show only this group", () => { viewGroup = viewKey(g); renderCameraGrid(); });
     }
     if (isPlayback()) {
       small("Play group", "Play every camera in this group from the chosen time", () => playGroup(box));
@@ -1844,7 +2053,7 @@ async function renderCameraGrid() {
   if (!camStatus.cameras.length && !rearranging) {
     const empty = document.createElement("div");
     empty.className = "empty-state";
-    empty.innerHTML = "<p><strong>No cameras on this TP-Link account</strong></p><p class=\"muted\">Add them in the Tapo app, then press Reload.</p>";
+    empty.innerHTML = "<p><strong>No cameras on your accounts yet</strong></p><p class=\"muted\">Add them in the Tapo or Mi Home app, then press Reload.</p>";
     const reload = document.createElement("button");
     reload.type = "button";
     reload.textContent = "Reload";
@@ -1865,6 +2074,9 @@ async function renderCameraGrid() {
     }
   }
   $("cam-state").textContent = `${camStatus.cameras.length} cameras`;
+  if (isPlayback() && camStatus.cameras.some((c) => c.brand && c.brand !== "tapo")) {
+    $("cam-message").textContent = "Xiaomi cameras are not shown here: Kagaz cannot play their recordings yet.";
+  }
   refreshSoundAll();
 }
 
@@ -2662,7 +2874,8 @@ $("cam-add-group").addEventListener("click", async () => {
 });
 $("cam-show-all").addEventListener("click", () => { viewGroup = null; renderCameraGrid(); });
 $("cam-sound-all").addEventListener("click", () => {
-  const tiles = [...$("cam-grid").querySelectorAll(".cam-cell")].map((c) => [c.querySelector(".cam-tile"), cameraById(c.dataset.id)]);
+  const tiles = [...$("cam-grid").querySelectorAll(".cam-cell")].map((c) => [c.querySelector(".cam-tile"), cameraById(c.dataset.id)])
+    .filter(([, cam]) => (cam.brand || "tapo") === "tapo");
   const anyOff = tiles.some(([t]) => !t.querySelector("audio") && !t._fileSound && !(t._player && t._player.sound));
   for (const [t, cam] of tiles) {
     if (anyOff) startAudio(t, cam); else { stopAudio(t); t._audioWanted = false; }

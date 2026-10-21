@@ -9,6 +9,7 @@
 
 pub mod account;
 pub mod api;
+pub mod local;
 pub mod phone;
 
 pub use account::{Login, QrLogin, Session, Step, XiaomiError};

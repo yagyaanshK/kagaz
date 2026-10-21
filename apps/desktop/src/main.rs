@@ -25,6 +25,7 @@ mod printing;
 #[cfg(desktop)]
 mod ring_notice;
 mod ringtones;
+mod xiaomi;
 
 /// Run a blocking core call off the UI thread.
 async fn blocking<T: Send + 'static>(
@@ -316,6 +317,25 @@ struct CameraEngine {
     cameras: Vec<kagaz_core::cameras::tapo::Camera>,
     /// Cameras reached directly on this network (device id → address).
     local: std::collections::HashMap<String, String>,
+    /// Xiaomi cameras, which the video engine reaches by itself.
+    xiaomi: Vec<XiaomiCamera>,
+}
+
+#[derive(Clone)]
+struct XiaomiCamera {
+    cam: kagaz_core::cameras::xiaomi::Camera,
+    /// Where it answered on this network just now; empty when it did not.
+    here: String,
+}
+
+impl XiaomiCamera {
+    /// Its id in the window, apart from Tapo's device ids.
+    fn id(&self) -> String {
+        format!("xiaomi:{}", self.cam.did)
+    }
+    fn stream(&self, hd: bool) -> String {
+        format!("mi_{}{}", self.cam.did, if hd { "" } else { "_vga" })
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -323,6 +343,8 @@ struct CameraView {
     name: String,
     model: String,
     device_id: String,
+    /// "tapo" or "xiaomi": what the camera can do beyond live view differs.
+    brand: String,
     /// go2rtc stream name.
     stream: String,
     /// WebSocket URL for go2rtc's player (MSE/WebRTC), HD.
@@ -356,6 +378,7 @@ fn camera_views(e: &CameraEngine) -> Vec<CameraView> {
             name: c.name.clone(),
             model: c.model.clone(),
             device_id: c.device_id.clone(),
+            brand: "tapo".into(),
             stream: kagaz_core::extras::go2rtc::yaml_key(&c.name),
             ws_url: e
                 .engine
@@ -376,14 +399,69 @@ fn camera_views(e: &CameraEngine) -> Vec<CameraView> {
             ),
             local_address: e.local.get(&c.device_id).cloned().unwrap_or_default(),
         })
+        .chain(e.xiaomi.iter().enumerate().map(|(j, x)| {
+            let i = e.cameras.len() + j;
+            let ws = |hd| e.engine.as_ref().map(|g| g.ws_url(&x.stream(hd))).unwrap_or_default();
+            CameraView {
+                name: x.cam.name.clone(),
+                model: x.cam.model.clone(),
+                device_id: x.id(),
+                brand: "xiaomi".into(),
+                stream: x.stream(true),
+                ws_url: ws(true),
+                ws_url_vga: ws(false),
+                ts_url: e._server.tile_url(i, &x.stream(true)),
+                ts_url_vga: e._server.tile_url(i, &x.stream(false)),
+                local_address: x.here.clone(),
+            }
+        }))
         .collect()
+}
+
+/// The Xiaomi account's cameras with their go2rtc streams, and the
+/// account (user ID, pass token) go2rtc fetches their keys with. Each
+/// camera is looked for on this network by its device ID: the address it
+/// answers from is used, since the cloud's may be stale.
+fn xiaomi_cameras() -> Result<(Vec<XiaomiCamera>, Vec<kagaz_core::extras::go2rtc::StreamSource>, (String, String)), String> {
+    use kagaz_core::cameras::xiaomi::{local, Session, XiaomiError};
+    let path = Session::default_path();
+    let mut session = Session::load(&path).map_err(|e| e.to_string())?;
+    let before = (session.pass_token.clone(), session.regions.clone());
+    let cloud = session.connect().map_err(|e| match e {
+        XiaomiError::SignedOut => "The Xiaomi sign-in has expired: sign in again.".to_string(),
+        other => other.to_string(),
+    })?;
+    let (cams, regions) = cloud.cameras(&session.regions).map_err(|e| e.to_string())?;
+    if !regions.is_empty() {
+        session.regions = regions;
+    }
+    if (session.pass_token.clone(), session.regions.clone()) != before {
+        let _ = session.save(&path);
+    }
+    let known: Vec<std::net::Ipv4Addr> = cams.iter().filter_map(|c| c.ip.parse().ok()).collect();
+    let here = local::find(&known, std::time::Duration::from_secs(2));
+    let mut out = Vec::new();
+    let mut streams = Vec::new();
+    for mut cam in cams {
+        let found = here.get(&cam.did).map(|ip| ip.to_string()).unwrap_or_default();
+        if !found.is_empty() {
+            cam.ip = found.clone();
+        }
+        let x = XiaomiCamera { cam, here: found };
+        let url = x.cam.stream_url(&session.user_id);
+        streams.push(kagaz_core::extras::go2rtc::StreamSource { name: x.stream(true), url: format!("{url}&subtype=hd") });
+        streams.push(kagaz_core::extras::go2rtc::StreamSource { name: x.stream(false), url: format!("{url}&subtype=sd") });
+        out.push(x);
+    }
+    Ok((out, streams, (session.user_id, session.pass_token)))
 }
 
 /// Where the cameras stand: not logged in, ready, or running with its streams.
 #[tauri::command]
 fn cameras_status(state: tauri::State<CameraState>) -> CamerasStatus {
     use kagaz_core::cameras::tapo::Session;
-    let logged_in = Session::default_path().is_file();
+    let logged_in = Session::default_path().is_file()
+        || kagaz_core::cameras::xiaomi::Session::default_path().is_file();
     let guard = state.engine.lock().unwrap();
     match guard.as_ref() {
         Some(e) => CamerasStatus {
@@ -407,7 +485,7 @@ fn cameras_status(state: tauri::State<CameraState>) -> CamerasStatus {
             message: if logged_in {
                 String::new()
             } else {
-                "Sign in to your Tapo (TP-Link) account to see your cameras.".into()
+                "Sign in to your Tapo (TP-Link) or Xiaomi account to see your cameras.".into()
             },
         },
     }
@@ -425,24 +503,57 @@ async fn cameras_start(
         return Ok(cameras_status(state));
     }
     let built = blocking(move || {
-        let mut session = Session::load(&Session::default_path()).map_err(|_| {
-            "Sign in to your Tapo (TP-Link) account first."
-                .to_string()
-        })?;
-        let cameras = match session.cameras() {
-            Ok(c) => c,
-            // An old token: refresh it once, then ask again.
-            Err(kagaz_core::cameras::tapo::CloudError::Unauthorized) => {
-                session
-                    .refresh()
-                    .map_err(|_| "The TP-Link session has expired: log in again.".to_string())?;
-                let _ = session.save(&Session::default_path());
-                session.cameras().map_err(|e| e.to_string())?
+        let tapo = Session::load(&Session::default_path()).ok();
+        let has_xiaomi = kagaz_core::cameras::xiaomi::Session::default_path().is_file();
+        if tapo.is_none() && !has_xiaomi {
+            return Err("Sign in to your Tapo (TP-Link) or Xiaomi account first.".to_string());
+        }
+        // Each account's cameras; one account failing leaves the other's.
+        let mut problems = Vec::new();
+        let (session, cameras) = match tapo {
+            Some(mut session) => {
+                let cameras = match session.cameras() {
+                    Ok(c) => Ok(c),
+                    // An old token: refresh it once, then ask again.
+                    Err(kagaz_core::cameras::tapo::CloudError::Unauthorized) => session
+                        .refresh()
+                        .map_err(|_| "The TP-Link session has expired: log in again.".to_string())
+                        .and_then(|_| {
+                            let _ = session.save(&Session::default_path());
+                            session.cameras().map_err(|e| e.to_string())
+                        }),
+                    Err(e) => Err(e.to_string()),
+                };
+                match cameras {
+                    Ok(c) => (session, c),
+                    Err(e) if !has_xiaomi => return Err(e),
+                    Err(e) => {
+                        problems.push(format!("Tapo: {e}"));
+                        (session, Vec::new())
+                    }
+                }
             }
-            Err(e) => return Err(e.to_string()),
+            // No Tapo account: the server still carries the engine's streams.
+            None => (Session::begin(""), Vec::new()),
         };
+        let (xiaomi, xiaomi_streams, xiaomi_account) = if has_xiaomi {
+            match xiaomi_cameras() {
+                Ok((cams, streams, account)) => (cams, streams, vec![account]),
+                Err(e) if cameras.is_empty() => return Err(e),
+                Err(e) => {
+                    problems.push(format!("Xiaomi: {e}"));
+                    (Vec::new(), Vec::new(), Vec::new())
+                }
+            }
+        } else {
+            (Vec::new(), Vec::new(), Vec::new())
+        };
+        for p in &problems {
+            let _ = app.emit("cameras-progress", p.clone());
+        }
         let server = TsServer::start(session, cameras.clone(), 0).map_err(|e| e.to_string())?;
-        let local = kagaz_core::cameras::tapo::local_sources(&server, &cameras);
+        let mut local = kagaz_core::cameras::tapo::local_sources(&server, &cameras);
+        local.streams.extend(xiaomi_streams);
         let _ = app.emit(
             "cameras-progress",
             format!("{} camera(s) on this network", local.local.len()),
@@ -461,7 +572,7 @@ async fn cameras_start(
         })
         .map_err(|e| e.to_string())
         .and_then(|binary| {
-            go2rtc::Engine::start(&binary, 0, &local.streams).map_err(|e| e.to_string())
+            go2rtc::Engine::start_with(&binary, 0, &local.streams, &xiaomi_account).map_err(|e| e.to_string())
         }) {
             Ok(engine) => {
                 server.set_engine_port(engine.api_port);
@@ -477,11 +588,28 @@ async fn cameras_start(
             engine,
             cameras,
             local: local.local,
+            xiaomi,
         })
     })
     .await?;
     *state.engine.lock().unwrap() = Some(built);
     Ok(cameras_status(state))
+}
+
+/// Start the cameras again from scratch, after an account was added or
+/// removed: the video engine is stopped and every account's cameras read anew.
+#[tauri::command]
+async fn cameras_restart(
+    app: AppHandle,
+    state: tauri::State<'_, CameraState>,
+) -> Result<CamerasStatus, String> {
+    let old = state.engine.lock().unwrap().take();
+    drop(old);
+    let tapo = kagaz_core::cameras::tapo::Session::default_path().is_file();
+    if !tapo && !kagaz_core::cameras::xiaomi::Session::default_path().is_file() {
+        return Ok(cameras_status(state));
+    }
+    cameras_start(app, state).await
 }
 
 /// The running camera engine, or why there is none.
@@ -1167,7 +1295,12 @@ fn camera_layout(
     use kagaz_core::cameras::Layout;
     let mut layout = Layout::load(&Layout::default_path()).map_err(|e| e.to_string())?;
     if let Ok(e) = running(&state) {
-        let ids: Vec<String> = e.cameras.iter().map(|c| c.device_id.clone()).collect();
+        let ids: Vec<String> = e
+            .cameras
+            .iter()
+            .map(|c| c.device_id.clone())
+            .chain(e.xiaomi.iter().map(|x| x.id()))
+            .collect();
         layout.reconcile(&ids);
     }
     Ok(layout)
@@ -1415,6 +1548,7 @@ pub fn run() {
         .manage(calls::CallsState::default())
         .manage(onetouch::OneTouchState::default())
         .manage(media::Watches::default())
+        .manage(xiaomi::XiaomiState::default())
         .plugin(tauri_plugin_dialog::init())
         .plugin(phone_plugin())
         .setup(|app| {
@@ -1453,6 +1587,16 @@ pub fn run() {
             button_settings_reset,
             cameras_status,
             cameras_start,
+            cameras_restart,
+            xiaomi::xiaomi_signed_in,
+            xiaomi::xiaomi_login_password,
+            xiaomi::xiaomi_login_phone,
+            xiaomi::xiaomi_login_captcha,
+            xiaomi::xiaomi_login_code,
+            xiaomi::xiaomi_qr_start,
+            xiaomi::xiaomi_cancel,
+            xiaomi::xiaomi_logout,
+            xiaomi::xiaomi_open_page,
             recording_days,
             recording_clips,
             clock_correct,

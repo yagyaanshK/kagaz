@@ -2963,9 +2963,15 @@ fn xiaomi_cameras(
 
 fn xiaomi_print(cams: &[kagaz_core::cameras::xiaomi::Camera]) {
     println!("{} camera{} on the account:", cams.len(), if cams.len() == 1 { "" } else { "s" });
+    let known: Vec<std::net::Ipv4Addr> = cams.iter().filter_map(|c| c.ip.parse().ok()).collect();
+    let here = kagaz_core::cameras::xiaomi::local::find(&known, std::time::Duration::from_secs(2));
     for c in cams {
         let state = if c.online { "" } else { ", offline" };
-        println!("  {}  ({}, {} at {}, region {}{state})", c.name, c.model, c.did, c.ip, c.region);
+        let lan = match here.get(&c.did) {
+            Some(ip) => format!("on this network at {ip}"),
+            None => "not found on this network".into(),
+        };
+        println!("  {}  ({}, {}, region {}{state}; {lan})", c.name, c.model, c.did, c.region);
     }
 }
 
