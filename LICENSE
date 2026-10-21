@@ -1,4 +1,6 @@
-# Kagaz License 1.0.0
+# Kagaz License 1.1.0 (KGZ-1.1.0)
+
+Short name: KGZ-1.1.0 (as an SPDX identifier: LicenseRef-KGZ-1.1.0)
 
 Required Notice: Copyright (c) 2026 Yagyaansh Khaneja (https://github.com/yagyaanshK/kagaz)
 
@@ -6,7 +8,7 @@ Kagaz is source-available, not open source. Its code is public so that
 anyone can read it, check it, build it and help improve it. It is not
 for reuse elsewhere.
 
-The Kagaz License is made of two parts: the Kagaz Additional Terms
+The Kagaz License (KGZ) is made of two parts: the Kagaz Additional Terms
 below, and the PolyForm Strict License 1.0.0 that follows them,
 unchanged. The licensor is Yagyaansh Khaneja, and the software is
 Kagaz: everything in the official repository at
@@ -54,11 +56,20 @@ may not use your changes for anything else.
    source code, into another programming language, or rewriting it by
    working from its source code; and publishing any such work, under
    any license.
-5. Making money from the software: selling it or any work based on it,
+5. Giving the source code, or any substantial part of it, to an AI
+   system (a coding agent, an AI assistant or chatbot, or any other
+   machine-learning model) to have it write software that does what
+   Kagaz does, or that copies its design, structure or code, in any
+   programming language. What the AI system writes counts as a work
+   based on the software, even when it writes it from scratch, and
+   item 4 applies to it. Using an AI system to read, explain or check
+   the code, or to prepare a contribution under "Contributing", is
+   allowed.
+6. Making money from the software: selling it or any work based on it,
    charging for it or for access to it, offering it as a paid service,
    or bundling it with anything sold. Using the official software,
    unchanged, in your own work is not making money from it.
-6. Removing or changing this license, the Required Notice, or the
+7. Removing or changing this license, the Required Notice, or the
    licensor's other notices.
 
 ### Asking for permission
