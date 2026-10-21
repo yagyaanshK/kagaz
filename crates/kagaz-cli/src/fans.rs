@@ -313,10 +313,24 @@ pub fn fan(which: &str, action: FanAction) -> Result<()> {
                         "no fan with id ending \"{which}\" within reach; kagaz fans lists them"
                     ),
                 })?;
-            let name = name.unwrap_or_else(|| f.suggested_name());
-            let room = room.unwrap_or_default();
-            let fan = fans.add(f, &name, &room)?.clone();
-            save(&fans)?;
+            // On the list as it is now (the window may have changed it
+            // during the listen); a fan already added keeps its name and
+            // room unless new ones are given.
+            let mut added = None;
+            update(|list| {
+                let known = list.find(&f.id).cloned();
+                let name = name
+                    .clone()
+                    .or_else(|| known.as_ref().map(|k| k.name.clone()))
+                    .unwrap_or_else(|| f.suggested_name());
+                let room = room
+                    .clone()
+                    .or_else(|| known.as_ref().map(|k| k.room.clone()))
+                    .unwrap_or_default();
+                added = Some(list.add(f, &name, &room)?.clone());
+                Ok(())
+            })?;
+            let fan = added.expect("just added");
             println!(
                 "Added {} ({} {}){}.",
                 fan.name,
