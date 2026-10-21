@@ -27,11 +27,14 @@ pub enum FanError {
     Bluetooth(String),
     #[error("the fan is out of reach")]
     OutOfReach,
-    /// Seen 2026-10-21 on two fans at once: the link comes up, the fan
-    /// lists no services at all. Not yet proven to be another phone's
-    /// connection; the words say "probably".
-    #[error("the fan let Kagaz connect but offered none of its controls; another phone or app is probably connected to it over Bluetooth (close the Atomberg app on nearby phones, then try again)")]
+    /// Seen 2026-10-21: after many connections a fan accepts one but
+    /// lists no services. Switching it off at the wall brought it back.
+    #[error("the fan let Kagaz connect but offered none of its controls; it has stopped taking new connections (switch it off at the wall for 30 seconds, then try again)")]
     Busy,
+    /// Seen 2026-10-21: after many connections a fan, still advertising,
+    /// refuses to connect at all.
+    #[error("the fan is within reach but refuses to connect; it has stopped taking new connections (switch it off at the wall for 30 seconds, then try again)")]
+    Refuses,
     #[error("the fan is not on this network and not within Bluetooth reach")]
     NoWay,
     #[error("the fan answered with something other than its state: {0}")]
@@ -178,7 +181,11 @@ pub fn send_raw(fan: &Fan, command: &Command) -> Result<(String, Reach), FanErro
     if let Some(address) = fan.ble_address.as_deref() {
         // Over Bluetooth a read only reads the state: nothing is written.
         let write = command.changes().then_some(json.as_str());
-        let text = ble::exchange(address, write)?;
+        let text = if ble::keeping() {
+            ble::kept_exchange(address, write)?
+        } else {
+            ble::exchange(address, write)?
+        };
         return Ok((text, Reach::Bluetooth));
     }
     Err(last.unwrap_or(FanError::NoWay))

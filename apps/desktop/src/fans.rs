@@ -16,6 +16,28 @@ use serde::Serialize;
 use std::sync::Mutex;
 
 static RADIO: Mutex<()> = Mutex::new(());
+
+/// Keep one connection per fan while it is in use, closed after 45
+/// seconds idle: a fan takes only so many new connections before it
+/// stops answering until switched off at the wall (seen 2026-10-21).
+pub fn start_links() {
+    #[cfg(not(target_os = "android"))]
+    {
+        fans::ble::keep_links(true);
+        std::thread::spawn(|| loop {
+            std::thread::sleep(std::time::Duration::from_secs(10));
+            if let Ok(_radio) = RADIO.try_lock() {
+                fans::ble::close_idle(std::time::Duration::from_secs(45));
+            }
+        });
+    }
+}
+
+/// Let go of every fan (the window is going away).
+pub fn close_links() {
+    #[cfg(not(target_os = "android"))]
+    fans::ble::close_all();
+}
 static LIST: Mutex<()> = Mutex::new(());
 
 fn load() -> Result<Fans, String> {

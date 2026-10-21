@@ -1432,6 +1432,8 @@ pub fn run() {
                 #[cfg(target_os = "android")]
                 let _ = reopen::APP.set(app.handle().clone());
             }
+            // Fans: one kept connection per fan while it is in use.
+            fans::start_links();
             // Listen for the doorbell from the start: that is what it is for.
             let port = kagaz_core::intercom::stations::Stations::load().listen_port;
             doorbell::start(app.handle(), port);
@@ -1569,8 +1571,10 @@ pub fn run() {
                     return;
                 }
             }
-            // Stop the camera engine when the window goes away.
+            // Stop the camera engine when the window goes away, and let
+            // go of the fans (a kept connection would block them).
             if let tauri::RunEvent::Exit = event {
+                fans::close_links();
                 if let Some(state) = app.try_state::<CameraState>() {
                     if let Ok(mut guard) = state.engine.lock() {
                         guard.take();

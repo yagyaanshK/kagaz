@@ -61,16 +61,19 @@ with the commit that closes them.
       Boost is speed 6 with bit 0x40, and 0x40 stays set after turning off
       from Boost. Fields 11 and 13 count seconds running and switched off,
       shown on the fan's menu. Fixtures in `fans/atomberg.rs`.
-- [ ] **Two fans stopped offering their controls** (2026-10-21, ~18:04).
-      The Aris and the Renesa accept a Bluetooth connection but list no
-      services; the untouched Efficio is fine, nothing on this computer
-      holds a link, no phone app is open. Most likely Kagaz's earlier
-      pattern wedged them (up to four quick tries per request, timed-out
-      tries never cancelled, every fan read on each page visit). Kagaz is
-      gentler now (two tries, every try closed, two seconds between
-      connections, reads only when asked or stale). Power-cycle the two
-      fans, then watch whether it comes back; if it does, capture with
-      `sudo btmon` to see what the fan answers.
+- [ ] **A fan takes only so many new connections** (2026-10-21). After
+      many connections the Aris and the Renesa first listed no services,
+      then (the Aris, after a power cycle and about a dozen one-reading
+      connections) refused to connect at all, while still advertising.
+      Switching off at the wall brings a fan back. The untouched Efficio
+      was fine throughout. Kagaz now keeps one connection per fan while it
+      is in use (window: closed after 45 s idle and on exit; CLI: `kagaz fan
+      <name> console`), so a session costs one connection. To verify: power
+      cycle, run the console through the Part B steps on one connection,
+      and see that the fan still answers afterwards.
+- [x] **Light read from the real fan** (2026-10-21): on/off, three colours
+      (warm, white, natural white) and brightness 10 to 100 decoded from an
+      Aris set with its remote; the card shows colour and brightness.
 - [ ] **Which command starts Boost**: the card sends speed 6 (what the fan
       reports in Boost); the community's `boost` key is untested.
 - [ ] **Light, sleep, timer, brightness on real fans.** Written from the

@@ -999,6 +999,7 @@ button.danger-text { background: none; border-color: transparent; color: var(--b
 .fan-speeds { display: flex; gap: 6px; flex-wrap: wrap; }
 .fan-speeds .chip { min-width: 40px; text-align: center; }
 .fan-extras { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.fan-dim input[type="range"] { width: 120px; accent-color: var(--accent); vertical-align: middle; }
 .fan-timer { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
 .fan-add-room { margin-top: 10px; }
 #fans-found {
