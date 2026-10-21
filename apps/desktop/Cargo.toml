@@ -23,7 +23,9 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 kagaz-core = { path = "../../crates/kagaz-core" }
 tauri = { version = "2", features = [] }
-tauri-plugin-dialog = "2"
+# On Linux, the desktop's own file chooser (through the XDG portal: GNOME's,
+# KDE's), not the plugin's default GTK 3 one, which looks foreign on GNOME.
+tauri-plugin-dialog = { version = "2", default-features = false, features = ["xdg-portal"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 base64 = "0.22"

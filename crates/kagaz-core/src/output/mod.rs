@@ -124,8 +124,10 @@ pub fn write(
                 };
                 let (bytes, warning) = fit(opts, |q, s| {
                     let r = render(page, opts.color, opts.format, q, s)?;
+                    // With its resolution, so it shows and prints at real size.
                     Ok(match r.kind {
-                        Kind::Jpeg { data, .. } | Kind::Png { data } => data,
+                        Kind::Jpeg { data, .. } => jpeg::with_dpi(data, r.dpi),
+                        Kind::Png { data } => png_with_dpi(data, r.dpi),
                         Kind::Bilevel { .. } => {
                             unreachable!("image files are never bilevel-packed")
                         }
@@ -142,6 +144,33 @@ pub fn write(
         }
     }
     Ok(written)
+}
+
+/// The PNG with its resolution recorded (a pHYs chunk after the header),
+/// unless it has one already. The image data is not touched.
+fn png_with_dpi(mut data: Vec<u8>, dpi: u32) -> Vec<u8> {
+    const SIGNATURE: &[u8] = b"\x89PNG\r\n\x1a\n";
+    // The signature, then IHDR: length, type, 13 bytes, CRC.
+    let after_ihdr = 8 + 4 + 4 + 13 + 4;
+    if data.len() < after_ihdr || &data[..8] != SIGNATURE || &data[12..16] != b"IHDR" {
+        return data;
+    }
+    if data.windows(4).any(|w| w == b"pHYs") {
+        return data;
+    }
+    let per_metre = ((dpi.max(1) as f64) / 0.0254).round() as u32;
+    let mut body = Vec::with_capacity(13);
+    body.extend_from_slice(b"pHYs");
+    body.extend_from_slice(&per_metre.to_be_bytes());
+    body.extend_from_slice(&per_metre.to_be_bytes());
+    body.push(1); // per metre
+    let mut crc = flate2::Crc::new();
+    crc.update(&body);
+    let mut chunk = 9u32.to_be_bytes().to_vec();
+    chunk.extend_from_slice(&body);
+    chunk.extend_from_slice(&crc.sum().to_be_bytes());
+    data.splice(after_ihdr..after_ihdr, chunk);
+    data
 }
 
 /// Render with the requested quality, then if a size limit is set and
@@ -414,6 +443,20 @@ pub fn parse_size(s: &str) -> Option<u64> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_png_says_its_resolution() {
+        let mut png = Vec::new();
+        image::DynamicImage::ImageRgb8(image::RgbImage::new(4, 4))
+            .write_to(&mut Cursor::new(&mut png), ImageFormat::Png)
+            .unwrap();
+        let marked = png_with_dpi(png, 1200);
+        let at = marked.windows(4).position(|w| w == b"pHYs").unwrap();
+        let ppm = u32::from_be_bytes(marked[at + 4..at + 8].try_into().unwrap());
+        assert_eq!(ppm, 47244); // 1200 dpi in pixels per metre
+        image::load_from_memory(&marked).unwrap();
+        assert_eq!(png_with_dpi(marked.clone(), 300), marked, "an existing pHYs is kept");
+    }
+
     use super::*;
     use image::{GrayImage, Luma, Rgb, RgbImage};
 
