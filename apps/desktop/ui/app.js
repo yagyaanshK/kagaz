@@ -9,8 +9,126 @@ const $ = (id) => document.getElementById(id);
 // or cannot, next to Rust's own lines, so a blank tile can be diagnosed.
 KagazPlayer.report = (line) => invoke("page_log", { line }).catch(() => {});
 
+// What the printer page lists: the printers the person added first (kept by
+// Rust in printers.json, with how to reach them), then the ones the latest
+// search found that are not added. `current` indexes it.
 let devices = [];
 let current = null;
+let savedPrinters = [];
+let foundDevices = [];
+let lastSearch = 0; // when the network was last searched (ms)
+const printerStates = new Map(); // printerKey -> { state, reason }, or "checking"
+
+// What stays the same about a printer when its address changes (as
+// printers.rs's key(): its UUID, else USB identity, else host name, else name).
+function printerKey(d) {
+  if (d.uuid) return "uuid:" + d.uuid.replace(/^urn:uuid:/, "").toLowerCase();
+  if (d.usb) return `usb:${hex(d.usb.vendor_id)}:${hex(d.usb.product_id)}${d.usb.serial ? ":" + d.usb.serial : ""}`;
+  if (d.hostname) return "host:" + d.hostname.replace(/\.$/, "").toLowerCase();
+  return "name:" + (d.name || "").toLowerCase();
+}
+
+function isSaved(d) {
+  const k = printerKey(d);
+  return savedPrinters.some((s) => printerKey(s) === k);
+}
+
+// Rebuild the list from the saved and found printers, keeping the one open.
+function rebuildDevices() {
+  const open = current !== null && devices[current] ? printerKey(devices[current]) : null;
+  const saved = new Set(savedPrinters.map(printerKey));
+  devices = [...savedPrinters, ...foundDevices.filter((d) => !saved.has(printerKey(d)))];
+  current = open === null ? null : devices.findIndex((d) => printerKey(d) === open);
+  if (current < 0) current = null;
+}
+
+// A saved printer's state in words: [class, text].
+function stateLine(d) {
+  const st = printerStates.get(printerKey(d));
+  if (!st || st === "checking") return ["muted", "Checking…"];
+  const why = st.reason ? `: ${st.reason}` : "";
+  switch (st.state) {
+    case "ready": return ["cap-ok", "Ready" + (st.reason ? ` · ${st.reason}` : "")];
+    case "printing": return ["cap-ok", "Printing" + (st.reason ? ` · ${st.reason}` : "")];
+    case "attention": return ["cap-warn", "Needs attention" + why];
+    case "online": return ["cap-ok", "On the network"];
+    case "usb": return ["muted", "Connected by USB"];
+    default: return ["cap-bad", "Offline"];
+  }
+}
+
+// Ask the saved printers whose state is not known (or was let go to be
+// asked again) how they are, together, redrawing as answers come.
+let statesBusy = false;
+async function checkPrinters() {
+  const todo = savedPrinters.filter((d) => !printerStates.has(printerKey(d)));
+  if (statesBusy || !todo.length) return;
+  statesBusy = true;
+  try {
+    for (const d of todo) printerStates.set(printerKey(d), "checking");
+    printersChanged();
+    await Promise.all(todo.map(async (d) => {
+      try {
+        printerStates.set(printerKey(d), await invoke("printer_state", { device: d }));
+      } catch (e) {
+        printerStates.set(printerKey(d), { state: "offline", reason: "" });
+      }
+      printersChanged();
+    }));
+  } finally {
+    statesBusy = false;
+  }
+  // Asked again while this ran (a search, the minute's refresh): go again.
+  if (savedPrinters.some((d) => !printerStates.has(printerKey(d)))) checkPrinters();
+}
+
+function printersChanged() {
+  renderList();
+  if (typeof KagazHome !== "undefined") KagazHome.devicesChanged();
+}
+
+async function addPrinter(d) {
+  try {
+    savedPrinters = await invoke("printer_add", { device: d });
+  } catch (e) {
+    $("search-note").textContent = "Could not add it: " + e;
+    return;
+  }
+  printerStates.delete(printerKey(d));
+  rebuildDevices();
+  printersChanged();
+  checkPrinters();
+}
+
+async function forgetPrinter(d) {
+  if (!(await KagazAsk.confirm(`Remove ${title(d)} from your printers?`, "Remove printer",
+    "It stays on the network; a search finds it again, and Add brings it back."))) return false;
+  try {
+    savedPrinters = await invoke("printer_forget", { device: d });
+  } catch (e) {
+    $("search-note").textContent = "Could not remove it: " + e;
+    return false;
+  }
+  printerStates.delete(printerKey(d));
+  rebuildDevices();
+  printersChanged();
+  return true;
+}
+
+// The saved printers, at start: listed at once, before any search.
+invoke("printers_saved").then((list) => {
+  savedPrinters = list || [];
+  rebuildDevices();
+  printersChanged();
+  checkPrinters();
+}).catch(() => {});
+// While the printers show (their page or Home), their states stay fresh.
+setInterval(() => {
+  if (document.visibilityState === "visible" && ["print", "home"].includes(currentView)) {
+    for (const d of savedPrinters) printerStates.delete(printerKey(d));
+    checkPrinters();
+  }
+}, 60000);
 
 // ---------- device list ----------
 
@@ -92,19 +210,34 @@ document.addEventListener("keydown", (ev) => {
 });
 
 function renderList() {
-  const ul = $("devices");
-  ul.innerHTML = "";
+  const mine = $("devices");
+  const found = $("found-devices");
+  mine.innerHTML = "";
+  found.innerHTML = "";
   renderBrandChips();
+  let mineShown = 0;
+  let foundShown = 0;
   devices.forEach((d, i) => {
     if (printBrand && (brandOf(d) || {}).id !== printBrand) return;
+    const saved = isSaved(d);
     const li = document.createElement("li");
     li.dataset.index = i;
     if (current === i) li.classList.add("active");
-    const caps = capLine(d)
+    // Mine: how it is now. Found: what it can do, and Add.
+    const caps = (saved ? [stateLine(d)] : capLine(d))
       .map(([cls, text]) => `<span class="${cls}">${text}</span>`)
       .join(" · ");
     li.innerHTML = `<div class="name"></div><div class="where"></div><div class="caps">${caps}</div>`;
     li.querySelector(".name").textContent = title(d);
+    if (!saved) {
+      const add = document.createElement("button");
+      add.type = "button";
+      add.className = "add-printer";
+      add.textContent = "Add";
+      add.setAttribute("aria-label", `Add ${title(d)} to your printers`);
+      add.addEventListener("click", (ev) => { ev.stopPropagation(); addPrinter(d); });
+      li.appendChild(add);
+    }
     const brand = brandOf(d);
     if (brand && brand.logo) {
       const img = document.createElement("img");
@@ -113,34 +246,52 @@ function renderList() {
       img.alt = "";
       li.prepend(img);
     }
-    li.querySelector(".where").textContent = where(d);
+    li.querySelector(".where").textContent = saved ? [d.manufacturer, d.model].filter(Boolean).join(" ") || where(d) : where(d);
     li.tabIndex = 0;
     li.setAttribute("role", "button");
     li.addEventListener("click", () => select(i));
-    ul.appendChild(li);
+    if (saved) { mine.appendChild(li); mineShown++; } else { found.appendChild(li); foundShown++; }
   });
+  $("mine-empty").classList.toggle("hidden", savedPrinters.length > 0);
+  $("devices").classList.toggle("hidden", mineShown === 0);
+  $("found-head").classList.toggle("hidden", foundShown === 0 && !$("rescan").disabled && !lastSearch);
 }
 
+// Search the network (and USB) for printers and scanners. The saved ones it
+// sees take their fresh addresses; the rest are listed under Found nearby.
 async function rescan() {
   $("rescan").disabled = true;
-  $("search-note").textContent = "Looking for printers and scanners…";
+  $("search-note").textContent = "Looking for printers and scanners nearby…";
   $("search-note").classList.remove("hidden");
+  $("search-note").classList.add("working");
+  renderList();
   try {
-    devices = await invoke("discover", { timeout: 3 });
-    const shown = printBrand ? devices.filter((d) => (brandOf(d) || {}).id === printBrand).length : devices.length;
-    $("search-note").textContent = devices.length
+    foundDevices = await invoke("discover", { timeout: 3 });
+    lastSearch = Date.now();
+    try {
+      savedPrinters = await invoke("printers_seen", { found: foundDevices });
+    } catch (_) {}
+    rebuildDevices();
+    const others = devices.filter((d) => !isSaved(d));
+    const shown = printBrand ? others.filter((d) => (brandOf(d) || {}).id === printBrand).length : others.length;
+    $("search-note").textContent = others.length
       ? printBrand && !shown
-        ? `No ${(KagazBrands.byId("print", printBrand) || {}).name || "such"} printer answered; ${devices.length} other${devices.length === 1 ? "" : "s"} found (All).`
-        : `${shown} found`
-      : "Nothing answered. Is the device on and on the same network?";
-    if (typeof KagazHome !== "undefined") KagazHome.devicesChanged();
+        ? `No other ${(KagazBrands.byId("print", printBrand) || {}).name || "such"} printer answered; ${others.length} other${others.length === 1 ? "" : "s"} found (All).`
+        : `${shown} found. Add one to keep it in your printers.`
+      : foundDevices.length || savedPrinters.length
+        ? "No other printers answered."
+        : "Nothing answered. Is the printer on, and on the same network?";
   } catch (e) {
-    devices = [];
+    foundDevices = [];
+    rebuildDevices();
     $("search-note").textContent = "Could not search: " + e;
   }
+  $("search-note").classList.remove("working");
   $("rescan").disabled = false;
-  if (current !== null && current >= devices.length) current = null;
-  renderList();
+  printersChanged();
+  // Addresses may have changed: ask the saved printers again.
+  for (const d of savedPrinters) printerStates.delete(printerKey(d));
+  checkPrinters();
 }
 
 // ---------- detail ----------
@@ -159,6 +310,7 @@ async function select(i) {
   $("main").scrollTop = 0;
   $("d-title").textContent = title(d);
   $("d-sub").textContent = [d.manufacturer, d.model, where(d)].filter(Boolean).join(" · ");
+  showSavedButton(d);
   $("scan-log").innerHTML = "";
   $("scan-state").textContent = "";
   showTab("about");
@@ -193,6 +345,22 @@ async function select(i) {
   } catch (err) {
     $("about-loading").textContent = "Could not work it out: " + err;
   }
+}
+
+// The device page's Add to my printers, or Remove for an added one.
+function showSavedButton(d) {
+  const b = $("d-saved");
+  const saved = isSaved(d);
+  b.textContent = saved ? "Remove from my printers" : "Add to my printers";
+  b.className = saved ? "" : "accent";
+  b.onclick = async () => {
+    if (isSaved(d)) {
+      if (await forgetPrinter(d)) showSavedButton(d);
+    } else {
+      await addPrinter(d);
+      showSavedButton(d);
+    }
+  };
 }
 
 function fillList(id, items) {
@@ -482,7 +650,14 @@ function selectCategory(cat) {
   }
   const pane = { print: "picker" }[cat] || cat;
   for (const id of PANES) $(id).classList.toggle("hidden", id !== pane);
-  if (cat === "print") { current = null; renderList(); if (!devices.length) rescan(); }
+  // The saved printers show at once; a search for new ones runs alongside
+  // (again only after a couple of minutes).
+  if (cat === "print") {
+    current = null;
+    renderList();
+    checkPrinters();
+    if (Date.now() - lastSearch > 2 * 60 * 1000 && !$("rescan").disabled) rescan();
+  }
   if (cat === "doorbell") { doorSettings(false); refreshDoorbell(); }
   if (cat === "home" && typeof KagazHome !== "undefined") KagazHome.show();
   if (cat === "settings" && typeof KagazSettings !== "undefined") KagazSettings.show();

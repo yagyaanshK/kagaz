@@ -145,17 +145,20 @@ const KagazHome = (() => {
     return true;
   }
 
+  // The printers the person added, each with how it is now.
   function printersGroup(root) {
-    if (!devices.length) return false;
+    if (!savedPrinters.length) return false;
     const g = group("print", "Printers & scanners", "", () => { printBrand = null; selectCategory("print"); });
-    devices.forEach((d, i) => {
+    for (const d of savedPrinters) {
       const b = brandOf(d);
-      g.tiles.appendChild(tile(title(d), [d.manufacturer, d.model].filter(Boolean).join(" ") || "Printer", KagazBrands.ICON.print, () => {
+      const key = printerKey(d);
+      g.tiles.appendChild(tile(title(d), stateLine(d)[1], KagazBrands.ICON.print, () => {
         printBrand = null;
         selectCategory("print");
-        select(i);
+        const i = devices.findIndex((x) => printerKey(x) === key);
+        if (i >= 0) select(i);
       }, b && b.logo));
-    });
+    }
     g.count();
     root.appendChild(g.box);
     return true;
@@ -167,8 +170,10 @@ const KagazHome = (() => {
     const shown = [await doorbellGroup(fresh), await camerasGroup(fresh), printersGroup(fresh)];
     root.replaceChildren(...fresh.childNodes);
     $("home-empty").classList.toggle("hidden", shown.some(Boolean));
-    // Printers answer on the network: look now and then, quietly.
-    if (!devices.length && Date.now() - lastScan > 5 * 60 * 1000) {
+    // The added printers' states; their addresses are refreshed by a quiet
+    // search now and then (a router can hand them new ones).
+    checkPrinters();
+    if (savedPrinters.length && Date.now() - lastScan > 5 * 60 * 1000 && !$("rescan").disabled) {
       lastScan = Date.now();
       rescan();
     }

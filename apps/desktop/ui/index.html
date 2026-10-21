@@ -93,8 +93,12 @@
         <button id="rescan" type="button" title="Look again on the network and USB">Look again</button>
       </div>
       <div id="print-brands" class="chips" role="group" aria-label="Brand"></div>
-      <p id="search-note" class="muted">Looking for printers and scanners…</p>
+      <h3 class="list-head">My printers</h3>
+      <p id="mine-empty" class="muted">None added yet. Add a printer from the ones found nearby, and it shows here every time, with whether it is ready.</p>
       <ul id="devices"></ul>
+      <h3 id="found-head" class="list-head">Found nearby</h3>
+      <p id="search-note" class="muted" role="status"></p>
+      <ul id="found-devices"></ul>
     </section>
 
     <section id="doorbell" class="pane hidden">
@@ -367,8 +371,10 @@
 
     <section id="detail" class="pane hidden">
       <button id="detail-back" type="button" class="back">&#x2190; Devices</button>
-      <h2 id="d-title"></h2>
-      <p id="d-sub" class="muted"></p>
+      <div class="pane-head">
+        <div><h2 id="d-title"></h2><p id="d-sub" class="muted"></p></div>
+        <button id="d-saved" type="button">Add to my printers</button>
+      </div>
 
       <nav class="tabs" role="tablist" aria-label="What to do with this device">
         <button class="tab active" type="button" role="tab" aria-selected="true" data-tab="about">About</button>

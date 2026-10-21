@@ -230,6 +230,13 @@ Kagaz makes itself, or your own songs), first for every doorbell, then
 each brand's own (OneTouch: ringing here, door stations, family, one
 device; stations on this network). The app's **Settings** holds what
 applies to the whole app: the accounts Kagaz is signed in to, and about.
+
+On **Printers & scanners**, **Add** keeps a printer the search found in
+**My printers**. Kagaz remembers how to reach it, so it is listed at once
+the next time, with how it is: Ready, Printing, Needs attention (in the
+printer's own words, such as "out of paper") or Offline. A search still
+runs alongside, lists new printers under **Found nearby**, and catches a
+printer that the router has given a new address.
 Wide windows have a sidebar; phones a bottom bar.
 
 On a phone, Kagaz keeps listening for doorbell calls after you close it,
