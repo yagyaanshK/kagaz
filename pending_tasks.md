@@ -69,8 +69,11 @@ with the commit that closes them.
 - [x] **Commands checked on the Aris** (2026-10-21): power, speeds, Boost
       on/off, light, colours, brightness 50/100. Sleep and timer are taken
       and reported back.
-- [ ] **What Sleep and the timer do over time**: set `timer 1` and see the
-      fan switch off an hour later; leave Sleep on overnight.
+- [ ] **What Sleep and the timer do over time**: both are taken by the Aris
+      and the Efficio (the Efficio blinks its indicator to confirm), but the
+      state shows whole hours left with no countdown, and the known timer
+      takes only 1, 2, 3 or 6 h. Set "Turn off after: 1 h" and see the fan
+      switch off an hour later; leave Sleep on overnight.
 - [x] **Brightness levels** (2026-10-21): the remote steps 10, 25, …, but
       the fan takes any value Kagaz sent from 10 to 100 in steps of 10 and
       shows each as a visible step. Finer steps are untried.

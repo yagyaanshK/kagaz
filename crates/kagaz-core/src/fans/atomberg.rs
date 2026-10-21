@@ -216,8 +216,10 @@ pub fn span_words(seconds: u64) -> String {
 /// speed 5), led, light_mode warm/cool/daylight, brightness 10 to 100 in
 /// steps of 10 (each a visible step; the remote's own steps are coarser,
 /// 10, 25, …).
-/// The fan takes sleep and timer and reports them back; their effect over
-/// time is not yet seen.
+/// The fan takes sleep and timer and reports them back, and an Efficio
+/// confirms each with an animation of its indicator light; what Sleep does
+/// through the night, and the timer switching the fan off, are not yet
+/// seen (the state shows whole hours left, with no countdown).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "value", rename_all = "snake_case")]
 pub enum Command {
@@ -461,6 +463,21 @@ mod tests {
     const LIGHT_WHITE: &str = "2618,1,Z,0,108.97,101,152,I1,1499,1,3142,24893372,0,13916671,0,0.59,25.18,0,0,0,0,0,300,0,278,END";
     const LIGHT_NATURAL_100: &str = "58426,1,Z,0,108.77,100,152,I1,1499,1,3142,24893429,0,13916671,0,0.59,25.18,0,0,0,0,0,300,0,278,END";
     const LIGHT_OFF_FAN_ON: &str = "58394,1,Z,0,108.67,97,152,I1,1499,1,3142,24893442,0,13916671,0,0.57,25.18,0,0,0,0,0,300,0,278,END";
+
+    /// An Efficio (M1), one white light, read on 2026-10-21: its string has
+    /// one more field than the Aris's (field 25, changing on every read,
+    /// not decoded). Here at speed 5, light on at 100, a 1-hour timer set.
+    const EFFICIO_TIMER_1H: &str = "123957,1,Z,0,186,234,245,M1,1909,1,101,22031950,578698512,10844128,0,1.37,25.18,0,385714287,0,0,0,306,0,282,2331,END";
+
+    #[test]
+    fn an_efficio_reads_as_it_was() {
+        let s = FanState::decode(EFFICIO_TIMER_1H).unwrap();
+        assert!(s.power && s.led && !s.in_boost());
+        assert_eq!((s.speed, s.brightness, s.timer_hours), (5, 100, 1));
+        assert_eq!(s.series.as_deref(), Some("M1"));
+        assert_eq!(s.words(), "Speed 5, light on, 1 h left");
+        assert!(!profile("M1").has_color && profile("M1").has_brightness);
+    }
 
     #[test]
     fn the_light_reads_as_it_was() {
