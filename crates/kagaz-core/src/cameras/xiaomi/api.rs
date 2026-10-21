@@ -28,17 +28,6 @@ pub struct Camera {
     pub online: bool,
 }
 
-impl Camera {
-    /// go2rtc's address for it: go2rtc fetches the keys with the account's
-    /// token for `user_id` and connects to `ip` on the home network.
-    pub fn stream_url(&self, user_id: &str) -> String {
-        format!(
-            "xiaomi://{user_id}:{}@{}?did={}&model={}",
-            self.region, self.ip, self.did, self.model
-        )
-    }
-}
-
 /// What a camera connection needs from the cloud.
 #[derive(Debug, Clone)]
 pub struct MissKeys {
@@ -329,10 +318,7 @@ mod tests {
         let c = parse_cameras(&v, "i2");
         assert_eq!(c.len(), 1);
         assert_eq!(c[0].mac, "aa:bb:cc:00:00:01");
-        assert_eq!(
-            c[0].stream_url("1000"),
-            "xiaomi://1000:i2@192.0.2.20?did=123456789&model=mijia.camera.v1"
-        );
+        assert_eq!((c[0].ip.as_str(), c[0].region.as_str()), ("192.0.2.20", "i2"));
     }
 
     #[test]

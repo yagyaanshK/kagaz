@@ -1,11 +1,10 @@
 //! Xiaomi (Mi Home) cameras. They stream over Xiaomi's own peer-to-peer
-//! service, never RTSP; go2rtc (1.9.13 and later) plays them when it is given
-//! the Mi account's user ID and pass token, fetching the per-connection keys
-//! from Xiaomi's cloud while the video itself stays on the home network.
-//!
-//! This module does the account part: signing in (password with Xiaomi's
-//! captcha and email or phone code; a phone number and texted code; or a QR
-//! code), keeping the session, and listing the account's cameras.
+//! service, never RTSP, and Kagaz speaks it itself: the account
+//! ([`account`], [`phone`]: password, texted code or QR code), the cloud
+//! ([`api`]: the cameras, and each connection's keys), the camera found on
+//! this network ([`local`]), the transport ([`cs2`]) and the encrypted
+//! streaming on it ([`miss`]), put together as a live view ([`live`]).
+//! The video itself stays on the home network.
 
 pub mod account;
 pub mod api;

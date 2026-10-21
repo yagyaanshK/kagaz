@@ -25,6 +25,8 @@ const DRW_ACK: u8 = 0xD1;
 const PING: u8 = 0xE0;
 const PONG: u8 = 0xE1;
 const CLOSE: u8 = 0xF1;
+/// How many packets ahead of the next one a channel keeps.
+const EARLY: usize = 256;
 
 /// The socket a connection runs on.
 #[derive(Clone)]
@@ -90,7 +92,7 @@ impl Conn {
             link: link.clone(),
             tcp_in,
             tcp,
-            channels: [Channel::new(10, cmd_tx), Channel::new(250, media_tx)],
+            channels: [Channel::new(cmd_tx), Channel::new(media_tx)],
             acks: ack_tx,
             closed: closed.clone(),
             error: error.clone(),
@@ -242,18 +244,17 @@ fn exchange(sock: &UdpSocket, to: &mut SocketAddr, request: &[u8], deadline: Ins
 /// the messages they carry, each prefixed by its length.
 struct Channel {
     wait_seq: u16,
+    /// Packets that came before their turn, up to [`EARLY`].
     early: HashMap<u16, Vec<u8>>,
-    early_max: usize,
     pending: Vec<u8>,
     out: SyncSender<Vec<u8>>,
 }
 
 impl Channel {
-    fn new(early_max: usize, out: SyncSender<Vec<u8>>) -> Channel {
+    fn new(out: SyncSender<Vec<u8>>) -> Channel {
         Channel {
             wait_seq: 0,
             early: HashMap::new(),
-            early_max,
             pending: Vec::new(),
             out,
         }
@@ -287,7 +288,7 @@ impl Channel {
             if self.early.contains_key(&seq) {
                 return Ok(true);
             }
-            if self.early.len() >= self.early_max {
+            if self.early.len() >= EARLY {
                 return Ok(false); // no room: the camera sends it again
             }
             self.early.insert(seq, data.to_vec());
@@ -426,7 +427,7 @@ mod tests {
     #[test]
     fn messages_are_split_across_and_within_packets() {
         let (tx, rx) = sync_channel(10);
-        let mut c = Channel::new(10, tx);
+        let mut c = Channel::new(tx);
         let mut stream = message(b"first");
         stream.extend(message(b"second one"));
         c.push(&stream[..7]).unwrap();
@@ -439,7 +440,7 @@ mod tests {
     #[test]
     fn packets_out_of_order_are_put_back_in_order() {
         let (tx, rx) = sync_channel(10);
-        let mut c = Channel::new(10, tx);
+        let mut c = Channel::new(tx);
         let stream = message(b"abcdef");
         // Packet 1 arrives before packet 0; a repeat of 0 is ignored.
         assert!(c.push_seq(1, &stream[5..]).unwrap());
@@ -454,7 +455,7 @@ mod tests {
     #[test]
     fn numbering_wraps_around() {
         let (tx, rx) = sync_channel(10);
-        let mut c = Channel::new(10, tx);
+        let mut c = Channel::new(tx);
         c.wait_seq = u16::MAX;
         let stream = message(b"xy");
         assert!(c.push_seq(0, &stream[3..]).unwrap()); // early, after the wrap
