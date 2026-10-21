@@ -56,6 +56,14 @@ with the commit that closes them.
       command verified on a Renesa (R1) with the CLI; the window's page is
       written (rooms, names, remembered fans, Found nearby, controls) and
       awaits a look in the window.
+- [ ] **Decode "on" from the real fans, not the community notes** (2026-10-21).
+      The community decoder takes bit 0x10 of the state as power. An Aris
+      and a Renesa, both running, reported 0x10 clear and an undocumented
+      0x40 set with speed 6, so Kagaz showed them as Off. After a speed
+      change the Aris showed 0x10 and no 0x40. Likely 0x40 is the remote's
+      Boost; to confirm, capture `kagaz fan <name> read --raw` with the fan
+      in known states (off; on at 1, 3, 6; Boost; Sleep; light on), then
+      build the decoder and test fixtures from those captures.
 - [ ] **Light, sleep, timer, brightness on real fans.** Written from the
       community's notes; only power and speed are exercised so far. Check
       an Aris (I1, dimmable, colour modes) and an Efficio (M1).

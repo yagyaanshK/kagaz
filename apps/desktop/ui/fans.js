@@ -15,6 +15,7 @@ const KagazFans = (() => {
   let arranging = false;
   const collapsed = new Set(); // rooms folded while the app runs
   const busy = new Set(); // ids with a command on its way
+  const menus = new Set(); // ids whose menu (Rename, Room, Forget) is open
   const TIMER = [0, 1, 2, 3, 6];
 
   function el(tag, cls, text) {
@@ -53,7 +54,7 @@ const KagazFans = (() => {
   // How a fan stands, from what is known and whether it answered.
   function standing(f, here) {
     const s = f.last_state;
-    if (busy.has(f.id)) return "Sending…";
+    if (busy.has(f.id)) return f.last_state ? "Sending…" : "Asking the fan…";
     if (scanning && !lastScan) return "Checking…";
     if (s && here) return words(s);
     if (s && !here) return s.power ? "Out of reach" : "Off, out of reach";
@@ -72,7 +73,7 @@ const KagazFans = (() => {
     if (busy.has(f.id)) return;
     busy.add(f.id);
     card.classList.add("busy");
-    card.querySelectorAll("button, select").forEach((c) => (c.disabled = true));
+    card.querySelectorAll(".fan-controls button, .fan-controls select").forEach((c) => (c.disabled = true));
     card.querySelector(".fan-standing").textContent = "Sending…";
     try {
       const out = await invoke("fan_send", { id: f.id, command });
@@ -105,10 +106,14 @@ const KagazFans = (() => {
     text.append(el("strong", "fan-name", f.name), el("span", "muted small fan-standing", standing(f, here)));
     head.append(icon, text);
     if (!arranging) {
-      head.appendChild(button("icon fan-more-btn", "⋯", () => {
+      const toggle = button("icon fan-more-btn", "⋯", () => {
         const more = c.querySelector(".fan-more");
         more.hidden = !more.hidden;
-      }, `More for ${f.name}`));
+        if (more.hidden) menus.delete(f.id); else menus.add(f.id);
+        toggle.setAttribute("aria-expanded", String(!more.hidden));
+      }, `More for ${f.name}`);
+      toggle.setAttribute("aria-expanded", String(menus.has(f.id)));
+      head.appendChild(toggle);
     }
     c.appendChild(head);
 
@@ -123,7 +128,7 @@ const KagazFans = (() => {
     }
 
     const more = el("div", "fan-more");
-    more.hidden = true;
+    more.hidden = !menus.has(f.id);
     more.appendChild(button("", "Rename", () => rename(f)));
     more.appendChild(roomSelect(f));
     more.appendChild(button("danger-text", "Forget", () => forget(f)));
@@ -214,7 +219,25 @@ const KagazFans = (() => {
 
   async function forget(f) {
     if (await KagazAsk.confirm(`Forget ${f.name}?`, "Forget fan", "It stays as it is; it is just not listed here any more. It shows under Found nearby when it is within reach.")) {
+      menus.delete(f.id);
       await apply(() => invoke("fan_forget", { id: f.id }));
+    }
+  }
+
+  // Ask one fan how it is, without changing anything.
+  async function readOne(id) {
+    if (busy.has(id)) return;
+    busy.add(id);
+    render();
+    try {
+      const out = await invoke("fan_send", { id, command: { kind: "read" } });
+      data = out.fans;
+      reachable.add(id);
+    } catch (e) {
+      reachable.delete(id);
+    } finally {
+      busy.delete(id);
+      render();
     }
   }
 
@@ -385,7 +408,8 @@ const KagazFans = (() => {
       found = found.filter((y) => y.id !== x.id);
       await apply(() => invoke("fan_add", { found: x, name: answer.name, room: answer.room }));
       reachable.add(x.id);
-      render();
+      // Ask the new fan how it is, so its card starts true (on, speed).
+      await readOne(x.id);
     });
     document.body.appendChild(dlg);
     KagazNav.push("ask", () => dlg.close());
@@ -403,7 +427,7 @@ const KagazFans = (() => {
     render();
     try {
       const out = await invoke("fans_scan", { seconds: 6 });
-      data = out.fans;
+      data = await invoke("fans_saved").catch(() => out.fans);
       reachable = new Set(out.reachable);
       found = out.found;
       lastScan = Date.now();

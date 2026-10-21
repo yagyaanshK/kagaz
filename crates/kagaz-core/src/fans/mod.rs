@@ -149,25 +149,32 @@ mod ble_stub {
 /// and return its state: over Wi-Fi when the fan has an address there and
 /// answers, else over Bluetooth.
 pub fn send(fan: &Fan, command: &Command) -> Result<(FanState, Reach), FanError> {
+    let (text, reach) = send_raw(fan, command)?;
+    let state = FanState::decode(&text).ok_or(FanError::Reply(text))?;
+    Ok((state, reach))
+}
+
+/// [`send`], returning the fan's state string exactly as it came, for
+/// checking the decoding against what the fan is really doing.
+pub fn send_raw(fan: &Fan, command: &Command) -> Result<(String, Reach), FanError> {
     command.validate()?;
     let json = command.to_json();
     let mut last: Option<FanError> = None;
     if let Some(ip) = fan.ip.as_deref().and_then(|s| s.parse::<IpAddr>().ok()) {
+        // Over Wi-Fi a read is the community's `{"read":1}`: the fan only
+        // answers a datagram. Not yet checked on a fan on the network.
         match udp::send(ip, &json, Duration::from_millis(800)) {
-            Ok(Some(text)) => {
-                if let Some(state) = FanState::decode(&text) {
-                    return Ok((state, Reach::Wifi));
-                }
-            }
+            Ok(Some(text)) => return Ok((text, Reach::Wifi)),
             Ok(None) => last = Some(FanError::OutOfReach),
             Err(e) => last = Some(e),
         }
     }
     #[cfg(not(target_os = "android"))]
     if let Some(address) = fan.ble_address.as_deref() {
-        let text = ble::exchange(address, Some(&json))?;
-        let state = FanState::decode(&text).ok_or(FanError::Reply(text))?;
-        return Ok((state, Reach::Bluetooth));
+        // Over Bluetooth a read only reads the state: nothing is written.
+        let write = command.changes().then_some(json.as_str());
+        let text = ble::exchange(address, write)?;
+        return Ok((text, Reach::Bluetooth));
     }
     Err(last.unwrap_or(FanError::NoWay))
 }
