@@ -478,7 +478,21 @@ label small { font-size: 12px; min-height: 1.2em; }
 .pb-form input { width: 6em; padding: 2px 4px; min-height: 0; }
 .pb-clock-form .ck-help, .pb-clock-form .ck-row { flex-basis: 100%; }
 .cam-cell.big { grid-column: 1 / -1; }
-.cam-tile .cam-quality { position: absolute; right: 8px; bottom: 6px; font-size: 11px; padding: 1px 6px; min-height: 0; background: rgba(0,0,0,0.5); color: #fff; border: 1px solid rgba(255,255,255,0.4); border-radius: 4px; }
+.cam-tile .cam-quality { position: absolute; right: 8px; bottom: 6px; font-size: 11px; padding: 1px 4px; min-height: 0; width: auto; max-width: 9em; background: rgba(0,0,0,0.5); color: #fff; border: 1px solid rgba(255,255,255,0.4); border-radius: 4px; }
+.cam-tile .cam-quality option { color: var(--text); background: var(--panel); }
+.cam-tile .cam-more { position: absolute; top: 6px; left: 8px; z-index: 2; min-height: 0; width: 30px; height: 30px; padding: 0; font-size: 18px; line-height: 1; background: rgba(0,0,0,0.55); color: #fff; border: 1px solid rgba(255,255,255,0.5); border-radius: 6px; }
+.cam-tile .cam-more:hover { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+.cam-settings-form { display: flex; flex-direction: column; gap: 10px; min-width: min(340px, calc(100vw - 72px)); }
+.cam-settings-form .ask-field { display: flex; flex-direction: column; gap: 4px; margin: 0; font-size: 13px; color: var(--muted); }
+.cam-settings-form .ask-field input, .cam-settings-form .ask-field select { color: var(--text); }
+.cam-settings-form .turn-row { display: flex; gap: 6px; flex-wrap: wrap; margin-top: -6px; }
+.cam-settings-form .turn-row button { min-width: 3.5em; }
+.cam-settings-form .check-row { display: flex; flex-direction: row; align-items: center; justify-content: flex-start; gap: 8px; font-size: 14px; color: var(--text); text-align: left; }
+.cam-settings-form .check-row input { width: auto; margin: 0; flex: none; }
+.cam-settings-form details summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+.cam-details { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 8px 0 0; font-size: 13px; }
+.cam-details dt { color: var(--muted); }
+.cam-details dd { margin: 0; overflow-wrap: anywhere; }
 .cam-tile .cam-quality:hover { background: rgba(0,0,0,0.8); }
 #cam-login-form, #xm-login-form { margin-top: 10px; padding: 10px; border: 1px solid var(--line); border-radius: 8px; }
 #xm-login-form .tabs { margin: 8px 0 4px; }
@@ -497,7 +511,7 @@ label small { font-size: 12px; min-height: 1.2em; }
 .cam-group.dragging { opacity: 0.5; }
 .cam-group.drop-before { box-shadow: 0 -3px 0 0 var(--accent); }
 .cam-group.drop-after { box-shadow: 0 3px 0 0 var(--accent); }
-.cam-tile .cam-speaker { position: absolute; right: 52px; bottom: 6px; font-size: 12px; padding: 1px 6px; min-height: 0; background: rgba(0,0,0,0.5); color: #fff; border: 1px solid rgba(255,255,255,0.4); border-radius: 4px; }
+.cam-tile .cam-speaker { position: absolute; right: 96px; bottom: 6px; font-size: 12px; padding: 1px 6px; min-height: 0; background: rgba(0,0,0,0.5); color: #fff; border: 1px solid rgba(255,255,255,0.4); border-radius: 4px; }
 .cam-tile .cam-speaker.on { background: var(--accent); border-color: var(--accent); }
 .cam-tile audio { display: none; }
 
@@ -524,7 +538,7 @@ label small { font-size: 12px; min-height: 1.2em; }
 /* The tile's own buttons stay above its overlay (playback's gaps cover the picture). */
 .cam-tile .cam-quality, .cam-tile .cam-speaker, .cam-tile .cam-volume { z-index: 2; }
 /* Per-camera volume: shown while the camera's sound is on, or on hover */
-.cam-tile .cam-volume { position: absolute; right: 92px; bottom: 9px; width: 80px; display: none; min-height: 0; accent-color: var(--accent); }
+.cam-tile .cam-volume { position: absolute; right: 136px; bottom: 9px; width: 80px; display: none; min-height: 0; accent-color: var(--accent); }
 .cam-tile.sound-on .cam-volume, .cam-tile:hover .cam-volume { display: block; }
 .cam-tile.placeholder .cam-volume { display: none; }
 /* Enlarge / back-to-grid control, top right of every tile */
@@ -740,8 +754,9 @@ ul.cards li.add .name { color: var(--accent); }
   .cam-tile .cam-full { opacity: 1; width: 44px; height: 40px; right: 60px; }
   .kz-button { width: 48px; height: 48px; }
   .cam-tile .cam-quality, .cam-tile .cam-speaker { padding: 6px 10px; font-size: 12px; }
-  .cam-tile .cam-speaker { right: 64px; }
-  .cam-tile .cam-volume { right: 112px; bottom: 12px; }
+  .cam-tile .cam-speaker { right: 112px; }
+  .cam-tile .cam-volume { right: 160px; bottom: 12px; }
+  .cam-tile .cam-more { width: 40px; height: 40px; }
   .cam-reload { width: 64px; height: 64px; }
   #categories li { min-height: 48px; }
 }

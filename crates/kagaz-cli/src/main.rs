@@ -387,6 +387,22 @@ enum XiaomiCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Watch a camera's live view for a while, spoken by Kagaz itself, and say what came: to prove the path works
+    Watch {
+        /// Camera name, or part of it, or its device ID
+        camera: String,
+        #[arg(long, default_value_t = 10)]
+        seconds: u64,
+        /// auto, low or high
+        #[arg(long, default_value = "high")]
+        quality: String,
+        /// Also write the pictures to this file (raw H.264)
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+        /// Play the SD card from this unix time instead of the live view
+        #[arg(long)]
+        from: Option<i64>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -2807,6 +2823,78 @@ fn xiaomi_command(cmd: XiaomiCommand) -> Result<()> {
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => println!("No saved Xiaomi sign-in."),
                 Err(e) => return Err(e.into()),
             }
+            Ok(())
+        }
+        XiaomiCommand::Watch { camera, seconds, quality, output, from } => {
+            use kagaz_core::cameras::xiaomi::live::{self, Quality};
+            use kagaz_core::media::Media;
+            let mut session = Session::load(&path)
+                .map_err(|_| anyhow::anyhow!("not signed in; run `kagaz xiaomi login` first"))?;
+            let mut cams = xiaomi_cameras(&mut session, &path)?;
+            let known: Vec<std::net::Ipv4Addr> = cams.iter().filter_map(|c| c.ip.parse().ok()).collect();
+            let here = kagaz_core::cameras::xiaomi::local::find(&known, std::time::Duration::from_secs(2));
+            for c in &mut cams {
+                if let Some(ip) = here.get(&c.did) {
+                    c.ip = ip.to_string();
+                }
+            }
+            let wanted = camera.to_lowercase();
+            let cam = cams
+                .iter()
+                .find(|c| c.did == camera || c.name.to_lowercase().contains(&wanted))
+                .ok_or_else(|| anyhow::anyhow!("no camera called {camera}"))?
+                .clone();
+            let quality = match quality.as_str() {
+                "auto" => Quality::Auto,
+                "low" => Quality::Low,
+                _ => Quality::High,
+            };
+            let started = std::time::Instant::now();
+            let mut view = match from {
+                Some(t) => live::open_playback(&mut session, &cam, t, t + seconds as i64 + 60),
+                None => live::open(&mut session, &cam, quality, true),
+            }
+            .map_err(|e| anyhow::anyhow!(e))?;
+            let _ = session.save(&path);
+            println!("Connected to {} over {} in {:.1} s.", cam.name, view.protocol(), started.elapsed().as_secs_f32());
+            if from.is_some() {
+                match view.answer(std::time::Duration::from_secs(3)) {
+                    Some((cmd, text)) => println!("The camera answered {cmd:#x}: {}", text.chars().take(300).collect::<String>()),
+                    None => println!("No answer to the playback request within 3 s."),
+                }
+            }
+            let mut file = match &output {
+                Some(p) => Some(std::fs::File::create(p)?),
+                None => None,
+            };
+            let (mut pictures, mut keys, mut bytes, mut sound) = (0u32, 0u32, 0usize, 0usize);
+            let mut first_key = None;
+            let until = std::time::Instant::now() + std::time::Duration::from_secs(seconds);
+            while std::time::Instant::now() < until {
+                for m in view.next().map_err(|e| anyhow::anyhow!(e))? {
+                    match m {
+                        Media::Video { data, key, .. } => {
+                            pictures += 1;
+                            bytes += data.len();
+                            if key {
+                                keys += 1;
+                                first_key.get_or_insert(started.elapsed().as_secs_f32());
+                            }
+                            if let Some(f) = file.as_mut() {
+                                std::io::Write::write_all(f, &data)?;
+                            }
+                        }
+                        Media::Audio { pcm, .. } => sound += pcm.len(),
+                        Media::Ended(_) => {}
+                    }
+                }
+            }
+            println!(
+                "{pictures} pictures ({keys} key, first after {:.1} s), {} KB; {:.1} s of sound.",
+                first_key.unwrap_or(0.0),
+                bytes / 1000,
+                sound as f32 / 8000.0
+            );
             Ok(())
         }
         XiaomiCommand::Cameras { json } => {

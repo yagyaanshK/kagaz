@@ -7,7 +7,7 @@
 const KagazBrands = (() => {
   const ICON = {
     doorbell: '<svg viewBox="0 0 24 24"><path d="M6 8a6 6 0 0 1 12 0v5l2 3H4l2-3zM10 19a2 2 0 0 0 4 0"/></svg>',
-    security: '<svg viewBox="0 0 24 24"><path d="M4 6h12l-1 6H5zM10 12v4M6 20h8M18 8l3-1"/></svg>',
+    security: '<svg viewBox="0 0 24 24"><path d="M2 4.5h13.5A1.5 1.5 0 0 1 17 6v5a1.5 1.5 0 0 1-1.5 1.5H2zM5.5 8.5h.01M17 7h2.5v3H17M10 12.5v5.5h11M21 14v7"/></svg>',
     print: '<svg viewBox="0 0 24 24"><path d="M6 9V3h12v6M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2M6 14h12v7H6z"/></svg>',
     camera: '<svg viewBox="0 0 24 24"><path d="M4 7h3l2-2h6l2 2h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1zM12 16a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z"/></svg>',
     vacuum: '<svg viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 8a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM6 16h12"/></svg>',

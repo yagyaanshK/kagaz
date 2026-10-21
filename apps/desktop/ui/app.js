@@ -1156,7 +1156,7 @@ function tileVideo(tile) {
 // The window's own player in a tile (player.js): Rust takes the stream
 // apart, the page decodes the pictures. Works on every platform, no helper.
 function mountBuiltin(tile, cam, paced) {
-  const player = new KagazPlayer.Player(tile, { sound: !!tile._audioWanted, paced, volume: volumeOf(cam) / 100, level: false, label: cam.name });
+  const player = new KagazPlayer.Player(tile, { sound: !!tile._audioWanted, paced, volume: volumeOf(cam) / 100, level: false, label: cam.name, turn: turnOf(cam), mirror: mirroredOf(cam) });
   tile.insertBefore(player.box, tile.firstChild);
   tile._player = player;
   player.onended = (why) => {
@@ -1208,19 +1208,18 @@ function watchTile(tile, onTick) {
   }, 1000);
 }
 
-// HD for an enlarged tile, or when the user asked for HD on that camera.
-function wantsHd(tile, cam) {
-  return tile.classList.contains("big") || (layout.hd || []).includes(cam.device_id);
-}
 
 function mountTile(tile, cam, big) {
   teardownTile(tile);
-  const mode = $("cam-mode").value;
-  const hd = big || wantsHd(tile, cam);
+  // Cameras Kagaz speaks to itself (Xiaomi) play only in its own player.
+  const mode = cam.ts_url ? $("cam-mode").value : "builtin";
+  const quality = qualityNow(tile, cam, big);
+  const hd = quality !== "low";
+  tile._quality = quality;
   let player = null;
   if (mode === "builtin") {
     const p = mountBuiltin(tile, cam, false);
-    KagazPlayer.watch(p, "camera_watch", { deviceId: cam.device_id, hd })
+    KagazPlayer.watch(p, "camera_watch", { deviceId: cam.device_id, hd, quality })
       .then((h) => { if (tile._player === p) tile._watchHandle = h; else h.stop(); })
       .catch((e) => { if (tile._player === p) setState(tile, "lost", "could not start: " + e); });
   } else if (mode === "ts") {
@@ -1236,9 +1235,14 @@ function mountTile(tile, cam, big) {
     player.setAttribute("mode", mode);
     player.src = hd ? cam.ws_url : cam.ws_url_vga;
   }
-  if (player) tile.insertBefore(player, tile.firstChild);
-  const q = tile.querySelector(".cam-quality");
-  if (q) q.textContent = hd ? "HD" : "VGA";
+  if (player) {
+    // A plain <video>: turned and mirrored by CSS (sideways pictures fit
+    // less well than in the window's own player).
+    const t = turnOf(cam);
+    if (t || mirroredOf(cam)) player.style.transform = `rotate(${t}deg)${mirroredOf(cam) ? " scaleX(-1)" : ""}`;
+    tile.insertBefore(player, tile.firstChild);
+  }
+  showQuality(tile, cam);
   setState(tile, "connecting", "connecting…");
   // After a long silence, reconnect by itself: a few times, spaced out.
   let lostSince = 0;
@@ -1494,6 +1498,11 @@ function mountFile(tile, cam, from, clip, speed) {
 // reload icon, retried by itself), ended (a recording is over: reload icon
 // plays it again, no automatic retry).
 function setState(tile, state, text) {
+  // A live picture that starts stalling: Auto may step down.
+  if (state === "waiting" && tile.dataset.state === "live") {
+    const cam = cameraById(tile.closest(".cam-cell")?.dataset.id);
+    if (cam) autoStall(tile, cam);
+  }
   tile.dataset.state = state;
   const o = tile.querySelector(".cam-overlay");
   if (!o) return;
@@ -1534,6 +1543,36 @@ function stopAudio(tile) {
 function volumeOf(cam) {
   const v = layout.volume && layout.volume[cam.device_id];
   return typeof v === "number" ? v : 100;
+}
+
+// The name shown in Kagaz: the person's own, else the camera's.
+function camName(cam) {
+  return (layout.names && layout.names[cam.device_id]) || cam.name;
+}
+function turnOf(cam) { return (layout.turn && layout.turn[cam.device_id]) || 0; }
+function mirroredOf(cam) { return (layout.mirror || []).includes(cam.device_id); }
+
+// The picture sizes a camera offers, by brand, with Auto first.
+function qualityChoices(cam) {
+  const sizes = cam.brand === "xiaomi" ? [["high", "1080p"], ["low", "360p"]] : [["high", "HD"], ["low", "360p"]];
+  return [["auto", "Auto"], ...sizes];
+}
+// What the person chose: "auto", "high" or "low".
+function qualityOf(cam) {
+  const q = layout.quality && layout.quality[cam.device_id];
+  if (q) return q;
+  return (layout.hd || []).includes(cam.device_id) ? "high" : "auto";
+}
+// What to ask the camera for now. Auto: the small stream for a small tile;
+// for an enlarged or full-screen one, the camera's own choice (Xiaomi
+// adapts to the network itself) or HD, stepping down to 360p for a while
+// after the picture keeps stalling.
+function qualityNow(tile, cam, big) {
+  const q = qualityOf(cam);
+  if (q !== "auto") return q;
+  if (!big && !tile.classList.contains("kz-full")) return "low";
+  if (cam.brand === "xiaomi") return "auto";
+  return tile._autoLowUntil && Date.now() < tile._autoLowUntil ? "low" : "high";
 }
 
 // Sound for one camera; any number of cameras can be heard at once.
@@ -1583,7 +1622,7 @@ function toggleAudio(tile, cam) {
 
 // The top row's button: sound on every camera shown, or off on all.
 function refreshSoundAll() {
-  const tiles = [...$("cam-grid").querySelectorAll('.cam-tile:not(.placeholder)[data-brand="tapo"]')];
+  const tiles = [...$("cam-grid").querySelectorAll(".cam-tile:not(.placeholder)")];
   const anyOff = !tiles.length || tiles.some((t) => !t.querySelector("audio") && !t._fileSound && !(t._player && t._player.sound));
   $("cam-sound-all").textContent = anyOff ? "\u{1F50A} Sound on all" : "\u{1F507} Mute all";
 }
@@ -1630,22 +1669,38 @@ function buildTile(cam) {
   tile.dataset.brand = cam.brand || "tapo";
   const name = document.createElement("div");
   name.className = "cam-name";
-  name.textContent = cam.name;
+  name.textContent = camName(cam);
   tile.appendChild(name);
-  const quality = document.createElement("button");
-  quality.type = "button";
+  const quality = document.createElement("select");
   quality.className = "cam-quality";
-  quality.title = "HD or VGA for this camera (enlarged tiles are always HD)";
-  quality.textContent = "VGA";
-  quality.addEventListener("click", (ev) => {
-    ev.stopPropagation();
-    layout.hd = layout.hd || [];
-    const i = layout.hd.indexOf(cam.device_id);
-    if (i >= 0) layout.hd.splice(i, 1); else layout.hd.push(cam.device_id);
+  quality.setAttribute("aria-label", `Picture quality for ${camName(cam)}`);
+  for (const [value, label] of qualityChoices(cam)) {
+    const o = document.createElement("option");
+    o.value = value;
+    o.textContent = label;
+    quality.appendChild(o);
+  }
+  quality.value = qualityOf(cam);
+  for (const ev of ["click", "mousedown", "pointerdown"]) quality.addEventListener(ev, (e) => e.stopPropagation());
+  quality.addEventListener("change", () => {
+    layout.quality = layout.quality || {};
+    layout.quality[cam.device_id] = quality.value;
+    layout.hd = (layout.hd || []).filter((x) => x !== cam.device_id);
+    tile._autoLowUntil = 0;
     saveLayout();
     if (!isPlayback()) mountTile(tile, cam, tile.classList.contains("big"));
+    else showQuality(tile, cam);
   });
   tile.appendChild(quality);
+  // Each camera's own settings: name, group, how its picture is turned, details.
+  const more = document.createElement("button");
+  more.type = "button";
+  more.className = "cam-more";
+  more.textContent = "\u22EE";
+  more.title = `Settings for ${camName(cam)}`;
+  more.setAttribute("aria-label", `Settings for ${camName(cam)}`);
+  more.addEventListener("click", (ev) => { ev.stopPropagation(); cameraSettings(cam); });
+  tile.appendChild(more);
   const speaker = document.createElement("button");
   speaker.type = "button";
   speaker.className = "cam-speaker";
@@ -1679,8 +1734,6 @@ function buildTile(cam) {
   volume.addEventListener("click", (ev) => ev.stopPropagation());
   volume.addEventListener("mousedown", (ev) => ev.stopPropagation());
   tile.appendChild(volume);
-  // Sound comes from Tapo's own stream; other brands' sound is not in Kagaz yet.
-  if (cam.brand && cam.brand !== "tapo") { speaker.classList.add("hidden"); volume.classList.add("hidden"); }
   const overlay = document.createElement("div");
   overlay.className = "cam-overlay hidden";
   overlay.innerHTML = '<div class="spinner"></div><button type="button" class="cam-reload" title="Reload this camera">&#x21bb;</button><div class="cam-overlay-text"></div>';
@@ -1725,6 +1778,154 @@ function buildTile(cam) {
     setBig(tile, cam, !tile.classList.contains("big"));
   });
   return tile;
+}
+
+// The quality list on a tile: what was chosen, and for Auto what plays now.
+function showQuality(tile, cam) {
+  const q = tile.querySelector(".cam-quality");
+  if (!q) return;
+  q.value = qualityOf(cam);
+  const auto = q.querySelector('option[value="auto"]');
+  const now = { high: cam.brand === "xiaomi" ? "1080p" : "HD", low: "360p", auto: "camera's choice" }[tile._quality] || "";
+  if (auto) auto.textContent = qualityOf(cam) === "auto" && now ? `Auto (${now})` : "Auto";
+  q.title = qualityOf(cam) === "auto"
+    ? "Auto: 360p in a small tile; the best the network carries when enlarged or full screen"
+    : "This camera always plays at this size";
+}
+
+// Auto on an enlarged tile: when the picture keeps stalling, step down to
+// 360p for three minutes, as the vendors' apps do on a slow network.
+function autoStall(tile, cam) {
+  if (qualityOf(cam) !== "auto" || tile._quality !== "high" || isPlayback()) return;
+  const now = Date.now();
+  tile._stalls = (tile._stalls || []).filter((t) => now - t < 30000);
+  tile._stalls.push(now);
+  if (tile._stalls.length >= 3) {
+    tile._stalls = [];
+    tile._autoLowUntil = now + 180000;
+    mountTile(tile, cam, tile.classList.contains("big"));
+  }
+}
+
+// A camera's own settings, in one dialog.
+async function cameraSettings(cam) {
+  const id = cam.device_id;
+  const brand = brandName(cam.brand || "tapo");
+  const saved = await KagazAsk.ask((dlg, finish) => {
+    const form = document.createElement("form");
+    form.method = "dialog";
+    form.className = "cam-settings-form";
+    const title = document.createElement("p");
+    title.className = "ask-title";
+    title.textContent = camName(cam);
+    form.appendChild(title);
+    const field = (label, control) => {
+      const l = document.createElement("label");
+      l.className = "ask-field";
+      l.textContent = label;
+      l.appendChild(control);
+      form.appendChild(l);
+      return control;
+    };
+    const name = document.createElement("input");
+    name.type = "text";
+    name.value = (layout.names && layout.names[id]) || "";
+    name.placeholder = cam.name;
+    name.autocomplete = "off";
+    field("Name in Kagaz", name);
+    const group = document.createElement("select");
+    const here = layout.groups.findIndex((g) => g.cameras.includes(id));
+    for (const [key, label] of [...layout.groups.map((g, i) => [String(i), g.name]), ["-1", `No group (with the other ${brand} cameras)`], ["new", "New group…"]]) {
+      const o = document.createElement("option");
+      o.value = key;
+      o.textContent = label;
+      o.selected = key === String(here);
+      group.appendChild(o);
+    }
+    field("Group", group);
+    const turnRow = document.createElement("div");
+    turnRow.className = "turn-row";
+    turnRow.setAttribute("role", "radiogroup");
+    turnRow.setAttribute("aria-label", "Turn the picture");
+    let turn = turnOf(cam);
+    const turnButtons = [0, 90, 180, 270].map((deg) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.textContent = `${deg}\u00B0`;
+      b.setAttribute("role", "radio");
+      b.addEventListener("click", () => { turn = deg; mark(); });
+      turnRow.appendChild(b);
+      return [deg, b];
+    });
+    const mark = () => turnButtons.forEach(([deg, b]) => { b.classList.toggle("accent", deg === turn); b.setAttribute("aria-checked", String(deg === turn)); });
+    mark();
+    const tl = document.createElement("p");
+    tl.className = "ask-field";
+    tl.textContent = "Turn the picture (clockwise)";
+    form.append(tl, turnRow);
+    const mirrorLabel = document.createElement("label");
+    mirrorLabel.className = "check-row";
+    const mirror = document.createElement("input");
+    mirror.type = "checkbox";
+    mirror.checked = mirroredOf(cam);
+    mirrorLabel.append(mirror, document.createTextNode(" Mirror the picture"));
+    form.appendChild(mirrorLabel);
+    const details = document.createElement("details");
+    const sum = document.createElement("summary");
+    sum.textContent = "Details";
+    const how = cam.brand === "xiaomi"
+      ? (cam.local_address ? "Straight from the camera on this network (keys from Xiaomi)" : "Not found on this network: Xiaomi cameras play only on the same network")
+      : (cam.local_address ? "Straight from the camera on this network" : "Through TP-Link's cloud relay");
+    const rows = [["Brand", brand], ["Model", cam.model], ["Its own name", cam.name], ["Address on this network", cam.local_address || "not found"], ["Plays", how], ["ID", id.replace(/^xiaomi:/, "")]];
+    const dl = document.createElement("dl");
+    dl.className = "cam-details";
+    for (const [k, v] of rows) {
+      const dt = document.createElement("dt");
+      dt.textContent = k;
+      const dd = document.createElement("dd");
+      dd.textContent = v || "—";
+      dl.append(dt, dd);
+    }
+    details.append(sum, dl);
+    form.appendChild(details);
+    const actions = document.createElement("div");
+    actions.className = "actions";
+    const cancel = document.createElement("button");
+    cancel.type = "button";
+    cancel.textContent = "Cancel";
+    cancel.addEventListener("click", () => finish(null));
+    const save = document.createElement("button");
+    save.type = "submit";
+    save.className = "accent";
+    save.textContent = "Save";
+    actions.append(cancel, save);
+    form.appendChild(actions);
+    dlg.appendChild(form);
+    form.addEventListener("submit", (e) => {
+      e.preventDefault();
+      finish({ name: name.value.trim(), group: group.value, turn, mirror: mirror.checked });
+    });
+    setTimeout(() => name.focus(), 0);
+  });
+  if (!saved) return;
+  layout.names = layout.names || {};
+  if (saved.name && saved.name !== cam.name) layout.names[id] = saved.name; else delete layout.names[id];
+  layout.turn = layout.turn || {};
+  if (saved.turn) layout.turn[id] = saved.turn; else delete layout.turn[id];
+  layout.mirror = (layout.mirror || []).filter((x) => x !== id);
+  if (saved.mirror) layout.mirror.push(id);
+  let to = saved.group;
+  if (to === "new") {
+    const n = await KagazAsk.name("Name the new group", "", "Create group");
+    if (n) { layout.groups.push({ name: n, cameras: [], collapsed: false }); to = String(layout.groups.length - 1); }
+    else to = null;
+  }
+  if (to !== null) {
+    const here = layout.groups.findIndex((g) => g.cameras.includes(id));
+    if (Number(to) !== here) moveCamera(id, Number(to), null);
+  }
+  await saveLayout();
+  renderCameraGrid();
 }
 
 // Enlarge a tile to the full width (HD), or bring it back (its own quality).
@@ -2874,8 +3075,7 @@ $("cam-add-group").addEventListener("click", async () => {
 });
 $("cam-show-all").addEventListener("click", () => { viewGroup = null; renderCameraGrid(); });
 $("cam-sound-all").addEventListener("click", () => {
-  const tiles = [...$("cam-grid").querySelectorAll(".cam-cell")].map((c) => [c.querySelector(".cam-tile"), cameraById(c.dataset.id)])
-    .filter(([, cam]) => (cam.brand || "tapo") === "tapo");
+  const tiles = [...$("cam-grid").querySelectorAll(".cam-cell")].map((c) => [c.querySelector(".cam-tile"), cameraById(c.dataset.id)]);
   const anyOff = tiles.some(([t]) => !t.querySelector("audio") && !t._fileSound && !(t._player && t._player.sound));
   for (const [t, cam] of tiles) {
     if (anyOff) startAudio(t, cam); else { stopAudio(t); t._audioWanted = false; }

@@ -110,5 +110,5 @@ const KagazAsk = (() => {
     });
   }
 
-  return { confirm, name };
+  return { confirm, name, ask };
 })();

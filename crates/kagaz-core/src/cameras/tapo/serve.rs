@@ -460,6 +460,48 @@ impl TsServer {
         Ok(Watcher { rx })
     }
 
+    /// Pictures and sound from a source Kagaz speaks itself outside this
+    /// server (a Xiaomi camera), for the window's own player. `source` runs
+    /// on its own thread, handing each batch to the callback until that
+    /// says nobody watches any more, and returns why it ended (empty when
+    /// the watchers simply left). Watchers of the same `key` share it.
+    pub fn watch_with(
+        &self,
+        key: &str,
+        source: impl FnOnce(&mut dyn FnMut(Vec<Media>) -> bool) -> String + Send + 'static,
+    ) -> Result<Watcher, String> {
+        let (tx, rx) = std::sync::mpsc::sync_channel::<Media>(256);
+        self.media_taps
+            .lock()
+            .map_err(|_| "state poisoned")?
+            .entry(key.to_string())
+            .or_default()
+            .push(MediaTap {
+                tx,
+                skipping: false,
+            });
+        let fresh = self
+            .media_sessions
+            .lock()
+            .map_err(|_| "state poisoned")?
+            .insert(key.to_string());
+        if fresh {
+            let server = self.clone_handle();
+            let key = key.to_string();
+            std::thread::Builder::new()
+                .name("kagaz-watch-source".into())
+                .spawn(move || {
+                    let why = source(&mut |items| server.fan_out(&key, items));
+                    if let Ok(mut s) = server.media_sessions.lock() {
+                        s.remove(&key);
+                    }
+                    server.end_taps(&key, why);
+                })
+                .map_err(|e| e.to_string())?;
+        }
+        Ok(Watcher { rx })
+    }
+
     /// Pictures of a stream the video engine reaches by itself (a Xiaomi
     /// camera through go2rtc's own source), for the window's own player:
     /// the engine's MPEG-TS, split the same way as a Tapo relay's.

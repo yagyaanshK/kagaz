@@ -39,6 +39,19 @@ impl Camera {
     }
 }
 
+/// What a camera connection needs from the cloud.
+#[derive(Debug, Clone)]
+pub struct MissKeys {
+    /// The peer-to-peer service the camera uses: 1 TUTK, 3 Agora, 4 CS2, 6 MTP.
+    pub vendor: u8,
+    /// The camera's ID on that service (TUTK).
+    pub p2p_id: String,
+    /// The camera's public key for this connection, hex.
+    pub device_public: String,
+    /// Xiaomi's signature over the app's public key, which the camera checks.
+    pub sign: String,
+}
+
 pub struct Cloud {
     user_id: String,
     ssecurity: Vec<u8>,
@@ -123,6 +136,26 @@ impl Cloud {
                 v.get("message").and_then(Value::as_str).unwrap_or("refused").to_string(),
             )),
         }
+    }
+
+    /// The keys for one connection to a camera: Xiaomi hands back the
+    /// camera's public key and a signature over `app_public` (hex), which
+    /// the camera checks when this app signs in to it.
+    pub fn miss_keys(&self, region: &str, did: &str, app_public: &str) -> Result<MissKeys, XiaomiError> {
+        let params = serde_json::json!({
+            "app_pubkey": app_public,
+            "did": did,
+            "support_vendors": "TUTK_CS2_MTP",
+        })
+        .to_string();
+        let v = self.request(region, "/v2/device/miss_get_vendor", &params)?;
+        let s = |p: &str| v.pointer(p).and_then(Value::as_str).unwrap_or("").to_string();
+        Ok(MissKeys {
+            vendor: v.pointer("/vendor/vendor").and_then(Value::as_u64).unwrap_or(0) as u8,
+            p2p_id: s("/vendor/vendor_params/p2p_id"),
+            device_public: s("/public_key"),
+            sign: s("/sign"),
+        })
     }
 
     /// The cameras in one region.

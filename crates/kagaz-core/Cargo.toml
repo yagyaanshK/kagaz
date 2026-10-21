@@ -36,6 +36,9 @@ url = "2"
 aes = "0.8"
 cbc = { version = "0.1", features = ["alloc"] }
 num-bigint = "0.4"
+x25519-dalek = { version = "2", features = ["static_secrets"] }
+chacha20 = "0.9"
+salsa20 = "0.10"
 
 [target.'cfg(not(target_os = "android"))'.dependencies]
 nusb = "0.2"

@@ -333,8 +333,40 @@ impl XiaomiCamera {
     fn id(&self) -> String {
         format!("xiaomi:{}", self.cam.did)
     }
-    fn stream(&self, hd: bool) -> String {
-        format!("mi_{}{}", self.cam.did, if hd { "" } else { "_vga" })
+}
+
+/// A Xiaomi camera's live view for the window's own player, until nobody
+/// watches (`hand` says so) or the camera stops; returns why it ended.
+fn xiaomi_live(
+    cam: &kagaz_core::cameras::xiaomi::Camera,
+    quality: kagaz_core::cameras::xiaomi::live::Quality,
+    hand: &mut dyn FnMut(Vec<kagaz_core::media::Media>) -> bool,
+) -> String {
+    use kagaz_core::cameras::xiaomi::{live, Session};
+    let path = Session::default_path();
+    let mut session = match Session::load(&path) {
+        Ok(s) => s,
+        Err(_) => return "Sign in to Xiaomi again.".into(),
+    };
+    let before = session.pass_token.clone();
+    let opened = live::open(&mut session, cam, quality, true);
+    if session.pass_token != before {
+        let _ = session.save(&path);
+    }
+    let mut view = match opened {
+        Ok(v) => v,
+        Err(e) => return e,
+    };
+    loop {
+        match view.next() {
+            Ok(items) if items.is_empty() => continue,
+            Ok(items) => {
+                if !hand(items) {
+                    return String::new();
+                }
+            }
+            Err(e) => return e,
+        }
     }
 }
 
@@ -400,29 +432,29 @@ fn camera_views(e: &CameraEngine) -> Vec<CameraView> {
             local_address: e.local.get(&c.device_id).cloned().unwrap_or_default(),
         })
         .chain(e.xiaomi.iter().enumerate().map(|(j, x)| {
-            let i = e.cameras.len() + j;
-            let ws = |hd| e.engine.as_ref().map(|g| g.ws_url(&x.stream(hd))).unwrap_or_default();
+            let _ = j;
+            // Only the window's own player shows these: Kagaz speaks to the
+            // camera itself, so there is no engine stream to point at.
             CameraView {
                 name: x.cam.name.clone(),
                 model: x.cam.model.clone(),
                 device_id: x.id(),
                 brand: "xiaomi".into(),
-                stream: x.stream(true),
-                ws_url: ws(true),
-                ws_url_vga: ws(false),
-                ts_url: e._server.tile_url(i, &x.stream(true)),
-                ts_url_vga: e._server.tile_url(i, &x.stream(false)),
+                stream: String::new(),
+                ws_url: String::new(),
+                ws_url_vga: String::new(),
+                ts_url: String::new(),
+                ts_url_vga: String::new(),
                 local_address: x.here.clone(),
             }
         }))
         .collect()
 }
 
-/// The Xiaomi account's cameras with their go2rtc streams, and the
-/// account (user ID, pass token) go2rtc fetches their keys with. Each
-/// camera is looked for on this network by its device ID: the address it
-/// answers from is used, since the cloud's may be stale.
-fn xiaomi_cameras() -> Result<(Vec<XiaomiCamera>, Vec<kagaz_core::extras::go2rtc::StreamSource>, (String, String)), String> {
+/// The Xiaomi account's cameras. Each is looked for on this network by its
+/// device ID: the address it answers from is used, since the cloud's may
+/// be stale.
+fn xiaomi_cameras() -> Result<Vec<XiaomiCamera>, String> {
     use kagaz_core::cameras::xiaomi::{local, Session, XiaomiError};
     let path = Session::default_path();
     let mut session = Session::load(&path).map_err(|e| e.to_string())?;
@@ -440,20 +472,16 @@ fn xiaomi_cameras() -> Result<(Vec<XiaomiCamera>, Vec<kagaz_core::extras::go2rtc
     }
     let known: Vec<std::net::Ipv4Addr> = cams.iter().filter_map(|c| c.ip.parse().ok()).collect();
     let here = local::find(&known, std::time::Duration::from_secs(2));
-    let mut out = Vec::new();
-    let mut streams = Vec::new();
-    for mut cam in cams {
-        let found = here.get(&cam.did).map(|ip| ip.to_string()).unwrap_or_default();
-        if !found.is_empty() {
-            cam.ip = found.clone();
-        }
-        let x = XiaomiCamera { cam, here: found };
-        let url = x.cam.stream_url(&session.user_id);
-        streams.push(kagaz_core::extras::go2rtc::StreamSource { name: x.stream(true), url: format!("{url}&subtype=hd") });
-        streams.push(kagaz_core::extras::go2rtc::StreamSource { name: x.stream(false), url: format!("{url}&subtype=sd") });
-        out.push(x);
-    }
-    Ok((out, streams, (session.user_id, session.pass_token)))
+    Ok(cams
+        .into_iter()
+        .map(|mut cam| {
+            let found = here.get(&cam.did).map(|ip| ip.to_string()).unwrap_or_default();
+            if !found.is_empty() {
+                cam.ip = found.clone();
+            }
+            XiaomiCamera { cam, here: found }
+        })
+        .collect())
 }
 
 /// Where the cameras stand: not logged in, ready, or running with its streams.
@@ -536,24 +564,23 @@ async fn cameras_start(
             // No Tapo account: the server still carries the engine's streams.
             None => (Session::begin(""), Vec::new()),
         };
-        let (xiaomi, xiaomi_streams, xiaomi_account) = if has_xiaomi {
+        let xiaomi = if has_xiaomi {
             match xiaomi_cameras() {
-                Ok((cams, streams, account)) => (cams, streams, vec![account]),
+                Ok(cams) => cams,
                 Err(e) if cameras.is_empty() => return Err(e),
                 Err(e) => {
                     problems.push(format!("Xiaomi: {e}"));
-                    (Vec::new(), Vec::new(), Vec::new())
+                    Vec::new()
                 }
             }
         } else {
-            (Vec::new(), Vec::new(), Vec::new())
+            Vec::new()
         };
         for p in &problems {
             let _ = app.emit("cameras-progress", p.clone());
         }
         let server = TsServer::start(session, cameras.clone(), 0).map_err(|e| e.to_string())?;
-        let mut local = kagaz_core::cameras::tapo::local_sources(&server, &cameras);
-        local.streams.extend(xiaomi_streams);
+        let local = kagaz_core::cameras::tapo::local_sources(&server, &cameras);
         let _ = app.emit(
             "cameras-progress",
             format!("{} camera(s) on this network", local.local.len()),
@@ -572,7 +599,7 @@ async fn cameras_start(
         })
         .map_err(|e| e.to_string())
         .and_then(|binary| {
-            go2rtc::Engine::start_with(&binary, 0, &local.streams, &xiaomi_account).map_err(|e| e.to_string())
+            go2rtc::Engine::start(&binary, 0, &local.streams).map_err(|e| e.to_string())
         }) {
             Ok(engine) => {
                 server.set_engine_port(engine.api_port);
