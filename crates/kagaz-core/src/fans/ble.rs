@@ -161,6 +161,14 @@ pub fn exchange(address: &str, command: Option<&str>) -> Result<String, FanError
 async fn talk(p: &Peripheral, command: Option<&str>) -> Result<String, FanError> {
     p.discover_services().await.map_err(bt)?;
     let chars = p.characteristics();
+    // A fan that lists nothing at all is answering someone else.
+    if !chars
+        .iter()
+        .any(|c| c.service_uuid == atomberg::BLE_SERVICE)
+        && chars.len() <= 1
+    {
+        return Err(FanError::Busy);
+    }
     let cmd_char = chars.iter().find(|c| c.uuid == atomberg::BLE_COMMAND);
     let state_char = chars
         .iter()
