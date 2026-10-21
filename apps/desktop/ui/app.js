@@ -707,7 +707,7 @@ function showCameras() {
 // device (each with its own settings). The sidebar (wide windows) and the
 // bottom bar (phones) switch between them; every kind's page has a way
 // back to Home.
-const PANES = ["empty", "home", "add", "settings", "tools", "picker", "detail", "cameras", "doorbell"];
+const PANES = ["empty", "home", "add", "settings", "tools", "picker", "detail", "cameras", "doorbell", "fans"];
 let currentView = null;
 
 function selectCategory(cat) {
@@ -752,6 +752,7 @@ function selectCategory(cat) {
     if (!KagazNav.has("door-settings")) doorSettings(false);
     refreshDoorbell();
   }
+  if (cat === "fans" && typeof KagazFans !== "undefined") KagazFans.show();
   if (cat === "home" && typeof KagazHome !== "undefined") KagazHome.show();
   if (cat === "settings" && typeof KagazSettings !== "undefined") KagazSettings.show();
   $("main").scrollTop = 0;

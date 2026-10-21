@@ -972,3 +972,44 @@ body.pip .pip-target .call-body, body.pip .pip-target .door-call-body { position
 @media (pointer: coarse) { .crop-remove { width: 44px; height: 44px; margin: -22px 0 0 -22px; } }
 .crop-tools { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; line-height: normal; }
 .crop-tools:empty { display: none; }
+
+/* Ceiling fans: rooms (the same boxes as Home's groups) of fan cards. */
+.fan-tools { display: flex; gap: var(--area); flex-wrap: wrap; }
+.fan-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 10px; padding: 0 12px 12px; }
+.home-group.fan-room:not(.open) .fan-cards { display: none; }
+.fan-card { border: 1px solid var(--line); border-radius: 12px; background: var(--panel); padding: 12px 14px; min-width: 0; }
+.fan-card.on { border-color: var(--accent); }
+.fan-card.busy { opacity: 0.75; }
+.fan-head { display: flex; align-items: center; gap: 12px; }
+.fan-icon { display: inline-flex; flex: 0 0 auto; width: 40px; height: 40px; align-items: center; justify-content: center; border-radius: 10px; background: var(--bg); color: var(--accent); }
+.fan-card.unreachable .fan-icon { color: var(--muted); }
+.fan-card.on .fan-icon svg { animation: fan-spin 2.4s linear infinite; }
+@media (prefers-reduced-motion: reduce) { .fan-card.on .fan-icon svg { animation: none; } }
+@keyframes fan-spin { to { transform: rotate(360deg); } }
+.fan-icon svg { width: 26px; height: 26px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.fan-text { display: flex; flex-direction: column; min-width: 0; flex: 1 1 auto; }
+.fan-text strong { overflow-wrap: anywhere; }
+.fan-more, .fan-arrange { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
+.fan-room-pick { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
+button.danger-text { background: none; border-color: transparent; color: var(--bad); }
+.fan-controls { margin-top: 12px; display: flex; flex-direction: column; gap: 8px; }
+.fan-power { align-self: flex-start; min-width: 110px; }
+.fan-power.on { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+.fan-speeds { display: flex; gap: 6px; flex-wrap: wrap; }
+.fan-speeds .chip { min-width: 40px; text-align: center; }
+.fan-extras { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.fan-timer { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
+.fan-add-room { margin-top: 10px; }
+#fans-found {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 10px;
+}
+#fans-found li { position: relative; padding: 12px 14px; padding-right: 76px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); }
+#fans-found .name { font-weight: 600; }
+#fans-found .where { font-size: 12px; color: var(--muted); margin-top: 2px; }
+#fans-found .add-printer { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); }
+dialog.ask label.ask-title select, dialog.ask label.ask-title input[type="text"] { display: block; width: 100%; margin-top: 8px; font-weight: 400; }

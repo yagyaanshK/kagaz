@@ -14,6 +14,8 @@ use kagaz_core::{
 use std::path::PathBuf;
 use std::time::Duration;
 
+mod fans;
+
 #[derive(Parser)]
 #[command(
     name = "kagaz",
@@ -258,6 +260,30 @@ enum Command {
         /// Seconds to listen for answers while finding the device
         #[arg(long, default_value_t = 3)]
         timeout: u64,
+    },
+    /// Ceiling fans (Atomberg): the fans you added, by room, how each is now, and the ones within reach
+    Fans {
+        /// Seconds to listen for fans over Bluetooth and on the Wi-Fi network
+        #[arg(long, default_value_t = 6.0)]
+        seconds: f32,
+        /// List the remembered fans only, without looking for them
+        #[arg(long)]
+        no_scan: bool,
+        /// Machine-readable output
+        #[arg(long)]
+        json: bool,
+    },
+    /// One fan: on, off, speed, light, sleep, timer; add, name, put in a room, forget
+    Fan {
+        /// The fan's name, its id, or the end of its id (`kagaz fans` lists them)
+        fan: String,
+        #[command(subcommand)]
+        action: fans::FanAction,
+    },
+    /// The rooms the fans are in: list, add, rename, remove
+    Rooms {
+        #[command(subcommand)]
+        action: Option<fans::RoomAction>,
     },
 }
 
@@ -1153,6 +1179,9 @@ fn main() -> Result<()> {
             println!("{} should be flashing its display now.", title(d));
             Ok(())
         }
+        Command::Fans { seconds, no_scan, json } => fans::list(seconds, no_scan, json),
+        Command::Fan { fan, action } => fans::fan(&fan, action),
+        Command::Rooms { action } => fans::rooms(action),
     }
 }
 

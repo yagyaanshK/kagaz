@@ -15,6 +15,7 @@ use tauri_plugin_dialog::DialogExt;
 mod bench;
 mod calls;
 mod doorbell;
+mod fans;
 mod media;
 mod onetouch;
 #[cfg(mobile)]
@@ -1482,6 +1483,17 @@ pub fn run() {
             printers::printer_forget,
             printers::printers_seen,
             printers::printer_state,
+            fans::fans_saved,
+            fans::fans_scan,
+            fans::fan_add,
+            fans::fan_forget,
+            fans::fan_rename,
+            fans::fan_set_room,
+            fans::room_add,
+            fans::room_rename,
+            fans::room_remove,
+            fans::room_order,
+            fans::fan_send,
             printing::print_queues,
             printing::choose_print_file,
             printing::print_file,

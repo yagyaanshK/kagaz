@@ -50,6 +50,28 @@ with the commit that closes them.
 - [ ] **OneTouch two-factor accounts and Indoor-monitor recordings**: not supported
       by this implementation. Existing direct SIP calls remain separate.
 
+## Ceiling fans (Atomberg)
+
+- [x] **Bluetooth from the computer** (2026-10-21): scan, state read and a
+      command verified on a Renesa (R1) with the CLI; the window's page is
+      written (rooms, names, remembered fans, Found nearby, controls) and
+      awaits a look in the window.
+- [ ] **Light, sleep, timer, brightness on real fans.** Written from the
+      community's notes; only power and speed are exercised so far. Check
+      an Aris (I1, dimmable, colour modes) and an Efficio (M1).
+- [ ] **Wi-Fi route.** No fan here is on the network. The broadcast
+      listener (UDP 5625) and the command path (UDP 5600) are written from
+      the community's notes; put a fan on Wi-Fi with the Atomberg app and
+      run `kagaz fans` to verify, then record a datagram as a fixture.
+- [ ] **Bluetooth on the phone.** The core's Bluetooth is `btleplug`,
+      desktop only; Android needs the Kotlin side (`KagazPlugin`) to scan
+      and talk GATT, with the Bluetooth permissions in the manifest. Until
+      then the phone finds fans on Wi-Fi only.
+- [ ] **Connection takes a few seconds.** BlueZ refuses the first connect
+      now and then ("abort-by-local"); Kagaz rescans and tries again, so a
+      command takes 3 to 10 s. Keeping a connection open while the page
+      is on screen would make it instant.
+
 ## Known gaps in the code
 
 - [ ] **eSCL over TLS only** (`_uscans` with no `_uscan`): refused with a
