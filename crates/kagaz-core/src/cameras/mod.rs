@@ -5,5 +5,6 @@
 pub mod layout;
 pub mod local;
 pub mod tapo;
+pub mod xiaomi;
 
 pub use layout::{Group, Layout, LayoutError};

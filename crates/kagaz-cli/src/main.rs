@@ -244,6 +244,9 @@ enum Command {
     /// Tapo cameras through your TP-Link account, the way the Tapo app reaches them
     #[command(subcommand)]
     Tapo(TapoCommand),
+    /// Xiaomi (Mi Home) cameras through your Xiaomi account
+    #[command(subcommand)]
+    Xiaomi(XiaomiCommand),
     /// Cameras: serve every camera for viewing (Tapo through your account) and start the video engine
     Cameras {
         /// Port for the video engine's local API and player (127.0.0.1 only)
@@ -353,6 +356,33 @@ enum IntercomCommand {
         /// UDP port to listen on
         #[arg(long, default_value_t = 5060)]
         port: u16,
+    },
+}
+
+#[derive(Subcommand)]
+enum XiaomiCommand {
+    /// Sign in to your Xiaomi account. In a terminal it asks for each step; run by a script or an agent it stops at each step and prints the command that continues it
+    Login {
+        /// Email, phone number with its country code (+91...) or Xiaomi ID
+        #[arg(long)]
+        user: Option<String>,
+        /// Read the password from standard input instead of asking for it
+        #[arg(long)]
+        password_stdin: bool,
+        /// Sign in by scanning a QR code with the Mi Home app instead: no password, no codes
+        #[arg(long)]
+        qr: bool,
+    },
+    /// Continue a sign-in with the code Xiaomi sent by email or text message
+    Code { code: String },
+    /// Continue a sign-in with the characters in Xiaomi's captcha picture
+    Captcha { text: String },
+    /// Forget the saved sign-in
+    Logout,
+    /// List the account's cameras
+    Cameras {
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -1172,6 +1202,7 @@ fn main() -> Result<()> {
             Ok(())
         }
         Command::Tapo(cmd) => tapo_command(cmd),
+        Command::Xiaomi(cmd) => xiaomi_command(cmd),
         Command::Cameras { port } => cameras_serve(port),
         Command::Intercom(cmd) => intercom_command(cmd),
         Command::Identify { device, timeout } => {
@@ -2691,6 +2722,220 @@ fn intercom_command(cmd: IntercomCommand) -> Result<()> {
             }
         }
     }
+}
+
+fn xiaomi_command(cmd: XiaomiCommand) -> Result<()> {
+    use kagaz_core::cameras::xiaomi::{Login, QrLogin, Session};
+    use std::io::IsTerminal;
+    let path = Session::default_path();
+    let pending = Login::pending_path();
+    let interactive = std::io::stdin().is_terminal();
+    let old_device = Session::load(&path).ok().map(|s| s.device_id);
+    match cmd {
+        XiaomiCommand::Login { user, password_stdin, qr } => {
+            if qr {
+                let mut qr = QrLogin::start(old_device.as_deref())?;
+                println!("Scan this with the Mi Home app (Profile, then the scan button at the top), and confirm on the phone:\n");
+                print_qr(&qr.login_url)?;
+                let picture = kagaz_core::paths::cache_dir().join("xiaomi-qr.png");
+                if let Ok(png) = qr.image() {
+                    kagaz_core::cameras::xiaomi::account::write_private(&picture, &png)?;
+                    println!("The same code as a picture: {}", picture.display());
+                }
+                println!("Or open this link on a phone signed in to Xiaomi:\n  {}\n", qr.login_url);
+                println!("Waiting for the scan (Ctrl+C to stop)...");
+                let session = qr.wait();
+                let _ = std::fs::remove_file(&picture);
+                return xiaomi_finish(session?, &path);
+            }
+            let user = match user {
+                Some(u) => u,
+                None => prompt("Xiaomi account (email, phone number with country code, or Xiaomi ID): ")?,
+            };
+            let password = if password_stdin {
+                let mut s = String::new();
+                std::io::stdin().read_line(&mut s)?;
+                s.trim_end_matches(['\r', '\n']).to_string()
+            } else {
+                prompt_secret("Password (not shown): ")?
+            };
+            let mut login = Login::new(&user, &password, old_device.as_deref());
+            let step = login.begin();
+            xiaomi_drive(login, step, interactive, &path, &pending)
+        }
+        XiaomiCommand::Code { code } => {
+            let mut login = Login::load(&pending).ok_or_else(xiaomi_nothing_pending)?;
+            let step = login.code(&code);
+            xiaomi_drive(login, step, interactive, &path, &pending)
+        }
+        XiaomiCommand::Captcha { text } => {
+            let mut login = Login::load(&pending).ok_or_else(xiaomi_nothing_pending)?;
+            let step = login.captcha(&text);
+            xiaomi_drive(login, step, interactive, &path, &pending)
+        }
+        XiaomiCommand::Logout => {
+            let _ = std::fs::remove_file(&pending);
+            match std::fs::remove_file(&path) {
+                Ok(()) => println!("Forgot the Xiaomi sign-in at {}.", path.display()),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => println!("No saved Xiaomi sign-in."),
+                Err(e) => return Err(e.into()),
+            }
+            Ok(())
+        }
+        XiaomiCommand::Cameras { json } => {
+            let mut session = Session::load(&path)
+                .map_err(|_| anyhow::anyhow!("not signed in; run `kagaz xiaomi login` first"))?;
+            let cams = xiaomi_cameras(&mut session, &path)?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&cams)?);
+            } else {
+                xiaomi_print(&cams);
+            }
+            Ok(())
+        }
+    }
+}
+
+fn xiaomi_nothing_pending() -> anyhow::Error {
+    anyhow::anyhow!("no Xiaomi sign-in is waiting (they last 15 minutes); run `kagaz xiaomi login` again")
+}
+
+/// Take a password sign-in through Xiaomi's steps: asked for here in a
+/// terminal, or kept in a private file with the command that continues it.
+fn xiaomi_drive(
+    mut login: kagaz_core::cameras::xiaomi::Login,
+    mut step: Result<kagaz_core::cameras::xiaomi::Step, kagaz_core::cameras::xiaomi::XiaomiError>,
+    interactive: bool,
+    path: &std::path::Path,
+    pending: &std::path::Path,
+) -> Result<()> {
+    use kagaz_core::cameras::xiaomi::{Step, XiaomiError};
+    let log = kagaz_core::paths::cache_dir().join("xiaomi-login.log");
+    // What was last asked, to ask again after a wrong answer.
+    let mut asked: Option<bool> = None; // Some(true) = captcha, Some(false) = code
+    loop {
+        match step {
+            Ok(Step::Done(session)) => {
+                let _ = std::fs::remove_file(pending);
+                let _ = std::fs::remove_file(kagaz_core::paths::cache_dir().join("xiaomi-captcha.png"));
+                return xiaomi_finish(session, path);
+            }
+            Ok(Step::Captcha(picture)) => {
+                let ext = if picture.starts_with(b"\x89PNG") { "png" } else { "jpg" };
+                let file = kagaz_core::paths::cache_dir().join(format!("xiaomi-captcha.{ext}"));
+                kagaz_core::cameras::xiaomi::account::write_private(&file, &picture)?;
+                println!("Xiaomi wants the characters in this picture (capitals count): {}", file.display());
+                asked = Some(true);
+                if !interactive {
+                    login.save(pending)?;
+                    println!("Continue with: kagaz xiaomi captcha <characters>");
+                    return Ok(());
+                }
+                let text = prompt("Characters: ")?;
+                step = login.captcha(&text);
+            }
+            Ok(Step::Code { by_email, to }) => {
+                let how = if by_email { "email" } else { "text message" };
+                let to = if to.is_empty() { String::new() } else { format!(" to {to}") };
+                println!("Xiaomi sent a code by {how}{to}.");
+                asked = Some(false);
+                login.save(pending)?;
+                if !interactive {
+                    println!("Continue with: kagaz xiaomi code <code>");
+                    return Ok(());
+                }
+                let code = prompt("Code: ")?;
+                step = login.code(&code);
+            }
+            Err(XiaomiError::WrongCode) if interactive && asked.is_some() => {
+                println!("Xiaomi did not accept that; try again.");
+                let again = prompt(if asked == Some(true) { "Characters: " } else { "Code: " })?;
+                step = if asked == Some(true) { login.captcha(&again) } else { login.code(&again) };
+            }
+            Err(XiaomiError::Page { title, .. }) => {
+                let _ = std::fs::remove_file(pending);
+                anyhow::bail!(
+                    "Xiaomi wants this sign-in finished on its own web page{}, which a terminal cannot show. \
+                     Sign in with `kagaz xiaomi login --qr` instead (scan the code with the Mi Home app), \
+                     or sign in once from the Kagaz window. The steps, without passwords or codes, are in {}.",
+                    if title.is_empty() { String::new() } else { format!(" (\"{title}\")") },
+                    log.display()
+                );
+            }
+            Err(e) => {
+                if matches!(e, XiaomiError::WrongCode) {
+                    login.save(pending)?;
+                }
+                return Err(anyhow::anyhow!("{e}. The steps, without passwords or codes, are in {}.", log.display()));
+            }
+        }
+    }
+}
+
+fn xiaomi_finish(mut session: kagaz_core::cameras::xiaomi::Session, path: &std::path::Path) -> Result<()> {
+    session.save(path)?;
+    println!("Signed in. The sign-in is kept in {} (readable only by you).", path.display());
+    match xiaomi_cameras(&mut session, path) {
+        Ok(cams) => xiaomi_print(&cams),
+        Err(e) => println!("Could not list the cameras yet: {e}"),
+    }
+    Ok(())
+}
+
+/// The account's cameras; the regions they are in and a renewed token are kept.
+fn xiaomi_cameras(
+    session: &mut kagaz_core::cameras::xiaomi::Session,
+    path: &std::path::Path,
+) -> Result<Vec<kagaz_core::cameras::xiaomi::Camera>> {
+    let before = (session.pass_token.clone(), session.regions.clone());
+    let cloud = session.connect()?;
+    let (cams, regions) = cloud.cameras(&session.regions)?;
+    if !regions.is_empty() {
+        session.regions = regions;
+    }
+    if (session.pass_token.clone(), session.regions.clone()) != before {
+        session.save(path)?;
+    }
+    Ok(cams)
+}
+
+fn xiaomi_print(cams: &[kagaz_core::cameras::xiaomi::Camera]) {
+    println!("{} camera{} on the account:", cams.len(), if cams.len() == 1 { "" } else { "s" });
+    for c in cams {
+        let state = if c.online { "" } else { ", offline" };
+        println!("  {}  ({}, {} at {}, region {}{state})", c.name, c.model, c.did, c.ip, c.region);
+    }
+}
+
+/// A QR code drawn with half-block characters, readable by a phone camera
+/// from most terminals.
+fn print_qr(text: &str) -> Result<()> {
+    let code = qrcode::QrCode::new(text.as_bytes())?;
+    let w = code.width();
+    let dark = |x: i64, y: i64| {
+        x >= 0 && y >= 0 && (x as usize) < w && (y as usize) < w
+            && code[(x as usize, y as usize)] == qrcode::Color::Dark
+    };
+    // Black modules on a white background, with a quiet zone of two modules,
+    // whatever the terminal's own colours.
+    let q = 2i64;
+    let mut y = -q;
+    while y < w as i64 + q {
+        let mut line = String::from("  \x1b[47;30m");
+        for x in -q..w as i64 + q {
+            line.push(match (dark(x, y), dark(x, y + 1)) {
+                (true, true) => '\u{2588}',
+                (true, false) => '\u{2580}',
+                (false, true) => '\u{2584}',
+                (false, false) => ' ',
+            });
+        }
+        line += "\x1b[0m";
+        println!("{line}");
+        y += 2;
+    }
+    println!();
+    Ok(())
 }
 
 fn load_tapo_session(path: &std::path::Path) -> Result<kagaz_core::cameras::tapo::Session> {

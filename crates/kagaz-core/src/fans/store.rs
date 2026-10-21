@@ -35,6 +35,15 @@ pub struct Fan {
     /// "bluetooth" or "wifi": how it was last reached.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_reach: Option<String>,
+    /// When the fan's own timer will switch it off (seconds since the
+    /// epoch). The fan reports only whole hours left, with no countdown
+    /// (checked on an Aris and an Efficio), so Kagaz keeps the moment.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timer_until: Option<u64>,
+    /// The moment is estimated from the hours the fan reported (a timer
+    /// set with a remote), not known from Kagaz setting it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub timer_estimated: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -173,6 +182,8 @@ impl Fans {
                 last_state: None,
                 last_seen: None,
                 last_reach: None,
+                timer_until: None,
+                timer_estimated: false,
             }),
         }
         let f = self
@@ -285,13 +296,23 @@ impl Fans {
 
     /// The fan answered with a state, by `reach` ("bluetooth" or "wifi").
     pub fn note_state(&mut self, id: &str, state: &FanState, reach: &str) {
+        let at = now();
         if let Some(f) = self.fans.iter_mut().find(|f| f.id == id) {
             f.last_state = Some(state.clone());
-            f.last_seen = Some(now());
+            f.last_seen = Some(at);
             f.last_reach = Some(reach.to_string());
             if let Some(s) = &state.series {
                 f.series = s.clone();
             }
+            f.track_timer(state, at);
+        }
+    }
+
+    /// Kagaz set the fan's timer to `hours` (0: cancelled) at `at`.
+    pub fn note_timer(&mut self, id: &str, hours: u8, at: u64) {
+        if let Some(f) = self.fans.iter_mut().find(|f| f.id == id) {
+            f.timer_until = (hours > 0).then(|| at + hours as u64 * 3600);
+            f.timer_estimated = false;
         }
     }
 
@@ -316,6 +337,7 @@ impl Fan {
         }
         if let Some(s) = &found.state {
             self.last_state = Some(s.clone());
+            self.track_timer(s, seen);
             self.last_seen = Some(seen);
             self.last_reach = Some(
                 if found.ip.is_some() {
@@ -325,6 +347,25 @@ impl Fan {
                 }
                 .to_string(),
             );
+        }
+    }
+
+    /// Keep the moment the timer ends in step with what the fan reports:
+    /// none when it is off or reports no timer; the known moment while it
+    /// fits the hours the fan reports; else an estimate from those hours.
+    fn track_timer(&mut self, state: &FanState, at: u64) {
+        if !state.power || state.timer_hours == 0 {
+            self.timer_until = None;
+            self.timer_estimated = false;
+            return;
+        }
+        let reported = state.timer_hours as u64 * 3600;
+        match self.timer_until {
+            Some(t) if t > at && t - at <= reported + 60 => {}
+            _ => {
+                self.timer_until = Some(at + reported);
+                self.timer_estimated = true;
+            }
         }
     }
 
@@ -416,6 +457,31 @@ mod tests {
             "the copy was taken before the rename"
         );
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn the_timer_moment_follows_the_fan() {
+        let mut fans = Fans::default();
+        fans.add(&found("a1b2c3d4e5f6", "I1"), "Bedroom fan", "")
+            .unwrap();
+        let on_1h = FanState::decode("65555,0,0,0,0,0,0,I1").unwrap(); // on, speed 3, 1 h
+        assert!(on_1h.power && on_1h.timer_hours == 1);
+        // Kagaz sets it: the moment is exact and survives a reading.
+        fans.note_timer("a1b2c3d4e5f6", 1, 1000);
+        fans.fans[0].track_timer(&on_1h, 1600);
+        assert_eq!(fans.fans[0].timer_until, Some(4600));
+        assert!(!fans.fans[0].timer_estimated);
+        // The fan switched itself off: the timer is gone.
+        let off = FanState::decode("3,0,0,0,0,0,0,I1").unwrap();
+        fans.fans[0].track_timer(&off, 4700);
+        assert_eq!(fans.fans[0].timer_until, None);
+        // A timer set with a remote: an estimate from the hours reported.
+        fans.fans[0].track_timer(&on_1h, 5000);
+        assert_eq!(fans.fans[0].timer_until, Some(8600));
+        assert!(fans.fans[0].timer_estimated);
+        // Cancelled from Kagaz.
+        fans.note_timer("a1b2c3d4e5f6", 0, 5100);
+        assert_eq!(fans.fans[0].timer_until, None);
     }
 
     #[test]

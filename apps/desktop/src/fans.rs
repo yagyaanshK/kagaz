@@ -191,6 +191,14 @@ pub async fn fan_send(id: String, command: Command) -> Result<Outcome, String> {
         let (state, reach) = fans::send(&fan, &command).map_err(|e| e.to_string())?;
         let fans = update(|f| {
             f.note_state(&fan.id, &state, reach.label());
+            // Kagaz set the timer: it knows the moment exactly.
+            if let Command::Timer(i) = command {
+                let hours = fans::atomberg::TIMER_HOURS
+                    .get(i as usize)
+                    .copied()
+                    .unwrap_or(0);
+                f.note_timer(&fan.id, hours, fans::store::now());
+            }
             Ok(())
         })?;
         Ok(Outcome { state, reach, fans })

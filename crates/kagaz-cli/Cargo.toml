@@ -17,3 +17,4 @@ anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 serde_json = "1"
 libc = "0.2.190"
+qrcode = { version = "0.14", default-features = false }
