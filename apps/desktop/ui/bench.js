@@ -19,6 +19,22 @@
 
 const KagazBench = (() => {
   const onPhone = /Android|iPhone|iPad/i.test(navigator.userAgent);
+  // Crop's shapes: [value, label]; "mm:w:h" also makes it that true size,
+  // "r:w:h" only that shape.
+  const SHAPES = [
+    ["Photos, at their true size", [
+      ["mm:35:45", "Passport photo, 35 × 45 mm"],
+      ["mm:50.8:50.8", "US passport or visa, 2 × 2 in"],
+      ["mm:20:25", "Stamp size, 20 × 25 mm"],
+      ["mm:101.6:152.4", "Photo print, 4 × 6 in"],
+      ["mm:152.4:101.6", "Photo print, 6 × 4 in"],
+    ]],
+    ["Screens", [["r:16:9", "16:9 wide"], ["r:9:16", "9:16 tall"], ["r:4:3", "4:3"], ["r:3:4", "3:4"], ["r:1:1", "1:1 square"]]],
+    ["Paper", [
+      ["r:210:297", "A4, upright"], ["r:297:210", "A4, sideways"],
+      ["r:8.5:11", "Letter, upright"], ["r:11:8.5", "Letter, sideways"],
+    ]],
+  ];
   const SIZES = [["200000", "200 KB"], ["500000", "500 KB"], ["1000000", "1 MB"], ["2000000", "2 MB"], ["5000000", "5 MB"]];
 
   function attach(box, { bench, paper = () => "A4", finish = [] }) {
@@ -45,7 +61,20 @@ const KagazBench = (() => {
         </div>
       </div>
       <div class="bench-panel" data-panel="crop" hidden>
-        <p class="small muted">Drag the frame's corners around what to keep (a photo, a signature). A tilted frame comes out level, along its bottom side.</p>
+        <div class="bench-row">
+          <label>Shape <select class="bench-shape">
+            <option value="free">Free: drag each corner</option>
+            <option value="lock">Lock the shape it has now</option>
+            ${SHAPES.map(([group, list]) => `<optgroup label="${group}">${list.map(([v, t]) => `<option value="${v}">${t}</option>`).join("")}</optgroup>`).join("")}
+            <option value="custom">Your own size or shape…</option>
+          </select></label>
+        </div>
+        <div class="bench-row bench-custom hidden">
+          <label>Width <input type="number" class="bench-custom-w" min="0.1" step="any" inputmode="decimal" value="35"></label>
+          <label>Height <input type="number" class="bench-custom-h" min="0.1" step="any" inputmode="decimal" value="45"></label>
+          <label>In <select class="bench-custom-unit"><option value="mm">mm (true size)</option><option value="in">inches (true size)</option><option value="r">a shape only (like 3 : 2)</option></select></label>
+        </div>
+        <p class="bench-shape-note small muted">Drag the frame's corners around what to keep (a photo, a signature), or drag inside it to move it. A tilted frame comes out level, along its bottom side.</p>
         <div class="bench-crop-editor"></div>
         <fieldset class="bench-modes"><legend class="small">Then</legend>
           <label class="switch"><input type="radio" name="${bench}-crop-mode" value="Area" checked> Just the cropped area, at its real size</label>
@@ -118,6 +147,43 @@ const KagazBench = (() => {
       }
     }
 
+    // Crop's shape: (width / height, or "lock", or null for free; the true
+    // size in mm, if it has one).
+    function shapeChosen() {
+      const v = q(".bench-shape").value;
+      q(".bench-custom").classList.toggle("hidden", v !== "custom");
+      if (v === "free") return { ratio: null, mm: null };
+      if (v === "lock") return { ratio: "lock", mm: null };
+      let kind, w, h;
+      if (v === "custom") {
+        kind = q(".bench-custom-unit").value;
+        [w, h] = [Number(q(".bench-custom-w").value), Number(q(".bench-custom-h").value)];
+        if (!(w > 0 && h > 0)) return null;
+        if (kind === "in") [kind, w, h] = ["mm", w * 25.4, h * 25.4];
+      } else {
+        [kind, w, h] = v.split(":").map((x, i) => (i ? Number(x) : x));
+      }
+      return { ratio: w / h, mm: kind === "mm" ? [w, h] : null };
+    }
+    const fmm = (n) => (Math.round(n * 10) / 10).toString();
+    function shapeNote(chosen) {
+      const base = "Drag the frame's corners around what to keep (a photo, a signature), or drag inside it to move it. A tilted frame comes out level, along its bottom side.";
+      q(".bench-shape-note").textContent = !chosen
+        ? "Give a width and a height above zero."
+        : chosen.mm
+          ? `The frame keeps this shape: its corners resize it, the round handle turns it, and inside it moves it. It comes out at exactly ${fmm(chosen.mm[0])} × ${fmm(chosen.mm[1])} mm, to print at its true size (Fill the page makes it larger).`
+          : chosen.ratio
+            ? "The frame keeps this shape: its corners resize it, the round handle turns it, and inside it moves it. It comes out level."
+            : base;
+    }
+    function applyShape() {
+      const chosen = shapeChosen();
+      shapeNote(chosen);
+      if (chosen && cropCrop) cropCrop.setRatio(chosen.ratio);
+    }
+    q(".bench-shape").addEventListener("change", applyShape);
+    for (const sel of [".bench-custom-w", ".bench-custom-h", ".bench-custom-unit"]) q(sel).addEventListener("change", applyShape);
+
     // One tool's panel open at a time.
     function open(tool) {
       for (const b of box.querySelectorAll("[data-tool]")) {
@@ -132,8 +198,10 @@ const KagazBench = (() => {
     async function startCrop() {
       const v = await run("bench_crop_start", {}, "Looking for what is on the page…");
       if (!v) return;
+      const chosen = shapeChosen();
+      shapeNote(chosen);
       cropCrop = KagazCrop.attach(q('[data-panel="crop"] .bench-crop-editor'), {
-        src: v.view, outlines: v.frames, radius: 0, names: ["crop"],
+        src: v.view, outlines: v.frames, radius: 0, names: ["crop"], ratio: chosen ? chosen.ratio : null, removable: false,
       });
     }
 
@@ -170,9 +238,10 @@ const KagazBench = (() => {
     q(".bench-crop-go").addEventListener("click", async () => {
       if (!cropCrop) return;
       const [shape] = cropCrop.quads();
-      if (!shape) return say("Add the frame back to crop to it.", "cap-warn");
+      const chosen = shapeChosen();
+      if (!chosen) return say("Give the shape a width and a height above zero.", "cap-warn");
       const mode = q(`input[name="${bench}-crop-mode"]:checked`).value;
-      const v = await run("bench_crop", { shape, mode, paper: paper() }, "Cropping…");
+      const v = await run("bench_crop", { shape, mode, paper: paper(), sizeMm: chosen.mm }, "Cropping…");
       if (v) open("crop"); // closes the panel
     });
     q(".bench-compress-go").addEventListener("click", () =>

@@ -122,16 +122,20 @@ pub enum CropMode {
 /// Crop `p` to `shape` (an outline as fractions of the picture; only what
 /// is inside it is kept). The area comes out level: turned so the outline's
 /// bottom side is horizontal, never stretched. `paper` is the page
-/// FillPage fills.
-pub fn crop(p: &Picture, shape: &Shape, mode: CropMode, paper: Paper) -> Picture {
+/// FillPage fills. `size_mm` (width, height), for a frame of that shape (a
+/// passport photo), makes the area exactly that size, to print true; Fill
+/// the page fills it anyway.
+pub fn crop(p: &Picture, shape: &Shape, mode: CropMode, paper: Paper, size_mm: Option<[f32; 2]>) -> Picture {
     let (w, h) = (p.img.width() as f32, p.img.height() as f32);
     let pts: Vec<[f32; 2]> = shape.iter().map(|q| [q[0].clamp(0.0, 1.0) * w, q[1].clamp(0.0, 1.0) * h]).collect();
     let turn = bottom_slope(&pts);
+    let size_mm = size_mm.filter(|s| mode != CropMode::FillPage && s[0] > 0.0 && s[1] > 0.0);
     // Under a twentieth of a degree: no turn, the pixels as they are.
-    let area = if turn.abs() < 0.001 {
+    let square = turn.abs() < 0.001;
+    let mut area = if square {
         let mut whole = p.img.clone();
         id::whiten_outside(&mut whole, std::slice::from_ref(shape), 0.0);
-        if mode == CropMode::KeepPage {
+        if mode == CropMode::KeepPage && size_mm.is_none() {
             return Picture { img: whole, dpi: p.dpi };
         }
         let xs = pts.iter().map(|q| q[0]);
@@ -141,20 +145,23 @@ pub fn crop(p: &Picture, shape: &Shape, mode: CropMode, paper: Paper) -> Picture
         let (cw, ch) = (((x1 - x0) as u32).max(1), ((y1 - y0) as u32).max(1));
         imageops::crop_imm(&whole, x0 as u32, y0 as u32, cw, ch).to_image()
     } else {
-        let area = level(&p.img, &pts, turn);
-        if mode == CropMode::KeepPage {
-            // Level where it was: centred on the outline's middle.
-            let xs = pts.iter().map(|q| q[0]);
-            let ys = pts.iter().map(|q| q[1]);
-            let cx = (xs.clone().fold(w, f32::min) + xs.fold(0.0, f32::max)) / 2.0;
-            let cy = (ys.clone().fold(h, f32::min) + ys.fold(0.0, f32::max)) / 2.0;
-            let mut page = RgbImage::from_pixel(p.img.width(), p.img.height(), Rgb([255, 255, 255]));
-            let at = |c: f32, size: u32| (c - size as f32 / 2.0).round() as i64;
-            imageops::replace(&mut page, &area, at(cx, area.width()), at(cy, area.height()));
-            return Picture { img: page, dpi: p.dpi };
-        }
-        area
+        level(&p.img, &pts, turn)
     };
+    if let Some([mw, mh]) = size_mm {
+        let px = |mm: f32| ((mm / 25.4 * p.dpi as f32).round() as u32).max(1);
+        area = imageops::resize(&area, px(mw), px(mh), imageops::FilterType::CatmullRom);
+    }
+    if mode == CropMode::KeepPage {
+        // Level where it was: centred on the outline's middle.
+        let xs = pts.iter().map(|q| q[0]);
+        let ys = pts.iter().map(|q| q[1]);
+        let cx = (xs.clone().fold(w, f32::min) + xs.fold(0.0, f32::max)) / 2.0;
+        let cy = (ys.clone().fold(h, f32::min) + ys.fold(0.0, f32::max)) / 2.0;
+        let mut page = RgbImage::from_pixel(p.img.width(), p.img.height(), Rgb([255, 255, 255]));
+        let at = |c: f32, size: u32| (c - size as f32 / 2.0).round() as i64;
+        imageops::replace(&mut page, &area, at(cx, area.width()), at(cy, area.height()));
+        return Picture { img: page, dpi: p.dpi };
+    }
     let (cw, ch) = area.dimensions();
     if mode == CropMode::Area {
         return Picture { img: area, dpi: p.dpi };
@@ -277,7 +284,7 @@ mod tests {
 
     #[test]
     fn crop_to_the_area_keeps_its_scale() {
-        let out = crop(&page(), &around(55.0, 95.0, 105.0, 125.0), CropMode::Area, Paper::A4);
+        let out = crop(&page(), &around(55.0, 95.0, 105.0, 125.0), CropMode::Area, Paper::A4, None);
         assert_eq!((out.img.width(), out.img.height(), out.dpi), (50, 30, 20));
         assert_eq!(out.img.get_pixel(10, 10), &Rgb([20, 20, 20]));
     }
@@ -286,7 +293,7 @@ mod tests {
     fn crop_keeping_the_page_whitens_the_rest() {
         let mut p = page();
         p.img.put_pixel(5, 5, Rgb([0, 0, 0]));
-        let out = crop(&p, &around(55.0, 95.0, 105.0, 125.0), CropMode::KeepPage, Paper::A4);
+        let out = crop(&p, &around(55.0, 95.0, 105.0, 125.0), CropMode::KeepPage, Paper::A4, None);
         assert_eq!(out.img.dimensions(), (165, 233));
         assert_eq!(out.img.get_pixel(5, 5), &Rgb([255, 255, 255]));
         assert_eq!(out.img.get_pixel(70, 110), &Rgb([20, 20, 20]));
@@ -294,7 +301,7 @@ mod tests {
 
     #[test]
     fn filling_the_page_enlarges_without_stretching() {
-        let out = crop(&page(), &around(60.0, 100.0, 100.0, 120.0), CropMode::FillPage, Paper::A4);
+        let out = crop(&page(), &around(60.0, 100.0, 100.0, 120.0), CropMode::FillPage, Paper::A4, None);
         assert_eq!(out.img.dimensions(), (165, 233), "an A4 page at the same dpi");
         // 40 x 20 grows to the page's width less margins: 2:1 kept.
         let dark: Vec<(u32, u32)> =
@@ -325,7 +332,7 @@ mod tests {
     #[test]
     fn a_tilted_crop_comes_out_level() {
         let (p, shape) = tilted();
-        let out = crop(&p, &shape, CropMode::Area, Paper::A4);
+        let out = crop(&p, &shape, CropMode::Area, Paper::A4, None);
         let (w, h) = out.img.dimensions();
         assert!((79..=81).contains(&w) && (39..=41).contains(&h), "{w} x {h}");
         // Level and unstretched: dark all over but a pixel's edge.
@@ -341,14 +348,14 @@ mod tests {
             bent.push(a);
             bent.push([(a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0]);
         }
-        let out8 = crop(&p, &bent, CropMode::Area, Paper::A4);
+        let out8 = crop(&p, &bent, CropMode::Area, Paper::A4, None);
         assert_eq!(out8.img.dimensions(), out.img.dimensions());
     }
 
     #[test]
     fn a_tilted_crop_keeping_the_page_stays_in_place() {
         let (p, shape) = tilted();
-        let out = crop(&p, &shape, CropMode::KeepPage, Paper::A4);
+        let out = crop(&p, &shape, CropMode::KeepPage, Paper::A4, None);
         assert_eq!(out.img.dimensions(), (200, 200));
         // Level: the row through the middle is dark 80 wide, centred.
         let dark: Vec<u32> = (0..200).filter(|&x| out.img.get_pixel(x, 100)[0] < 100).collect();
@@ -357,6 +364,17 @@ mod tests {
         // Near the bar's bottom right corner, dark while it was tilted, is not.
         assert_eq!(p.img.get_pixel(134, 124)[0], 20);
         assert_eq!(out.img.get_pixel(134, 124), &Rgb([255, 255, 255]));
+    }
+
+    #[test]
+    fn a_true_size_crop_comes_out_at_that_size() {
+        // 40 x 20 pixels at 20 dpi is 2 x 1 in; asked for 4 x 2 in (80 x 40).
+        let shape = around(60.0, 100.0, 100.0, 120.0);
+        let out = crop(&page(), &shape, CropMode::Area, Paper::A4, Some([101.6, 50.8]));
+        assert_eq!((out.img.width(), out.img.height(), out.dpi), (80, 40, 20));
+        let kept = crop(&page(), &shape, CropMode::KeepPage, Paper::A4, Some([101.6, 50.8]));
+        assert_eq!(kept.img.dimensions(), (165, 233));
+        assert!(kept.img.get_pixel(45, 92)[0] < 100, "grown in place");
     }
 
     #[test]
