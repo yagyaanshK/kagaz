@@ -1379,7 +1379,8 @@ async function mountPlayback(tile, cam, from, opts = {}) {
   try { clip = await invoke("playback_clip", { deviceId: cam.device_id, at: from }); } catch (_) { clip = null; }
   if (tile._mountId !== mountId || !tile.isConnected) return;
   if (clip) { mountFile(tile, cam, from, clip, speed); return; }
-  const builtin = $("cam-mode").value === "builtin";
+  // Cameras Kagaz speaks to itself (Xiaomi) play only in its own player.
+  const builtin = !cam.ts_url || $("cam-mode").value === "builtin";
   try {
     if (builtin) {
       const p = mountBuiltin(tile, cam, true);
@@ -1639,8 +1640,7 @@ function viewKey(g) { return g.key === -1 ? "brand:" + g.brand : g.key; }
 
 // The groups to show, in order: the person's own, then one per brand for
 // the cameras in none of them; each as { key, brand, name, ids, collapsed }
-// (key -1 for a brand's group). Playback shows only cameras whose
-// recordings Kagaz can play (Tapo's).
+// (key -1 for a brand's group).
 function visibleGroups() {
   let all = layout.groups.map((g, i) => ({ key: i, name: g.name, ids: g.cameras, collapsed: g.collapsed }));
   const brands = [...new Set(camStatus.cameras.map((c) => c.brand || "other"))];
@@ -1649,9 +1649,6 @@ function visibleGroups() {
     if (ids.length || rearranging) {
       all.push({ key: -1, brand: b, name: brandName(b), ids, collapsed: (layout.brand_collapsed || []).includes(b) });
     }
-  }
-  if (isPlayback() && !rearranging) {
-    all = all.map((g) => ({ ...g, ids: g.ids.filter((id) => brandOf(id) === "tapo") })).filter((g) => g.ids.length);
   }
   if (viewGroup === null) return all;
   return all.filter((g) => viewKey(g) === viewGroup);
@@ -2275,9 +2272,6 @@ async function renderCameraGrid() {
     }
   }
   $("cam-state").textContent = `${camStatus.cameras.length} cameras`;
-  if (isPlayback() && camStatus.cameras.some((c) => c.brand && c.brand !== "tapo")) {
-    $("cam-message").textContent = "Xiaomi cameras are not shown here: Kagaz cannot play their recordings yet.";
-  }
   refreshSoundAll();
 }
 
@@ -2878,6 +2872,11 @@ function buildTimeline(cam, tile) {
   tsl.addEventListener("change", () => speedCells([cellOf()], sliderSpeed(tsl.value)));
   row.querySelector(".pb-download").addEventListener("click", () => downloadForm(wrap, cam, tile));
   row.querySelector(".pb-clock").addEventListener("click", () => clockForm(wrap, cam, tile));
+  // A Xiaomi camera plays its card at its own pace; saving and clock
+  // corrections are Tapo's for now.
+  if (cam.brand === "xiaomi") {
+    for (const sel of [".pb-download", ".pb-clock", ".tile-speed", ".tile-speed-label"]) row.querySelector(sel).classList.add("hidden");
+  }
   wrap.appendChild(row);
   return wrap;
 }
