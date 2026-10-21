@@ -87,7 +87,8 @@ pub fn profile(series: &str) -> Profile {
 /// colour 0x8000 alone is warm, 0x08 alone white ("cool"), both natural
 /// white ("daylight"); bits 8 to 14 are the brightness, 10 to 100. Sleep
 /// (0x80) and the timer's hours (bits 16 to 19) come back as set by a
-/// command (checked); the remote has neither button.
+/// command (checked). The Aris's remote has neither button; the
+/// Efficio's remote has both, so both are the fans' own features.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FanState {
     pub power: bool,
