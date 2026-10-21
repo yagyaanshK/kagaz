@@ -28,7 +28,7 @@ pub enum FanAction {
     Speed { speed: u8 },
     /// The fan's light on or off
     Light { state: OnOff },
-    /// How bright the light is, 0 to 127 (fans whose light dims)
+    /// How bright the light is, 10 to 100, any whole value (fans whose light dims)
     Brightness { level: u8 },
     /// The light's colour: cool, warm or daylight (fans with colour modes)
     LightMode { mode: String },

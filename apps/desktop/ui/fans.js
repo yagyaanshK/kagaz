@@ -212,7 +212,7 @@ const KagazFans = (() => {
       range.type = "range";
       range.min = "10";
       range.max = "100";
-      range.step = "10";
+      range.step = "1"; // any whole value: the fan shows steps of about 2 (checked on an Aris)
       range.value = String((s && s.brightness) || 100);
       range.setAttribute("aria-label", `Brightness of ${f.name}`);
       const shown = el("span", "muted small", `${range.value}%`);
