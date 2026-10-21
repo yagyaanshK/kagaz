@@ -124,6 +124,21 @@ with the commit that closes them.
       command takes 3 to 10 s. Keeping a connection open while the page
       is on screen would make it instant.
 
+## More devices to connect (as of 2026-10-22)
+
+- [ ] **Orient ceiling fan.** It announces nothing over Bluetooth. Orient's
+      smart fans are set up with the Orient Smart app, which appears to run
+      on the Tuya platform (unconfirmed). Tuya devices announce themselves on
+      the local network every few seconds, encrypted with a per-device key.
+      Several such devices are on the test network; find out which one is
+      the fan (or whether it has no smart features at all).
+- [ ] **A fan with Bluetooth and speakers, maker unknown.** Identify the
+      maker and model first (label on the fan or remote, the app it pairs
+      with, the name it advertises), then see how it is reached.
+- [ ] **Smart switches.** Probably the other Tuya devices on the test
+      network; one Tuya route in Kagaz could cover them, the Orient fan and
+      the robot vacuums on the roadmap.
+
 ## Known gaps in the code
 
 - [ ] **eSCL over TLS only** (`_uscans` with no `_uscan`): refused with a
