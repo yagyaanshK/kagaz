@@ -9,6 +9,9 @@
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
     <!-- Doorbell calls: the microphone, and the phone's speaker setup. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- The camera on a video call (only when the person turns it on). -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <!-- Doorbell rings in the background: a foreground service keeps the
          line signed in, and a call notification rings and can light the

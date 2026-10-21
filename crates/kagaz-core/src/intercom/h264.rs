@@ -1,7 +1,8 @@
 //! H.264 over RTP (RFC 6184) back into whole pictures: single NAL units,
 //! STAP-A aggregates and FU-A fragments become one Annex-B access unit per
 //! RTP timestamp. A lost packet spoils its picture, and every later one
-//! until the next keyframe, so a decoder never sees a damaged frame.
+//! until the next keyframe, so a decoder never sees a damaged frame. And
+//! the other way, a picture into packets ([`packetize`]), for our camera.
 
 /// One picture, as Annex-B (start code before every NAL unit).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -265,6 +266,65 @@ pub fn parse_rtp(p: &[u8]) -> Option<(u16, u32, bool, &[u8])> {
     (start <= end).then(|| (seq, ts, marker, &p[start..end]))
 }
 
+/// The NAL units of an Annex-B picture (start codes of 3 or 4 bytes).
+pub fn nal_units(annexb: &[u8]) -> Vec<&[u8]> {
+    let mut starts = Vec::new();
+    let mut i = 0;
+    while i + 3 <= annexb.len() {
+        if annexb[i] == 0 && annexb[i + 1] == 0 && annexb[i + 2] == 1 {
+            starts.push(i + 3);
+            i += 3;
+        } else {
+            i += 1;
+        }
+    }
+    starts
+        .iter()
+        .enumerate()
+        .map(|(k, &from)| {
+            let mut to = starts.get(k + 1).map_or(annexb.len(), |&next| next - 3);
+            // A 4-byte start code's leading zero belongs to it, not the unit.
+            while to > from && k + 1 < starts.len() && annexb[to - 1] == 0 {
+                to -= 1;
+            }
+            &annexb[from..to]
+        })
+        .filter(|n| !n.is_empty())
+        .collect()
+}
+
+/// One picture (Annex-B) as RTP payloads, in order: each NAL unit whole
+/// when it fits in `max` bytes, else as FU-A fragments. The last payload
+/// ends the picture (its packet gets the marker). Access unit delimiters
+/// (which WebKit's encoder adds) are left out: RTP marks pictures itself,
+/// and some receivers choke on them.
+pub fn packetize(annexb: &[u8], max: usize) -> Vec<Vec<u8>> {
+    let mut out = Vec::new();
+    for nal in nal_units(annexb).into_iter().filter(|n| n[0] & 0x1F != 9) {
+        if nal.len() <= max {
+            out.push(nal.to_vec());
+            continue;
+        }
+        let (head, body) = (nal[0], &nal[1..]);
+        let indicator = (head & 0xE0) | 28;
+        let chunks: Vec<&[u8]> = body.chunks(max - 2).collect();
+        for (i, chunk) in chunks.iter().enumerate() {
+            let mut fu = head & 0x1F;
+            if i == 0 {
+                fu |= 0x80;
+            }
+            if i + 1 == chunks.len() {
+                fu |= 0x40;
+            }
+            let mut p = Vec::with_capacity(chunk.len() + 2);
+            p.extend_from_slice(&[indicator, fu]);
+            p.extend_from_slice(chunk);
+            out.push(p);
+        }
+    }
+    out
+}
+
 /// The WebCodecs codec string (`avc1.PPCCLL`) for an SPS NAL unit.
 pub fn codec_string(sps: &[u8]) -> Option<String> {
     (sps.len() >= 4).then(|| format!("avc1.{:02X}{:02X}{:02X}", sps[1], sps[2], sps[3]))
@@ -328,6 +388,43 @@ mod tests {
         let delta = d.push(&rtp(7, 500, true, &[0x41, 9])).unwrap();
         assert!(!delta.key);
         assert_eq!(delta.data, vec![0, 0, 0, 1, 0x41, 9]);
+    }
+
+    #[test]
+    fn a_picture_goes_out_and_comes_back_whole() {
+        // SPS and PPS small, the IDR slice long enough to need fragments.
+        let mut idr = vec![0x65];
+        idr.extend((0..3000u32).map(|i| (i % 251) as u8 | 1));
+        let mut annexb = Vec::new();
+        for (code, nal) in [(&START[..], SPS), (&[0, 0, 1][..], PPS), (&START[..], &idr[..])] {
+            annexb.extend_from_slice(code);
+            annexb.extend_from_slice(nal);
+        }
+        assert_eq!(nal_units(&annexb), vec![SPS, PPS, &idr[..]]);
+        // An access unit delimiter in front (WebKit adds one) is left out.
+        let mut with_aud = vec![0, 0, 0, 1, 0x09, 0xF0];
+        with_aud.extend_from_slice(&annexb);
+        assert_eq!(packetize(&with_aud, 1200), packetize(&annexb, 1200));
+        let payloads = packetize(&annexb, 1200);
+        assert_eq!(payloads.len(), 2 + 3, "SPS, PPS, then the slice in three");
+        assert!(payloads.iter().all(|p| p.len() <= 1200));
+        let mut d = Depacketizer::new();
+        let n = payloads.len();
+        let mut unit = None;
+        for (i, p) in payloads.iter().enumerate() {
+            unit = d.push(&rtp(i as u16, 3000, i + 1 == n, p));
+        }
+        let unit = unit.unwrap();
+        assert!(unit.key);
+        assert_eq!(nal_units(&unit.data), vec![SPS, PPS, &idr[..]]);
+    }
+
+    #[test]
+    fn the_black_picture_is_one_keyframe() {
+        let black = include_bytes!("black-640x480.h264");
+        let types: Vec<u8> = nal_units(black).iter().map(|n| n[0] & 0x1F).collect();
+        assert_eq!(types, vec![7, 8, 5]);
+        assert!(packetize(black, 1200).iter().all(|p| p.len() <= 1200));
     }
 
     #[test]

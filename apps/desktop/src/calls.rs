@@ -1,8 +1,9 @@
 //! Doorbell calls through the OneTouch cloud, in the window: the account's
 //! app line rings here, a call shows the caller's camera and plays their
-//! voice, and the page's microphone goes back. The line runs on its own
-//! thread (`intercom::phone`); the page gets its events as `call-event`
-//! and the media through a channel it opens with `calls_media`.
+//! voice, and the page's microphone (and camera, when the other side takes
+//! video) goes back. The line runs on its own thread (`intercom::phone`);
+//! the page gets its events as `call-event` and the media through a
+//! channel it opens with `calls_media`.
 
 use super::blocking;
 use base64::Engine as _;
@@ -58,7 +59,9 @@ pub struct Status {
     phase: String,
     /// Who: a device name, or the number.
     peer: String,
+    /// They send video; they take ours (the page's camera can go).
     video: bool,
+    send_video: bool,
     /// Seconds since the epoch the call connected (0 before).
     since: u64,
     /// The door key of the peer, when it has a door.
@@ -222,10 +225,15 @@ fn on_event(app: &AppHandle, e: Event) {
             s.since = 0;
         }),
         Event::Ringing { .. } => update(app, |s| s.detail = "ringing there".into()),
-        Event::Connected { video, .. } => update(app, |s| {
+        Event::Connected { video, send_video, .. } => update(app, |s| {
             s.phase = "talking".into();
             s.video = video;
+            s.send_video = send_video;
             s.since = now();
+        }),
+        Event::MediaChanged { video, send_video, .. } => update(app, |s| {
+            s.video = video;
+            s.send_video = send_video;
         }),
         Event::Others { .. } => {}
         Event::Ended { reason, .. } => update(app, |s| {
@@ -234,6 +242,7 @@ fn on_event(app: &AppHandle, e: Event) {
             s.detail = reason;
             s.since = 0;
             s.video = false;
+            s.send_video = false;
         }),
     }
 }
@@ -246,6 +255,11 @@ fn on_media(app: &AppHandle, m: MediaOut) {
     let m = match m {
         MediaOut::VideoStats(stats) => {
             let _ = app.emit("call-video", &stats);
+            return;
+        }
+        // The other side wants a full picture of our camera.
+        MediaOut::KeyframeWanted => {
+            let _ = app.emit("call-keyframe", ());
             return;
         }
         m => m,
@@ -272,7 +286,7 @@ fn on_media(app: &AppHandle, m: MediaOut) {
             p.extend_from_slice(&unit.data);
             p
         }
-        MediaOut::VideoStats(_) => return,
+        MediaOut::VideoStats(_) | MediaOut::KeyframeWanted => return,
     };
     let _ = channel.send(InvokeResponseBody::Raw(packet));
 }
@@ -540,6 +554,18 @@ pub async fn calls_audio(app: AppHandle, data: String) -> Result<(), String> {
             .map(|b| i16::from_le_bytes(*b))
             .collect();
         with_phone(&app, |p| p.send_audio(&pcm))
+    })
+    .await
+}
+
+/// A picture from the page's camera: H.264 (Annex-B), base64.
+#[tauri::command]
+pub async fn calls_video(app: AppHandle, data: String) -> Result<(), String> {
+    blocking(move || {
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(data)
+            .map_err(|e| e.to_string())?;
+        with_phone(&app, |p| p.send_video(&bytes))
     })
     .await
 }

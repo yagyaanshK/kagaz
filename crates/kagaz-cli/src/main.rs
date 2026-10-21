@@ -2528,7 +2528,7 @@ fn intercom_command(cmd: IntercomCommand) -> Result<()> {
                             k.fetch_add(1, Ordering::Relaxed);
                         }
                     }
-                    MediaOut::VideoStats(_) => {}
+                    MediaOut::VideoStats(_) | MediaOut::KeyframeWanted => {}
                 },
             );
             let name_of = |number: &str| {
@@ -2586,6 +2586,11 @@ fn intercom_command(cmd: IntercomCommand) -> Result<()> {
                         }
                     }
                     Some(PhoneEvent::Ringing { .. }) => println!("It is ringing there."),
+                    Some(PhoneEvent::MediaChanged { video, send_video, .. }) => println!(
+                        "The call's media changed: their video {}, ours {}.",
+                        if video { "on" } else { "off" },
+                        if send_video { "wanted" } else { "not wanted" }
+                    ),
                     Some(PhoneEvent::Connected { video, .. }) => {
                         println!(
                             "Connected{}; staying {seconds} s.",

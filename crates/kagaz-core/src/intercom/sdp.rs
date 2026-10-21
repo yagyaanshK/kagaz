@@ -1,7 +1,8 @@
 //! The media half of a call (SDP, RFC 4566 / 3264): what the other side
 //! offers or answers, and what Kagaz offers or answers back. Kagaz sends
-//! and receives G.711 voice with telephone-event tones, and only receives
-//! H.264 video: it has no camera to show.
+//! and receives G.711 voice with telephone-event tones, and H.264 video:
+//! the other side's camera, and ours (or a black picture while it is off)
+//! when they take video.
 
 use super::g711::Law;
 use std::net::{IpAddr, SocketAddr};
@@ -65,6 +66,11 @@ impl Stream {
     /// Whether the other side will send on this stream.
     fn they_send(&self) -> bool {
         matches!(self.direction.as_str(), "sendrecv" | "sendonly" | "")
+    }
+
+    /// Whether the other side takes what we send on this stream.
+    fn they_receive(&self) -> bool {
+        matches!(self.direction.as_str(), "sendrecv" | "recvonly" | "")
     }
 }
 
@@ -160,9 +166,13 @@ pub struct Agreed {
     pub audio: Option<SocketAddr>,
     pub law: Option<Law>,
     pub dtmf_pt: Option<u8>,
-    /// Where the video comes from (and where to send keep-alives).
+    /// The other side's video address: where theirs comes from and ours
+    /// goes (None: no video).
     pub video: Option<SocketAddr>,
     pub video_pt: Option<u8>,
+    /// They send video; they take ours.
+    pub video_in: bool,
+    pub video_out: bool,
     /// Where the video's RTCP goes (to ask for a full picture).
     pub video_rtcp: Option<SocketAddr>,
     /// `sprop-parameter-sets` of the H.264 stream, when given.
@@ -197,8 +207,18 @@ pub fn offer(local_ip: &str, audio_port: u16, video_port: u16) -> String {
     s.push_str(&format!("m=video {video_port} RTP/AVP 96\r\n"));
     s.push_str("a=rtpmap:96 H264/90000\r\n");
     s.push_str("a=fmtp:96 profile-level-id=42e01f;packetization-mode=1\r\n");
-    s.push_str("a=recvonly\r\n");
+    s.push_str("a=sendrecv\r\n");
     s
+}
+
+/// `a=` direction for a stream we send on (`out`) and receive on (`in`).
+fn direction(in_: bool, out: bool) -> &'static str {
+    match (in_, out) {
+        (true, true) => "sendrecv",
+        (true, false) => "recvonly",
+        (false, true) => "sendonly",
+        (false, false) => "inactive",
+    }
 }
 
 /// What the other side's answer to our [`offer`] agreed.
@@ -216,8 +236,10 @@ pub fn agreed_from_answer(answer: &Description) -> Agreed {
     }
     if let Some(s) = &answer.video {
         a.video_pt = s.find("H264");
-        if a.video_pt.is_some() && s.they_send() {
+        if a.video_pt.is_some() && (s.they_send() || s.they_receive()) {
             a.video = s.addr();
+            a.video_in = s.they_send();
+            a.video_out = s.they_receive();
             a.video_rtcp = s.rtcp_addr();
             a.sprop = sprop(a.video_pt.and_then(|pt| s.fmtp_of(pt)));
         }
@@ -225,8 +247,9 @@ pub fn agreed_from_answer(answer: &Description) -> Agreed {
     a
 }
 
-/// Answer an offer: pick G.711 (and tones), and take H.264 video when it
-/// is offered for us to receive. Returns the answer SDP and the agreement.
+/// Answer an offer: pick G.711 (and tones), and take H.264 video, each way
+/// it is offered (theirs to us; ours to them, which a video phone wants
+/// before it sends its own). Returns the answer SDP and the agreement.
 pub fn answer(
     offer: &Description,
     local_ip: &str,
@@ -267,11 +290,13 @@ pub fn answer(
         }
     }
     if let Some(v) = &offer.video {
-        let pt = v.find("H264").filter(|_| v.they_send());
+        let pt = v.find("H264").filter(|_| v.they_send() || v.they_receive());
         match pt {
             Some(pt) => {
                 agreed.video_pt = Some(pt);
                 agreed.video = v.addr();
+                agreed.video_in = v.they_send();
+                agreed.video_out = v.they_receive();
                 agreed.video_rtcp = v.rtcp_addr();
                 agreed.sprop = sprop(v.fmtp_of(pt));
                 s.push_str(&format!("m=video {video_port} RTP/AVP {pt}\r\n"));
@@ -279,7 +304,7 @@ pub fn answer(
                 if let Some(f) = v.fmtp_of(pt) {
                     s.push_str(&format!("a=fmtp:{pt} {f}\r\n"));
                 }
-                s.push_str("a=recvonly\r\n");
+                s.push_str(&format!("a={}\r\n", direction(agreed.video_in, agreed.video_out)));
             }
             None => {
                 let pts: Vec<String> = v.payloads.iter().map(u8::to_string).collect();
@@ -323,6 +348,7 @@ m=video 12002 RTP/AVP 104\r\na=rtpmap:104 H264/90000\r\na=fmtp:104 profile-level
         assert!(sdp.contains("m=audio 40000 RTP/AVP 0 101"));
         assert!(sdp.contains("m=video 40002 RTP/AVP 104"));
         assert!(sdp.contains("a=recvonly"));
+        assert!(agreed.video_in && !agreed.video_out, "a door station only sends");
         // The answer parses back into what was agreed.
         let back = parse(&sdp);
         assert_eq!(back.audio.unwrap().payloads, vec![0, 101]);
@@ -347,6 +373,20 @@ m=video 12002 RTP/AVP 104\r\na=rtpmap:104 H264/90000\r\na=fmtp:104 profile-level
         assert_eq!(a.video_rtcp.unwrap().port(), 7003);
         let named = parse("v=0\r\nc=IN IP4 203.0.113.10\r\nm=video 7002 RTP/AVP 96\r\na=rtcp:7100 IN IP4 203.0.113.10\r\n");
         assert_eq!(named.video.unwrap().rtcp_addr().unwrap().port(), 7100);
-        assert!(offer("192.0.2.6", 1, 2).contains("a=recvonly"));
+        assert!(a.video_in && !a.video_out);
+        assert!(offer("192.0.2.6", 1, 2).contains("m=video 2 RTP/AVP 96\r\na=rtpmap:96 H264/90000\r\na=fmtp:96 profile-level-id=42e01f;packetization-mode=1\r\na=sendrecv"));
+    }
+
+    #[test]
+    fn a_video_phone_gets_video_back() {
+        // An app calling: video both ways (no direction: sendrecv).
+        let app = OFFER.replace("a=sendonly", "a=sendrecv");
+        let (sdp, agreed) = answer(&parse(&app), "192.0.2.6", 40000, 40002);
+        assert!(agreed.video_in && agreed.video_out);
+        assert!(sdp.ends_with("a=sendrecv\r\n"), "{sdp}");
+        // One that only wants to see us.
+        let (sdp, agreed) = answer(&parse(&OFFER.replace("a=sendonly", "a=recvonly")), "192.0.2.6", 40000, 40002);
+        assert!(!agreed.video_in && agreed.video_out);
+        assert!(sdp.ends_with("a=sendonly\r\n"), "{sdp}");
     }
 }

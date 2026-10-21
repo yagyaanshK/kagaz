@@ -1,14 +1,19 @@
 //! A phone line on a SIP server over TCP, as the OneTouch cloud gives its
 //! app: stay registered, ring on an incoming call, answer or turn it down,
 //! call a device, hang up, press the door key. Voice is G.711 both ways;
-//! video (H.264) is received only.
+//! video is H.264 both ways when the other side takes ours: the app's
+//! camera ([`Phone::send_video`]), or a black picture while it is off, so a
+//! video phone (and the cloud's relay) sees video coming and sends its own.
 //!
 //! One thread owns the signalling: it reads what a reader thread hands it
 //! from the TCP connection, takes commands from the app, renews the
 //! registration and keeps the connection alive, and reconnects when it
-//! drops. Each call adds two receiver threads (voice, video) that hand
-//! decoded media to the app; the app's microphone audio goes out through
-//! [`Phone::send_audio`].
+//! drops. Each call adds receiver threads (voice, video, the video's RTCP)
+//! that hand decoded media to the app; the app's microphone audio goes out
+//! through [`Phone::send_audio`]. Voice and video go back to wherever the
+//! other side's actually come from (behind a home router or a relay that
+//! is seldom the address its SDP names), and a change of media in the
+//! middle of a call (a re-INVITE) is followed.
 
 use super::g711::Law;
 use super::h264::{AccessUnit, Depacketizer};
@@ -40,8 +45,19 @@ pub enum Event {
     Outgoing { id: String, number: String },
     /// The other side is ringing.
     Ringing { id: String },
-    /// Talking.
-    Connected { id: String, video: bool },
+    /// Talking. `video`: they send video; `send_video`: they take ours.
+    Connected {
+        id: String,
+        video: bool,
+        send_video: bool,
+    },
+    /// The media changed in the middle of the call (a re-INVITE), e.g.
+    /// their camera came on.
+    MediaChanged {
+        id: String,
+        video: bool,
+        send_video: bool,
+    },
     /// The call is over.
     Ended { id: String, reason: String },
     /// The other devices signed in on this line, as the server lists them
@@ -55,6 +71,9 @@ pub enum MediaOut {
     Audio(Vec<i16>),
     Video(AccessUnit),
     VideoStats(VideoStats),
+    /// The other side asked for a full picture of ours: the camera's
+    /// encoder should make its next frame a keyframe.
+    KeyframeWanted,
 }
 
 /// How a call's video is doing, so the app can say why no picture shows:
@@ -93,6 +112,7 @@ type MediaSink = Arc<dyn Fn(MediaOut) + Send + Sync>;
 pub struct Phone {
     tx: Sender<Command>,
     audio: Arc<Mutex<Option<AudioOut>>>,
+    video: Arc<Mutex<Option<VideoOut>>>,
 }
 
 impl Phone {
@@ -104,14 +124,15 @@ impl Phone {
     ) -> Phone {
         let (tx, rx) = mpsc::channel();
         let audio = Arc::new(Mutex::new(None));
-        let shared = audio.clone();
+        let video = Arc::new(Mutex::new(None));
+        let out = Outs { audio: audio.clone(), video: video.clone() };
         let events: EventSink = Arc::new(on_event);
         let media: MediaSink = Arc::new(on_media);
         std::thread::Builder::new()
             .name("kagaz-phone".into())
-            .spawn(move || run(line, rx, events, media, shared))
+            .spawn(move || run(line, rx, events, media, out))
             .expect("phone thread");
-        Phone { tx, audio }
+        Phone { tx, audio, video }
     }
 
     pub fn answer(&self) {
@@ -138,6 +159,22 @@ impl Phone {
             out.push(pcm);
         }
     }
+
+    /// A picture from the app's camera (H.264, Annex-B), when the other
+    /// side takes video. While none come, a black picture goes each second.
+    pub fn send_video(&self, annexb: &[u8]) {
+        if let Some(out) = self.video.lock().unwrap().as_mut() {
+            out.camera = Some(Instant::now());
+            out.send(annexb);
+        }
+    }
+}
+
+/// The senders the app's microphone and camera feed, while a call is on.
+#[derive(Clone)]
+struct Outs {
+    audio: Arc<Mutex<Option<AudioOut>>>,
+    video: Arc<Mutex<Option<VideoOut>>>,
 }
 
 impl Drop for Phone {
@@ -221,6 +258,63 @@ impl AudioOut {
     }
 }
 
+/// Where a call's video goes, and which ways it flows: as agreed, then
+/// wherever theirs actually comes from; changed by a re-INVITE.
+#[derive(Debug, Clone, Default)]
+struct VideoWay {
+    rtp: Option<SocketAddr>,
+    rtcp: Option<SocketAddr>,
+    pt: u8,
+    /// They send video; they take ours.
+    video_in: bool,
+    video_out: bool,
+}
+
+/// One black 640 x 480 picture (H.264 baseline: SPS, PPS, IDR), sent while
+/// our camera is off: a video phone, or the relay between us, may send
+/// nothing until video comes from this side.
+const BLACK: &[u8] = include_bytes!("black-640x480.h264");
+
+/// The video sender: our camera's pictures (or black ones) as RTP.
+struct VideoOut {
+    sock: UdpSocket,
+    way: Arc<Mutex<VideoWay>>,
+    ssrc: u32,
+    seq: u16,
+    start: Instant,
+    /// When the app last sent a camera picture.
+    camera: Option<Instant>,
+}
+
+impl VideoOut {
+    fn send(&mut self, annexb: &[u8]) {
+        let way = self.way.lock().unwrap().clone();
+        let Some(to) = way.rtp.filter(|_| way.video_out) else {
+            return;
+        };
+        // 90 kHz from the call's start.
+        let ts = (self.start.elapsed().as_micros() * 9 / 100) as u32;
+        let payloads = super::h264::packetize(annexb, 1200);
+        let last = payloads.len().saturating_sub(1);
+        for (i, payload) in payloads.iter().enumerate() {
+            let mut p = Vec::with_capacity(12 + payload.len());
+            p.push(0x80);
+            p.push(if i == last { 0x80 | way.pt } else { way.pt });
+            p.extend_from_slice(&self.seq.to_be_bytes());
+            p.extend_from_slice(&ts.to_be_bytes());
+            p.extend_from_slice(&self.ssrc.to_be_bytes());
+            p.extend_from_slice(payload);
+            let _ = self.sock.send_to(&p, to);
+            self.seq = self.seq.wrapping_add(1);
+        }
+    }
+
+    /// The camera sent nothing lately (it is off, or there is none).
+    fn camera_quiet(&self) -> bool {
+        self.camera.is_none_or(|t| t.elapsed() > Duration::from_millis(1500))
+    }
+}
+
 /// A call's sockets and receiver threads.
 struct Media {
     audio: UdpSocket,
@@ -232,6 +326,32 @@ struct Media {
     /// Set by the video thread when it needs a full picture; the
     /// signalling thread then asks over SIP.
     key_wanted: Arc<AtomicBool>,
+    /// The other side wants a full picture of ours (RTCP or SIP INFO).
+    their_key_wanted: Arc<AtomicBool>,
+    way: Arc<Mutex<VideoWay>>,
+    /// The video threads run (from the start, or since a re-INVITE).
+    video_running: AtomicBool,
+}
+
+/// Note where packets first come from on a socket (the first five), for
+/// the call log.
+fn note_source(diag: &Diag, what: &str, count: u64, peer: SocketAddr) {
+    if count <= 5 {
+        diag.line(&format!("{what}: packet {count} from {peer}"));
+    }
+}
+
+/// Whether an RTCP compound packet asks for a full picture (PLI or FIR).
+fn asks_for_keyframe(mut p: &[u8]) -> bool {
+    while p.len() >= 4 {
+        let (fmt, pt) = (p[0] & 0x1F, p[1]);
+        if pt == 206 && (fmt == 1 || fmt == 4) {
+            return true;
+        }
+        let len = (u16::from_be_bytes([p[2], p[3]]) as usize + 1) * 4;
+        p = p.get(len..).unwrap_or(&[]);
+    }
+    false
 }
 
 /// SIP INFO asking a video phone for a full picture (RFC 5168).
@@ -277,12 +397,18 @@ impl Media {
         // a small receive buffer (64 KB on Windows) drops some of them,
         // and one lost packet spoils the picture. The system may cap this.
         let _ = socket2::SockRef::from(&video).set_recv_buffer_size(4 << 20);
+        if let Some(r) = &video_rtcp {
+            r.set_read_timeout(Some(Duration::from_millis(250)))?;
+        }
         Ok(Media {
             audio,
             video,
             video_rtcp,
             stop: Arc::new(AtomicBool::new(false)),
             key_wanted: Arc::new(AtomicBool::new(false)),
+            their_key_wanted: Arc::new(AtomicBool::new(false)),
+            way: Arc::new(Mutex::new(VideoWay::default())),
+            video_running: AtomicBool::new(false),
         })
     }
 
@@ -293,21 +419,17 @@ impl Media {
         )
     }
 
-    /// Start receiving and set up the voice sender.
-    fn begin(
-        &self,
-        agreed: &Agreed,
-        sink: MediaSink,
-        out: &Arc<Mutex<Option<AudioOut>>>,
-        diag: Diag,
-    ) {
+    /// Start receiving and set up the senders.
+    fn begin(&self, agreed: &Agreed, sink: MediaSink, out: &Outs, diag: Diag) {
         diag.line(&format!(
-            "agreed: voice to {:?} ({:?}, tones {:?}); video from {:?} (payload {:?}, sprop {})",
+            "agreed: voice to {:?} ({:?}, tones {:?}); video with {:?} (payload {:?}, theirs comes {}, ours goes {}, sprop {})",
             agreed.audio,
             agreed.law,
             agreed.dtmf_pt,
             agreed.video,
             agreed.video_pt,
+            agreed.video_in,
+            agreed.video_out,
             agreed.sprop.is_some()
         ));
         if let (Some(dest), Some(law)) = (agreed.audio, agreed.law) {
@@ -326,12 +448,13 @@ impl Media {
                 // A little silence opens the way through NAT and relays
                 // before the microphone starts.
                 sender.push(&[0i16; FRAME * 5]);
-                *out.lock().unwrap() = Some(sender);
+                *out.audio.lock().unwrap() = Some(sender);
             }
             if let Ok(sock) = self.audio.try_clone() {
                 let stop = self.stop.clone();
                 let sink = sink.clone();
                 let diag = diag.clone();
+                let out = out.audio.clone();
                 std::thread::spawn(move || {
                     let mut buf = [0u8; 2048];
                     let mut packets = 0u64;
@@ -347,123 +470,249 @@ impl Media {
                         };
                         packets += 1;
                         from = Some(peer);
+                        note_source(&diag, "voice", packets, peer);
                         let Some((_, _, _, payload)) = super::h264::parse_rtp(&buf[..n]) else {
                             continue;
                         };
                         if let Some(law) = Law::from_payload_type(buf[1] & 0x7F) {
+                            // Our voice goes back where theirs comes from.
+                            if let Some(o) = out.lock().unwrap().as_mut() {
+                                if o.dest != peer {
+                                    diag.line(&format!("voice: now sending to {peer} (was {})", o.dest));
+                                    o.dest = peer;
+                                }
+                            }
                             sink(MediaOut::Audio(law.decode(payload)));
                         }
                     }
                 });
             }
         }
-        if let (Some(dest), Some(pt)) = (agreed.video, agreed.video_pt) {
-            if let Ok(sock) = self.video.try_clone() {
-                let stop = self.stop.clone();
-                let sprop = agreed.sprop.clone();
-                let diag = diag.clone();
-                let key_wanted = self.key_wanted.clone();
-                // RTCP from its own port when there is one, else from the video's.
-                let rtcp = self
-                    .video_rtcp
-                    .as_ref()
-                    .and_then(|s| s.try_clone().ok())
-                    .or_else(|| sock.try_clone().ok());
-                let rtcp_dest = agreed.video_rtcp;
-                std::thread::spawn(move || {
-                    let mut depack = Depacketizer::new();
-                    if let Some(s) = &sprop {
-                        depack.set_parameter_sets(s);
-                    }
-                    let mut buf = vec![0u8; 65536];
-                    let mut last_ping = Instant::now() - Duration::from_secs(10);
-                    let ssrc = rand_u32();
-                    let mut seq = rand_u16();
-                    let mut seen = 0u64;
-                    let mut other_pt = 0u64;
-                    let mut from = None;
-                    let mut last_log = Instant::now();
-                    let started = Instant::now();
-                    let mut their_ssrc = 0u32;
-                    let mut asked = 0u64;
-                    let mut last_ask: Option<Instant> = None;
-                    while !stop.load(Ordering::SeqCst) {
-                        // No picture can show until a full one comes: ask for
-                        // one shortly after the start, and again while none
-                        // has (every 2 s, then every 5 s), over RTCP here and
-                        // over SIP by the signalling thread.
-                        let gap = if asked < 5 { 2 } else { 5 };
-                        let due = match last_ask {
-                            None => started.elapsed() > Duration::from_millis(300),
-                            Some(t) => t.elapsed() > Duration::from_secs(gap),
-                        };
-                        if due && depack.waiting_for_key() {
-                            if let (Some(r), Some(to)) = (&rtcp, rtcp_dest) {
-                                let _ = r.send_to(&key_request(ssrc, their_ssrc, asked as u8), to);
-                            }
-                            key_wanted.store(true, Ordering::SeqCst);
-                            asked += 1;
-                            last_ask = Some(Instant::now());
-                        }
-                        if last_log.elapsed() > Duration::from_secs(2) {
-                            let st = &depack.stats;
-                            sink(MediaOut::VideoStats(VideoStats {
-                                seconds: started.elapsed().as_secs(),
-                                packets: seen,
-                                other_payload: other_pt,
-                                pictures: st.units,
-                                keyframes: st.keyframes,
-                                damaged: st.damaged,
-                                waiting: st.waiting,
-                                asked,
-                            }));
-                            let types: Vec<String> = st
-                                .nal_types
-                                .iter()
-                                .enumerate()
-                                .filter(|(_, n)| **n > 0)
-                                .map(|(t, n)| format!("{t}:{n}"))
-                                .collect();
-                            diag.line(&format!(
-                                "video: {seen} packets from {from:?} ({other_pt} other payload types); depacketized {} packets into {} pictures ({} keyframes), dropped {} damaged and {} waiting for a keyframe; asked for a full picture {asked} times; NAL types {}",
-                                st.packets, st.units, st.keyframes, st.damaged, st.waiting, types.join(" ")
-                            ));
-                            last_log = Instant::now();
-                        }
-                        // We send no video, so a bare RTP header now and then
-                        // keeps NAT and the relay pointing back at us.
-                        if last_ping.elapsed() > Duration::from_secs(2) {
-                            let mut p = vec![0x80, pt];
-                            p.extend_from_slice(&seq.to_be_bytes());
-                            p.extend_from_slice(&0u32.to_be_bytes());
-                            p.extend_from_slice(&ssrc.to_be_bytes());
-                            let _ = sock.send_to(&p, dest);
-                            seq = seq.wrapping_add(1);
-                            last_ping = Instant::now();
-                        }
-                        let Ok((n, peer)) = sock.recv_from(&mut buf) else {
-                            continue;
-                        };
-                        seen += 1;
-                        from = Some(peer);
-                        if n < 12 || buf[1] & 0x7F != pt {
-                            if other_pt == 0 && n >= 2 {
-                                diag.line(&format!(
-                                    "video: first packet with payload type {}",
-                                    buf[1] & 0x7F
-                                ));
-                            }
-                            other_pt += 1;
-                            continue;
-                        }
-                        their_ssrc = u32::from_be_bytes([buf[8], buf[9], buf[10], buf[11]]);
-                        if let Some(unit) = depack.push(&buf[..n]) {
-                            sink(MediaOut::Video(unit));
-                        }
-                    }
-                });
-            }
+        self.set_video_way(agreed, &diag);
+        self.begin_video(agreed, sink, out, diag);
+    }
+
+    /// The video's way as agreed (or agreed again); where it already goes
+    /// back to the source of theirs, that stays unless the address changed.
+    fn set_video_way(&self, agreed: &Agreed, diag: &Diag) {
+        let mut way = self.way.lock().unwrap();
+        let moved = |old: Option<SocketAddr>, new: Option<SocketAddr>| new.is_some() && new != old;
+        let fresh = VideoWay {
+            rtp: agreed.video,
+            rtcp: agreed.video_rtcp,
+            pt: agreed.video_pt.unwrap_or(way.pt),
+            video_in: agreed.video_in,
+            video_out: agreed.video_out,
+        };
+        if way.rtp.is_some() {
+            diag.line(&format!("video agreed again: {fresh:?} (was {way:?})"));
         }
+        let keep_rtp = way.rtp.is_some() && !moved(way.rtp, fresh.rtp);
+        let keep_rtcp = way.rtcp.is_some() && !moved(way.rtcp, fresh.rtcp);
+        let (rtp, rtcp) = (way.rtp, way.rtcp);
+        *way = fresh;
+        if keep_rtp {
+            way.rtp = rtp;
+        }
+        if keep_rtcp {
+            way.rtcp = rtcp;
+        }
+    }
+
+    /// Start the video threads, once there is video to send or receive.
+    fn begin_video(&self, agreed: &Agreed, sink: MediaSink, out: &Outs, diag: Diag) {
+        if agreed.video.is_none() || agreed.video_pt.is_none() {
+            return;
+        }
+        if self.video_running.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        let Ok(sock) = self.video.try_clone() else {
+            return;
+        };
+        if let Ok(s) = self.video.try_clone() {
+            *out.video.lock().unwrap() = Some(VideoOut {
+                sock: s,
+                way: self.way.clone(),
+                ssrc: rand_u32(),
+                seq: rand_u16(),
+                start: Instant::now(),
+                camera: None,
+            });
+        }
+        // Their RTCP: where it comes from, and whether they ask for a full
+        // picture of ours.
+        if let Some(r) = self.video_rtcp.as_ref().and_then(|s| s.try_clone().ok()) {
+            let stop = self.stop.clone();
+            let way = self.way.clone();
+            let wanted = self.their_key_wanted.clone();
+            let diag = diag.clone();
+            std::thread::spawn(move || {
+                let mut buf = [0u8; 2048];
+                let mut count = 0u64;
+                let mut asks = 0u64;
+                while !stop.load(Ordering::SeqCst) {
+                    let Ok((n, peer)) = r.recv_from(&mut buf) else {
+                        continue;
+                    };
+                    count += 1;
+                    note_source(&diag, "video RTCP", count, peer);
+                    if count == 1 && n >= 2 && buf[1] == 200 {
+                        diag.line("video RTCP: their first report is a sender's (their video is on its way)");
+                    }
+                    {
+                        let mut w = way.lock().unwrap();
+                        if w.rtcp != Some(peer) {
+                            diag.line(&format!("video RTCP: now sending to {peer} (was {:?})", w.rtcp));
+                            w.rtcp = Some(peer);
+                        }
+                    }
+                    if asks_for_keyframe(&buf[..n]) {
+                        asks += 1;
+                        if asks <= 3 {
+                            diag.line("video RTCP: they asked for a full picture of ours");
+                        }
+                        wanted.store(true, Ordering::SeqCst);
+                    }
+                }
+            });
+        }
+        let stop = self.stop.clone();
+        let sprop = agreed.sprop.clone();
+        let key_wanted = self.key_wanted.clone();
+        let their_key_wanted = self.their_key_wanted.clone();
+        let way = self.way.clone();
+        let vout = out.video.clone();
+        // RTCP from its own port when there is one, else from the video's.
+        let rtcp = self
+            .video_rtcp
+            .as_ref()
+            .and_then(|s| s.try_clone().ok())
+            .or_else(|| sock.try_clone().ok());
+        std::thread::spawn(move || {
+            let mut depack = Depacketizer::new();
+            if let Some(s) = &sprop {
+                depack.set_parameter_sets(s);
+            }
+            let mut buf = vec![0u8; 65536];
+            let mut last_ping = Instant::now() - Duration::from_secs(10);
+            let mut last_black = Instant::now() - Duration::from_secs(10);
+            let ssrc = rand_u32();
+            let mut seq = rand_u16();
+            let mut seen = 0u64;
+            let mut other_pt = 0u64;
+            let mut from = None;
+            let mut last_log = Instant::now();
+            let started = Instant::now();
+            let mut their_ssrc = 0u32;
+            let mut asked = 0u64;
+            let mut last_ask: Option<Instant> = None;
+            let mut blacks = 0u64;
+            while !stop.load(Ordering::SeqCst) {
+                let w = way.lock().unwrap().clone();
+                // No picture can show until a full one comes: ask for
+                // one shortly after the start, and again while none
+                // has (every 2 s, then every 5 s), over RTCP here and
+                // over SIP by the signalling thread.
+                let gap = if asked < 5 { 2 } else { 5 };
+                let due = match last_ask {
+                    None => started.elapsed() > Duration::from_millis(300),
+                    Some(t) => t.elapsed() > Duration::from_secs(gap),
+                };
+                if w.video_in && due && depack.waiting_for_key() {
+                    if let (Some(r), Some(to)) = (&rtcp, w.rtcp) {
+                        let _ = r.send_to(&key_request(ssrc, their_ssrc, asked as u8), to);
+                    }
+                    key_wanted.store(true, Ordering::SeqCst);
+                    asked += 1;
+                    last_ask = Some(Instant::now());
+                }
+                if last_log.elapsed() > Duration::from_secs(2) {
+                    let st = &depack.stats;
+                    if w.video_in {
+                        sink(MediaOut::VideoStats(VideoStats {
+                            seconds: started.elapsed().as_secs(),
+                            packets: seen,
+                            other_payload: other_pt,
+                            pictures: st.units,
+                            keyframes: st.keyframes,
+                            damaged: st.damaged,
+                            waiting: st.waiting,
+                            asked,
+                        }));
+                    }
+                    let types: Vec<String> = st
+                        .nal_types
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, n)| **n > 0)
+                        .map(|(t, n)| format!("{t}:{n}"))
+                        .collect();
+                    diag.line(&format!(
+                        "video: {seen} packets from {from:?} ({other_pt} other payload types); depacketized {} packets into {} pictures ({} keyframes), dropped {} damaged and {} waiting for a keyframe; asked for a full picture {asked} times; NAL types {}; sent {blacks} black pictures, to {:?}",
+                        st.packets, st.units, st.keyframes, st.damaged, st.waiting, types.join(" "), w.rtp
+                    ));
+                    last_log = Instant::now();
+                }
+                if w.video_out {
+                    // Our video: the camera's, or a black picture each
+                    // second while it is quiet (at once when they ask).
+                    let asked_ours = their_key_wanted.swap(false, Ordering::SeqCst);
+                    let mut out = vout.lock().unwrap();
+                    if let Some(o) = out.as_mut() {
+                        if o.camera_quiet() {
+                            if asked_ours || last_black.elapsed() > Duration::from_secs(1) {
+                                o.send(BLACK);
+                                blacks += 1;
+                                last_black = Instant::now();
+                            }
+                        } else if asked_ours {
+                            sink(MediaOut::KeyframeWanted);
+                        }
+                    }
+                } else if last_ping.elapsed() > Duration::from_secs(2) {
+                    // Sending no video, a bare RTP header now and then keeps
+                    // NAT and the relay pointing back at us.
+                    if let Some(to) = w.rtp {
+                        let mut p = vec![0x80, w.pt];
+                        p.extend_from_slice(&seq.to_be_bytes());
+                        p.extend_from_slice(&0u32.to_be_bytes());
+                        p.extend_from_slice(&ssrc.to_be_bytes());
+                        let _ = sock.send_to(&p, to);
+                        seq = seq.wrapping_add(1);
+                    }
+                    last_ping = Instant::now();
+                }
+                let Ok((n, peer)) = sock.recv_from(&mut buf) else {
+                    continue;
+                };
+                seen += 1;
+                from = Some(peer);
+                note_source(&diag, "video", seen, peer);
+                if n < 12 || buf[1] & 0x7F != w.pt {
+                    if other_pt == 0 && n >= 2 {
+                        diag.line(&format!(
+                            "video: first packet with payload type {}",
+                            buf[1] & 0x7F
+                        ));
+                    }
+                    other_pt += 1;
+                    continue;
+                }
+                // Ours goes back where theirs comes from.
+                {
+                    let mut w = way.lock().unwrap();
+                    if w.rtp != Some(peer) {
+                        diag.line(&format!("video: now sending to {peer} (was {:?})", w.rtp));
+                        w.rtp = Some(peer);
+                    }
+                }
+                their_ssrc = u32::from_be_bytes([buf[8], buf[9], buf[10], buf[11]]);
+                if let Some(unit) = depack.push(&buf[..n]) {
+                    sink(MediaOut::Video(unit));
+                }
+            }
+        });
     }
 }
 
@@ -473,18 +722,45 @@ impl Drop for Media {
     }
 }
 
-/// A per-call diagnostic log in Kagaz's cache folder (`kagaz-call.log`;
-/// the system temp folder is out of reach on Android), replaced by each
-/// call: the media descriptions and what arrived. It stays on this device;
-/// it holds addresses, never passwords.
+/// A diagnostic log for each call in Kagaz's cache folder
+/// (`calls/kagaz-call-<time>.log`; the system temp folder is out of reach on
+/// Android), the last ten kept: the call's SIP messages and media
+/// descriptions, and where media came from. It stays on this device; it
+/// holds addresses, never passwords. Tests write none, so a test call never
+/// replaces a real one's.
 #[derive(Clone)]
 struct Diag(Arc<Mutex<Option<std::fs::File>>>);
 
+/// How many call logs are kept.
+const CALL_LOGS: usize = 10;
+
 impl Diag {
     fn new() -> Diag {
-        let dir = crate::paths::cache_dir();
+        if cfg!(test) {
+            return Diag(Arc::new(Mutex::new(None)));
+        }
+        let dir = crate::paths::cache_dir().join("calls");
         let _ = std::fs::create_dir_all(&dir);
-        let file = std::fs::File::create(dir.join("kagaz-call.log")).ok();
+        // The oldest go, leaving room for this one.
+        if let Ok(entries) = std::fs::read_dir(&dir) {
+            let mut logs: Vec<std::path::PathBuf> = entries
+                .filter_map(|e| e.ok().map(|e| e.path()))
+                .filter(|p| p.file_name().is_some_and(|n| n.to_string_lossy().starts_with("kagaz-call-")))
+                .collect();
+            logs.sort();
+            let extra = (logs.len() + 1).saturating_sub(CALL_LOGS);
+            for old in logs.iter().take(extra) {
+                let _ = std::fs::remove_file(old);
+            }
+        }
+        // The one log every call replaced, before.
+        let _ = std::fs::remove_file(crate::paths::cache_dir().join("kagaz-call.log"));
+        let t = crate::localtime::now();
+        let mut name = format!("kagaz-call-{}{:02}.log", t.file_stamp(), t.second);
+        if dir.join(&name).exists() {
+            name = format!("kagaz-call-{}{:02}-{}.log", t.file_stamp(), t.second, rand_u16());
+        }
+        let file = std::fs::File::create(dir.join(name)).ok();
         Diag(Arc::new(Mutex::new(file)))
     }
 
@@ -599,7 +875,9 @@ struct Line {
     wire: Receiver<Wire>,
     events: EventSink,
     media: MediaSink,
-    audio: Arc<Mutex<Option<AudioOut>>>,
+    out: Outs,
+    /// Our address as the server sees it (its Via `received`/`rport`).
+    public: Option<String>,
     reg_call_id: String,
     reg_tag: String,
     reg_cseq: u32,
@@ -658,7 +936,7 @@ fn run(
     commands: Receiver<Command>,
     events: EventSink,
     media: MediaSink,
-    audio: Arc<Mutex<Option<AudioOut>>>,
+    out: Outs,
 ) {
     let mut backoff = Duration::from_secs(2);
     loop {
@@ -683,7 +961,8 @@ fn run(
             wire,
             events: events.clone(),
             media: media.clone(),
-            audio: audio.clone(),
+            out: out.clone(),
+            public: None,
             reg_call_id: token(),
             reg_tag: token(),
             reg_cseq: 0,
@@ -906,6 +1185,20 @@ impl Line {
             }
             Some(200) => {
                 self.reg_auth_tried = false;
+                // Where the server saw us come from.
+                if let Some(via) = m.header("Via") {
+                    let param = |name: &str| {
+                        via.split(';')
+                            .find_map(|p| p.trim().strip_prefix(name)?.strip_prefix('='))
+                            .map(str::to_string)
+                    };
+                    if let Some(ip) = param("received") {
+                        self.public = Some(match param("rport") {
+                            Some(port) => format!("{ip}:{port}"),
+                            None => ip,
+                        });
+                    }
+                }
                 let expires = m
                     .header("Expires")
                     .and_then(|v| v.trim().parse().ok())
@@ -945,6 +1238,14 @@ impl Line {
     // ---------------- incoming messages
 
     fn on_message(&mut self, m: Message) -> Result<(), String> {
+        // Everything in the call goes in its log (a new call logs its
+        // INVITE itself).
+        if self.same_call(&m) {
+            if let Some(d) = &self.call {
+                let body = if m.body.is_empty() { String::new() } else { format!("\n{}", m.body) };
+                d.diag.line(&format!("received:\n{}{body}", headers_for_log(&m)));
+            }
+        }
         if let Some(method) = m.method() {
             return self.on_request(&method, m);
         }
@@ -997,10 +1298,19 @@ impl Line {
                         // Our own call came back to us.
                         return self.reply(&m, 482, "Loop Detected", &token(), None);
                     }
-                    // A re-INVITE in our dialog (session refresh): keep the media.
+                    // A re-INVITE in our dialog: answer it and follow what
+                    // it changed (their camera on, media moved elsewhere).
                     let tag = d.local_tag.clone();
-                    let (sdp, _) = self.answer_sdp(&m);
-                    return self.reply(&m, 200, "OK", &tag, Some(&sdp));
+                    if m.body.trim().is_empty() {
+                        // They ask us to offer: the media as it stands.
+                        let ports = d.media.as_ref().map(Media::ports).unwrap_or((0, 0));
+                        let sdp = sdp::offer(&self.local_ip(), ports.0, ports.1);
+                        return self.reply(&m, 200, "OK", &tag, Some(&sdp));
+                    }
+                    let (sdp, agreed) = self.answer_sdp(&m);
+                    self.reply(&m, 200, "OK", &tag, Some(&sdp))?;
+                    self.follow(agreed, &sdp);
+                    return Ok(());
                 }
                 let (from_number, _) = caller(&m);
                 let calling_own_line = self.call.as_ref().is_some_and(|d| {
@@ -1101,9 +1411,28 @@ impl Line {
                 }
                 Ok(())
             }
-            "OPTIONS" | "NOTIFY" | "MESSAGE" | "INFO" | "UPDATE" => {
+            "UPDATE" if self.same_call(&m) && !m.body.trim().is_empty() => {
+                // A media change before or during the call: answered with
+                // ours, then followed.
+                let tag = self.call.as_ref().map(|d| d.local_tag.clone()).unwrap_or_default();
+                let confirmed = self.call.as_ref().is_some_and(|d| d.state == State::Confirmed);
+                let (sdp, agreed) = self.answer_sdp(&m);
+                self.reply(&m, 200, "OK", &tag, Some(&sdp))?;
+                if confirmed {
+                    self.follow(agreed, &sdp);
+                }
+                Ok(())
+            }
+            "INFO" => {
+                // A video phone asking for a full picture of ours.
+                if self.same_call(&m) && m.body.contains("picture_fast_update") {
+                    if let Some(media) = self.call.as_ref().and_then(|d| d.media.as_ref()) {
+                        media.their_key_wanted.store(true, Ordering::SeqCst);
+                    }
+                }
                 self.reply(&m, 200, "OK", "", None)
             }
+            "OPTIONS" | "NOTIFY" | "MESSAGE" | "UPDATE" => self.reply(&m, 200, "OK", "", None),
             _ => self.reply(&m, 501, "Not Implemented", "", None),
         }
     }
@@ -1137,8 +1466,6 @@ impl Line {
         }
         let code = m.status().unwrap_or(0);
         let d = self.call.as_mut().unwrap();
-        d.diag
-            .line(&format!("reply to our call:\n{}", headers_for_log(&m)));
         if d.state != State::Calling {
             // A repeated 200 OK: ACK it again.
             if (200..300).contains(&code) {
@@ -1167,7 +1494,6 @@ impl Line {
                     .collect();
                 d.route.reverse();
                 d.state = State::Confirmed;
-                d.diag.line(&format!("their answer:\n{}", m.body));
                 d.agreed = sdp::agreed_from_answer(&sdp::parse(&m.body));
                 let ack = self.ack_for_2xx(&m);
                 self.send(&ack)?;
@@ -1333,6 +1659,7 @@ impl Line {
                     return Ok(());
                 }
                 let sent = self
+                    .out
                     .audio
                     .lock()
                     .unwrap()
@@ -1425,6 +1752,7 @@ impl Line {
             format!("CSeq: {} {method}", d.cseq),
             "User-Agent: Kagaz".into(),
         ]);
+        d.diag.line(&format!("sent {method} (CSeq {})", d.cseq));
         let content = body.map(|(_, b)| b).unwrap_or("");
         if let Some((kind, _)) = body {
             lines.push(format!("Content-Type: {kind}"));
@@ -1456,16 +1784,49 @@ impl Line {
         let Some(d) = self.call.as_mut() else {
             return;
         };
+        d.diag.line(&format!(
+            "this line: {} here, {} as the call server sees it",
+            self.local,
+            self.public.as_deref().unwrap_or("unknown")
+        ));
         if let Some(m) = &d.media {
-            m.begin(&d.agreed, self.media.clone(), &self.audio, d.diag.clone());
+            m.begin(&d.agreed, self.media.clone(), &self.out, d.diag.clone());
         }
-        let video = d.agreed.video.is_some();
+        let (video, send_video) = (d.agreed.video_in, d.agreed.video_out);
         let id = d.id.clone();
-        (self.events)(Event::Connected { id, video });
+        (self.events)(Event::Connected { id, video, send_video });
+    }
+
+    /// The media agreed again in the middle of the call: voice and video
+    /// go where it says (unless already going where theirs comes from),
+    /// video starts if it is new, and the app hears what changed.
+    fn follow(&mut self, agreed: Agreed, our_sdp: &str) {
+        let Some(d) = self.call.as_mut() else {
+            return;
+        };
+        d.diag.line(&format!("our answer to the change:\n{our_sdp}"));
+        let before = std::mem::replace(&mut d.agreed, agreed.clone());
+        if let (Some(dest), true) = (agreed.audio, agreed.audio != before.audio) {
+            if let Some(o) = self.out.audio.lock().unwrap().as_mut() {
+                o.dest = dest;
+            }
+        }
+        if let Some(m) = &d.media {
+            m.set_video_way(&agreed, &d.diag);
+            m.begin_video(&agreed, self.media.clone(), &self.out, d.diag.clone());
+        }
+        if (agreed.video_in, agreed.video_out) != (before.video_in, before.video_out) {
+            (self.events)(Event::MediaChanged {
+                id: d.id.clone(),
+                video: agreed.video_in,
+                send_video: agreed.video_out,
+            });
+        }
     }
 
     fn end_call(&mut self, reason: &str) {
-        *self.audio.lock().unwrap() = None;
+        *self.out.audio.lock().unwrap() = None;
+        *self.out.video.lock().unwrap() = None;
         for (inv, tag) in std::mem::take(&mut self.own_legs) {
             let _ = self.reply(&inv, 487, "Request Terminated", &tag, None);
         }
@@ -1605,6 +1966,7 @@ mod tests {
         let agreed = Agreed {
             video: Some(station.local_addr().unwrap()),
             video_pt: Some(104),
+            video_in: true,
             video_rtcp: Some(station_rtcp.local_addr().unwrap()),
             ..Default::default()
         };
@@ -1615,12 +1977,8 @@ mod tests {
                 seen.lock().unwrap().push(v);
             }
         });
-        media.begin(
-            &agreed,
-            sink,
-            &Arc::new(Mutex::new(None)),
-            Diag(Arc::new(Mutex::new(None))),
-        );
+        let outs = super::Outs { audio: Arc::new(Mutex::new(None)), video: Arc::new(Mutex::new(None)) };
+        media.begin(&agreed, sink, &outs, Diag(Arc::new(Mutex::new(None))));
         let mut buf = [0u8; 256];
         let (n, _) = station_rtcp.recv_from(&mut buf).unwrap();
         assert_eq!(n, 40);
@@ -1630,6 +1988,64 @@ mod tests {
         let v = stats.lock().unwrap().last().cloned().unwrap();
         assert_eq!((v.packets, v.pictures), (0, 0));
         assert!(v.asked >= 1);
+    }
+
+    #[test]
+    fn a_video_phone_gets_black_pictures_and_ours_follows_theirs() {
+        use super::{Agreed, Diag, Media, Outs};
+        use std::net::UdpSocket;
+        use std::sync::{Arc, Mutex};
+        use std::time::{Duration, Instant};
+        // What its SDP names, and where its video really comes from.
+        let named = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let real = UdpSocket::bind("127.0.0.1:0").unwrap();
+        for s in [&named, &real] {
+            s.set_read_timeout(Some(Duration::from_millis(1500))).unwrap();
+        }
+        let media = Media::open().unwrap();
+        let agreed = Agreed {
+            video: Some(named.local_addr().unwrap()),
+            video_pt: Some(96),
+            video_in: true,
+            video_out: true,
+            ..Default::default()
+        };
+        let outs = Outs { audio: Arc::new(Mutex::new(None)), video: Arc::new(Mutex::new(None)) };
+        media.begin(&agreed, Arc::new(|_| {}), &outs, Diag(Arc::new(Mutex::new(None))));
+        // A black picture comes to the named address: SPS, PPS, then the
+        // IDR slice with the marker.
+        let mut buf = [0u8; 2048];
+        let mut types = Vec::new();
+        while types.len() < 3 {
+            let (n, _) = named.recv_from(&mut buf).unwrap();
+            assert_eq!(buf[1] & 0x7F, 96);
+            types.push((buf[12] & 0x1F, buf[1] & 0x80 != 0, n));
+        }
+        assert_eq!(types.iter().map(|t| (t.0, t.1)).collect::<Vec<_>>(), vec![(7, false), (8, false), (5, true)]);
+        // Their video comes from elsewhere: ours follows it there.
+        let ours = media.video.local_addr().unwrap().port();
+        let mut p = vec![0x80, 96, 0, 1, 0, 0, 0, 0, 0, 0, 0, 9];
+        p.push(0x41);
+        real.send_to(&p, ("127.0.0.1", ours)).unwrap();
+        let until = Instant::now() + Duration::from_secs(3);
+        let mut moved = false;
+        while Instant::now() < until && !moved {
+            moved = real.recv_from(&mut buf).is_ok_and(|(_, _)| buf[1] & 0x7F == 96);
+        }
+        assert!(moved, "our video goes back where theirs comes from");
+        // Asked for a full picture, it sends one at once.
+        media.their_key_wanted.store(true, std::sync::atomic::Ordering::SeqCst);
+        let asked = Instant::now();
+        let mut idr = false;
+        while asked.elapsed() < Duration::from_millis(600) && !idr {
+            idr = real.recv_from(&mut buf).is_ok_and(|_| buf[12] & 0x1F == 5);
+        }
+        assert!(idr);
+        // The camera, once on, takes over from the black pictures.
+        outs.video.lock().unwrap().as_mut().unwrap().camera = Some(Instant::now());
+        assert!(!outs.video.lock().unwrap().as_ref().unwrap().camera_quiet());
+        assert!(super::asks_for_keyframe(&key_request(1, 2, 0)));
+        assert!(!super::asks_for_keyframe(&[0x80, 201, 0, 1, 0, 0, 0, 1]));
     }
 
     #[test]
