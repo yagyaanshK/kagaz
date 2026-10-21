@@ -198,18 +198,6 @@ fn thumbnail(page: &Page) -> Result<(String, u32, u32), String> {
     shrunk(page, 360, 75)
 }
 
-/// A picture as a JPEG data: URL.
-fn data_url(img: &image::DynamicImage, quality: u8) -> Result<String, String> {
-    let mut jpeg = Vec::new();
-    image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpeg, quality)
-        .encode_image(&img.to_rgb8())
-        .map_err(|e| e.to_string())?;
-    Ok(format!(
-        "data:image/jpeg;base64,{}",
-        base64::engine::general_purpose::STANDARD.encode(jpeg)
-    ))
-}
-
 /// The thumbnail and the full-size view of a page, from one decoding: a
 /// 1200 dpi scan takes a while to open, so it is opened once.
 fn thumb_and_view(page: &Page) -> Result<((String, u32, u32), String), String> {
@@ -360,6 +348,12 @@ pub async fn copy_print(
     .await
 }
 
+/// Pages made elsewhere (the workbench: an ID page) become the copy's.
+pub fn set_copy_pages(app: &AppHandle, pages: Vec<Page>) {
+    use tauri::Manager;
+    *app.state::<CopyState>().pages.lock().unwrap() = pages;
+}
+
 #[tauri::command]
 pub fn copy_discard(state: State<'_, CopyState>) {
     state.pages.lock().unwrap().clear();
@@ -377,10 +371,9 @@ pub fn copy_discard(state: State<'_, CopyState>) {
 #[derive(Default)]
 pub struct IdState {
     sides: Mutex<[Option<Page>; 2]>,
-    sheet: Mutex<Option<Page>>,
-    /// Full-size views of the front, the back and the page, made as each
-    /// came, so opening one is instant.
-    views: Mutex<[Option<String>; 3]>,
+    /// Full-size views of the front and the back, made as each came, so
+    /// opening one is instant.
+    views: Mutex<[Option<String>; 2]>,
 }
 
 /// Scan one side (0 the front, 1 the back): the top half of the glass.
@@ -433,18 +426,13 @@ pub async fn id_scan_side(
     }
     sides[side] = Some(page);
     views[side] = Some(view);
-    views[2] = None;
-    *state.sheet.lock().unwrap() = None;
     Ok(Thumb { index: side, src, width, height, dpi, note: String::new() })
 }
 
-/// Put the two sides on one page; a preview of it.
+/// Put the two sides on one page, on the "id" workbench: Tidy, Crop,
+/// Compress, then Save or Print, as for any scan (bench.rs).
 #[tauri::command]
-pub async fn id_page(
-    state: State<'_, IdState>,
-    paper: Paper,
-    tidy: Option<kagaz_core::scan::id::Tidy>,
-) -> Result<Thumb, String> {
+pub async fn id_page(app: AppHandle, state: State<'_, IdState>, paper: Paper) -> Result<super::bench::View, String> {
     let (front, back) = {
         let sides = state.sides.lock().unwrap();
         match (&sides[0], &sides[1]) {
@@ -454,31 +442,29 @@ pub async fn id_page(
         }
     };
     let paper = if paper == Paper::Max { Paper::A4 } else { paper };
-    let tidy = tidy.unwrap_or_default();
-    let (sheet, notes, (src, width, height), view) = blocking(move || {
-        let (sheet, notes) = kagaz_core::scan::id::page_tidied(&front, &back, paper, tidy)?;
-        let (thumb, view) = thumb_and_view(&sheet)?;
-        Ok((sheet, notes, thumb, view))
+    let picture = blocking(move || {
+        let sheet = kagaz_core::scan::id::page(&front, &back, paper)?;
+        kagaz_core::tools::from_page(&sheet)
     })
     .await?;
-    let dpi = sheet.dpi;
-    *state.sheet.lock().unwrap() = Some(sheet);
-    state.views.lock().unwrap()[2] = Some(view);
-    Ok(Thumb { index: 0, src, width, height, dpi, note: notes.join(" ") })
+    super::bench::put(&app, "id", "id-card", vec![picture]);
+    super::bench::bench_view(app, "id".into(), 0).await
 }
 
-/// A side (0, 1) or the page (2), big enough to look at closely.
+/// A side (0 the front, 1 the back), big enough to look at closely.
 #[tauri::command]
 pub async fn id_picture(state: State<'_, IdState>, which: usize) -> Result<String, String> {
     if let Some(view) = state.views.lock().unwrap().get(which).cloned().flatten() {
         return Ok(view);
     }
-    let page = if which == 2 {
-        state.sheet.lock().unwrap().clone()
-    } else {
-        state.sides.lock().unwrap().get(which).cloned().flatten()
-    }
-    .ok_or_else(|| "nothing scanned there yet".to_string())?;
+    let page = state
+        .sides
+        .lock()
+        .unwrap()
+        .get(which)
+        .cloned()
+        .flatten()
+        .ok_or_else(|| "nothing scanned there yet".to_string())?;
     blocking(move || shrunk(&page, 2000, 85).map(|(src, _, _)| src)).await
 }
 
@@ -493,200 +479,6 @@ pub async fn copy_picture(state: State<'_, CopyState>, index: usize) -> Result<S
         .cloned()
         .ok_or_else(|| "that page is no longer here; scan again".to_string())?;
     blocking(move || shrunk(&page, 2000, 85).map(|(src, _, _)| src)).await
-}
-
-/// A saved file, tidied and waiting to be looked at, then saved; and its
-/// pages as they were, for outlines the person adjusts on the first.
-static TIDIED: Mutex<Option<Vec<Page>>> = Mutex::new(None);
-static TIDY_SOURCE: Mutex<Option<Vec<(image::RgbImage, u32)>>> = Mutex::new(None);
-
-/// One card's outline on the first page, where it starts.
-#[derive(Debug, Clone, Serialize)]
-pub struct Outline {
-    quad: kagaz_core::scan::id::Quad,
-    /// Find the card saw a card there (else it is the whole half).
-    found: bool,
-}
-
-/// What tidying a saved file made, to look at before saving.
-#[derive(Debug, Clone, Serialize)]
-pub struct Tidied {
-    /// The first page tidied, small and full size (data: URLs).
-    thumb: String,
-    view: String,
-    /// The first page as it was, full size, under the outlines.
-    original: String,
-    /// With Find the card: an outline per card (each half of a page).
-    outlines: Vec<Outline>,
-    /// A card's rounded corner, as a fraction of the page's width.
-    radius: f32,
-    pages: usize,
-    /// Where a card was not found (that part is left as it was).
-    notes: Vec<String>,
-}
-
-/// Tidy a saved scan or photo (PDF, JPEG or PNG) with Clean background
-/// and Find the card, no printer needed. The result waits here to be
-/// looked at; [`tidy_save`] writes it. The original is not touched.
-#[tauri::command]
-pub async fn tidy_preview(path: String, tidy: kagaz_core::scan::id::Tidy) -> Result<Tidied, String> {
-    use kagaz_core::scan::ColorMode;
-    blocking(move || {
-        let data = std::fs::read(&path).map_err(|e| format!("could not read {path}: {e}"))?;
-        // Each page as a picture, with its resolution.
-        let mut pictures: Vec<(image::RgbImage, u32)> = Vec::new();
-        if data.starts_with(b"%PDF") {
-            // A PDF's pages drawn at 600 dpi on A4, sharp enough for a scan.
-            let plan = kagaz_core::print::Plan {
-                dpi: 600,
-                gray: false,
-                media: "iso_a4_210x297mm".into(),
-                width_pt: 595,
-                height_pt: 842,
-                sides: kagaz_core::print::Sides::OneSided,
-                sheet_back_rotated: false,
-                copies: 1,
-            };
-            for p in kagaz_core::print::render_file(std::path::Path::new(&path), &plan, &mut |_| {})
-                .map_err(|e| e.to_string())?
-            {
-                let img = if p.components == 1 {
-                    image::DynamicImage::ImageLuma8(
-                        image::GrayImage::from_raw(p.width, p.height, p.pixels)
-                            .ok_or("a page came out damaged")?,
-                    )
-                    .to_rgb8()
-                } else {
-                    image::RgbImage::from_raw(p.width, p.height, p.pixels)
-                        .ok_or("a page came out damaged")?
-                };
-                pictures.push((img, plan.dpi));
-            }
-        } else {
-            let img = image::load_from_memory(&data)
-                .map_err(|_| "this is not a PDF, JPEG or PNG file".to_string())?;
-            let dpi = kagaz_core::output::jpeg::dpi(&data).unwrap_or(300);
-            pictures.push((img.to_rgb8(), dpi));
-        }
-        let mut notes = Vec::new();
-        let mut pages = Vec::new();
-        let (first_img, first_dpi) = pictures.first().cloned().ok_or("the file has no pages")?;
-        let outlines = if tidy.card {
-            kagaz_core::scan::id::find_cards(&first_img, first_dpi)
-                .into_iter()
-                .map(|(quad, found)| Outline { quad, found })
-                .collect()
-        } else {
-            Vec::new()
-        };
-        let radius = kagaz_core::scan::id::corner_radius(first_dpi) / first_img.width().max(1) as f32;
-        let original = data_url(&image::DynamicImage::ImageRgb8(first_img).thumbnail(2000, 2000), 85)?;
-        *TIDY_SOURCE.lock().unwrap() = Some(pictures.clone());
-        for (mut img, dpi) in pictures {
-            notes.extend(kagaz_core::scan::id::tidy_image(&mut img, dpi, tidy));
-            let mut png = Vec::new();
-            image::DynamicImage::ImageRgb8(img)
-                .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
-                .map_err(|e| e.to_string())?;
-            pages.push(Page { data: png, mime: "image/png", dpi, color: ColorMode::Color });
-        }
-        let first = pages.first().ok_or("the file has no pages")?;
-        let ((thumb, _, _), view) = thumb_and_view(first)?;
-        let count = pages.len();
-        *TIDIED.lock().unwrap() = Some(pages);
-        Ok(Tidied { thumb, view, original, outlines, radius, pages: count, notes })
-    })
-    .await
-}
-
-/// The first page with the person's outlines (white outside them), then
-/// Clean background if ticked; it takes the auto-tidied first page's place.
-/// Returns its full-size view.
-#[tauri::command]
-pub async fn tidy_outlines(
-    outlines: Vec<kagaz_core::scan::id::Shape>,
-    background: bool,
-) -> Result<String, String> {
-    let (mut img, dpi) = TIDY_SOURCE
-        .lock()
-        .unwrap()
-        .as_ref()
-        .and_then(|p| p.first().cloned())
-        .ok_or_else(|| "choose a file to tidy first".to_string())?;
-    blocking(move || {
-        kagaz_core::scan::id::tidy_outlined(&mut img, &outlines, dpi, background);
-        let view = data_url(&image::DynamicImage::ImageRgb8(img.clone()).thumbnail(2000, 2000), 85)?;
-        let mut png = Vec::new();
-        image::DynamicImage::ImageRgb8(img)
-            .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
-            .map_err(|e| e.to_string())?;
-        let page = Page { data: png, mime: "image/png", dpi, color: kagaz_core::scan::ColorMode::Color };
-        if let Some(pages) = TIDIED.lock().unwrap().as_mut() {
-            if let Some(first) = pages.first_mut() {
-                *first = page;
-            }
-        }
-        Ok(view)
-    })
-    .await
-}
-
-/// Save the tidied file at `out`, in that file's format (PDF, JPEG, PNG).
-#[tauri::command]
-pub async fn tidy_save(app: AppHandle, out: String) -> Result<String, String> {
-    use kagaz_core::output::Format;
-    let pages = TIDIED
-        .lock()
-        .unwrap()
-        .clone()
-        .ok_or_else(|| "choose a file to tidy first".to_string())?;
-    blocking(move || {
-        let format = std::path::Path::new(&out)
-            .extension()
-            .and_then(|e| Format::from_extension(&e.to_string_lossy()))
-            .unwrap_or(Format::Pdf);
-        let output = super::OutputRequest {
-            format,
-            color: kagaz_core::scan::ColorMode::Color,
-            quality: Some(92),
-            max_bytes: None,
-        };
-        let written = super::write_scan(&app, &pages, &output, out)?;
-        Ok(written.first().map(|w| w.path.clone()).unwrap_or_default())
-    })
-    .await
-}
-
-/// Save the ID page (Scan tab), as a scan is saved.
-#[tauri::command]
-pub async fn id_save(
-    app: AppHandle,
-    state: State<'_, IdState>,
-    output: super::OutputRequest,
-    path: String,
-) -> Result<Vec<super::WrittenFile>, String> {
-    let sheet = state
-        .sheet
-        .lock()
-        .unwrap()
-        .clone()
-        .ok_or_else(|| "scan both sides first".to_string())?;
-    blocking(move || super::write_scan(&app, &[sheet], &output, path)).await
-}
-
-/// The ID page becomes the copy's one page (Copy tab), ready to print.
-#[tauri::command]
-pub fn id_to_copy(id: State<'_, IdState>, copy: State<'_, CopyState>) -> Result<Vec<Thumb>, String> {
-    let sheet = id
-        .sheet
-        .lock()
-        .unwrap()
-        .clone()
-        .ok_or_else(|| "scan both sides first".to_string())?;
-    let (src, width, height) = thumbnail(&sheet)?;
-    let dpi = sheet.dpi;
-    *copy.pages.lock().unwrap() = vec![sheet];
-    Ok(vec![Thumb { index: 0, src, width, height, dpi, note: String::new() }])
 }
 
 /// The phone's print dialog: the document becomes a PDF that Android's

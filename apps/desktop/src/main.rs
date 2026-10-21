@@ -12,6 +12,7 @@ use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_dialog::DialogExt;
 
+mod bench;
 mod calls;
 mod doorbell;
 mod media;
@@ -150,7 +151,7 @@ fn write_scan(
     output: &OutputRequest,
     path: String,
 ) -> Result<Vec<WrittenFile>, String> {
-    let written = output::write(
+    let files = output::encode_files(
         pages,
         &OutputOptions {
             format: output.format,
@@ -158,9 +159,19 @@ fn write_scan(
             quality: output.quality,
             max_bytes: output.max_bytes,
         },
-        &PathBuf::from(path),
     )
     .map_err(|e| e.to_string())?;
+    write_encoded(app, files, path)
+}
+
+/// Write files already encoded (bench.rs: Compress's) at `path`; on a
+/// phone, then into Downloads/Kagaz.
+fn write_encoded(
+    app: &AppHandle,
+    files: Vec<kagaz_core::output::Encoded>,
+    path: String,
+) -> Result<Vec<WrittenFile>, String> {
+    let written = output::write_encoded(files, &PathBuf::from(path)).map_err(|e| e.to_string())?;
     #[cfg(mobile)]
     let written = written
         .into_iter()
@@ -1334,6 +1345,7 @@ pub fn run() {
         .manage(doorbell::DoorbellState::new())
         .manage(printing::CopyState::default())
         .manage(printing::IdState::default())
+        .manage(bench::Benches::default())
         .manage(calls::CallsState::default())
         .manage(onetouch::OneTouchState::default())
         .manage(media::Watches::default())
@@ -1429,15 +1441,22 @@ pub fn run() {
             printing::copy_discard,
             printing::id_scan_side,
             printing::scan_cancel,
-            printing::tidy_preview,
-            printing::tidy_save,
-            printing::tidy_outlines,
+            bench::bench_open_file,
+            bench::bench_view,
+            bench::bench_tidy,
+            bench::bench_frames,
+            bench::bench_crop_start,
+            bench::bench_crop,
+            bench::bench_compress,
+            bench::bench_undo,
+            bench::bench_reset,
+            bench::bench_save,
+            bench::bench_to_copy,
+            bench::scan_to_bench,
             printing::id_picture,
             printing::copy_picture,
             scan_max_bytes,
             printing::id_page,
-            printing::id_save,
-            printing::id_to_copy,
             onetouch::onetouch_status,
             onetouch::onetouch_login,
             onetouch::onetouch_logout,

@@ -402,17 +402,19 @@
     kind: "copy",
     device: () => device,
     request: () => ({ ...copySettings().scan, source: "Glass", half_page: true }),
-    finish: {
+    // The ID page (tidied, cropped as chosen) printed at real size.
+    finish: [{
       label: "Print",
+      accent: true,
       run: async () => {
         const s = copySettings();
-        await invoke("id_to_copy");
+        await invoke("bench_to_copy", { bench: "id" });
         order = [0];
         thumbs = new Map();
         const sent = await printPages([0], { ...s, fit: "ActualSize", print: { ...s.print, sides: "OneSided" } });
         return "Sent: " + sent.label;
       },
-    },
+    }],
   });
 
   $("copy-form").addEventListener("submit", async (ev) => {

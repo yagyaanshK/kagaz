@@ -17,6 +17,7 @@ pub mod paths;
 pub mod print;
 pub mod scan;
 pub mod select;
+pub mod tools;
 
 pub use device::{Device, Protocol, Service, UsbInfo};
 pub use discovery::{discover, DiscoverOptions};
