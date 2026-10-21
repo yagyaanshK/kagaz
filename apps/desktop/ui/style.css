@@ -312,6 +312,10 @@ body.kz-has-full { overflow: hidden; }
 .call-video.has-stage { aspect-ratio: auto; background: none; }
 .call-video-note { position: absolute; inset: 0; z-index: 1; display: flex; align-items: center; justify-content: center; color: #ddd; font-size: 13px; padding: 0 12px; text-align: center; pointer-events: none; }
 .call-video-note:empty { display: none; }
+/* Your own camera, small in the picture's corner, mirrored as in a mirror. */
+.call-self { position: absolute; right: 10px; bottom: 10px; z-index: 3; width: 26%; max-width: 180px; min-width: 88px; aspect-ratio: 4 / 3; object-fit: cover; transform: scaleX(-1); border-radius: 8px; border: 2px solid rgba(255, 255, 255, 0.85); background: #000; box-shadow: 0 1px 6px rgba(0, 0, 0, 0.5); }
+.call-ask { margin: 10px 0 0; padding: 10px 12px; border: 1px solid var(--accent); border-radius: 10px; }
+.call-ask .actions { margin-top: 8px; }
 /* While the caller's live view shows, the call's own (still black) picture waits behind it. */
 .call-video.previewing > .call-stage { display: none; }
 .call-clock { position: absolute; z-index: 1; top: 44px; right: 10px; color: #fff; font-size: 12px; background: rgba(0, 0, 0, 0.7); padding: 2px 8px; border-radius: 999px; }

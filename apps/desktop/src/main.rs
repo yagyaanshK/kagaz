@@ -1494,6 +1494,7 @@ pub fn run() {
             calls::calls_call,
             calls::calls_press,
             calls::calls_audio,
+            calls::calls_video,
             calls::calls_media,
             media::camera_watch,
             media::playback_watch,

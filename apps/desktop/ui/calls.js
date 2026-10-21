@@ -1,7 +1,11 @@
 // Doorbell calls through the OneTouch cloud: the account's app line rings
 // here. A ring brings up the call card at the top of the Doorbell pane; a
 // call shows the caller's camera, plays their voice (levelled) and sends
-// the microphone. The devices to call are the Doorbell pane's cards
+// the microphone, and this device's camera when the other side takes video
+// (call-camera.js): on from the start with a person's own phone or monitor,
+// off with a door station or the guard (shared devices) until turned on,
+// and when the other person's camera comes on, Kagaz offers to turn its
+// own on too. The devices to call are the Doorbell pane's cards
 // (onetouch.js), which call through KagazCalls.call; a call made from a
 // card plays inside that card. The picture and voice go through the
 // window's player (player.js). Uses app.js's globals: $, invoke, listen,
@@ -27,6 +31,7 @@
         <div id="call-video" class="call-video">
           <div id="call-video-note" class="call-video-note"></div>
           <span id="call-clock" class="call-clock hidden">0:00</span>
+          <video id="call-self" class="call-self hidden" muted playsinline aria-label="Your camera"></video>
         </div>
         <div class="call-body">
           <div class="call-who">
@@ -38,11 +43,19 @@
             <button id="call-decline" type="button" class="big">Decline</button>
             <button id="call-open" type="button" class="big accent">Open door</button>
             <button id="call-mute" type="button" class="big">Mute</button>
+            <button id="call-camera" type="button" class="big" aria-pressed="false">Camera on</button>
             <button id="call-hangup" type="button" class="big danger">Hang up</button>
           </div>
           <label class="call-volume" title="How loud their voice plays here">Volume
             <input id="call-volume" type="range" min="0.5" max="3" step="0.1" value="1">
           </label>
+          <div id="call-ask" class="call-ask hidden" role="alert">
+            <span id="call-ask-text"></span>
+            <div class="actions">
+              <button id="call-ask-yes" type="button" class="accent">Turn my camera on</button>
+              <button id="call-ask-no" type="button">Not now</button>
+            </div>
+          </div>
           <p id="call-note" class="muted small"></p>
         </div>
       </div>`;
@@ -149,6 +162,7 @@
     show("call-decline", phase === "ringing");
     show("call-open", phase === "talking" && !!s.door_dtmf);
     show("call-mute", phase === "talking");
+    show("call-camera", phase === "talking" && !!s.send_video);
     show("call-hangup", phase === "talking" || phase === "calling");
     $("call-clock").classList.toggle("hidden", phase !== "talking");
 
@@ -186,6 +200,12 @@
       startClock(s.since);
       startAudio();
       startPlayer();
+      // A person's own device: video both ways from the start.
+      if (s.send_video && !camDecided) {
+        camDecided = true;
+        if (personal(s)) startCamera();
+      }
+      if (!s.send_video && (cam || camStarting)) stopCamera();
       if (!s.video && !preview) $("call-video-note").textContent = "No camera on this call";
     } else {
       stopClock();
@@ -196,6 +216,10 @@
       card.dataset.ended = "1";
       stopAudio();
       stopPlayer();
+      stopCamera();
+      camDecided = false;
+      camAsked = false;
+      $("call-ask").classList.add("hidden");
       $("call-state").textContent = s.detail || "call ended";
       setTimeout(() => {
         card.dataset.ended = "";
@@ -257,6 +281,7 @@
     // matter are on the picture too.
     stage.button("Open door", "Open door", () => $("call-open").click(), "kz-word kz-full-only kz-open");
     stage.button("Hang up", "Hang up", () => $("call-hangup").click(), "kz-word kz-full-only kz-danger");
+    stage.button("Camera", "Your camera on or off", () => $("call-camera").click(), "kz-word kz-full-only");
     // What happened to the camera on this call, said on the card when no
     // picture shows: nothing arrived, or it arrived and could not be shown.
     videoWatch = setInterval(() => {
@@ -268,6 +293,13 @@
         return;
       }
       if (status.video) $("call-video-note").textContent = videoNote();
+      // Their camera is on and ours is off: offer to turn ours on (a
+      // person's own device; a door station's camera is always on).
+      if (player.stats.shown && status.send_video && !cam && !camStarting && !camAsked && personal(status)) {
+        camAsked = true;
+        $("call-ask-text").textContent = `${status.peer || "They"} turned on their camera. Turn yours on too?`;
+        $("call-ask").classList.remove("hidden");
+      }
     }, 1000);
     if (preview) addCallButtons(preview);
   }
@@ -453,6 +485,73 @@
     muted = false;
     $("call-mute").textContent = "Mute";
   }
+
+  // ---------- our camera ----------
+
+  let cam = null; // KagazCallCamera handle while it films
+  let camStarting = false;
+  let camDecided = false; // this call's camera was set on or off at its start
+  let camAsked = false; // this call offered to turn the camera on
+
+  // A person's own phone, computer or indoor monitor (video both ways, as
+  // a video call), not a device the building shares: a door station or
+  // the guard's phone (the camera stays off until turned on).
+  function personal(s) {
+    const peer = ((s && s.peer) || "").trim().toLowerCase();
+    if (typeof otPeople !== "undefined" && otPeople.some((p) => p.name.trim().toLowerCase() === peer)) return true;
+    const dev = ((s && s.devices) || []).find((d) => d.name.trim().toLowerCase() === peer);
+    return !(dev && (dev.kind === "door" || dev.kind === "guard"));
+  }
+
+  function renderCamera() {
+    const on = !!cam || camStarting;
+    $("call-camera").textContent = on ? "Camera off" : "Camera on";
+    $("call-camera").setAttribute("aria-pressed", String(on));
+    $("call-self").classList.toggle("hidden", !cam);
+  }
+
+  async function startCamera() {
+    if (cam || camStarting) return;
+    camStarting = true;
+    $("call-ask").classList.add("hidden");
+    renderCamera();
+    try {
+      const handle = await KagazCallCamera.start($("call-self"), {
+        onError: (e) => {
+          cam = null;
+          renderCamera();
+          note("The camera stopped: " + (e.message || e));
+        },
+      });
+      if (!status || status.phase !== "talking" || !status.send_video) handle.stop();
+      else cam = handle;
+    } catch (e) {
+      if (e && e.name === "NotAllowedError") {
+        const where = /Android/i.test(navigator.userAgent) ? "Settings › Apps › Kagaz › Permissions" : "the system's privacy settings";
+        note(`Kagaz may not use the camera, so they cannot see you. Allow it in ${where}, then try again.`);
+      } else if (e && (e.name === "NotFoundError" || e.name === "OverconstrainedError")) {
+        note("This device has no camera they can see you with.");
+      } else {
+        note("The camera did not start, so they cannot see you: " + ((e && e.message) || e));
+      }
+    } finally {
+      camStarting = false;
+      renderCamera();
+    }
+  }
+
+  function stopCamera() {
+    if (cam) cam.stop();
+    cam = null;
+    renderCamera();
+  }
+
+  listen("call-keyframe", () => {
+    if (cam) cam.keyframe();
+  });
+  $("call-camera").addEventListener("click", () => (cam || camStarting ? stopCamera() : startCamera()));
+  $("call-ask-yes").addEventListener("click", () => startCamera());
+  $("call-ask-no").addEventListener("click", () => $("call-ask").classList.add("hidden"));
 
   // ---------- buttons ----------
 
