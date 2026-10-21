@@ -183,7 +183,14 @@ const KagazHistory = (() => {
   // ---------- the picture viewer ----------
 
   function view(e) {
-    $("viewer-title").textContent = [e.device, timeText(e.date, e.at)].filter(Boolean).join(" · ");
+    open([e.device, timeText(e.date, e.at)].filter(Boolean).join(" · "), e);
+  }
+  // Any picture full size, e.g. a scan before it is saved (idscan.js).
+  function picture(title, src) {
+    open(title, { picture: src });
+  }
+  function open(title, e) {
+    $("viewer-title").textContent = title;
     const img = $("viewer-img");
     const video = $("viewer-video");
     img.classList.toggle("hidden", !!e.video);
@@ -266,5 +273,5 @@ const KagazHistory = (() => {
   }
   $("ot-history-more").addEventListener("click", () => show(false));
 
-  return { show, when };
+  return { show, when, picture };
 })();

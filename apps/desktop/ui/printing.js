@@ -478,7 +478,7 @@
       const li = document.createElement("li");
       li.draggable = true;
       li.classList.toggle("dropped", !t.keep);
-      li.innerHTML = `<img alt=""><label><input type="checkbox"> <span></span></label>`
+      li.innerHTML = `<button type="button" class="thumb-look"><img alt=""></button><label><input type="checkbox"> <span></span></label>`
         + `<span class="thumb-move"><button type="button" class="icon" data-by="-1">\u2190</button><button type="button" class="icon" data-by="1">\u2192</button></span>`;
       // Dragging needs a mouse; the arrows move a page with a finger or the keyboard.
       li.querySelectorAll(".thumb-move button").forEach((b) => {
@@ -496,7 +496,16 @@
         });
       });
       li.querySelector("img").src = t.src;
-      li.querySelector("img").alt = `Scanned page ${pos + 1}`;
+      // A tap shows the page full size.
+      const look = li.querySelector(".thumb-look");
+      look.setAttribute("aria-label", `See page ${pos + 1} full size`);
+      look.addEventListener("click", async () => {
+        try {
+          KagazHistory.picture(`Page ${pos + 1}`, await invoke("copy_picture", { index }));
+        } catch (e) {
+          logTo("copy-log", String(e), "bad");
+        }
+      });
       li.querySelector("span").textContent = `Page ${pos + 1}`;
       const box = li.querySelector("input");
       box.checked = t.keep;

@@ -331,6 +331,12 @@ fn run(
         return Err(
             if err.contains("no documents") || err.contains("document feeder out of documents") {
                 ScanError::FeederEmpty
+            } else if err.contains("out of memory") {
+                ScanError::Refused(format!(
+                    "the scanner's driver ran out of memory at {} dpi; choose a lower resolution ({} dpi or less, 300 is plenty for documents)",
+                    req.dpi,
+                    req.largest_dpi().min(600)
+                ))
             } else {
                 ScanError::Refused(format!(
                     "scanimage produced no pages: {}",

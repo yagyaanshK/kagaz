@@ -192,11 +192,17 @@ pub async fn print_file(
 
 /// A thumbnail of a scanned page, as a data: URL.
 fn thumbnail(page: &Page) -> Result<(String, u32, u32), String> {
+    shrunk(page, 360, 75)
+}
+
+/// The page as a JPEG data: URL at most `max` pixels on its long side, and
+/// the page's own size. A scan at 1200 dpi is far too big for the window.
+fn shrunk(page: &Page, max: u32, quality: u8) -> Result<(String, u32, u32), String> {
     let img = image::load_from_memory(&page.data).map_err(|e| e.to_string())?;
     let (w, h) = (img.width(), img.height());
-    let small = img.thumbnail(360, 360).to_rgb8();
+    let small = if w.max(h) > max { img.thumbnail(max, max) } else { img }.to_rgb8();
     let mut jpeg = Vec::new();
-    image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpeg, 75)
+    image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpeg, quality)
         .encode_image(&small)
         .map_err(|e| e.to_string())?;
     Ok((
@@ -382,6 +388,31 @@ pub async fn id_page(state: State<'_, IdState>, paper: Paper) -> Result<Thumb, S
     let dpi = sheet.dpi;
     *state.sheet.lock().unwrap() = Some(sheet);
     Ok(Thumb { index: 0, src, width, height, dpi })
+}
+
+/// A side (0, 1) or the page (2), big enough to look at closely.
+#[tauri::command]
+pub async fn id_picture(state: State<'_, IdState>, which: usize) -> Result<String, String> {
+    let page = if which == 2 {
+        state.sheet.lock().unwrap().clone()
+    } else {
+        state.sides.lock().unwrap().get(which).cloned().flatten()
+    }
+    .ok_or_else(|| "nothing scanned there yet".to_string())?;
+    blocking(move || shrunk(&page, 2000, 85).map(|(src, _, _)| src)).await
+}
+
+/// A copy's scanned page, big enough to look at closely.
+#[tauri::command]
+pub async fn copy_picture(state: State<'_, CopyState>, index: usize) -> Result<String, String> {
+    let page = state
+        .pages
+        .lock()
+        .unwrap()
+        .get(index)
+        .cloned()
+        .ok_or_else(|| "that page is no longer here; scan again".to_string())?;
+    blocking(move || shrunk(&page, 2000, 85).map(|(src, _, _)| src)).await
 }
 
 /// Save the ID page (Scan tab), as a scan is saved.

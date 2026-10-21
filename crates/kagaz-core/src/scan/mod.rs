@@ -87,7 +87,33 @@ impl ScanRequest {
         let (w, h) = self.paper.size_mils()?;
         Some(if self.half_page { (w, h / 2) } else { (w, h) })
     }
+
+    /// How big one page is once opened, in bytes: its pixels times colour
+    /// channels. The whole glass counts as Legal, the largest common glass.
+    pub fn image_bytes(&self) -> u64 {
+        let (w, h) = self.area_mils().unwrap_or((8500, 14000));
+        let px = |mils: u32| mils as u64 * self.dpi as u64 / 1000;
+        let channels = if self.color == ColorMode::Color { 3 } else { 1 };
+        px(w) * px(h) * channels
+    }
+
+    /// The highest common resolution whose page stays within [`MAX_IMAGE_BYTES`].
+    pub fn largest_dpi(&self) -> u32 {
+        [4800, 2400, 1200, 600, 400, 300, 200, 150, 100, 75]
+            .into_iter()
+            .find(|&dpi| ScanRequest { dpi, ..self.clone() }.image_bytes() <= MAX_IMAGE_BYTES)
+            .unwrap_or(75)
+    }
 }
+
+/// The largest page Kagaz scans, once opened (see [`ScanRequest::image_bytes`]).
+/// Beyond it a scanner's driver runs out of memory (Brother's did at 9600
+/// dpi), and so would Kagaz putting the pages together; a phone has less.
+pub const MAX_IMAGE_BYTES: u64 = if cfg!(any(target_os = "android", target_os = "ios")) {
+    200_000_000
+} else {
+    700_000_000
+};
 
 impl Default for ScanRequest {
     fn default() -> Self {
@@ -141,6 +167,8 @@ pub enum ScanError {
     FeederEmpty,
     #[error("the scanner is busy or not ready: {0}")]
     Busy(String),
+    #[error("at {dpi} dpi this would be about {size} once opened, more than this device can hold; choose {largest} dpi or less (300 dpi is plenty for documents and ID cards)")]
+    TooBig { dpi: u32, size: String, largest: u32 },
 }
 
 /// What one engine offers, in the terms the window and the CLI present.
@@ -323,6 +351,14 @@ pub fn scan(
     req: &ScanRequest,
     on_event: &mut dyn FnMut(Event),
 ) -> Result<Vec<Page>, ScanError> {
+    // Say so now, not after minutes of scanning and a driver out of memory.
+    if req.image_bytes() > MAX_IMAGE_BYTES {
+        return Err(ScanError::TooBig {
+            dpi: req.dpi,
+            size: crate::output::human_size(req.image_bytes()),
+            largest: req.largest_dpi(),
+        });
+    }
     if req.engine == Engine::Driver && cfg!(windows) {
         let devices = wia::list_devices()?;
         let dev = wia::device_for(&devices, device).ok_or_else(|| {
@@ -408,4 +444,34 @@ pub fn scan(
     } else {
         device.name.clone()
     }))
+}
+
+#[cfg(test)]
+mod size_tests {
+    use super::*;
+
+    fn half(dpi: u32, color: ColorMode) -> ScanRequest {
+        ScanRequest { dpi, color, half_page: true, ..Default::default() }
+    }
+
+    #[test]
+    fn a_page_too_big_to_hold_is_refused_before_scanning() {
+        // Half an A4 in colour at 9600 dpi: about 13 GB once opened.
+        let req = half(9600, ColorMode::Color);
+        assert!(req.image_bytes() > 13_000_000_000);
+        match scan(&Device::default(), &req, &mut |_| {}) {
+            // 1200 dpi is about 209 MB: within a computer's limit, not a phone's.
+            Err(ScanError::TooBig { largest, .. }) => {
+                assert_eq!(largest, if MAX_IMAGE_BYTES >= 300_000_000 { 1200 } else { 600 })
+            }
+            other => panic!("expected TooBig, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ordinary_scans_stay_within_the_limit() {
+        assert!(half(300, ColorMode::Color).image_bytes() < 20_000_000);
+        assert!(ScanRequest { dpi: 600, ..Default::default() }.image_bytes() <= MAX_IMAGE_BYTES);
+        assert_eq!(ScanRequest { dpi: 300, color: ColorMode::Gray, ..Default::default() }.largest_dpi(), 2400);
+    }
 }
