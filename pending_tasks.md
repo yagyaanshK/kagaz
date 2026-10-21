@@ -56,14 +56,23 @@ with the commit that closes them.
       command verified on a Renesa (R1) with the CLI; the window's page is
       written (rooms, names, remembered fans, Found nearby, controls) and
       awaits a look in the window.
-- [ ] **Decode "on" from the real fans, not the community notes** (2026-10-21).
-      The community decoder takes bit 0x10 of the state as power. An Aris
-      and a Renesa, both running, reported 0x10 clear and an undocumented
-      0x40 set with speed 6, so Kagaz showed them as Off. After a speed
-      change the Aris showed 0x10 and no 0x40. Likely 0x40 is the remote's
-      Boost; to confirm, capture `kagaz fan <name> read --raw` with the fan
-      in known states (off; on at 1, 3, 6; Boost; Sleep; light on), then
-      build the decoder and test fixtures from those captures.
+- [x] **Decode on, speed and Boost from the real fans** (2026-10-21):
+      captured on an Aris with its remote. Bit 0x10 is on; speeds 1 to 5;
+      Boost is speed 6 with bit 0x40, and 0x40 stays set after turning off
+      from Boost. Fields 11 and 13 count seconds running and switched off,
+      shown on the fan's menu. Fixtures in `fans/atomberg.rs`.
+- [ ] **Two fans stopped offering their controls** (2026-10-21, ~18:04).
+      The Aris and the Renesa accept a Bluetooth connection but list no
+      services; the untouched Efficio is fine, nothing on this computer
+      holds a link, no phone app is open. Most likely Kagaz's earlier
+      pattern wedged them (up to four quick tries per request, timed-out
+      tries never cancelled, every fan read on each page visit). Kagaz is
+      gentler now (two tries, every try closed, two seconds between
+      connections, reads only when asked or stale). Power-cycle the two
+      fans, then watch whether it comes back; if it does, capture with
+      `sudo btmon` to see what the fan answers.
+- [ ] **Which command starts Boost**: the card sends speed 6 (what the fan
+      reports in Boost); the community's `boost` key is untested.
 - [ ] **Light, sleep, timer, brightness on real fans.** Written from the
       community's notes; only power and speed are exercised so far. Check
       an Aris (I1, dimmable, colour modes) and an Efficio (M1).

@@ -24,7 +24,7 @@ pub enum FanAction {
     On,
     /// Turn the fan off
     Off,
-    /// Set the speed, 1 to 6 (turns the fan on)
+    /// Set the speed, 1 to 5, or 6 for Boost (turns the fan on)
     Speed { speed: u8 },
     /// The fan's light on or off
     Light { state: OnOff },
@@ -275,6 +275,7 @@ pub fn fan(which: &str, action: FanAction) -> Result<()> {
             }
             if let Some(state) = kagaz_core::fans::FanState::decode(&text) {
                 println!("decoded as: {}", state.words());
+                print_times(&state);
             }
             return Ok(());
         }
@@ -363,8 +364,20 @@ pub fn fan(which: &str, action: FanAction) -> Result<()> {
         println!("{}: {} ({}, over {how})", fan.name, command, state.words());
     } else {
         println!("{}: {} (over {how})", fan.name, state.words());
+        print_times(&state);
     }
     Ok(())
+}
+
+/// The fan's own count of its running and switched-off time.
+fn print_times(state: &kagaz_core::fans::FanState) {
+    use kagaz_core::fans::atomberg::span_words;
+    if let Some(s) = state.run_seconds {
+        println!("  has run for {} to date", span_words(s));
+    }
+    if let Some(s) = state.off_seconds {
+        println!("  has been switched off for {} to date", span_words(s));
+    }
 }
 
 /// `kagaz rooms [add|rename|remove]`.

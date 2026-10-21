@@ -44,11 +44,23 @@ const KagazFans = (() => {
   function words(state) {
     if (!state) return "";
     if (!state.power) return "Off";
-    const w = [`Speed ${state.speed}`];
+    const w = [state.boost ? "Boost" : `Speed ${state.speed}`];
     if (state.sleep) w.push("sleep");
     if (state.led) w.push("light on");
     if (state.timer_hours > 0) w.push(`${state.timer_hours} h left`);
     return w.join(", ");
+  }
+
+  // A span of seconds the way people say it (the same words as the CLI).
+  function span(seconds) {
+    const d = Math.floor(seconds / 86400), h = Math.floor(seconds / 3600) % 24;
+    const m = Math.floor(seconds / 60) % 60, sec = seconds % 60;
+    const parts = [];
+    if (d) parts.push(`${d} day${d === 1 ? "" : "s"}`);
+    if (h) parts.push(`${h} h`);
+    if (m) parts.push(`${m} min`);
+    if (sec || !parts.length) parts.push(`${sec} s`);
+    return parts.length === 1 ? parts[0] : `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
   }
 
   // How a fan stands, from what is known and whether it answered.
@@ -129,6 +141,15 @@ const KagazFans = (() => {
 
     const more = el("div", "fan-more");
     more.hidden = !menus.has(f.id);
+    if (s && (s.run_seconds != null || s.off_seconds != null)) {
+      const times = el("p", "fan-times muted small");
+      const lines = [];
+      if (s.run_seconds != null) lines.push(`Has run for ${span(s.run_seconds)} to date.`);
+      if (s.off_seconds != null) lines.push(`Has been switched off for ${span(s.off_seconds)} to date.`);
+      times.textContent = lines.join(" ");
+      times.title = "The fan's own count, as of the last time Kagaz read it";
+      more.appendChild(times);
+    }
     more.appendChild(button("", "Rename", () => rename(f)));
     more.appendChild(roomSelect(f));
     more.appendChild(button("danger-text", "Forget", () => forget(f)));
@@ -141,11 +162,20 @@ const KagazFans = (() => {
     const speeds = el("div", "fan-speeds");
     speeds.setAttribute("role", "group");
     speeds.setAttribute("aria-label", `Speed of ${f.name}`);
-    for (let n = 1; n <= 6; n++) {
-      const b = button("chip" + (on && s.speed === n ? " active" : ""), String(n), () => send(f, { kind: "speed", value: n }, c), `Speed ${n}`);
-      b.setAttribute("aria-pressed", String(on && s.speed === n));
+    // Speeds 1 to 5 and Boost, as on the remote. The fan reports Boost as
+    // speed 6 with its Boost flag (checked on an Aris).
+    const boosting = on && !!s.boost;
+    for (let n = 1; n <= 5; n++) {
+      const here = on && !boosting && s.speed === n;
+      const b = button("chip" + (here ? " active" : ""), String(n), () => send(f, { kind: "speed", value: n }, c), `Speed ${n}`);
+      b.setAttribute("aria-pressed", String(here));
       speeds.appendChild(b);
     }
+    // Which command starts Boost is not yet checked on a fan; speed 6 is
+    // what the fan reports in Boost.
+    const boost = button("chip" + (boosting ? " active" : ""), "Boost", () => send(f, { kind: "speed", value: 6 }, c), `Boost ${f.name}`);
+    boost.setAttribute("aria-pressed", String(boosting));
+    speeds.appendChild(boost);
     controls.appendChild(speeds);
     const extras = el("div", "fan-extras");
     const p = profile(f);
@@ -419,14 +449,16 @@ const KagazFans = (() => {
 
   // ---------- scanning ----------
 
-  async function rescan() {
+  // `fresh`: the person asked (Look again), so every fan within reach is
+  // read; otherwise only fans whose last reading is old.
+  async function rescan(fresh = false) {
     if (scanning) return;
     scanning = true;
     $("fans-rescan").disabled = true;
     $("fans-note").textContent = "";
     render();
     try {
-      const out = await invoke("fans_scan", { seconds: 6 });
+      const out = await invoke("fans_scan", { seconds: 6, fresh });
       data = await invoke("fans_saved").catch(() => out.fans);
       reachable = new Set(out.reachable);
       found = out.found;
@@ -453,7 +485,7 @@ const KagazFans = (() => {
     if (Date.now() - lastScan > 2 * 60 * 1000) rescan();
   }
 
-  $("fans-rescan").addEventListener("click", rescan);
+  $("fans-rescan").addEventListener("click", () => rescan(true));
   $("fans-arrange").addEventListener("click", () => {
     arranging = !arranging;
     if (arranging) KagazNav.push("fans-arrange", () => { arranging = false; render(); });

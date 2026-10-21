@@ -77,11 +77,24 @@ pub fn profile(series: &str) -> Profile {
 }
 
 /// The fan's live state, decoded from its state string.
+///
+/// Checked on a real Aris (I1) on 2026-10-21, state set with its remote and
+/// read back: field 0 bit 0x10 is on, the low three bits are the speed
+/// (1 to 5, and 6 in Boost), bit 0x40 is Boost and stays set after the fan
+/// is turned off from Boost (a Renesa off after Boost reads 0x46). Field 11
+/// counts seconds running and field 13 seconds switched off, each moving
+/// only in its own state. Still from the community's notes, not yet
+/// checked: light (0x20), colour (0x08 cool, 0x8000 warm), brightness
+/// (bits 8 to 14), sleep (0x80), timer (bits 16 to 19).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FanState {
     pub power: bool,
-    /// 1 to 6 (0 when the fan has never run).
+    /// 1 to 5, or 6 in Boost (0 when the fan has never run).
     pub speed: u8,
+    /// The Boost flag as the fan reports it; it stays set after the fan is
+    /// turned off from Boost, so it means Boost only while `power` is on.
+    #[serde(default)]
+    pub boost: bool,
     pub led: bool,
     pub sleep: bool,
     /// 0 to 127, meaningful on fans whose light dims.
@@ -92,6 +105,12 @@ pub struct FanState {
     pub light_mode: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub series: Option<String>,
+    /// Seconds the fan has run, in all, to date (field 11).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run_seconds: Option<u64>,
+    /// Seconds the fan has been switched off, in all, to date (field 13).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub off_seconds: Option<u64>,
     /// The raw bit field, kept for the report.
     #[serde(default)]
     pub raw: i64,
@@ -110,9 +129,11 @@ impl FanState {
             (true, false) => "cool",
             _ => "warm",
         };
+        let count = |i: usize| parts.get(i).and_then(|s| s.trim().parse::<u64>().ok());
         Some(FanState {
             power: v & 0x10 != 0,
             speed: (v & 0x07) as u8,
+            boost: v & 0x40 != 0,
             led: v & 0x20 != 0,
             sleep: v & 0x80 != 0,
             brightness: ((v & 0x7F00) >> 8) as u8,
@@ -123,16 +144,27 @@ impl FanState {
                 .map(|s| s.trim())
                 .filter(|s| !s.is_empty())
                 .map(str::to_string),
+            run_seconds: count(11),
+            off_seconds: count(13),
             raw: v,
         })
     }
 
-    /// The state in a few words: "Off", "Speed 3", "Speed 2, light on, 1 h left".
+    /// Running in Boost now (the flag alone stays set after turning off).
+    pub fn in_boost(&self) -> bool {
+        self.power && self.boost
+    }
+
+    /// The state in a few words: "Off", "Speed 3", "Boost", "Speed 2, light on, 1 h left".
     pub fn words(&self) -> String {
         if !self.power {
             return "Off".to_string();
         }
-        let mut words = vec![format!("Speed {}", self.speed)];
+        let mut words = vec![if self.in_boost() {
+            "Boost".to_string()
+        } else {
+            format!("Speed {}", self.speed)
+        }];
         if self.sleep {
             words.push("sleep".into());
         }
@@ -143,6 +175,33 @@ impl FanState {
             words.push(format!("{} h left", self.timer_hours));
         }
         words.join(", ")
+    }
+}
+
+/// A span of seconds the way people say it: "288 days, 2 h, 4 min and 16 s".
+pub fn span_words(seconds: u64) -> String {
+    let (d, h, m, s) = (
+        seconds / 86_400,
+        seconds / 3600 % 24,
+        seconds / 60 % 60,
+        seconds % 60,
+    );
+    let mut parts = Vec::new();
+    if d > 0 {
+        parts.push(format!("{d} day{}", if d == 1 { "" } else { "s" }));
+    }
+    if h > 0 {
+        parts.push(format!("{h} h"));
+    }
+    if m > 0 {
+        parts.push(format!("{m} min"));
+    }
+    if s > 0 || parts.is_empty() {
+        parts.push(format!("{s} s"));
+    }
+    match parts.len() {
+        1 => parts.remove(0),
+        n => format!("{} and {}", parts[..n - 1].join(", "), parts[n - 1]),
     }
 }
 
@@ -353,6 +412,51 @@ mod tests {
         assert_eq!(s.words(), "Speed 3, light on, 2 h left");
         assert_eq!(FanState::decode("3,0").unwrap().words(), "Off");
         assert!(FanState::decode("No command detected in the message").is_none());
+    }
+
+    /// State strings read from real fans on 2026-10-21, with what the fan
+    /// was doing (set with its remote).
+    const ARIS_OFF: &str = "35338,1,Z,0,108.69,106,153,I1,1498,1,3140,24890656,634730394,13916395,0,0.62,25.29,0,385714287,0,0,0,300,0,282,END";
+    const ARIS_SPEED_1: &str = "35353,1,Z,0,86.85,76,120,I1,1498,1,3140,24890669,634730460,13916413,0,0.45,25.29,0,385714287,0,0,0,300,0,282,END";
+    const ARIS_SPEED_1_LATER: &str = "35353,1,Z,0,86.46,70,120,I1,1498,1,3140,24890680,634730493,13916413,0,0.41,25.29,0,385714287,0,0,0,300,0,282,END";
+    const ARIS_SPEED_3: &str = "35355,1,Z,0,131.03,136,180,I1,1498,1,3140,24890731,634730808,13916413,0,0.80,25.18,0,385714287,0,0,0,300,0,282,END";
+    const ARIS_BOOST: &str = "35422,1,Z,0,222.69,309,252,I1,1498,1,3140,24890754,634731222,13916413,0,1.81,25.18,0,385714287,0,0,0,300,0,282,END";
+    const RENESA_OFF_AFTER_BOOST: &str = "70,1,Z,0,210.06,273,312,R1,1816,1,2481,20195877,257194846,7587414,0,1.60,25.06,0,158823531,0,0,0,340,0,307,END";
+
+    #[test]
+    fn real_fans_read_as_they_were() {
+        let off = FanState::decode(ARIS_OFF).unwrap();
+        assert!(!off.power);
+        assert_eq!(off.words(), "Off");
+        let one = FanState::decode(ARIS_SPEED_1).unwrap();
+        assert!(one.power && !one.in_boost());
+        assert_eq!(one.speed, 1);
+        assert_eq!(FanState::decode(ARIS_SPEED_3).unwrap().words(), "Speed 3");
+        let boost = FanState::decode(ARIS_BOOST).unwrap();
+        assert!(boost.in_boost());
+        assert_eq!(boost.speed, 6);
+        assert_eq!(boost.words(), "Boost");
+        let renesa = FanState::decode(RENESA_OFF_AFTER_BOOST).unwrap();
+        assert!(renesa.boost && !renesa.power && !renesa.in_boost());
+        assert_eq!(renesa.words(), "Off");
+        assert_eq!(renesa.series.as_deref(), Some("R1"));
+    }
+
+    #[test]
+    fn running_time_moves_only_while_running() {
+        let a = FanState::decode(ARIS_SPEED_1).unwrap();
+        let b = FanState::decode(ARIS_SPEED_1_LATER).unwrap();
+        assert_eq!(b.run_seconds.unwrap() - a.run_seconds.unwrap(), 11);
+        assert_eq!(b.off_seconds, a.off_seconds);
+        let off = FanState::decode(ARIS_OFF).unwrap();
+        assert_eq!(off.run_seconds, Some(24_890_656));
+        assert_eq!(
+            span_words(off.run_seconds.unwrap()),
+            "288 days, 2 h, 4 min and 16 s"
+        );
+        assert_eq!(span_words(3600 * 5 + 14 * 60 + 3), "5 h, 14 min and 3 s");
+        assert_eq!(span_words(60), "1 min");
+        assert_eq!(span_words(0), "0 s");
     }
 
     #[test]

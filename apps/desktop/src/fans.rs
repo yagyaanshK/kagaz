@@ -57,9 +57,13 @@ pub fn fans_saved() -> Result<Fans, String> {
 }
 
 /// Look for fans for about `seconds`, refresh the remembered ones that
-/// were seen (asking each over Bluetooth how it is), and list the rest.
+/// were seen, and list the rest. A Bluetooth fan tells its state only over
+/// a connection, and fans have stopped answering after many connections,
+/// so a fan is asked only when `fresh` (the person pressed Look again) or
+/// when its last reading is more than ten minutes old.
 #[tauri::command]
-pub async fn fans_scan(seconds: f32) -> Result<Scan, String> {
+pub async fn fans_scan(seconds: f32, fresh: Option<bool>) -> Result<Scan, String> {
+    let fresh = fresh.unwrap_or(false);
     blocking(move || {
         let _radio = RADIO.lock().map_err(|e| e.to_string())?;
         let (found, trouble) = fans::scan(seconds.clamp(1.0, 30.0));
@@ -68,10 +72,16 @@ pub async fn fans_scan(seconds: f32) -> Result<Scan, String> {
             Ok(())
         })?;
         let mut reachable: Vec<String> = found.iter().map(|f| f.id.clone()).collect();
+        let now = fans::store::now();
         let to_ask: Vec<fans::Fan> = found
             .iter()
             .filter(|f| f.state.is_none())
             .filter_map(|f| known.find(&f.id).cloned())
+            .filter(|f| {
+                fresh
+                    || f.last_state.is_none()
+                    || f.last_seen.is_none_or(|t| now.saturating_sub(t) > 600)
+            })
             .collect();
         let mut answers = Vec::new();
         for fan in to_ask {
