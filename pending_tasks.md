@@ -285,13 +285,21 @@ with the commit that closes them.
 - [ ] **Recording lists in a burst**: asking seven cameras at once made two
       answer with a device error (-71101); the window now asks one at a
       time with a second try.
-- [ ] **Xiaomi camera** (Mi Home, model unknown): it answers the miIO hello
-      on the LAN (device id only, no model) and advertises nothing over
-      mDNS or SSDP, so the model and the local token come only from the Mi
-      cloud with the Mi account. Mi Home cameras stream over Xiaomi's own
-      P2P service, not RTSP; which models have a usable path depends on the
-      model. Next: a `kagaz xiaomi login` that lists the account's devices
-      (model, token), then decide per model.
+- [x] **Xiaomi cameras** (2026-10-22): sign-in by texted code, password or
+      QR code (window and `kagaz xiaomi`); live view, sound and SD-card
+      recordings spoken natively (CS2 + miss), so the phone gets them too;
+      grouped by brand. Checked live on a CS2 camera.
+- [ ] **Xiaomi, still open**: talk-back is built but not yet tried on the
+      camera; the phone app not yet tried on a phone; Xiaomi's own sign-in
+      page in a window (when it demands one) untested; cameras on TUTK
+      (older firmware) or sending H.265 are not spoken yet; saving footage
+      and playback speed are Tapo's only; the card's list is asked every
+      ten minutes, so a shorter gap may not show. Viewing with no internet
+      would need replacement firmware (thingino: the case opened and the
+      flash chip reprogrammed) and is not planned.
+- [ ] **Camera engine restart** (`cameras_restart`, after an account is
+      added or removed) leaves the old local server's listening threads
+      idle; harmless, but a restart per sign-in adds a few.
 - [ ] **Windows and macOS ffmpeg checksums** are pinned to the builds
       downloaded on 2026-10-07; the Windows zip (gyan.dev) and macOS zip
       (evermeet) extraction paths are untested on those systems.
