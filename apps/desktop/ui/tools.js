@@ -25,7 +25,7 @@
         const out = await invoke("choose_save_path", { suggestedName: `${base}-edited.${ext}`, extension: ext });
         if (!out) return "";
         const written = await invoke("bench_save", { bench: "tools", out, maxBytes: null });
-        return written.length ? `Saved ${written.map((w) => w.path).join(", ")}.` : "";
+        return written.length ? { text: `Saved ${written.map((w) => w.path).join(", ")}.`, path: written[0].path } : "";
       },
     }],
   });

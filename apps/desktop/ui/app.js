@@ -610,7 +610,7 @@ const scanId = KagazId.attach({
         log(`Saved ${w.path} (${human(w.bytes)})`, "ok");
         if (w.warning) log("Warning: " + w.warning, "warn");
       }
-      return written.length ? `Saved ${written[0].path}.` : "";
+      return written.length ? { text: `Saved ${written[0].path}.`, path: written[0].path } : "";
     },
   }],
 });
@@ -644,7 +644,7 @@ const scanPanel = KagazBench.attach($("scan-bench"), {
         log(`Saved ${w.path} (${w.pages} page${w.pages === 1 ? "" : "s"}, ${human(w.bytes)})`, "ok");
         if (w.warning) log("Warning: " + w.warning, "warn");
       }
-      return written.length ? `Saved ${written.map((w) => w.path).join(", ")}.` : "";
+      return written.length ? { text: `Saved ${written.map((w) => w.path).join(", ")}.`, path: written[0].path } : "";
     },
   }],
 });

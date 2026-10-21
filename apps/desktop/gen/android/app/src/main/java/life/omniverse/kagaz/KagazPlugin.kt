@@ -13,6 +13,7 @@ package life.omniverse.kagaz
 //   Android Keystore (the desktop's password vault does this elsewhere).
 
 import android.app.Activity
+import android.app.DownloadManager
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
@@ -258,6 +259,25 @@ class KagazPlugin(private val first: Activity) : Plugin(first) {
         } catch (e: Exception) {
             invoke.reject(e.message ?: "could not save into Downloads")
         }
+    }
+
+    /** Saved files' folder (Downloads/Kagaz) in the Files app; else Downloads. */
+    @Command
+    fun showDownloads(invoke: Invoke) {
+        val folder = Uri.parse("content://com.android.externalstorage.documents/document/primary%3ADownload%2FKagaz")
+        val tries = listOf(
+            Intent(Intent.ACTION_VIEW).setDataAndType(folder, "vnd.android.document/directory"),
+            Intent(DownloadManager.ACTION_VIEW_DOWNLOADS),
+        )
+        for (intent in tries) {
+            try {
+                activity.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                invoke.resolve()
+                return
+            } catch (e: Exception) {
+            }
+        }
+        invoke.reject("this phone has no app to show Downloads")
     }
 }
 

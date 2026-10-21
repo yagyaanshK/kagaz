@@ -119,21 +119,43 @@ pub enum CropMode {
     KeepPage,
 }
 
-/// Crop `p` to `shape` (an outline as fractions of the picture; a tilted
-/// one keeps only what is inside it). `paper` is the page FillPage fills.
+/// Crop `p` to `shape` (an outline as fractions of the picture; only what
+/// is inside it is kept). The area comes out level: turned so the outline's
+/// bottom side is horizontal, never stretched. `paper` is the page
+/// FillPage fills.
 pub fn crop(p: &Picture, shape: &Shape, mode: CropMode, paper: Paper) -> Picture {
-    let mut whole = p.img.clone();
-    id::whiten_outside(&mut whole, std::slice::from_ref(shape), 0.0);
-    if mode == CropMode::KeepPage {
-        return Picture { img: whole, dpi: p.dpi };
-    }
-    let (w, h) = (whole.width() as f32, whole.height() as f32);
-    let xs = shape.iter().map(|q| q[0].clamp(0.0, 1.0) * w);
-    let ys = shape.iter().map(|q| q[1].clamp(0.0, 1.0) * h);
-    let (x0, x1) = (xs.clone().fold(w, f32::min).floor(), xs.fold(0.0, f32::max).ceil());
-    let (y0, y1) = (ys.clone().fold(h, f32::min).floor(), ys.fold(0.0, f32::max).ceil());
-    let (cw, ch) = (((x1 - x0) as u32).max(1), ((y1 - y0) as u32).max(1));
-    let area = imageops::crop_imm(&whole, x0 as u32, y0 as u32, cw, ch).to_image();
+    let (w, h) = (p.img.width() as f32, p.img.height() as f32);
+    let pts: Vec<[f32; 2]> = shape.iter().map(|q| [q[0].clamp(0.0, 1.0) * w, q[1].clamp(0.0, 1.0) * h]).collect();
+    let turn = bottom_slope(&pts);
+    // Under a twentieth of a degree: no turn, the pixels as they are.
+    let area = if turn.abs() < 0.001 {
+        let mut whole = p.img.clone();
+        id::whiten_outside(&mut whole, std::slice::from_ref(shape), 0.0);
+        if mode == CropMode::KeepPage {
+            return Picture { img: whole, dpi: p.dpi };
+        }
+        let xs = pts.iter().map(|q| q[0]);
+        let ys = pts.iter().map(|q| q[1]);
+        let (x0, x1) = (xs.clone().fold(w, f32::min).floor(), xs.fold(0.0, f32::max).ceil());
+        let (y0, y1) = (ys.clone().fold(h, f32::min).floor(), ys.fold(0.0, f32::max).ceil());
+        let (cw, ch) = (((x1 - x0) as u32).max(1), ((y1 - y0) as u32).max(1));
+        imageops::crop_imm(&whole, x0 as u32, y0 as u32, cw, ch).to_image()
+    } else {
+        let area = level(&p.img, &pts, turn);
+        if mode == CropMode::KeepPage {
+            // Level where it was: centred on the outline's middle.
+            let xs = pts.iter().map(|q| q[0]);
+            let ys = pts.iter().map(|q| q[1]);
+            let cx = (xs.clone().fold(w, f32::min) + xs.fold(0.0, f32::max)) / 2.0;
+            let cy = (ys.clone().fold(h, f32::min) + ys.fold(0.0, f32::max)) / 2.0;
+            let mut page = RgbImage::from_pixel(p.img.width(), p.img.height(), Rgb([255, 255, 255]));
+            let at = |c: f32, size: u32| (c - size as f32 / 2.0).round() as i64;
+            imageops::replace(&mut page, &area, at(cx, area.width()), at(cy, area.height()));
+            return Picture { img: page, dpi: p.dpi };
+        }
+        area
+    };
+    let (cw, ch) = area.dimensions();
     if mode == CropMode::Area {
         return Picture { img: area, dpi: p.dpi };
     }
@@ -149,6 +171,77 @@ pub fn crop(p: &Picture, shape: &Shape, mode: CropMode, paper: Paper) -> Picture
     let mut page = RgbImage::from_pixel(pw, ph, Rgb([255, 255, 255]));
     imageops::replace(&mut page, &big, ((pw - nw) / 2) as i64, ((ph - nh) / 2) as i64);
     Picture { img: page, dpi: p.dpi }
+}
+
+/// How far the outline's bottom side (bottom left to bottom right corner)
+/// slopes, in radians; within a quarter turn, so the area stays upright.
+fn bottom_slope(pts: &[[f32; 2]]) -> f32 {
+    let (br, bl) = match pts.len() {
+        8 => (pts[4], pts[6]),
+        4 => (pts[2], pts[3]),
+        _ => return 0.0,
+    };
+    let a = (br[1] - bl[1]).atan2(br[0] - bl[0]);
+    let quarter = std::f32::consts::FRAC_PI_2;
+    if a > quarter {
+        a - 2.0 * quarter
+    } else if a < -quarter {
+        a + 2.0 * quarter
+    } else {
+        a
+    }
+}
+
+/// What is inside the outline (`pts`, in pixels), turned back by `turn` so
+/// its bottom side is level: the box around it, white outside the outline.
+fn level(img: &RgbImage, pts: &[[f32; 2]], turn: f32) -> RgbImage {
+    let (s, c) = turn.sin_cos();
+    // Turned back: u along the bottom side, v across it.
+    let turned: Vec<[f32; 2]> = pts.iter().map(|q| [q[0] * c + q[1] * s, q[1] * c - q[0] * s]).collect();
+    let u0 = turned.iter().map(|q| q[0]).fold(f32::MAX, f32::min);
+    let u1 = turned.iter().map(|q| q[0]).fold(f32::MIN, f32::max);
+    let v0 = turned.iter().map(|q| q[1]).fold(f32::MAX, f32::min);
+    let v1 = turned.iter().map(|q| q[1]).fold(f32::MIN, f32::max);
+    let (ow, oh) = (((u1 - u0).round() as u32).max(1), ((v1 - v0).round() as u32).max(1));
+    let (w, h) = (img.width() as f32, img.height() as f32);
+    // Each pixel from where it was, between the four pixels around it.
+    let sample = |x: f32, y: f32| -> [u8; 3] {
+        let (x, y) = (x - 0.5, y - 0.5);
+        if x < -0.5 || y < -0.5 || x > w - 0.5 || y > h - 0.5 {
+            return [255, 255, 255];
+        }
+        let (x, y) = (x.clamp(0.0, w - 1.0), y.clamp(0.0, h - 1.0));
+        let (xa, ya) = (x.floor() as u32, y.floor() as u32);
+        let (xb, yb) = ((xa + 1).min(img.width() - 1), (ya + 1).min(img.height() - 1));
+        let (fx, fy) = (x - xa as f32, y - ya as f32);
+        let (a, b, cc, d) = (img.get_pixel(xa, ya), img.get_pixel(xb, ya), img.get_pixel(xa, yb), img.get_pixel(xb, yb));
+        std::array::from_fn(|k| {
+            let top = a[k] as f32 * (1.0 - fx) + b[k] as f32 * fx;
+            let bottom = cc[k] as f32 * (1.0 - fx) + d[k] as f32 * fx;
+            (top * (1.0 - fy) + bottom * fy).round() as u8
+        })
+    };
+    let mut out = RgbImage::new(ow, oh);
+    let stride = ow as usize * 3;
+    let threads = std::thread::available_parallelism().map_or(1, |n| n.get()).min(8);
+    let band = (oh as usize).div_ceil(threads).max(1);
+    std::thread::scope(|scope| {
+        for (i, rows) in out.chunks_mut(band * stride).enumerate() {
+            let sample = &sample;
+            scope.spawn(move || {
+                for (r, row) in rows.chunks_mut(stride).enumerate() {
+                    let v = v0 + (i * band + r) as f32 + 0.5;
+                    for (x, px) in row.chunks_mut(3).enumerate() {
+                        let u = u0 + x as f32 + 0.5;
+                        px.copy_from_slice(&sample(u * c - v * s, u * s + v * c));
+                    }
+                }
+            });
+        }
+    });
+    let outline: Shape = turned.iter().map(|q| [(q[0] - u0) / ow as f32, (q[1] - v0) / oh as f32]).collect();
+    id::whiten_outside(&mut out, &[outline], 0.0);
+    out
 }
 
 /// The pictures as files of `format`, each under `max_bytes` if it can be
@@ -211,6 +304,59 @@ mod tests {
         let (dw, dh) = ((maxx - minx + 1) as f32, (maxy - miny + 1) as f32);
         assert!(dw > 140.0, "{dw}");
         assert!((dw / dh - 2.0).abs() < 0.15, "{dw} x {dh}");
+    }
+
+    // A dark 80 x 40 bar on a white page, turned 10 degrees about (100,
+    // 100); its corners from the top left, as fractions.
+    fn tilted() -> (Picture, Shape) {
+        let (s, c) = 10f32.to_radians().sin_cos();
+        let mut img = RgbImage::from_pixel(200, 200, Rgb([255, 255, 255]));
+        for (x, y, p) in img.enumerate_pixels_mut() {
+            let (dx, dy) = (x as f32 + 0.5 - 100.0, y as f32 + 0.5 - 100.0);
+            let (u, v) = (dx * c + dy * s, dy * c - dx * s);
+            if u.abs() < 40.0 && v.abs() < 20.0 {
+                *p = Rgb([20, 20, 20]);
+            }
+        }
+        let corner = |u: f32, v: f32| [(100.0 + u * c - v * s) / 200.0, (100.0 + u * s + v * c) / 200.0];
+        (Picture { img, dpi: 20 }, vec![corner(-40.0, -20.0), corner(40.0, -20.0), corner(40.0, 20.0), corner(-40.0, 20.0)])
+    }
+
+    #[test]
+    fn a_tilted_crop_comes_out_level() {
+        let (p, shape) = tilted();
+        let out = crop(&p, &shape, CropMode::Area, Paper::A4);
+        let (w, h) = out.img.dimensions();
+        assert!((79..=81).contains(&w) && (39..=41).contains(&h), "{w} x {h}");
+        // Level and unstretched: dark all over but a pixel's edge.
+        for y in 2..h - 2 {
+            for x in 2..w - 2 {
+                assert!(out.img.get_pixel(x, y)[0] < 60, "({x}, {y})");
+            }
+        }
+        // A middle of a side, moved inward, still turns by the bottom side.
+        let mut bent = Vec::new();
+        for i in 0..4 {
+            let (a, b) = (shape[i], shape[(i + 1) % 4]);
+            bent.push(a);
+            bent.push([(a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0]);
+        }
+        let out8 = crop(&p, &bent, CropMode::Area, Paper::A4);
+        assert_eq!(out8.img.dimensions(), out.img.dimensions());
+    }
+
+    #[test]
+    fn a_tilted_crop_keeping_the_page_stays_in_place() {
+        let (p, shape) = tilted();
+        let out = crop(&p, &shape, CropMode::KeepPage, Paper::A4);
+        assert_eq!(out.img.dimensions(), (200, 200));
+        // Level: the row through the middle is dark 80 wide, centred.
+        let dark: Vec<u32> = (0..200).filter(|&x| out.img.get_pixel(x, 100)[0] < 100).collect();
+        assert!((78..=82).contains(&(dark.len() as u32)), "{}", dark.len());
+        assert!((59..=61).contains(&dark[0]), "{}", dark[0]);
+        // Near the bar's bottom right corner, dark while it was tilted, is not.
+        assert_eq!(p.img.get_pixel(134, 124)[0], 20);
+        assert_eq!(out.img.get_pixel(134, 124), &Rgb([255, 255, 255]));
     }
 
     #[test]

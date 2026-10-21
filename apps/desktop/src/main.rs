@@ -193,6 +193,71 @@ fn write_encoded(
         .collect())
 }
 
+/// Show a saved file in the file manager, picked out where it can be; on
+/// a phone, its Downloads.
+#[tauri::command]
+async fn show_in_folder(app: AppHandle, path: String) -> Result<(), String> {
+    #[cfg(mobile)]
+    {
+        let _ = path;
+        mobile::show_downloads(&app)
+    }
+    #[cfg(not(mobile))]
+    {
+        let _ = app;
+        blocking(move || reveal(std::path::Path::new(&path))).await
+    }
+}
+
+#[cfg(desktop)]
+fn reveal(path: &std::path::Path) -> Result<(), String> {
+    use std::process::Command;
+    // Wait for it in the background, so it leaves nothing behind.
+    let open = |c: &mut Command| {
+        c.spawn().map(|mut child| drop(std::thread::spawn(move || child.wait()))).map_err(|e| e.to_string())
+    };
+    #[cfg(target_os = "linux")]
+    {
+        // Files, Dolphin and the like pick the file out (FileManager1);
+        // else its folder opens.
+        let uri = format!("['{}']", file_uri(path));
+        let picked = Command::new("gdbus")
+            .args(["call", "--session", "--dest", "org.freedesktop.FileManager1"])
+            .args(["--object-path", "/org/freedesktop/FileManager1"])
+            .args(["--method", "org.freedesktop.FileManager1.ShowItems", &uri, ""])
+            .output()
+            .is_ok_and(|o| o.status.success());
+        if picked {
+            return Ok(());
+        }
+        open(Command::new("xdg-open").arg(path.parent().ok_or("the file has no folder")?))
+    }
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        open(Command::new("explorer").raw_arg(format!("/select,\"{}\"", path.display())))
+    }
+    #[cfg(target_os = "macos")]
+    {
+        open(Command::new("open").arg("-R").arg(path))
+    }
+}
+
+/// A file's address (file:///...), every byte but plain ones escaped.
+#[cfg(target_os = "linux")]
+fn file_uri(path: &std::path::Path) -> String {
+    use std::os::unix::ffi::OsStrExt;
+    let mut uri = String::from("file://");
+    for &b in path.as_os_str().as_bytes() {
+        if b.is_ascii_alphanumeric() || b"/-_.~".contains(&b) {
+            uri.push(b as char);
+        } else {
+            uri.push_str(&format!("%{b:02X}"));
+        }
+    }
+    uri
+}
+
 #[derive(Debug, Clone, Deserialize)]
 struct ButtonChange {
     action: String,
@@ -1456,6 +1521,7 @@ pub fn run() {
             printing::id_picture,
             printing::copy_picture,
             scan_max_bytes,
+            show_in_folder,
             printing::id_page,
             onetouch::onetouch_status,
             onetouch::onetouch_login,
