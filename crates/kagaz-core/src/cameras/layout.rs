@@ -32,6 +32,19 @@ pub struct Layout {
     /// Sound volume per camera, 0 to 100 (absent: 100).
     #[serde(default)]
     pub volume: std::collections::BTreeMap<String, u8>,
+    /// Picture size per camera: "auto", "high" or "low" (none: auto, or
+    /// high for cameras in `hd`, as chosen before there was a choice).
+    #[serde(default)]
+    pub quality: std::collections::BTreeMap<String, String>,
+    /// A name shown in Kagaz in place of the camera's own.
+    #[serde(default)]
+    pub names: std::collections::BTreeMap<String, String>,
+    /// How far the picture is turned, clockwise: 90, 180 or 270.
+    #[serde(default)]
+    pub turn: std::collections::BTreeMap<String, u16>,
+    /// Cameras whose picture is shown mirrored.
+    #[serde(default)]
+    pub mirror: Vec<String>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -95,6 +108,10 @@ impl Layout {
         }
         self.hd.retain(|id| known.contains(id));
         self.volume.retain(|id, _| known.contains(id));
+        self.quality.retain(|id, _| known.contains(id));
+        self.names.retain(|id, _| known.contains(id));
+        self.turn.retain(|id, _| known.contains(id));
+        self.mirror.retain(|id| known.contains(id));
     }
 }
 
@@ -115,6 +132,10 @@ mod tests {
             brand_collapsed: vec!["xiaomi".into()],
             hd: vec!["a".into()],
             volume: [("a".to_string(), 40u8), ("gone".to_string(), 10u8)].into(),
+            quality: [("a".to_string(), "low".to_string())].into(),
+            names: [("gone".to_string(), "Old".to_string())].into(),
+            turn: [("b".to_string(), 90u16)].into(),
+            mirror: vec!["gone".into()],
         };
         let text = toml::to_string_pretty(&l).unwrap();
         assert_eq!(Layout::parse(&text).unwrap(), l);
@@ -123,6 +144,8 @@ mod tests {
         assert_eq!(l.ungrouped, vec!["b", "c"]);
         assert_eq!(l.volume.get("a"), Some(&40));
         assert!(!l.volume.contains_key("gone"));
+        assert_eq!(l.turn.get("b"), Some(&90));
+        assert!(l.names.is_empty() && l.mirror.is_empty());
         assert_eq!(Layout::parse("").unwrap(), Layout::default());
     }
 }

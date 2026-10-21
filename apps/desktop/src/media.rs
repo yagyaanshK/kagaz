@@ -116,13 +116,27 @@ pub async fn camera_watch(
     app: AppHandle,
     device_id: String,
     hd: bool,
+    // "auto", "high" or "low"; cameras that cannot choose for themselves
+    // go by `hd`.
+    quality: Option<String>,
     channel: Channel<InvokeResponseBody>,
 ) -> Result<u64, String> {
     let e = super::running(&app.state::<super::CameraState>())?;
-    // A Xiaomi camera: the video engine reaches it, the server splits its stream.
+    // A Xiaomi camera: Kagaz speaks to it itself, on this network.
     if let Some(x) = e.xiaomi.iter().find(|x| x.id() == device_id).cloned() {
-        let key = format!("{device_id}:{}", if hd { "HD" } else { "VGA" });
-        let watcher = super::blocking(move || e._server.watch_engine(&key, &x.stream(hd))).await?;
+        use kagaz_core::cameras::xiaomi::live::Quality;
+        let quality = match quality.as_deref() {
+            Some("auto") => Quality::Auto,
+            Some("low") => Quality::Low,
+            Some("high") => Quality::High,
+            _ if hd => Quality::High,
+            _ => Quality::Low,
+        };
+        let key = format!("{device_id}:{quality:?}");
+        let watcher = super::blocking(move || {
+            e._server.watch_with(&key, move |hand| super::xiaomi_live(&x.cam, quality, hand))
+        })
+        .await?;
         return Ok(forward(app, watcher.rx, channel));
     }
     let watcher = super::blocking(move || e._server.watch_live(&device_id, hd)).await?;

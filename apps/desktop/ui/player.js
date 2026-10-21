@@ -79,9 +79,13 @@ const KagazPlayer = (() => {
   class Player {
     // root: the element the picture fills. sound: play the audio packets.
     // paced: a recording, shown by its timestamps (live shows at once).
-    constructor(root, { sound = false, paced = false, volume = 1, level = true, label = "player" } = {}) {
+    constructor(root, { sound = false, paced = false, volume = 1, level = true, label = "player", turn = 0, mirror = false } = {}) {
       this.root = root;
       this.label = label;
+      // How the picture is shown: turned clockwise (0, 90, 180, 270) and/or
+      // mirrored, for cameras mounted sideways or upside down.
+      this.turn = turn;
+      this.mirror = mirror;
       this.paced = paced;
       this.level = level;
       this.box = document.createElement("div");
@@ -284,16 +288,36 @@ const KagazPlayer = (() => {
       if (this.queue.length || this.pendingChunks.length || !this.ended) this.raf = requestAnimationFrame(() => this.tick());
     }
 
+    // Turn or mirror what is shown from now on.
+    setView(turn, mirror) {
+      this.turn = turn;
+      this.mirror = mirror;
+    }
+
     draw(frame) {
       const c = this.canvas;
-      if (c.width !== frame.displayWidth || c.height !== frame.displayHeight) {
-        c.width = frame.displayWidth;
-        c.height = frame.displayHeight;
+      const fw = frame.displayWidth;
+      const fh = frame.displayHeight;
+      const side = this.turn === 90 || this.turn === 270;
+      const w = side ? fh : fw;
+      const h = side ? fw : fh;
+      if (c.width !== w || c.height !== h) {
+        c.width = w;
+        c.height = h;
         // Wide pictures and tall ones are laid out differently (see Stage).
         this.box.dataset.shape = shapeOf(c.width, c.height);
         if (this.onsize) this.onsize(c.width, c.height);
       }
-      this.ctx.drawImage(frame, 0, 0);
+      if (this.turn || this.mirror) {
+        this.ctx.setTransform(1, 0, 0, 1, 0, 0);
+        this.ctx.translate(w / 2, h / 2);
+        this.ctx.rotate((this.turn * Math.PI) / 180);
+        if (this.mirror) this.ctx.scale(-1, 1);
+        this.ctx.drawImage(frame, -fw / 2, -fh / 2);
+        this.ctx.setTransform(1, 0, 0, 1, 0, 0);
+      } else {
+        this.ctx.drawImage(frame, 0, 0);
+      }
       const ts = frame.timestamp / 1e6;
       frame.close();
       this.stats.shown++;
