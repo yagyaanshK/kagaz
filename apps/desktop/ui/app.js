@@ -614,6 +614,13 @@ const scanId = KagazId.attach({
   },
 });
 
+// Stop the scan under way: the scanner is told to stop.
+$("scan-cancel").addEventListener("click", () => {
+  $("scan-cancel").disabled = true;
+  $("scan-state").textContent = "Cancelling…";
+  invoke("scan_cancel").catch(() => {});
+});
+
 $("scan-form").addEventListener("submit", async (ev) => {
   ev.preventDefault();
   if (current === null || scanId.active()) return;
@@ -629,6 +636,8 @@ $("scan-form").addEventListener("submit", async (ev) => {
   $("scan-go").disabled = true;
   $("scan-state").textContent = "Scanning…";
   $("scan-state").classList.add("working");
+  $("scan-cancel").classList.remove("hidden");
+  $("scan-cancel").disabled = false;
   try {
     const written = await invoke("scan", {
       device: d,
@@ -653,9 +662,11 @@ $("scan-form").addEventListener("submit", async (ev) => {
     }
     $("scan-state").textContent = "Done.";
   } catch (err) {
-    log("Failed: " + err, "bad");
+    if (/cancelled/.test(String(err))) log("Scan cancelled.");
+    else log("Failed: " + err, "bad");
     $("scan-state").textContent = "";
   }
+  $("scan-cancel").classList.add("hidden");
   $("scan-state").classList.remove("working");
   $("scan-go").disabled = false;
 });

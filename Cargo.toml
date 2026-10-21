@@ -20,6 +20,13 @@ debug = "line-tables-only"
 
 [profile.dev.package."*"]
 debug = false
+# Libraries optimised even in a debug build: opening and shrinking a 1200
+# dpi scan (the image library) took many seconds unoptimised.
+opt-level = 2
+
+# The core's own image work (putting an ID page together, tidying it) too.
+[profile.dev.package.kagaz-core]
+opt-level = 2
 
 [profile.release]
 opt-level = 3

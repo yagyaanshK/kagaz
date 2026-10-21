@@ -360,7 +360,15 @@
     for (const id of ["copy-go", "copy-preview", "copy-print", "copy-more", "copy-clear"]) $(id).disabled = on;
     $("copy-state").textContent = text || "";
     $("copy-state").classList.toggle("working", on);
+    // While it scans, it can be stopped.
+    $("copy-cancel").classList.toggle("hidden", !(on && /Scanning/.test(text || "")));
+    $("copy-cancel").disabled = false;
   }
+  $("copy-cancel").addEventListener("click", () => {
+    $("copy-cancel").disabled = true;
+    $("copy-state").textContent = "Cancelling…";
+    invoke("scan_cancel").catch(() => {});
+  });
 
   async function scanPages(keep) {
     const s = copySettings();
@@ -420,7 +428,8 @@
       logTo("copy-log", `Copied ${order.length} page${order.length === 1 ? "" : "s"}: ${sent.label}`, "ok");
       copyBusy(false, "Done.");
     } catch (err) {
-      logTo("copy-log", "Failed: " + err, "bad");
+      if (/cancelled/.test(String(err))) logTo("copy-log", "Scan cancelled.");
+      else logTo("copy-log", "Failed: " + err, "bad");
       copyBusy(false);
     }
   });
@@ -434,7 +443,8 @@
       renderThumbs();
       copyBusy(false, `${order.length} page${order.length === 1 ? "" : "s"} scanned.`);
     } catch (err) {
-      logTo("copy-log", "Failed: " + err, "bad");
+      if (/cancelled/.test(String(err))) logTo("copy-log", "Scan cancelled.");
+      else logTo("copy-log", "Failed: " + err, "bad");
       copyBusy(false);
     }
   }
@@ -464,7 +474,8 @@
       logTo("copy-log", `Printed ${chosen.length} page${chosen.length === 1 ? "" : "s"}: ${sent.label}`, "ok");
       copyBusy(false, "Done.");
     } catch (err) {
-      logTo("copy-log", "Failed: " + err, "bad");
+      if (/cancelled/.test(String(err))) logTo("copy-log", "Scan cancelled.");
+      else logTo("copy-log", "Failed: " + err, "bad");
       copyBusy(false);
     }
   });

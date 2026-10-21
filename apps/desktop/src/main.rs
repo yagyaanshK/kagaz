@@ -120,10 +120,11 @@ async fn choose_save_path(
 async fn scan(
     app: AppHandle,
     device: Device,
-    request: ScanRequest,
+    mut request: ScanRequest,
     output: OutputRequest,
     path: String,
 ) -> Result<Vec<WrittenFile>, String> {
+    printing::cancellable(&mut request);
     blocking(move || {
         let pages = kagaz_core::scan::scan(&device, &request, &mut |event| {
             let _ = app.emit("scan-progress", &event);
@@ -1427,6 +1428,8 @@ pub fn run() {
             printing::copy_print,
             printing::copy_discard,
             printing::id_scan_side,
+            printing::scan_cancel,
+            printing::tidy_file,
             printing::id_picture,
             printing::copy_picture,
             scan_max_bytes,

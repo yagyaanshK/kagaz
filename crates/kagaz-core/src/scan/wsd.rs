@@ -311,6 +311,41 @@ impl WsdScanner {
         check_fault(&text)?;
         let (job_id, token) = parse_create_job(&text)?;
 
+        // Cancel: tell the scanner to drop the job; the page it is sending
+        // then ends too, and the scan says it was cancelled.
+        let done = std::sync::atomic::AtomicBool::new(false);
+        let result = std::thread::scope(|scope| {
+            scope.spawn(|| {
+                while !done.load(std::sync::atomic::Ordering::SeqCst) {
+                    if req.cancel.is_cancelled() {
+                        let _ = self.post(
+                            "CancelJob",
+                            &format!("<sca:CancelJobRequest><sca:JobId>{job_id}</sca:JobId></sca:CancelJobRequest>"),
+                        );
+                        return;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(150));
+                }
+            });
+            let r = self.retrieve(&params, source, &job_id, &token, on_event);
+            done.store(true, std::sync::atomic::Ordering::SeqCst);
+            r
+        });
+        if req.cancel.is_cancelled() {
+            return Err(ScanError::Cancelled);
+        }
+        result
+    }
+
+    /// The job's pages, one RetrieveImage each.
+    fn retrieve(
+        &self,
+        params: &JobParams,
+        source: Source,
+        job_id: &str,
+        token: &str,
+        on_event: &mut dyn FnMut(Event),
+    ) -> Result<Vec<Page>, ScanError> {
         let mime = if params.format == "png" {
             "image/png"
         } else {
