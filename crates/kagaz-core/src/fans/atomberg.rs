@@ -213,8 +213,9 @@ pub fn span_words(seconds: u64) -> String {
 ///
 /// Checked on an Aris on 2026-10-21, over one connection, watching the fan:
 /// power, speed 1 to 5, speed 6 (Boost), boost on and off (off returns to
-/// speed 5), led, light_mode warm/cool/daylight, brightness (50 and 100
-/// visibly brighter; 10 showed no change though the fan reported it).
+/// speed 5), led, light_mode warm/cool/daylight, brightness 10 to 100 in
+/// steps of 10 (each a visible step; the remote's own steps are coarser,
+/// 10, 25, …).
 /// The fan takes sleep and timer and reports them back; their effect over
 /// time is not yet seen.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

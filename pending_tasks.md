@@ -71,10 +71,20 @@ with the commit that closes them.
       and reported back.
 - [ ] **What Sleep and the timer do over time**: set `timer 1` and see the
       fan switch off an hour later; leave Sleep on overnight.
-- [ ] **Brightness levels**: the Aris has 4 visible levels; `brightness 10`
-      showed no change. Find the four values the fan uses and make the
-      slider snap to them.
+- [x] **Brightness levels** (2026-10-21): the remote steps 10, 25, …, but
+      the fan takes any value Kagaz sent from 10 to 100 in steps of 10 and
+      shows each as a visible step. Finer steps are untried.
 - [ ] **Renesa**: needs a power cycle at the wall before Kagaz can reach it.
+- [ ] **Read the Atomberg phone app** (later, as asked 2026-10-21): every
+      command it can send, to learn whether the firmware has a finer speed
+      control than 1 to 5 + Boost, or a smooth white-to-yellow light, and
+      how the app itself connects (one connection kept, or one per
+      command). Then confirm on the fan with the console.
+- [ ] **Read the Atomberg phone app** (later, as asked 2026-10-21): every
+      command it can send, to learn whether the firmware has a finer speed
+      control than 1 to 5 + Boost, or a smooth white-to-yellow light, and
+      how the app itself connects (one connection kept, or one per
+      command). Then confirm on the fan with the console.
 - [x] **Light read from the real fan** (2026-10-21): on/off, three colours
       (warm, white, natural white) and brightness 10 to 100 decoded from an
       Aris set with its remote; the card shows colour and brightness.

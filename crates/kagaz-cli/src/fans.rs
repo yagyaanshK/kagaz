@@ -64,7 +64,8 @@ pub enum FanAction {
     /// before it needs switching off at the wall, so a session uses one
     Console {
         /// Walk through the commands in this file, one per line, asking
-        /// before each and noting what the fan did
+        /// before each and noting what the fan did; text after " # " on a
+        /// line is shown as what to do before that step
         #[arg(long)]
         steps: Option<std::path::PathBuf>,
         /// Append every command, the fan's answer and your notes to this file
@@ -585,8 +586,20 @@ fn console(
                 .filter(|l| !l.is_empty() && !l.starts_with('#'))
                 .collect();
             println!("{} steps. Watch the fan after each.", lines.len());
-            for (i, line) in lines.iter().enumerate() {
-                println!("\n>> {}/{}: Kagaz sends: {line}", i + 1, lines.len());
+            for (i, step) in lines.iter().enumerate() {
+                // "read # do this with the remote first": the words after
+                // " # " are for the person.
+                let (line, todo) = match step.split_once(" # ") {
+                    Some((l, t)) => (l.trim(), Some(t.trim())),
+                    None => (*step, None),
+                };
+                let line = &line;
+                if let Some(todo) = todo {
+                    println!("\n>> {}/{}: {todo}", i + 1, lines.len());
+                    println!("   then Kagaz sends: {line}");
+                } else {
+                    println!("\n>> {}/{}: Kagaz sends: {line}", i + 1, lines.len());
+                }
                 let go = ask("   Enter to send, 'skip' to pass, 'stop' to end: ")
                     .unwrap_or_else(|| "stop".into());
                 match go.trim() {
