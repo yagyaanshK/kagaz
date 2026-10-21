@@ -248,7 +248,7 @@ JPEG or PNG), Copy prints it at real size. Two options, off unless ticked, tidy 
 **Clean background** turns the lid's grey around the card white, and
 **Find the card** whitens everything outside the card. The same two work on a file already on this
 device, no printer needed: **Tidy a saved scan or photo**, under the
-printers, makes a tidied copy of a PDF, JPEG or PNG. A scan under way can
+printers, shows a PDF, JPEG or PNG tidied, then saves it as a new file. A scan under way can
 be stopped with **Cancel scan**: the scanner is told to stop.
 
 Each page keeps its place: leave a printer's page with a scan under way
