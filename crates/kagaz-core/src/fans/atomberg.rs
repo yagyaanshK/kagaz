@@ -83,9 +83,11 @@ pub fn profile(series: &str) -> Profile {
 /// (1 to 5, and 6 in Boost), bit 0x40 is Boost and stays set after the fan
 /// is turned off from Boost (a Renesa off after Boost reads 0x46). Field 11
 /// counts seconds running and field 13 seconds switched off, each moving
-/// only in its own state. Still from the community's notes, not yet
-/// checked: light (0x20), colour (0x08 cool, 0x8000 warm), brightness
-/// (bits 8 to 14), sleep (0x80), timer (bits 16 to 19).
+/// only in its own state. The light, checked the same way: 0x20 is on;
+/// colour 0x8000 alone is warm, 0x08 alone white ("cool"), both natural
+/// white ("daylight"); bits 8 to 14 are the brightness, 10 to 100. Still
+/// from the community's notes, not yet checked: sleep (0x80) and the
+/// timer (bits 16 to 19); the remote has neither.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FanState {
     pub power: bool,
@@ -97,11 +99,12 @@ pub struct FanState {
     pub boost: bool,
     pub led: bool,
     pub sleep: bool,
-    /// 0 to 127, meaningful on fans whose light dims.
+    /// 10 to 100 (percent), meaningful on fans whose light dims.
     pub brightness: u8,
     /// Hours left on the timer, 0 when none is set.
     pub timer_hours: u8,
-    /// "cool", "warm" or "daylight" (meaningful on fans with colour modes).
+    /// "warm", "cool" (white) or "daylight" (natural white), meaningful on
+    /// fans with colour modes.
     pub light_mode: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub series: Option<String>,
@@ -215,7 +218,7 @@ pub enum Command {
     Speed(u8),
     Sleep(bool),
     Led(bool),
-    /// 0 to 127.
+    /// 10 to 100, as the fan reports it.
     Brightness(u8),
     /// The timer by index into [`TIMER_HOURS`]: 0 off, 1 = 1 h, 2 = 2 h, 3 = 3 h, 4 = 6 h.
     Timer(u8),
@@ -232,7 +235,7 @@ pub enum CommandError {
     Speed,
     #[error("timer must be 0 (off) to 4 (6 h)")]
     Timer,
-    #[error("brightness must be 0 to 127")]
+    #[error("brightness must be 10 to 100")]
     Brightness,
     #[error("light mode must be cool, warm or daylight")]
     LightMode,
@@ -243,7 +246,8 @@ impl Command {
         match self {
             Command::Speed(n) if !(MIN_SPEED..=MAX_SPEED).contains(n) => Err(CommandError::Speed),
             Command::Timer(i) if *i as usize >= TIMER_HOURS.len() => Err(CommandError::Timer),
-            Command::Brightness(b) if *b > 127 => Err(CommandError::Brightness),
+            // The Aris reports its light from 10 (lowest) to 100 (highest).
+            Command::Brightness(b) if !(10..=100).contains(b) => Err(CommandError::Brightness),
             Command::LightMode(m) if !matches!(m.as_str(), "cool" | "warm" | "daylight") => {
                 Err(CommandError::LightMode)
             }
@@ -440,6 +444,37 @@ mod tests {
         assert!(renesa.boost && !renesa.power && !renesa.in_boost());
         assert_eq!(renesa.words(), "Off");
         assert_eq!(renesa.series.as_deref(), Some("R1"));
+    }
+
+    /// The Aris at speed 2 with its light, cycled with the remote (field 0
+    /// as read; two counters this test does not use set to 0).
+    const LIGHT_NATURAL_10: &str = "35386,1,Z,0,108.72,103,153,I1,1499,1,3142,24893329,0,13916671,0,0.60,25.29,0,0,0,0,0,300,0,278,END";
+    const LIGHT_WARM: &str = "35378,1,Z,0,108.71,100,153,I1,1499,1,3142,24893357,0,13916671,0,0.59,25.18,0,0,0,0,0,300,0,278,END";
+    const LIGHT_WHITE: &str = "2618,1,Z,0,108.97,101,152,I1,1499,1,3142,24893372,0,13916671,0,0.59,25.18,0,0,0,0,0,300,0,278,END";
+    const LIGHT_NATURAL_100: &str = "58426,1,Z,0,108.77,100,152,I1,1499,1,3142,24893429,0,13916671,0,0.59,25.18,0,0,0,0,0,300,0,278,END";
+    const LIGHT_OFF_FAN_ON: &str = "58394,1,Z,0,108.67,97,152,I1,1499,1,3142,24893442,0,13916671,0,0.57,25.18,0,0,0,0,0,300,0,278,END";
+
+    #[test]
+    fn the_light_reads_as_it_was() {
+        let n = FanState::decode(LIGHT_NATURAL_10).unwrap();
+        assert!(n.led && n.power);
+        assert_eq!(
+            (n.light_mode.as_str(), n.brightness, n.speed),
+            ("daylight", 10, 2)
+        );
+        assert_eq!(FanState::decode(LIGHT_WARM).unwrap().light_mode, "warm");
+        assert_eq!(FanState::decode(LIGHT_WHITE).unwrap().light_mode, "cool");
+        let bright = FanState::decode(LIGHT_NATURAL_100).unwrap();
+        assert_eq!(
+            (bright.light_mode.as_str(), bright.brightness),
+            ("daylight", 100)
+        );
+        let off = FanState::decode(LIGHT_OFF_FAN_ON).unwrap();
+        assert!(!off.led && off.power);
+        assert_eq!(
+            off.brightness, 100,
+            "the light keeps its brightness while off"
+        );
     }
 
     #[test]

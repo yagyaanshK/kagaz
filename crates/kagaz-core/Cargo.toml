@@ -42,7 +42,7 @@ nusb = "0.2"
 # BlueZ, Windows WinRT, macOS CoreBluetooth). Async by nature, so a small
 # tokio runtime runs each short exchange; the phone's Bluetooth is Kotlin's.
 btleplug = "0.13"
-tokio = { version = "1", default-features = false, features = ["rt", "time"] }
+tokio = { version = "1", default-features = false, features = ["rt", "rt-multi-thread", "time"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = [

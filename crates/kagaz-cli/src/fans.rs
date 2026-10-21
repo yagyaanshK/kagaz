@@ -2,7 +2,7 @@
 //! from the command line, the same list, rooms and controls as the window.
 
 use anyhow::{anyhow, bail, Context, Result};
-use clap::{Subcommand, ValueEnum};
+use clap::{Parser, Subcommand, ValueEnum};
 use kagaz_core::fans::atomberg::TIMER_HOURS;
 use kagaz_core::fans::{self, Command as FanCommand, Fans, Found};
 
@@ -58,6 +58,19 @@ pub enum FanAction {
     },
     /// Stop remembering the fan
     Forget,
+    /// Keep one connection open and send commands one at a time (on, off,
+    /// speed 3, light on, brightness 50, light-mode warm, sleep on, timer 1,
+    /// boost on, read, send <json>); a fan takes only so many connections
+    /// before it needs switching off at the wall, so a session uses one
+    Console {
+        /// Walk through the commands in this file, one per line, asking
+        /// before each and noting what the fan did
+        #[arg(long)]
+        steps: Option<std::path::PathBuf>,
+        /// Append every command, the fan's answer and your notes to this file
+        #[arg(long)]
+        log: Option<std::path::PathBuf>,
+    },
     /// Give the fan a new name
     Rename { name: String },
     /// Put the fan in a room (a new room is created); without a room, in none
@@ -280,6 +293,7 @@ pub fn fan(which: &str, action: FanAction) -> Result<()> {
             return Ok(());
         }
         FanAction::Read { raw: false } => FanCommand::Read,
+        FanAction::Console { steps, log } => return console(&fans, which, steps, log),
         FanAction::Add {
             name,
             room,
@@ -424,4 +438,264 @@ pub fn rooms(action: Option<RoomAction>) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// One line typed in the console, read as a fan action.
+#[derive(clap::Parser)]
+#[command(no_binary_name = true)]
+struct ConsoleLine {
+    #[command(subcommand)]
+    action: FanAction,
+}
+
+/// What a console line asks the fan: JSON to send (None: just read).
+fn console_json(line: &str) -> Result<Option<String>> {
+    let line = line.trim();
+    if line == "read" {
+        return Ok(None);
+    }
+    if let Some(json) = line.strip_prefix("send ") {
+        return Ok(Some(json.trim().to_string()));
+    }
+    let words: Vec<&str> = line.split_whitespace().collect();
+    let parsed = ConsoleLine::try_parse_from(words).map_err(|e| {
+        anyhow!(
+            "{}",
+            e.to_string().lines().next().unwrap_or("not understood")
+        )
+    })?;
+    let command = match parsed.action {
+        FanAction::On => FanCommand::Power(true),
+        FanAction::Off => FanCommand::Power(false),
+        FanAction::Speed { speed } => FanCommand::Speed(speed),
+        FanAction::Light { state } => FanCommand::Led(state.into()),
+        FanAction::Brightness { level } => FanCommand::Brightness(level),
+        FanAction::LightMode { mode } => FanCommand::LightMode(mode.to_ascii_lowercase()),
+        FanAction::Sleep { state } => FanCommand::Sleep(state.into()),
+        FanAction::Timer { hours } => {
+            let i = TIMER_HOURS
+                .iter()
+                .position(|h| *h == hours)
+                .ok_or_else(|| anyhow!("the timer takes 1, 2, 3 or 6 hours, or 0 for off"))?;
+            FanCommand::Timer(i as u8)
+        }
+        FanAction::Boost { state } => FanCommand::Boost(state.into()),
+        FanAction::Read { .. } => return Ok(None),
+        _ => bail!("not in the console: use kagaz fan for that"),
+    };
+    command.validate().map_err(|e| anyhow!("{e}"))?;
+    Ok(Some(command.to_json()))
+}
+
+/// The answer laid out: the state string, its bits, and in words.
+fn show_answer(text: &str) -> String {
+    let mut out = format!("   fan: {text}\n");
+    if let Some(v) = text
+        .split(',')
+        .next()
+        .and_then(|f| f.trim().parse::<i64>().ok())
+    {
+        let bits: Vec<String> = (0..24)
+            .filter(|b| v & (1 << b) != 0)
+            .map(|b| format!("0x{:x}", 1i64 << b))
+            .collect();
+        out += &format!("   field 0 = 0x{v:x}: {}\n", bits.join(" "));
+    }
+    if let Some(state) = kagaz_core::fans::FanState::decode(text) {
+        out += &format!("   Kagaz reads: {}\n", state.words());
+    }
+    out
+}
+
+#[cfg(not(target_os = "android"))]
+fn console(
+    fans: &Fans,
+    which: &str,
+    steps: Option<std::path::PathBuf>,
+    log: Option<std::path::PathBuf>,
+) -> Result<()> {
+    use kagaz_core::fans::ble::Link;
+    use std::io::{BufRead, Write};
+    let fan = fans
+        .find(which)
+        .cloned()
+        .ok_or_else(|| anyhow!("no fan called \"{which}\"; kagaz fans lists them"))?;
+    let address = fan.ble_address.clone().ok_or_else(|| {
+        anyhow!(
+            "{} has no Bluetooth address yet; run kagaz fans with it in range",
+            fan.name
+        )
+    })?;
+    let mut log_file = match &log {
+        Some(p) => Some(
+            std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(p)
+                .with_context(|| format!("cannot write {}", p.display()))?,
+        ),
+        None => None,
+    };
+    let mut note = |what: &str, answer: &str, said: &str| {
+        if let Some(f) = log_file.as_mut() {
+            let n = kagaz_core::localtime::now();
+            let t = format!("{:02}:{:02}:{:02}", n.hour, n.minute, n.second);
+            let _ = writeln!(f, "{t}\t{what}\t{answer}\t{said}");
+        }
+    };
+    println!("Connecting to {}…", fan.name);
+    let mut link = Link::open(&address).with_context(|| format!("could not reach {}", fan.name))?;
+    println!("Connected. One connection for the whole session.");
+    let stdin = std::io::stdin();
+    let mut input = stdin.lock().lines();
+    let mut ask = |prompt: &str| -> Option<String> {
+        print!("{prompt}");
+        let _ = std::io::stdout().flush();
+        input.next().and_then(|l| l.ok())
+    };
+    // Run one line on the kept connection (reconnecting once if the fan dropped it).
+    let run = |link: &mut Link, line: &str| -> Result<String> {
+        let json = console_json(line)?;
+        match link.exchange(json.as_deref()) {
+            Ok(text) => Ok(text),
+            Err(e) if !link.is_connected() => {
+                println!("   The connection dropped ({e}); connecting again…");
+                *link = Link::open(&address)
+                    .with_context(|| format!("could not reach {}", fan.name))?;
+                Ok(link.exchange(json.as_deref())?)
+            }
+            Err(e) => Err(anyhow!("{e}")),
+        }
+    };
+    let save = |text: &str| {
+        if let Some(state) = kagaz_core::fans::FanState::decode(text) {
+            let _ = update(|f| {
+                f.note_state(&fan.id, &state, "bluetooth");
+                Ok(())
+            });
+        }
+    };
+    match steps {
+        Some(path) => {
+            let text = std::fs::read_to_string(&path)
+                .with_context(|| format!("cannot read {}", path.display()))?;
+            let lines: Vec<&str> = text
+                .lines()
+                .map(str::trim)
+                .filter(|l| !l.is_empty() && !l.starts_with('#'))
+                .collect();
+            println!("{} steps. Watch the fan after each.", lines.len());
+            for (i, line) in lines.iter().enumerate() {
+                println!("\n>> {}/{}: Kagaz sends: {line}", i + 1, lines.len());
+                let go = ask("   Enter to send, 'skip' to pass, 'stop' to end: ")
+                    .unwrap_or_else(|| "stop".into());
+                match go.trim() {
+                    "stop" => break,
+                    "skip" => {
+                        note(line, "skipped", "");
+                        continue;
+                    }
+                    _ => {}
+                }
+                match run(&mut link, line) {
+                    Ok(answer) => {
+                        print!("{}", show_answer(&answer));
+                        save(&answer);
+                        let said = ask("   What did the fan do? (Enter = exactly that): ")
+                            .unwrap_or_default();
+                        note(
+                            line,
+                            &answer,
+                            if said.trim().is_empty() {
+                                "as asked"
+                            } else {
+                                said.trim()
+                            },
+                        );
+                    }
+                    Err(e) => {
+                        println!("   {e}");
+                        note(line, &format!("error: {e}"), "");
+                    }
+                }
+            }
+        }
+        None => {
+            println!("Type a command (on, off, speed 3, light on, brightness 50, light-mode warm,");
+            println!(
+                "sleep on, timer 1, boost on, read, send {{\"json\":1}}), '# what the fan did'"
+            );
+            println!("to note it, or 'quit'.");
+            while let Some(line) = ask("> ") {
+                let line = line.trim();
+                if line.is_empty() {
+                    continue;
+                }
+                if line == "quit" || line == "exit" {
+                    break;
+                }
+                if let Some(said) = line.strip_prefix('#') {
+                    note("note", "", said.trim());
+                    continue;
+                }
+                match run(&mut link, line) {
+                    Ok(answer) => {
+                        print!("{}", show_answer(&answer));
+                        save(&answer);
+                        note(line, &answer, "");
+                    }
+                    Err(e) => {
+                        println!("   {e}");
+                        note(line, &format!("error: {e}"), "");
+                    }
+                }
+            }
+        }
+    }
+    drop(link);
+    println!("Disconnected.");
+    Ok(())
+}
+
+#[cfg(target_os = "android")]
+fn console(
+    _: &Fans,
+    _: &str,
+    _: Option<std::path::PathBuf>,
+    _: Option<std::path::PathBuf>,
+) -> Result<()> {
+    bail!("the console needs this computer's Bluetooth")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn console_lines_become_one_key_commands() {
+        assert_eq!(console_json("read").unwrap(), None);
+        assert_eq!(
+            console_json("speed 3").unwrap().as_deref(),
+            Some(r#"{"speed":3}"#)
+        );
+        assert_eq!(
+            console_json("light on").unwrap().as_deref(),
+            Some(r#"{"led":true}"#)
+        );
+        assert_eq!(
+            console_json("light-mode warm").unwrap().as_deref(),
+            Some(r#"{"light_mode":"warm"}"#)
+        );
+        assert_eq!(
+            console_json("timer 6").unwrap().as_deref(),
+            Some(r#"{"timer":4}"#)
+        );
+        assert_eq!(
+            console_json("send {\"x\":1}").unwrap().as_deref(),
+            Some(r#"{"x":1}"#)
+        );
+        assert!(console_json("speed 9").is_err());
+        assert!(console_json("forget").is_err());
+        assert!(console_json("dance").is_err());
+    }
 }

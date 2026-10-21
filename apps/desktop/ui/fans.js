@@ -37,16 +37,21 @@ const KagazFans = (() => {
     return {
       light: !s.startsWith("K"),
       brightness: s.startsWith("I") || ["M1", "S1", "S2"].includes(s),
+      color: s.startsWith("I"),
     };
   }
 
   // The fan's state in a few words: the same words the CLI uses.
-  function words(state) {
+  // The Aris's three light colours, in the remote's words.
+  const COLOURS = { warm: "warm", cool: "white", daylight: "natural white" };
+
+  function words(state, colourFan = false) {
     if (!state) return "";
     if (!state.power) return "Off";
     const w = [state.boost ? "Boost" : `Speed ${state.speed}`];
     if (state.sleep) w.push("sleep");
     if (state.led) w.push("light on");
+    if (state.led && colourFan) w[w.length - 1] = `light ${COLOURS[state.light_mode] || "on"}, ${state.brightness}%`;
     if (state.timer_hours > 0) w.push(`${state.timer_hours} h left`);
     return w.join(", ");
   }
@@ -68,7 +73,7 @@ const KagazFans = (() => {
     const s = f.last_state;
     if (busy.has(f.id)) return f.last_state ? "Sending…" : "Asking the fan…";
     if (scanning && !lastScan) return "Checking…";
-    if (s && here) return words(s);
+    if (s && here) return words(s, profile(f).color);
     if (s && !here) return s.power ? "Out of reach" : "Off, out of reach";
     return here ? "Within reach" : "Out of reach";
   }
@@ -184,6 +189,38 @@ const KagazFans = (() => {
       const b = button("chip" + (led ? " active" : ""), led ? "Light on" : "Light off", () => send(f, { kind: "led", value: !led }, c), `Light of ${f.name}: turn ${led ? "off" : "on"}`);
       b.setAttribute("aria-pressed", String(led));
       extras.appendChild(b);
+    }
+    // The light's colour and brightness, on fans that have them (read as
+    // checked on an Aris; the commands that set them are not yet checked).
+    if (p.light && p.color) {
+      const pick = el("label", "fan-timer", "Colour ");
+      const sel = el("select");
+      sel.setAttribute("aria-label", `Light colour of ${f.name}`);
+      for (const [mode, name] of [["warm", "Warm"], ["cool", "White"], ["daylight", "Natural white"]]) {
+        const o = el("option", "", name);
+        o.value = mode;
+        sel.appendChild(o);
+      }
+      sel.value = (s && s.light_mode) || "daylight";
+      sel.addEventListener("change", () => send(f, { kind: "light_mode", value: sel.value }, c));
+      pick.appendChild(sel);
+      extras.appendChild(pick);
+    }
+    if (p.light && p.brightness) {
+      const dim = el("label", "fan-timer fan-dim", "Brightness ");
+      const range = el("input");
+      range.type = "range";
+      range.min = "10";
+      range.max = "100";
+      range.step = "10";
+      range.value = String((s && s.brightness) || 100);
+      range.setAttribute("aria-label", `Brightness of ${f.name}`);
+      const shown = el("span", "muted small", `${range.value}%`);
+      range.addEventListener("input", () => (shown.textContent = `${range.value}%`));
+      // Sent when let go, not while dragging: one connection, not ten.
+      range.addEventListener("change", () => send(f, { kind: "brightness", value: Number(range.value) }, c));
+      dim.append(range, shown);
+      extras.appendChild(dim);
     }
     const sleep = !!(s && s.sleep);
     const sb = button("chip" + (sleep ? " active" : ""), "Sleep", () => send(f, { kind: "sleep", value: !sleep }, c), `Sleep mode of ${f.name}: turn ${sleep ? "off" : "on"}`);
