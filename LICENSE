@@ -1,6 +1,6 @@
-# Kagaz License 1.1.0 (KGZ-1.1.0)
+# Kagaz License 1.2.0 (KGZ-1.2.0)
 
-Short name: KGZ-1.1.0 (as an SPDX identifier: LicenseRef-KGZ-1.1.0)
+Short name: KGZ-1.2.0 (as an SPDX identifier: LicenseRef-KGZ-1.2.0)
 
 Required Notice: Copyright (c) 2026 Yagyaansh Khaneja (https://github.com/yagyaanshK/kagaz)
 
@@ -65,11 +65,14 @@ may not use your changes for anything else.
    item 4 applies to it. Using an AI system to read, explain or check
    the code, or to prepare a contribution under "Contributing", is
    allowed.
-6. Making money from the software: selling it or any work based on it,
+6. Using the source code, or any part of it, to train, fine-tune or
+   evaluate an AI system, or including it in a dataset made for that,
+   whether the AI system is for your own use, shared or sold.
+7. Making money from the software: selling it or any work based on it,
    charging for it or for access to it, offering it as a paid service,
    or bundling it with anything sold. Using the official software,
    unchanged, in your own work is not making money from it.
-7. Removing or changing this license, the Required Notice, or the
+8. Removing or changing this license, the Required Notice, or the
    licensor's other notices.
 
 ### Asking for permission

@@ -434,10 +434,10 @@ model, pointing at the vendor's official downloads.
 
 ## License
 
-Kagaz is source-available under the [Kagaz License 1.1.0](LICENSE) (KGZ-1.1.0: the Kagaz Additional Terms with the PolyForm Strict License 1.0.0). It is not open source.
+Kagaz is source-available under the [Kagaz License 1.2.0](LICENSE) (KGZ-1.2.0: the Kagaz Additional Terms with the PolyForm Strict License 1.0.0). It is not open source.
 
 - **Use:** anyone may use the official releases, or the code from this repository built without changes, for any purpose, at home or at work, free of charge.
 - **Contribute:** anyone may read the code, check it, and send changes back to this repository, under the [CLA](CLA.md).
-- **Not allowed without written permission:** passing on Kagaz or any build of it, changed or not; forks or other works based on it (except contributions here); copying its code into other software; translating or porting it to another language; giving its code to an AI agent or model to rewrite Kagaz, even "from scratch"; and making money from it. (Using AI to read, check or contribute to the code is fine. A rewrite by someone who never worked from this code is outside these terms.)
+- **Not allowed without written permission:** passing on Kagaz or any build of it, changed or not; forks or other works based on it (except contributions here); copying its code into other software; translating or porting it to another language; giving its code to an AI agent or model to rewrite Kagaz, even "from scratch"; using its code to train or fine-tune AI models, or in datasets for that; and making money from it. (Using AI to read, check or contribute to the code is fine. A rewrite by someone who never worked from this code is outside these terms.)
 
 To ask for permission, open an issue.

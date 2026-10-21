@@ -8,7 +8,7 @@ default-members = ["crates/kagaz-core", "crates/kagaz-cli"]
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-license = "LicenseRef-KGZ-1.1.0"
+license = "LicenseRef-KGZ-1.2.0"
 repository = "https://github.com/yagyaanshK/kagaz"
 authors = ["Yagyaansh Khaneja"]
 
