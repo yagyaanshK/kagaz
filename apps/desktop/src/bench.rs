@@ -71,6 +71,8 @@ pub struct View {
     size: Option<u64>,
     warning: Option<String>,
     notes: Vec<String>,
+    /// What the tool made, when worth saying (a sheet's copies).
+    said: Option<String>,
     can_undo: bool,
 }
 
@@ -115,6 +117,7 @@ fn view(b: &Bench, page: usize, frames: Vec<Frame>, notes: Vec<String>, with_bef
         size,
         warning,
         notes,
+        said: None,
         can_undo: b.before.is_some(),
     })
 }
@@ -221,8 +224,11 @@ pub async fn bench_crop(
     work(app, bench, move |b| {
         step(b);
         let p = b.current.get(page).ok_or("no such page")?;
-        b.current[page] = tools::crop(p, &shape, mode, paper.unwrap_or(Paper::A4), size_mm);
-        view(b, page, Vec::new(), Vec::new(), false)
+        let (cropped, note) = tools::crop(p, &shape, mode, paper.unwrap_or(Paper::A4), size_mm);
+        b.current[page] = cropped;
+        let mut v = view(b, page, Vec::new(), Vec::new(), false)?;
+        v.said = note;
+        Ok(v)
     })
     .await
 }
