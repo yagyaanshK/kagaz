@@ -129,36 +129,49 @@ async fn scan(
             let _ = app.emit("scan-progress", &event);
         })
         .map_err(|e| e.to_string())?;
-        let written = output::write(
-            &pages,
-            &OutputOptions {
-                format: output.format,
-                color: output.color,
-                quality: output.quality,
-                max_bytes: output.max_bytes,
-            },
-            &PathBuf::from(path),
-        )
-        .map_err(|e| e.to_string())?;
-        #[cfg(mobile)]
-        let written = written
-            .into_iter()
-            .map(|mut w| {
-                w.path = PathBuf::from(mobile::publish(&app, &w.path)?);
-                Ok(w)
-            })
-            .collect::<Result<Vec<_>, String>>()?;
-        Ok(written
-            .into_iter()
-            .map(|w| WrittenFile {
-                path: w.path.display().to_string(),
-                bytes: w.bytes,
-                pages: w.pages,
-                warning: w.warning,
-            })
-            .collect())
+        write_scan(&app, &pages, &output, path)
     })
     .await
+}
+
+/// Write scanned pages as the person chose (PDF, JPEG, PNG; on a phone,
+/// then into Downloads/Kagaz).
+fn write_scan(
+    app: &AppHandle,
+    pages: &[kagaz_core::scan::Page],
+    output: &OutputRequest,
+    path: String,
+) -> Result<Vec<WrittenFile>, String> {
+    let written = output::write(
+        pages,
+        &OutputOptions {
+            format: output.format,
+            color: output.color,
+            quality: output.quality,
+            max_bytes: output.max_bytes,
+        },
+        &PathBuf::from(path),
+    )
+    .map_err(|e| e.to_string())?;
+    #[cfg(mobile)]
+    let written = written
+        .into_iter()
+        .map(|mut w| {
+            w.path = PathBuf::from(mobile::publish(app, &w.path)?);
+            Ok(w)
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    #[cfg(not(mobile))]
+    let _ = app;
+    Ok(written
+        .into_iter()
+        .map(|w| WrittenFile {
+            path: w.path.display().to_string(),
+            bytes: w.bytes,
+            pages: w.pages,
+            warning: w.warning,
+        })
+        .collect())
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -1289,6 +1302,7 @@ pub fn run() {
         })
         .manage(doorbell::DoorbellState::new())
         .manage(printing::CopyState::default())
+        .manage(printing::IdState::default())
         .manage(calls::CallsState::default())
         .manage(onetouch::OneTouchState::default())
         .manage(media::Watches::default())
@@ -1382,6 +1396,10 @@ pub fn run() {
             printing::copy_scan,
             printing::copy_print,
             printing::copy_discard,
+            printing::id_scan_side,
+            printing::id_page,
+            printing::id_save,
+            printing::id_to_copy,
             onetouch::onetouch_status,
             onetouch::onetouch_login,
             onetouch::onetouch_logout,

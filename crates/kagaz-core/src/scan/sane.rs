@@ -231,8 +231,7 @@ pub fn choose(
     }
 
     if let Some((w, h)) = req
-        .paper
-        .size_mils()
+        .area_mils()
         .map(|(w, h)| (w as f32 * 25.4 / 1000.0, h as f32 * 25.4 / 1000.0))
     {
         let w = caps.max_width_mm.map(|m| w.min(m)).unwrap_or(w);

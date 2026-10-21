@@ -388,9 +388,28 @@
     });
   }
 
+  // ID card or passport page: both sides on one page, printed at real size.
+  const copyId = KagazId.attach({
+    form: $("copy-form"),
+    kind: "copy",
+    device: () => device,
+    request: () => ({ ...copySettings().scan, source: "Glass", half_page: true }),
+    finish: {
+      label: "Print",
+      run: async () => {
+        const s = copySettings();
+        await invoke("id_to_copy");
+        order = [0];
+        thumbs = new Map();
+        const sent = await printPages([0], { ...s, fit: "ActualSize", print: { ...s.print, sides: "OneSided" } });
+        return "Sent: " + sent.label;
+      },
+    },
+  });
+
   $("copy-form").addEventListener("submit", async (ev) => {
     ev.preventDefault();
-    if (busy || !device) return;
+    if (busy || !device || copyId.active()) return;
     $("copy-log").innerHTML = "";
     $("copy-pages").classList.add("hidden");
     copyBusy(true, "Scanning…");
@@ -507,6 +526,7 @@
   // ---------- the device page ----------
 
   document.addEventListener("kagaz-device", (e) => {
+    copyId.reset();
     device = e.detail.device;
     deviceIndex = e.detail.index;
     $("print-log").innerHTML = "";

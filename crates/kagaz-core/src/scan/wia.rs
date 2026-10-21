@@ -8,7 +8,7 @@
 //! Building the scripts and reading their answers is plain text work and
 //! is tested on every platform; running them needs Windows.
 
-use super::{ColorMode, Paper, ScanError, ScanRequest, Source};
+use super::{ColorMode, ScanError, ScanRequest, Source};
 use crate::Device;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -256,10 +256,7 @@ pub fn choose(caps: &WiaCaps, req: &ScanRequest) -> Result<Choice, ScanError> {
         dpi,
         intent,
         handling,
-        size_mils: match req.paper {
-            Paper::Max => None,
-            p => p.size_mils(),
-        },
+        size_mils: req.area_mils(),
         png: req.color == ColorMode::BlackWhite,
     })
 }
@@ -481,6 +478,7 @@ pub use run::{available, capabilities, list_devices, scan};
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::scan::Paper;
 
     #[test]
     fn reads_the_device_list() {
@@ -550,6 +548,7 @@ mod tests {
             color: ColorMode::Gray,
             paper: Paper::A4,
             engine: crate::scan::Engine::Driver,
+            half_page: false,
         };
         let c = choose(&caps, &req).unwrap();
         assert_eq!((c.dpi, c.intent, c.handling), (300, INTENT_GRAY, FLATBED));

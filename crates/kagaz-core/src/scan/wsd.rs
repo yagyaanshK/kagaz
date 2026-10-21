@@ -274,7 +274,7 @@ impl WsdScanner {
                 ))
             })?;
 
-        let (width, height) = match req.paper.size_mils() {
+        let (width, height) = match req.area_mils() {
             Some((w, h)) => (w.min(caps.max_width), h.min(caps.max_height)),
             None => (caps.max_width, caps.max_height),
         };
