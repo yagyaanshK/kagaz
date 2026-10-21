@@ -80,6 +80,11 @@ const KagazBench = (() => {
           <label class="switch"><input type="radio" name="${bench}-crop-mode" value="Area" checked> Just the cropped area, at its real size</label>
           <label class="switch"><input type="radio" name="${bench}-crop-mode" value="FillPage"> Enlarge it to fill the page, without stretching</label>
           <label class="switch"><input type="radio" name="${bench}-crop-mode" value="KeepPage"> Keep the whole page, white outside the frame</label>
+          <label class="switch"><input type="radio" name="${bench}-crop-mode" value="Sheet"> Fill a sheet with copies, with lines to cut along (passport photos)</label>
+          <div class="bench-row bench-sheet hidden">
+            <label>On <select class="bench-sheet-paper"><option value="A4">A4</option><option value="Letter">Letter</option><option value="Photo4x6">4 × 6 in photo paper</option></select></label>
+            <label>Copies <select class="bench-sheet-copies"><option value="">As many as fit</option>${[1, 2, 4, 6, 8, 10, 12, 16, 20, 24, 30].map((n) => `<option value="${n}">${n}</option>`).join("")}</select></label>
+          </div>
         </fieldset>
         <div class="actions"><button type="button" class="bench-crop-go accent">Crop</button></div>
       </div>
@@ -123,6 +128,7 @@ const KagazBench = (() => {
       q(".bench-undo").disabled = !v.can_undo;
       if (v.size != null) say(`About ${human(v.size)} as ${q(".bench-format").selectedOptions[0].text}.${v.warning ? " " + v.warning : ""}`, v.warning ? "cap-warn" : "cap-ok");
       else if (v.notes && v.notes.length) say(v.notes.join(" "), "cap-warn");
+      else if (v.said) say(v.said, "cap-ok");
     }
 
     // Run a bench command, showing what it gives back.
@@ -182,6 +188,9 @@ const KagazBench = (() => {
       if (chosen && cropCrop) cropCrop.setRatio(chosen.ratio);
     }
     q(".bench-shape").addEventListener("change", applyShape);
+    // A sheet's paper and copies, shown only for a sheet.
+    box.querySelectorAll(`input[name="${bench}-crop-mode"]`).forEach((r) => r.addEventListener("change", () =>
+      q(".bench-sheet").classList.toggle("hidden", q(`input[name="${bench}-crop-mode"]:checked`).value !== "Sheet")));
     for (const sel of [".bench-custom-w", ".bench-custom-h", ".bench-custom-unit"]) q(sel).addEventListener("change", applyShape);
 
     // One tool's panel open at a time.
@@ -240,7 +249,11 @@ const KagazBench = (() => {
       const [shape] = cropCrop.quads();
       const chosen = shapeChosen();
       if (!chosen) return say("Give the shape a width and a height above zero.", "cap-warn");
-      const mode = q(`input[name="${bench}-crop-mode"]:checked`).value;
+      let mode = q(`input[name="${bench}-crop-mode"]:checked`).value;
+      if (mode === "Sheet") {
+        const copies = q(".bench-sheet-copies").value;
+        mode = { Sheet: { paper: q(".bench-sheet-paper").value, copies: copies ? Number(copies) : null } };
+      }
       const v = await run("bench_crop", { shape, mode, paper: paper(), sizeMm: chosen.mm }, "Cropping…");
       if (v) open("crop"); // closes the panel
     });
