@@ -311,6 +311,7 @@ async function select(i) {
   $("d-title").textContent = title(d);
   $("d-sub").textContent = [d.manufacturer, d.model, where(d)].filter(Boolean).join(" · ");
   showSavedButton(d);
+  scanId.reset();
   $("scan-log").innerHTML = "";
   $("scan-state").textContent = "";
   showTab("about");
@@ -555,9 +556,40 @@ listen("scan-progress", (e) => {
   log(text, cls);
 });
 
+// ID card or passport page: both sides on one page, saved as a scan is.
+const scanId = KagazId.attach({
+  form: $("scan-form"),
+  kind: "scan",
+  device: () => devices[current],
+  request: () => {
+    const f = new FormData($("scan-form"));
+    return { source: "Glass", dpi: Number(f.get("dpi")), color: f.get("color"), paper: f.get("paper"), engine: f.get("engine"), half_page: true };
+  },
+  finish: {
+    label: "Save…",
+    run: async () => {
+      const f = new FormData($("scan-form"));
+      const format = f.get("format");
+      const ext = { Pdf: "pdf", Jpeg: "jpg", Png: "png" }[format];
+      const suggested = await invoke("default_scan_name", { extension: ext });
+      const path = await invoke("choose_save_path", { suggestedName: suggested, extension: ext });
+      if (!path) return "";
+      const written = await invoke("id_save", {
+        output: { format, color: f.get("color"), quality: null, max_bytes: f.get("max") ? Number(f.get("max")) : null },
+        path,
+      });
+      for (const w of written) {
+        log(`Saved ${w.path} (${human(w.bytes)})`, "ok");
+        if (w.warning) log("Warning: " + w.warning, "warn");
+      }
+      return written.length ? `Saved ${written[0].path}` : "";
+    },
+  },
+});
+
 $("scan-form").addEventListener("submit", async (ev) => {
   ev.preventDefault();
-  if (current === null) return;
+  if (current === null || scanId.active()) return;
   const d = devices[current];
   const f = new FormData(ev.target);
   const format = f.get("format");

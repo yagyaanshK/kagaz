@@ -212,7 +212,7 @@ impl EsclScanner {
             })?;
         // Paper sizes are kept in 1/1000 inch; eSCL wants 1/300 inch.
         let to300 = |mils: u32| (mils as u64 * 300 / 1000) as u32;
-        let (width, height) = match req.paper.size_mils() {
+        let (width, height) = match req.area_mils() {
             Some((w, h)) => (to300(w), to300(h)),
             None => (caps.max_width, caps.max_height),
         };

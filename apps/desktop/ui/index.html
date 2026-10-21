@@ -414,7 +414,7 @@
             <label>Copies
               <input name="copies" type="number" min="1" max="999" value="1">
             </label>
-            <label>Sides
+            <label class="no-id">Sides
               <select name="sides">
                 <option value="OneSided">one side</option>
                 <option value="TwoSidedLongEdge">both sides, turn like a book</option>
@@ -463,7 +463,7 @@
               </select>
               <small id="engine-note" class="muted"></small>
             </label>
-            <label>Paper is
+            <label class="no-id">Paper is
               <figure class="pic" id="pic-source"></figure>
               <select name="source">
                 <option value="Auto">in the feeder if loaded, else on the glass</option>
@@ -535,7 +535,7 @@
         <p id="copy-unavailable" class="muted hidden"></p>
         <form id="copy-form">
           <div class="grid">
-            <label>Originals are
+            <label class="no-id">Originals are
               <select name="source">
                 <option value="Auto">in the feeder if loaded, else on the glass</option>
                 <option value="Glass">on the glass</option>
@@ -564,7 +564,7 @@
                 <option value="Legal">Legal</option>
               </select>
             </label>
-            <label>Size
+            <label class="no-id">Size
               <select name="fit">
                 <option value="ActualSize">same size as the original</option>
                 <option value="FitToPage">fill the paper</option>
@@ -621,6 +621,7 @@
   <script src="pictures.js"></script>
   <script src="timeline.js"></script>
   <script src="player.js"></script>
+  <script src="idscan.js"></script>
   <script src="app.js"></script>
   <script src="printing.js"></script>
   <script src="onetouch.js"></script>

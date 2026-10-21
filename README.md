@@ -237,6 +237,14 @@ the next time, with how it is: Ready, Printing, Needs attention (in the
 printer's own words, such as "out of paper") or Offline. A search still
 runs alongside, lists new printers under **Found nearby**, and catches a
 printer that the router has given a new address.
+
+Scan and Copy can also take **both sides of an ID card or a passport page
+on one page**, as a printer's 2-in-1 ID copy does, for any scanner Kagaz
+reaches, including ones whose panel offers ID copy only for copying. Put the
+card face down in the half of the glass by its corner mark and scan the
+front; turn it over in the same place and scan the back. The page has the
+front's half above the back's, each just where it lay; Scan saves it (PDF,
+JPEG or PNG), Copy prints it at real size.
 Wide windows have a sidebar; phones a bottom bar.
 
 On a phone, Kagaz keeps listening for doorbell calls after you close it,

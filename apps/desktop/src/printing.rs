@@ -8,7 +8,7 @@ use base64::Engine as _;
 use kagaz_core::ipp::status::PrinterStatus;
 use kagaz_core::print::system::{self, Queue};
 use kagaz_core::print::{Fit, PrintRequest};
-use kagaz_core::scan::{Page, ScanRequest};
+use kagaz_core::scan::{Page, Paper, ScanRequest, Source};
 use kagaz_core::Device;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -302,6 +302,118 @@ pub async fn copy_print(
 #[tauri::command]
 pub fn copy_discard(state: State<'_, CopyState>) {
     state.pages.lock().unwrap().clear();
+}
+
+// ---------- ID scan and ID copy ----------
+//
+// Both sides of an ID card or a passport page on one page, as a printer's
+// "2 in 1 ID copy" makes it: the front is a scan of the top half of the
+// glass, the back (turned over, same place) another, and the page is the
+// front's half above the back's (kagaz_core::scan::id). The Scan tab saves
+// that page; the Copy tab prints it.
+
+/// The two sides scanned so far, and the page made from them.
+#[derive(Default)]
+pub struct IdState {
+    sides: Mutex<[Option<Page>; 2]>,
+    sheet: Mutex<Option<Page>>,
+}
+
+/// Scan one side (0 the front, 1 the back): the top half of the glass.
+/// Scanning the front again starts over.
+#[tauri::command]
+pub async fn id_scan_side(
+    app: AppHandle,
+    state: State<'_, IdState>,
+    device: Device,
+    mut request: ScanRequest,
+    side: usize,
+    copy: bool,
+) -> Result<Thumb, String> {
+    if side > 1 {
+        return Err("an ID has two sides".into());
+    }
+    request.source = Source::Glass;
+    request.half_page = true;
+    if request.paper == Paper::Max {
+        request.paper = Paper::A4;
+    }
+    let channel = if copy { "copy-progress" } else { "scan-progress" };
+    let page = blocking(move || {
+        let pages = kagaz_core::scan::scan(&device, &request, &mut |e| {
+            if copy {
+                emit(&app, channel, Progress::Scan(e))
+            } else {
+                let _ = app.emit(channel, &e);
+            }
+        })
+        .map_err(|e| e.to_string())?;
+        pages
+            .into_iter()
+            .next()
+            .ok_or_else(|| "the scanner sent no picture".to_string())
+    })
+    .await?;
+    let (src, width, height) = thumbnail(&page)?;
+    let dpi = page.dpi;
+    let mut sides = state.sides.lock().unwrap();
+    if side == 0 {
+        sides[1] = None;
+    }
+    sides[side] = Some(page);
+    *state.sheet.lock().unwrap() = None;
+    Ok(Thumb { index: side, src, width, height, dpi })
+}
+
+/// Put the two sides on one page; a preview of it.
+#[tauri::command]
+pub async fn id_page(state: State<'_, IdState>, paper: Paper) -> Result<Thumb, String> {
+    let (front, back) = {
+        let sides = state.sides.lock().unwrap();
+        match (&sides[0], &sides[1]) {
+            (Some(f), Some(b)) => (f.clone(), b.clone()),
+            (None, _) => return Err("scan the front first".into()),
+            (_, None) => return Err("scan the back first".into()),
+        }
+    };
+    let paper = if paper == Paper::Max { Paper::A4 } else { paper };
+    let sheet = blocking(move || kagaz_core::scan::id::page(&front, &back, paper)).await?;
+    let (src, width, height) = thumbnail(&sheet)?;
+    let dpi = sheet.dpi;
+    *state.sheet.lock().unwrap() = Some(sheet);
+    Ok(Thumb { index: 0, src, width, height, dpi })
+}
+
+/// Save the ID page (Scan tab), as a scan is saved.
+#[tauri::command]
+pub async fn id_save(
+    app: AppHandle,
+    state: State<'_, IdState>,
+    output: super::OutputRequest,
+    path: String,
+) -> Result<Vec<super::WrittenFile>, String> {
+    let sheet = state
+        .sheet
+        .lock()
+        .unwrap()
+        .clone()
+        .ok_or_else(|| "scan both sides first".to_string())?;
+    blocking(move || super::write_scan(&app, &[sheet], &output, path)).await
+}
+
+/// The ID page becomes the copy's one page (Copy tab), ready to print.
+#[tauri::command]
+pub fn id_to_copy(id: State<'_, IdState>, copy: State<'_, CopyState>) -> Result<Vec<Thumb>, String> {
+    let sheet = id
+        .sheet
+        .lock()
+        .unwrap()
+        .clone()
+        .ok_or_else(|| "scan both sides first".to_string())?;
+    let (src, width, height) = thumbnail(&sheet)?;
+    let dpi = sheet.dpi;
+    *copy.pages.lock().unwrap() = vec![sheet];
+    Ok(vec![Thumb { index: 0, src, width, height, dpi }])
 }
 
 /// The phone's print dialog: the document becomes a PDF that Android's

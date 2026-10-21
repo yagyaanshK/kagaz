@@ -3,6 +3,7 @@
 
 pub mod button_settings;
 pub mod escl;
+pub mod id;
 pub mod multipart;
 pub mod sane;
 pub mod vendor;
@@ -72,6 +73,20 @@ pub struct ScanRequest {
     pub paper: Paper,
     #[serde(default)]
     pub engine: Engine,
+    /// Only the top half of the page, the half by the glass's corner mark:
+    /// one side of an ID card or a passport page, as a printer's ID copy
+    /// scans it (see [`id`]). No effect with [`Paper::Max`].
+    #[serde(default)]
+    pub half_page: bool,
+}
+
+impl ScanRequest {
+    /// What to scan from the glass's corner, in 1/1000 inch: the paper, or
+    /// its top half. None: as much as the device takes.
+    pub fn area_mils(&self) -> Option<(u32, u32)> {
+        let (w, h) = self.paper.size_mils()?;
+        Some(if self.half_page { (w, h / 2) } else { (w, h) })
+    }
 }
 
 impl Default for ScanRequest {
@@ -82,6 +97,7 @@ impl Default for ScanRequest {
             color: ColorMode::Color,
             paper: Paper::A4,
             engine: Engine::Driverless,
+            half_page: false,
         }
     }
 }
