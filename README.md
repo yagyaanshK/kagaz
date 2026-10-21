@@ -297,7 +297,8 @@ a new source, such as a camera, only adds a button.
 On **Ceiling fans**, the fans you added show at once, by room, each with
 how it was last seen; a look around runs alongside and the ones within
 reach get their controls: Turn on and off, the speed, the light (on fans
-that have one), Sleep and a timer. A fan that does not answer stays listed
+that have one), Sleep and a timer. A timer shows as a countdown on the
+card and on Home; when it ends, Kagaz asks the fan how it is. A fan that does not answer stays listed
 as out of reach rather than vanishing. **Found nearby** lists the fans
 within reach that are not added yet; **Add** asks for a name and a room.
 **Rearrange** makes, renames and removes rooms, and moves fans between

@@ -69,7 +69,13 @@ with the commit that closes them.
 - [x] **Commands checked on the Aris** (2026-10-21): power, speeds, Boost
       on/off, light, colours, brightness 50/100. Sleep and timer are taken
       and reported back.
-- [ ] **What Sleep and the timer do over time**: both are taken by the Aris
+- [x] **The timer switches the fan off** (2026-10-22): a 1-hour timer set
+      from the window switched an Aris off an hour later. The fan reports
+      only whole hours left, so Kagaz keeps the moment the timer ends and
+      shows a countdown on the card and on Home; when it is up, the page
+      asks the fan how it is (or does so when next opened). A timer set with
+      a remote shows as an estimate ("about").
+- [ ] **What Sleep does over time** (the timer part is done, above): both are taken by the Aris
       and the Efficio (the Efficio blinks its indicator to confirm), but the
       state shows whole hours left with no countdown, and the known timer
       takes only 1, 2, 3 or 6 h. The Efficio's remote has Sleep and Timer

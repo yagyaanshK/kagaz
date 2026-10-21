@@ -68,6 +68,46 @@ const KagazFans = (() => {
     return parts.length === 1 ? parts[0] : `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
   }
 
+  // The fan's own timer: the fan reports only whole hours left, so Kagaz
+  // keeps the moment it ends (timer_until, seconds since the epoch;
+  // estimated when the timer was set with a remote).
+  function timerLeft(f) {
+    const s = f.last_state;
+    if (!f.timer_until || !s || !s.power) return null;
+    return f.timer_until - Date.now() / 1000;
+  }
+  function clock(seconds) {
+    const t = Math.max(0, Math.ceil(seconds));
+    const h = Math.floor(t / 3600), m = Math.floor(t / 60) % 60, sec = t % 60;
+    const two = (n) => String(n).padStart(2, "0");
+    return h ? `${h}:${two(m)}:${two(sec)}` : `${m}:${two(sec)}`;
+  }
+  function countdownText(f) {
+    const left = timerLeft(f);
+    if (left === null) return "";
+    if (left > 0) return `Turns off in ${f.timer_estimated ? "about " : ""}${clock(left)}`;
+    return "Timer done; checking the fan…";
+  }
+  // Asked once per timer that ended, so a fan out of reach is not asked
+  // again and again.
+  const timerChecked = new Set();
+  function tick() {
+    if ($("fans").classList.contains("hidden")) return;
+    for (const el of document.querySelectorAll(".fan-countdown")) {
+      const f = data.fans.find((x) => x.id === el.dataset.id);
+      if (!f) continue;
+      el.textContent = countdownText(f);
+      const left = timerLeft(f);
+      // A little after the moment, so the fan has switched itself off.
+      const key = `${f.id}@${f.timer_until}`;
+      if (left !== null && left < -15 && !timerChecked.has(key) && !busy.has(f.id)) {
+        timerChecked.add(key);
+        readOne(f.id);
+      }
+    }
+  }
+  setInterval(tick, 1000);
+
   // How a fan stands, from what is known and whether it answered.
   function standing(f, here) {
     const s = f.last_state;
@@ -81,7 +121,9 @@ const KagazFans = (() => {
   // What Home says about a fan, with no scan: what was seen last.
   function homeWords(f) {
     const w = f.last_state ? words(f.last_state) : "Not reached yet";
-    return [f.room, w].filter(Boolean).join(" · ");
+    const left = timerLeft(f);
+    const t = left !== null && left > 0 ? `turns off in ${f.timer_estimated ? "about " : ""}${Math.ceil(left / 60)} min` : "";
+    return [f.room, w, t].filter(Boolean).join(" · ");
   }
 
   // ---------- commands ----------
@@ -120,7 +162,10 @@ const KagazFans = (() => {
     const icon = el("span", "fan-icon");
     icon.innerHTML = FAN_ICON;
     const text = el("div", "fan-text");
-    text.append(el("strong", "fan-name", f.name), el("span", "muted small fan-standing", standing(f, here)));
+    const countdown = el("span", "small fan-countdown", countdownText(f));
+    countdown.dataset.id = f.id;
+    countdown.setAttribute("role", "timer");
+    text.append(el("strong", "fan-name", f.name), el("span", "muted small fan-standing", standing(f, here)), countdown);
     head.append(icon, text);
     if (!arranging) {
       const toggle = button("icon fan-more-btn", "⋯", () => {
@@ -517,6 +562,12 @@ const KagazFans = (() => {
       $("fans-note").textContent = String(e);
     }
     render();
+    // A timer that ended while this page was closed: ask those fans how
+    // they are now, one at a time.
+    for (const f of data.fans.filter((x) => (timerLeft(x) ?? 1) < 0)) {
+      timerChecked.add(`${f.id}@${f.timer_until}`);
+      await readOne(f.id);
+    }
     // The saved fans show at once; a look around runs alongside (again
     // only after a couple of minutes).
     if (Date.now() - lastScan > 2 * 60 * 1000) rescan();

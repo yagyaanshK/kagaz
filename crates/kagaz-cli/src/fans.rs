@@ -385,6 +385,10 @@ pub fn fan(which: &str, action: FanAction) -> Result<()> {
         fans::send(&fan, &command).with_context(|| format!("could not reach {}", fan.name))?;
     update(|f| {
         f.note_state(&fan.id, &state, reach.label());
+        if let FanCommand::Timer(i) = command {
+            let hours = TIMER_HOURS.get(i as usize).copied().unwrap_or(0);
+            f.note_timer(&fan.id, hours, kagaz_core::fans::store::now());
+        }
         Ok(())
     })?;
     let how = match reach {
