@@ -213,9 +213,10 @@ pub fn span_words(seconds: u64) -> String {
 ///
 /// Checked on an Aris on 2026-10-21, over one connection, watching the fan:
 /// power, speed 1 to 5, speed 6 (Boost), boost on and off (off returns to
-/// speed 5), led, light_mode warm/cool/daylight, brightness 10 to 100 in
-/// steps of 10 (each a visible step; the remote's own steps are coarser,
-/// 10, 25, …).
+/// speed 5), led, light_mode warm/cool/daylight, brightness any whole
+/// value 10 to 100 (stored exactly; steps of 2 or more are visible; the
+/// remote's own steps are coarser: 10, 25, ...). A timer index outside
+/// 0 to 4 (5 was tried) cancels the timer, as 0 does.
 /// The fan takes sleep and timer and reports them back, and an Efficio
 /// confirms each with an animation of its indicator light; what Sleep does
 /// through the night, and the timer switching the fan off, are not yet

@@ -75,8 +75,12 @@ with the commit that closes them.
       takes only 1, 2, 3 or 6 h. Set "Turn off after: 1 h" and see the fan
       switch off an hour later; leave Sleep on overnight.
 - [x] **Brightness levels** (2026-10-21): the remote steps 10, 25, …, but
-      the fan takes any value Kagaz sent from 10 to 100 in steps of 10 and
-      shows each as a visible step. Finer steps are untried.
+      the fan stores any whole value from 10 to 100 and shows a change of
+      2 or more (30 to 31 was too close to tell). The card's slider moves
+      in single steps.
+- [x] **Short timer** (2026-10-21): none known. Timer index 5 (outside the
+      known 0 to 4) cancels the timer, as 0 does; the app's analysis may
+      still show another way.
 - [ ] **Renesa**: needs a power cycle at the wall before Kagaz can reach it.
 - [ ] **Read the Atomberg phone app** (later, as asked 2026-10-21): every
       command it can send, to learn whether the firmware has a finer speed
