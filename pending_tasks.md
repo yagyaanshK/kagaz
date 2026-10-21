@@ -72,8 +72,11 @@ with the commit that closes them.
 - [ ] **What Sleep and the timer do over time**: both are taken by the Aris
       and the Efficio (the Efficio blinks its indicator to confirm), but the
       state shows whole hours left with no countdown, and the known timer
-      takes only 1, 2, 3 or 6 h. Set "Turn off after: 1 h" and see the fan
-      switch off an hour later; leave Sleep on overnight.
+      takes only 1, 2, 3 or 6 h. The Efficio's remote has Sleep and Timer
+      buttons (the Aris's has neither): set them with that remote and read
+      the state, to learn the remote's timer lengths. Then set "Turn off
+      after: 1 h" and see the fan switch off an hour later; leave Sleep on
+      overnight.
 - [x] **Brightness levels** (2026-10-21): the remote steps 10, 25, …, but
       the fan stores any whole value from 10 to 100 and shows a change of
       2 or more (30 to 31 was too close to tell). The card's slider moves

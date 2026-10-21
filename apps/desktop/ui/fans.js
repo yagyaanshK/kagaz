@@ -224,7 +224,7 @@ const KagazFans = (() => {
     }
     const sleep = !!(s && s.sleep);
     const sb = button("chip" + (sleep ? " active" : ""), "Sleep", () => send(f, { kind: "sleep", value: !sleep }, c), `Sleep mode of ${f.name}: turn ${sleep ? "off" : "on"}`);
-    sb.title = "Sleep mode: the fan takes it, though its remote has no button (an Efficio blinks its indicator to confirm); what it does through the night is not yet known";
+    sb.title = "Sleep mode: the fan's own feature (on some remotes, such as the Efficio's; the Aris's remote has no button for it); what it does through the night is not yet known";
     sb.setAttribute("aria-pressed", String(sleep));
     extras.appendChild(sb);
     const timer = el("label", "fan-timer", "Turn off after ");
