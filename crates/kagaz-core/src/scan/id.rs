@@ -170,12 +170,16 @@ fn whiten_outside_card(img: &mut RgbImage, dpi: u32) -> bool {
     let Some((x0, y0, x1, y1)) = find_card(img, dpi) else {
         return false;
     };
-    for (x, y, p) in img.enumerate_pixels_mut() {
-        if x < x0 || x > x1 || y < y0 || y > y1 {
-            *p = Rgb([255, 255, 255]);
-        }
-    }
+    let (w, h) = (img.width() as f32, img.height() as f32);
+    let (l, t, r, b) = (x0 as f32 / w, y0 as f32 / h, (x1 + 1) as f32 / w, (y1 + 1) as f32 / h);
+    whiten_outside(img, &[vec![[l, t], [r, t], [r, b], [l, b]]], corner_radius(dpi));
     true
+}
+
+/// A card's corner, rounded: ID cards (ID-1) and passport pages have
+/// corners of about 3.18 mm radius. In pixels at `dpi`.
+pub fn corner_radius(dpi: u32) -> f32 {
+    dpi as f32 * 3.18 / 25.4
 }
 
 /// The card's box (left, top, right, bottom, in pixels): whatever is clearly
@@ -254,20 +258,59 @@ pub fn find_cards(img: &RgbImage, dpi: u32) -> Vec<(Quad, bool)> {
         .collect()
 }
 
-/// White everywhere outside the outlines; with none, all white.
-pub fn whiten_outside(img: &mut RgbImage, quads: &[Quad]) {
+/// An outline as the person shapes it: points in order around the card,
+/// as fractions of the picture (0 to 1). Four are its corners; eight are
+/// corner, side's middle, corner, ... (a side bends through its middle, for
+/// a passport page that bows).
+pub type Shape = Vec<[f32; 2]>;
+
+/// The outline in pixels, its corners rounded by `radius` pixels: each
+/// corner is cut by a curve between the points `radius` along its two sides.
+fn rounded(shape: &[[f32; 2]], w: f32, h: f32, radius: f32) -> Vec<(f32, f32)> {
+    let pts: Vec<(f32, f32)> = shape.iter().map(|p| (p[0] * w, p[1] * h)).collect();
+    let n = pts.len();
+    // With eight points the corners are every other one; with four, all.
+    let corner = |i: usize| n != 8 || i % 2 == 0;
+    let mut out = Vec::with_capacity(n * 8);
+    for i in 0..n {
+        let c = pts[i];
+        if !corner(i) || radius <= 0.0 {
+            out.push(c);
+            continue;
+        }
+        let toward = |q: (f32, f32)| {
+            let (dx, dy) = (q.0 - c.0, q.1 - c.1);
+            let len = (dx * dx + dy * dy).sqrt().max(1e-3);
+            let k = radius.min(len / 2.0) / len;
+            (c.0 + dx * k, c.1 + dy * k)
+        };
+        let (a, b) = (toward(pts[(i + n - 1) % n]), toward(pts[(i + 1) % n]));
+        for step in 0..=6 {
+            let t = step as f32 / 6.0;
+            let (u, v, z) = ((1.0 - t) * (1.0 - t), 2.0 * (1.0 - t) * t, t * t);
+            out.push((u * a.0 + v * c.0 + z * b.0, u * a.1 + v * c.1 + z * b.1));
+        }
+    }
+    out
+}
+
+/// White everywhere outside the outlines, their corners rounded by
+/// `radius` pixels; with none, all white.
+pub fn whiten_outside(img: &mut RgbImage, shapes: &[Shape], radius: f32) {
     let (w, h) = img.dimensions();
-    let (fw, fh) = (w as f32, h as f32);
+    let polygons: Vec<Vec<(f32, f32)>> =
+        shapes.iter().filter(|s| s.len() >= 3).map(|s| rounded(s, w as f32, h as f32, radius)).collect();
     let mut spans: Vec<(f32, f32)> = Vec::new();
     for y in 0..h {
         // Where this row (through the pixels' middles) is inside an outline.
         let row = y as f32 + 0.5;
         spans.clear();
-        for q in quads {
-            let mut xs: Vec<f32> = Vec::with_capacity(4);
-            for i in 0..4 {
-                let (ax, ay) = (q[i][0] * fw, q[i][1] * fh);
-                let (bx, by) = (q[(i + 1) % 4][0] * fw, q[(i + 1) % 4][1] * fh);
+        for poly in &polygons {
+            let mut xs: Vec<f32> = Vec::new();
+            let n = poly.len();
+            for i in 0..n {
+                let (ax, ay) = poly[i];
+                let (bx, by) = poly[(i + 1) % n];
                 if (ay <= row && row < by) || (by <= row && row < ay) {
                     xs.push(ax + (row - ay) * (bx - ax) / (by - ay));
                 }
@@ -289,9 +332,9 @@ pub fn whiten_outside(img: &mut RgbImage, quads: &[Quad]) {
 }
 
 /// Tidy with outlines the person set (in place of Find the card's own),
-/// then Clean background if asked.
-pub fn tidy_outlined(img: &mut RgbImage, quads: &[Quad], background: bool) {
-    whiten_outside(img, quads);
+/// corners rounded as a card's, then Clean background if asked.
+pub fn tidy_outlined(img: &mut RgbImage, shapes: &[Shape], dpi: u32, background: bool) {
+    whiten_outside(img, shapes, corner_radius(dpi));
     if background {
         whiten_background(img);
     }
@@ -391,8 +434,10 @@ mod tests {
             &Rgb([90, 120, 160]),
             "the card stays"
         );
+        // Beside the card, within the margin, stays (the margin's very
+        // corner is rounded off, as a card's is).
         assert_eq!(
-            img.get_pixel(18, 13),
+            img.get_pixel(18, 30),
             &Rgb([214, 214, 210]),
             "within the margin stays"
         );
@@ -415,7 +460,7 @@ mod tests {
         let top = found[0].0;
         assert!(top[0][0] < 20.0 / 210.0 && top[1][0] > 106.0 / 210.0, "{top:?}");
         // Keep only the front (a one-sided ID): the back half goes white.
-        whiten_outside(&mut img, &[top]);
+        whiten_outside(&mut img, &[top.to_vec()], 0.0);
         assert_eq!(img.get_pixel(50, 40), &Rgb([90, 120, 160]));
         assert_eq!(img.get_pixel(150, 200), &Rgb([255, 255, 255]));
         assert_eq!(img.get_pixel(180, 100), &Rgb([255, 255, 255]));
@@ -425,10 +470,30 @@ mod tests {
     fn a_tilted_outline_keeps_what_is_inside_it() {
         let mut img = RgbImage::from_pixel(100, 100, Rgb([0, 0, 0]));
         // A diamond: the middle stays, the corners go white.
-        whiten_outside(&mut img, &[[[0.5, 0.1], [0.9, 0.5], [0.5, 0.9], [0.1, 0.5]]]);
+        whiten_outside(&mut img, &[vec![[0.5, 0.1], [0.9, 0.5], [0.5, 0.9], [0.1, 0.5]]], 0.0);
         assert_eq!(img.get_pixel(50, 50), &Rgb([0, 0, 0]));
         assert_eq!(img.get_pixel(5, 5), &Rgb([255, 255, 255]));
         assert_eq!(img.get_pixel(95, 95), &Rgb([255, 255, 255]));
+    }
+
+    #[test]
+    fn corners_are_rounded_and_a_side_bends_through_its_middle() {
+        // A 100 px square outline with 10 px corners: the very corner goes
+        // white, just inside it stays.
+        let mut img = RgbImage::from_pixel(120, 120, Rgb([0, 0, 0]));
+        let (a, b) = (10.0 / 120.0, 110.0 / 120.0);
+        whiten_outside(&mut img, &[vec![[a, a], [b, a], [b, b], [a, b]]], 10.0);
+        assert_eq!(img.get_pixel(10, 10), &Rgb([255, 255, 255]), "the corner is cut");
+        assert_eq!(img.get_pixel(16, 16), &Rgb([0, 0, 0]));
+        assert_eq!(img.get_pixel(60, 11), &Rgb([0, 0, 0]), "a side stays straight");
+
+        // Eight points: the top side's middle pulled up bows the top out.
+        let mut img = RgbImage::from_pixel(120, 120, Rgb([0, 0, 0]));
+        let m = 60.0 / 120.0;
+        let shape = vec![[a, a], [m, 2.0 / 120.0], [b, a], [b, m], [b, b], [m, b], [a, b], [a, m]];
+        whiten_outside(&mut img, &[shape], 0.0);
+        assert_eq!(img.get_pixel(60, 5), &Rgb([0, 0, 0]), "kept above the straight line");
+        assert_eq!(img.get_pixel(15, 5), &Rgb([255, 255, 255]));
     }
 
     #[test]

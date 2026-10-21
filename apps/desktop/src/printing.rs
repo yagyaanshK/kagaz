@@ -518,6 +518,8 @@ pub struct Tidied {
     original: String,
     /// With Find the card: an outline per card (each half of a page).
     outlines: Vec<Outline>,
+    /// A card's rounded corner, as a fraction of the page's width.
+    radius: f32,
     pages: usize,
     /// Where a card was not found (that part is left as it was).
     notes: Vec<String>,
@@ -577,6 +579,7 @@ pub async fn tidy_preview(path: String, tidy: kagaz_core::scan::id::Tidy) -> Res
         } else {
             Vec::new()
         };
+        let radius = kagaz_core::scan::id::corner_radius(first_dpi) / first_img.width().max(1) as f32;
         let original = data_url(&image::DynamicImage::ImageRgb8(first_img).thumbnail(2000, 2000), 85)?;
         *TIDY_SOURCE.lock().unwrap() = Some(pictures.clone());
         for (mut img, dpi) in pictures {
@@ -591,7 +594,7 @@ pub async fn tidy_preview(path: String, tidy: kagaz_core::scan::id::Tidy) -> Res
         let ((thumb, _, _), view) = thumb_and_view(first)?;
         let count = pages.len();
         *TIDIED.lock().unwrap() = Some(pages);
-        Ok(Tidied { thumb, view, original, outlines, pages: count, notes })
+        Ok(Tidied { thumb, view, original, outlines, radius, pages: count, notes })
     })
     .await
 }
@@ -601,7 +604,7 @@ pub async fn tidy_preview(path: String, tidy: kagaz_core::scan::id::Tidy) -> Res
 /// Returns its full-size view.
 #[tauri::command]
 pub async fn tidy_outlines(
-    outlines: Vec<kagaz_core::scan::id::Quad>,
+    outlines: Vec<kagaz_core::scan::id::Shape>,
     background: bool,
 ) -> Result<String, String> {
     let (mut img, dpi) = TIDY_SOURCE
@@ -611,7 +614,7 @@ pub async fn tidy_outlines(
         .and_then(|p| p.first().cloned())
         .ok_or_else(|| "choose a file to tidy first".to_string())?;
     blocking(move || {
-        kagaz_core::scan::id::tidy_outlined(&mut img, &outlines, background);
+        kagaz_core::scan::id::tidy_outlined(&mut img, &outlines, dpi, background);
         let view = data_url(&image::DynamicImage::ImageRgb8(img.clone()).thumbnail(2000, 2000), 85)?;
         let mut png = Vec::new();
         image::DynamicImage::ImageRgb8(img)
