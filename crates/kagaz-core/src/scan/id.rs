@@ -6,13 +6,33 @@
 
 use super::{ColorMode, Page, Paper};
 use image::{imageops, DynamicImage, ImageFormat, Rgb, RgbImage};
+use serde::Deserialize;
 use std::io::Cursor;
+
+/// Tidying the person may ask for; both off unless chosen.
+#[derive(Debug, Clone, Copy, Default, Deserialize)]
+pub struct Tidy {
+    /// The lid's off-white around the card becomes pure white; the card is
+    /// left as scanned.
+    #[serde(default)]
+    pub background: bool,
+    /// Find the card and make everything outside it white.
+    #[serde(default)]
+    pub card: bool,
+}
 
 /// The page: `front` in the top half, `back` in the bottom half, at the
 /// front's resolution. A side bigger than its half (a scanner that sent the
 /// whole glass) is cut to the half; a smaller one keeps its place at the
 /// top left, the glass's corner.
 pub fn page(front: &Page, back: &Page, paper: Paper) -> Result<Page, String> {
+    page_tidied(front, back, paper, Tidy::default()).map(|(p, _)| p)
+}
+
+/// [`page`], tidied as asked; with a note for each side whose card was not
+/// found (that side is left as scanned).
+pub fn page_tidied(front: &Page, back: &Page, paper: Paper, tidy: Tidy) -> Result<(Page, Vec<String>), String> {
+    let mut notes = Vec::new();
     let (w_mils, h_mils) = paper.size_mils().unwrap_or((8268, 11693));
     let dpi = front.dpi.max(1);
     let px = |mils: u32| ((mils as u64 * dpi as u64) / 1000) as u32;
@@ -28,7 +48,13 @@ pub fn page(front: &Page, back: &Page, paper: Paper) -> Result<Page, String> {
             let (w, h) = (img.width() as f64 * scale, img.height() as f64 * scale);
             img = img.resize_exact(w.round() as u32, h.round() as u32, imageops::FilterType::Triangle);
         }
-        let img = img.crop_imm(0, 0, img.width().min(width), img.height().min(half)).to_rgb8();
+        let mut img = img.crop_imm(0, 0, img.width().min(width), img.height().min(half)).to_rgb8();
+        if tidy.card && !whiten_outside_card(&mut img, dpi) {
+            notes.push(format!("The card on the {name} was not found clearly, so that side is as scanned."));
+        }
+        if tidy.background {
+            whiten_background(&mut img);
+        }
         imageops::replace(&mut sheet, &img, 0, top as i64);
     }
 
@@ -52,7 +78,88 @@ pub fn page(front: &Page, back: &Page, paper: Paper) -> Result<Page, String> {
         .map_err(|e| e.to_string())?;
         "image/jpeg"
     };
-    Ok(Page { data, mime, dpi, color })
+    Ok((Page { data, mime, dpi, color }, notes))
+}
+
+fn luma(p: &Rgb<u8>) -> u8 {
+    ((p[0] as u32 * 299 + p[1] as u32 * 587 + p[2] as u32 * 114) / 1000) as u8
+}
+
+fn chroma(p: &Rgb<u8>) -> u8 {
+    p.0.iter().max().unwrap() - p.0.iter().min().unwrap()
+}
+
+/// The lid's brightness: most of a half-glass scan is lid (a card is about a
+/// sixth of it), so the median brightness is the lid's. None when that is
+/// dark (a black lid, or something covering the glass): nothing to whiten.
+fn lid_level(img: &RgbImage) -> Option<u8> {
+    let mut counts = [0u64; 256];
+    for p in img.pixels() {
+        counts[luma(p) as usize] += 1;
+    }
+    let half = img.pixels().len() as u64 / 2;
+    let mut seen = 0;
+    let level = (0..256).find(|&v| {
+        seen += counts[v];
+        seen > half
+    })? as u8;
+    (level >= 150).then_some(level)
+}
+
+/// Lid-coloured pixels (bright and without colour) become white.
+fn whiten_background(img: &mut RgbImage) {
+    let Some(lid) = lid_level(img) else { return };
+    let floor = lid.saturating_sub(18);
+    for p in img.pixels_mut() {
+        if luma(p) >= floor && chroma(p) < 24 {
+            *p = Rgb([255, 255, 255]);
+        }
+    }
+}
+
+/// Find the card (whatever is clearly not lid) and make everything outside
+/// it white, keeping a small margin. False, with nothing changed, when no
+/// card-sized thing stands out.
+fn whiten_outside_card(img: &mut RgbImage, dpi: u32) -> bool {
+    let Some(lid) = lid_level(img) else { return false };
+    let (w, h) = img.dimensions();
+    let not_lid = |p: &Rgb<u8>| luma(p) + 30 < lid || chroma(p) > 40;
+    let mut cols = vec![0u32; w as usize];
+    let mut rows = vec![0u32; h as usize];
+    for (x, y, p) in img.enumerate_pixels() {
+        if not_lid(p) {
+            cols[x as usize] += 1;
+            rows[y as usize] += 1;
+        }
+    }
+    // A row or column counts when a fair share of it is not lid: specks of
+    // dust do not.
+    let min_col = (h / 100).max(4);
+    let min_row = (w / 100).max(4);
+    let span = |counts: &[u32], min: u32| {
+        let first = counts.iter().position(|&c| c >= min)?;
+        let last = counts.iter().rposition(|&c| c >= min)?;
+        Some((first as u32, last as u32))
+    };
+    let (Some((x0, x1)), Some((y0, y1))) = (span(&cols, min_col), span(&rows, min_row)) else {
+        return false;
+    };
+    // About 2 mm around what was found, for the card's own pale edge.
+    let margin = (dpi as f32 * 2.0 / 25.4).round() as u32;
+    let (x0, y0) = (x0.saturating_sub(margin), y0.saturating_sub(margin));
+    let (x1, y1) = ((x1 + margin).min(w - 1), (y1 + margin).min(h - 1));
+    let found = (x1 - x0 + 1) as f64 * (y1 - y0 + 1) as f64;
+    let share = found / (w as f64 * h as f64);
+    // A card is about 15% of half the glass, a passport page about 35%.
+    if !(0.03..=0.85).contains(&share) {
+        return false;
+    }
+    for (x, y, p) in img.enumerate_pixels_mut() {
+        if x < x0 || x > x1 || y < y0 || y > y1 {
+            *p = Rgb([255, 255, 255]);
+        }
+    }
+    true
 }
 
 fn decode(p: &Page) -> image::ImageResult<DynamicImage> {
@@ -92,6 +199,44 @@ mod tests {
         assert!(at(&sheet, 45, 58 + 15) < 60, "back card where it lay, in the lower half");
         assert!(at(&sheet, 45, 15) > 200, "nothing of the back in the top half");
         assert!(at(&sheet, 10, 58 + 10) > 200, "nothing of the front in the lower half");
+    }
+
+    // A half-glass scan: a light grey lid with a darker "card" and a speck of dust.
+    fn on_lid(card: (u32, u32, u32, u32)) -> RgbImage {
+        let mut img = RgbImage::from_pixel(200, 140, Rgb([214, 214, 210]));
+        for y in card.1..card.1 + card.3 {
+            for x in card.0..card.0 + card.2 {
+                img.put_pixel(x, y, Rgb([90, 120, 160]));
+            }
+        }
+        img.put_pixel(180, 120, Rgb([20, 20, 20]));
+        img
+    }
+
+    #[test]
+    fn the_lid_becomes_white_and_the_card_stays() {
+        let mut img = on_lid((20, 15, 80, 50));
+        whiten_background(&mut img);
+        assert_eq!(img.get_pixel(150, 100), &Rgb([255, 255, 255]));
+        assert_eq!(img.get_pixel(40, 30), &Rgb([90, 120, 160]));
+    }
+
+    #[test]
+    fn outside_the_card_becomes_white() {
+        let mut img = on_lid((20, 15, 80, 50));
+        assert!(whiten_outside_card(&mut img, 25)); // 25 dpi: a 2 px margin
+        assert_eq!(img.get_pixel(180, 120), &Rgb([255, 255, 255]), "the speck outside goes");
+        assert_eq!(img.get_pixel(150, 100), &Rgb([255, 255, 255]));
+        assert_eq!(img.get_pixel(40, 30), &Rgb([90, 120, 160]), "the card stays");
+        assert_eq!(img.get_pixel(18, 13), &Rgb([214, 214, 210]), "within the margin stays");
+    }
+
+    #[test]
+    fn no_card_found_leaves_the_scan_alone() {
+        let mut img = RgbImage::from_pixel(200, 140, Rgb([214, 214, 210]));
+        let before = img.clone();
+        assert!(!whiten_outside_card(&mut img, 25));
+        assert_eq!(img, before);
     }
 
     #[test]

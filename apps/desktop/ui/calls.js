@@ -344,7 +344,10 @@
     if (!stage) $("call-video").classList.remove("has-stage");
   }
 
+  // On a phone the ring's picture stops while Kagaz is out of sight; a
+  // computer keeps showing it (app.js, out of sight).
   document.addEventListener("visibilitychange", () => {
+    if (!ON_PHONE) return;
     if (document.hidden) stopPreview();
     else if (status) render(status);
   });

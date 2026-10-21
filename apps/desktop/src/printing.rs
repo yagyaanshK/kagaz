@@ -65,6 +65,9 @@ pub struct Thumb {
     width: u32,
     height: u32,
     dpi: u32,
+    /// Anything to tell about it (an ID's card not found).
+    #[serde(skip_serializing_if = "String::is_empty")]
+    note: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -247,6 +250,7 @@ pub async fn copy_scan(
                 width,
                 height,
                 dpi: p.dpi,
+                note: String::new(),
             })
         })
         .collect()
@@ -368,12 +372,16 @@ pub async fn id_scan_side(
     }
     sides[side] = Some(page);
     *state.sheet.lock().unwrap() = None;
-    Ok(Thumb { index: side, src, width, height, dpi })
+    Ok(Thumb { index: side, src, width, height, dpi, note: String::new() })
 }
 
 /// Put the two sides on one page; a preview of it.
 #[tauri::command]
-pub async fn id_page(state: State<'_, IdState>, paper: Paper) -> Result<Thumb, String> {
+pub async fn id_page(
+    state: State<'_, IdState>,
+    paper: Paper,
+    tidy: Option<kagaz_core::scan::id::Tidy>,
+) -> Result<Thumb, String> {
     let (front, back) = {
         let sides = state.sides.lock().unwrap();
         match (&sides[0], &sides[1]) {
@@ -383,11 +391,13 @@ pub async fn id_page(state: State<'_, IdState>, paper: Paper) -> Result<Thumb, S
         }
     };
     let paper = if paper == Paper::Max { Paper::A4 } else { paper };
-    let sheet = blocking(move || kagaz_core::scan::id::page(&front, &back, paper)).await?;
+    let tidy = tidy.unwrap_or_default();
+    let (sheet, notes) =
+        blocking(move || kagaz_core::scan::id::page_tidied(&front, &back, paper, tidy)).await?;
     let (src, width, height) = thumbnail(&sheet)?;
     let dpi = sheet.dpi;
     *state.sheet.lock().unwrap() = Some(sheet);
-    Ok(Thumb { index: 0, src, width, height, dpi })
+    Ok(Thumb { index: 0, src, width, height, dpi, note: notes.join(" ") })
 }
 
 /// A side (0, 1) or the page (2), big enough to look at closely.
@@ -444,7 +454,7 @@ pub fn id_to_copy(id: State<'_, IdState>, copy: State<'_, CopyState>) -> Result<
     let (src, width, height) = thumbnail(&sheet)?;
     let dpi = sheet.dpi;
     *copy.pages.lock().unwrap() = vec![sheet];
-    Ok(vec![Thumb { index: 0, src, width, height, dpi }])
+    Ok(vec![Thumb { index: 0, src, width, height, dpi, note: String::new() }])
 }
 
 /// The phone's print dialog: the document becomes a PDF that Android's

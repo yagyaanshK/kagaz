@@ -450,6 +450,7 @@ function dpiLabel(dpi) {
 }
 
 let caps = null; // what the selected device offers, per engine
+let formatEngine = null; // the engine the format was last picked for
 
 // The largest page a scan may be once opened (kagaz_core MAX_IMAGE_BYTES):
 // resolutions beyond it are greyed out, as the scan would refuse them.
@@ -496,6 +497,14 @@ function renderResolutions() {
     opt.disabled = (opt.value === "Driver" && !caps.driver) || (opt.value === "Driverless" && !caps.driverless);
   }
   if (engSel.selectedOptions[0]?.disabled) engSel.value = caps.driverless ? "Driverless" : "Driver";
+  // Each engine's own format, picked when the engine changes (yours to
+  // change after): the driver hands over the scan as it is (PNG, nothing
+  // lost); without one, scanners send JPEG (Brother's WSD offers only that).
+  if (engSel.value !== formatEngine) {
+    formatEngine = engSel.value;
+    $("scan-form").querySelector('select[name="format"]').value = engSel.value === "Driver" ? "Png" : "Jpeg";
+    Pictures.update($("scan-form"));
+  }
   const ec = engineCaps();
   for (const opt of srcSel.options) {
     const needsFeeder = opt.value === "Feeder" || opt.value === "FeederDuplex";
@@ -518,6 +527,7 @@ function renderResolutions() {
 
 async function loadCapabilities(d, i) {
   caps = null;
+  formatEngine = null;
   $("engine-note").textContent = "asking the scanner what it offers…";
   try {
     const c = await invoke("scan_capabilities", { device: d });
@@ -664,9 +674,9 @@ let pbClips = {};     // device_id -> { day_start, clips: [{start,end,video_type
 let pbOffset = 0;     // the cameras' clock, minutes east of UTC (first camera asked)
 
 function showCameras() {
-  current = null;
-  renderList();
-  refreshCameras();
+  // Pictures held while away: back where they were, else a fresh look.
+  if (camerasHeld && camStatus && camStatus.running) resumeCameras();
+  else refreshCameras();
 }
 
 // The views: Home, Add a device, Settings, and one page per kind of
@@ -679,7 +689,11 @@ let currentView = null;
 function selectCategory(cat) {
   document.querySelectorAll(".kz-full").forEach((el) => KagazPlayer.fullscreen(el, false));
   if (cat !== "doorbell" && typeof stopOneTouch === "function") stopOneTouch();
+  const was = currentView;
   currentView = cat;
+  // Away from the cameras their pictures stop (sparing the connection);
+  // downloads go on. They come back where they were.
+  if (was === "cameras" && cat !== "cameras") holdCameras();
   // Back from any page goes to Home.
   KagazNav.root(cat === "home" ? null : cat, () => selectCategory("home"));
   // The sidebar and the bottom bar mark the section on screen, and only it
@@ -697,17 +711,23 @@ function selectCategory(cat) {
     showCameras();
     return;
   }
-  const pane = { print: "picker" }[cat] || cat;
+  // Back on Printers with a printer's page left open (a scan under way,
+  // say): that page, as it was.
+  const backToPrinter = cat === "print" && KagazNav.has("print-detail") && current !== null;
+  const pane = backToPrinter ? "detail" : { print: "picker" }[cat] || cat;
   for (const id of PANES) $(id).classList.toggle("hidden", id !== pane);
   // The saved printers show at once; a search for new ones runs alongside
   // (again only after a couple of minutes).
   if (cat === "print") {
-    current = null;
+    if (!backToPrinter) current = null;
     renderList();
     checkPrinters();
     if (Date.now() - lastSearch > 2 * 60 * 1000 && !$("rescan").disabled) rescan();
   }
-  if (cat === "doorbell") { doorSettings(false); refreshDoorbell(); }
+  if (cat === "doorbell") {
+    if (!KagazNav.has("door-settings")) doorSettings(false);
+    refreshDoorbell();
+  }
   if (cat === "home" && typeof KagazHome !== "undefined") KagazHome.show();
   if (cat === "settings" && typeof KagazSettings !== "undefined") KagazSettings.show();
   $("main").scrollTop = 0;
@@ -734,7 +754,8 @@ async function refreshCameras() {
     return;
   }
   $("cam-message").textContent = camStatus.message || "";
-  $("cam-start").classList.toggle("hidden", camStatus.running || !camStatus.logged_in);
+  // Signed in: the cameras start by themselves when their page opens.
+  if (camStatus.logged_in && !camStatus.running && currentView === "cameras") startCameras();
   // Without the helper (a phone), the window's own player is the only way.
   const helper = !camStatus.running || !!camStatus.player_script;
   for (const o of $("cam-mode").options) o.disabled = !helper && o.value !== "builtin";
@@ -2624,21 +2645,24 @@ $("cam-sound-all").addEventListener("click", () => {
   refreshSoundAll();
 });
 
-$("cam-start").addEventListener("click", async () => {
-  $("cam-start").disabled = true;
+// Connect to the cameras (their video engine and the account's relay).
+let camStarting = false;
+async function startCameras() {
+  if (camStarting) return;
+  camStarting = true;
   $("cam-state").textContent = "starting…";
+  $("cam-message").textContent = "Connecting to your cameras…";
   try {
     camStatus = await invoke("cameras_start");
     $("cam-message").textContent = "";
-    $("cam-start").classList.add("hidden");
     await loadLayout();
-    renderCameraGrid();
+    if (currentView === "cameras") renderCameraGrid();
   } catch (e) {
-    $("cam-message").textContent = "Could not start: " + e;
+    $("cam-message").textContent = "Could not connect to the cameras: " + e;
     $("cam-state").textContent = "";
   }
-  $("cam-start").disabled = false;
-});
+  camStarting = false;
+}
 listen("cameras-progress", (e) => {
   $("cam-state").textContent = e.payload;
 });
@@ -2648,7 +2672,6 @@ $("rescan").addEventListener("click", rescan);
 window.addEventListener("DOMContentLoaded", () => invoke("startup_view").then((v) => {
   if (v === "cameras") {
     selectCategory("cameras");
-    setTimeout(() => $("cam-start").click(), 800);
   } else if (!currentView) {
     selectCategory("home");
   }
@@ -2959,26 +2982,48 @@ listen("doorbell-state", (e) => {
 });
 
 // ---------- out of sight ----------
-// When the window is out of sight (Home on a phone, another app, the screen
-// off, a minimised window), live pictures and sound stop, as video apps do;
-// they come back where they were when it is in sight again. A call keeps
-// going (calls.js does not listen to this), and so does a ring.
-let pausedOutOfSight = null; // what to bring back
+// Live pictures and recordings play only while someone can be watching,
+// as video apps do, and come back where they were:
+// - on a computer, while their page is the one chosen in Kagaz, whether or
+//   not the window is in front or minimised;
+// - on a phone, while their page is chosen and Kagaz is the app on screen.
+// Downloads, a scan, a call and a ring go on regardless (calls.js).
+const ON_PHONE = /Android|iPhone|iPad/i.test(navigator.userAgent);
+let camerasHeld = null; // what to bring back: { playback }
+
+function holdCameras() {
+  if (camerasHeld || !camStatus || !camStatus.running) return;
+  const tiles = allTiles();
+  camerasHeld = { playback: isPlayback() };
+  // Recordings hold their place; live tiles just stop.
+  if (camerasHeld.playback) pauseCells(cellsOf($("cam-grid")));
+  tiles.forEach(teardownTile);
+}
+
+function resumeCameras() {
+  const back = camerasHeld;
+  camerasHeld = null;
+  if (!back || !camStatus || !camStatus.running) return;
+  if (isPlayback() !== back.playback) {
+    renderCameraGrid();
+    return;
+  }
+  for (const tile of allTiles()) {
+    const cam = camOf(tile);
+    if (cam) remount(tile, cam);
+  }
+  if (back.playback) resumeCells(cellsOf($("cam-grid")));
+}
+
+let pausedOutOfSight = null; // the doorbell's live view and videos to bring back
 
 document.addEventListener("visibilitychange", () => {
+  if (!ON_PHONE) return; // a computer keeps playing what its page shows
   if (document.hidden) {
-    const camerasShown = !$("cameras").classList.contains("hidden") && camStatus && camStatus.running;
-    const tiles = camerasShown ? allTiles() : [];
+    if (currentView === "cameras") holdCameras();
     pausedOutOfSight = {
-      cameras: tiles.length > 0,
-      playback: isPlayback(),
       live: typeof otLive !== "undefined" && otLive ? otLive.key : null,
     };
-    if (tiles.length) {
-      // Recordings hold their place; live tiles just stop.
-      if (pausedOutOfSight.playback) pauseCells(cellsOf($("cam-grid")));
-      tiles.forEach(teardownTile);
-    }
     if (pausedOutOfSight.live && typeof otStopLive === "function") otStopLive();
     for (const id of ["ot-video", "viewer-video"]) {
       const v = $(id);
@@ -2986,16 +3031,10 @@ document.addEventListener("visibilitychange", () => {
     }
     return;
   }
+  if (currentView === "cameras") resumeCameras();
   const back = pausedOutOfSight;
   pausedOutOfSight = null;
   if (!back) return;
-  if (back.cameras && !$("cameras").classList.contains("hidden") && camStatus && camStatus.running && isPlayback() === back.playback) {
-    for (const tile of allTiles()) {
-      const cam = camOf(tile);
-      if (cam) remount(tile, cam);
-    }
-    if (back.playback) resumeCells(cellsOf($("cam-grid")));
-  }
   if (back.live && currentView === "doorbell" && typeof otCards === "function") {
     const card = otCards().find((c) => c.key === back.live);
     if (card) otOpenCard(card);
