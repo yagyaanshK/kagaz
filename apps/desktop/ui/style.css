@@ -916,3 +916,5 @@ form.id-mode .no-id, form.id-mode > .actions.bar { display: none; }
 .id-thumb.id-page img { max-width: 140px; max-height: 200px; }
 .thumb-look img { display: block; width: 100%; }
 .id-note { margin: 10px 0 0; min-height: 1.4em; }
+.id-tidy { display: flex; flex-direction: column; gap: 2px; margin: 0 0 8px; font-size: 14px; }
+.id-tidy .switch { white-space: normal; }

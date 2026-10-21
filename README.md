@@ -244,7 +244,14 @@ reaches, including ones whose panel offers ID copy only for copying. Put the
 card face down in the half of the glass by its corner mark and scan the
 front; turn it over in the same place and scan the back. The page has the
 front's half above the back's, each just where it lay; Scan saves it (PDF,
-JPEG or PNG), Copy prints it at real size.
+JPEG or PNG), Copy prints it at real size. Two options, off unless ticked, tidy the page:
+**Clean background** turns the lid's grey around the card white, and
+**Find the card** whitens everything outside the card.
+
+Each page keeps its place: leave a printer's page with a scan under way
+for the cameras, and coming back finds the scan where it was. Camera
+pictures play only while their page is chosen (on a phone, also only
+while Kagaz is on screen), sparing the connection; downloads carry on.
 Wide windows have a sidebar; phones a bottom bar.
 
 On a phone, Kagaz keeps listening for doorbell calls after you close it,

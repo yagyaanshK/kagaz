@@ -49,6 +49,10 @@ const KagazId = (() => {
         </li>
         <li data-side="page">
           <p><strong>The page.</strong> The front in the top half, the back below, each where it lay on the glass.</p>
+          <div class="id-tidy">
+            <label class="switch"><input type="checkbox" class="id-clean"> Clean background (the lid's grey becomes white)</label>
+            <label class="switch"><input type="checkbox" class="id-card"> Find the card (white outside it)</label>
+          </div>
           <div class="id-row"><button type="button" class="id-finish" disabled></button><button type="button" class="id-thumb id-page hidden" data-which="2" aria-label="See the page full size"><img alt=""></button></div>
         </li>
       </ol>
@@ -101,6 +105,25 @@ const KagazId = (() => {
       }
     }));
 
+    // Both sides on one page, tidied as chosen; again when a choice changes.
+    const tidy = () => ({ background: box.querySelector(".id-clean").checked, card: box.querySelector(".id-card").checked });
+    async function makePage() {
+      setBusy(true, "Putting both sides on one page…");
+      const page = await invoke("id_page", { paper: request().paper, tidy: tidy() });
+      show(steps[2].querySelector(".id-thumb"), page);
+      have[2] = true;
+      setBusy(false, page.note || "");
+      if (page.note) note.classList.add("cap-warn");
+    }
+    box.querySelectorAll(".id-tidy input").forEach((c) => c.addEventListener("change", async () => {
+      if (!have[1] || busy) return;
+      try {
+        await makePage();
+      } catch (e) {
+        fail(e);
+      }
+    }));
+
     for (const side of [0, 1]) {
       steps[side].querySelector(".id-scan").addEventListener("click", async () => {
         if (busy) return;
@@ -116,10 +139,7 @@ const KagazId = (() => {
             setBusy(false, "Now turn the card over, in the same place.");
           } else {
             have[1] = true;
-            setBusy(true, "Putting both sides on one page…");
-            show(steps[2].querySelector(".id-thumb"), await invoke("id_page", { paper: request().paper }));
-            have[2] = true;
-            setBusy(false, "");
+            await makePage();
             finishButton.focus();
           }
         } catch (e) {

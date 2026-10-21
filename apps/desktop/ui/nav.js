@@ -95,22 +95,35 @@ const KagazNav = (() => {
     sync();
   }
 
-  // A top-level place: Home (null), or a page one level above Home. What
-  // was open on the page left behind (a menu, rearranging) closes, so it is
-  // not still open on coming back.
+  // A top-level place: Home (null), or a page one level above Home.
+  // Going elsewhere keeps the page's own levels (a printer's page with a
+  // scan under way, the doorbell's settings, rearranging) for coming back
+  // to it; only what floats over it (a menu, a question, a picture, full
+  // screen, a live view) closes. Choosing the page you are on goes to its top.
+  const FLOATING = new Set(["cam-menu", "ot-menu", "ask", "viewer", "full", "ot-card"]);
+  const kept = new Map(); // page -> its levels, as left
   function root(id, close) {
     if (closing) return;
-    const left = stack.slice(1).reverse();
-    stack = id ? [{ id, close }] : [];
+    const leaving = stack.length ? stack[0].id : null;
+    const above = stack.slice(1);
+    const shut = leaving === id ? above : above.filter((l) => FLOATING.has(l.id));
     closing = true;
-    for (const level of left) {
+    for (const level of shut.reverse()) {
       try {
         level.close();
       } catch (e) {}
     }
     closing = false;
+    if (leaving && leaving !== id) kept.set(leaving, above.filter((l) => !FLOATING.has(l.id)));
+    stack = id ? [{ id, close }, ...(leaving === id ? [] : kept.get(id) || [])] : [];
+    kept.delete(id);
     sync();
   }
 
-  return { push, pop, root };
+  // Is this level open (on the page shown)?
+  function has(id) {
+    return stack.some((l) => l.id === id);
+  }
+
+  return { push, pop, root, has };
 })();
