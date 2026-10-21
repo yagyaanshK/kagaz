@@ -12,6 +12,11 @@ const KagazRing = (() => {
   let listing = null; // { tones, settings } from Rust
   const buffers = new Map(); // tone id -> AudioBuffer
   let playing = null; // { source, gain }
+  // Each start or stop counts one up. Loading a tone takes a moment (a
+  // file from Rust, then decoding): a tone that finishes loading after a
+  // later stop (a ring answered at once) must not start, or it loops on
+  // with nothing left to stop it.
+  let turn = 0;
 
   async function tones() {
     if (!listing) listing = await invoke("ringtones_list");
@@ -35,14 +40,17 @@ const KagazRing = (() => {
     return own || settings.events[kind] || settings.events.all || "soft-chime";
   }
 
-  async function play(id, loop, volume) {
-    stop();
+  async function play(id, loop, volume, mine) {
+    halt();
+    const decoded = await buffer(id);
+    if (mine !== turn) return; // stopped (or started again) meanwhile
+    halt();
     const ctx = KagazPlayer.audioContext();
     const gain = ctx.createGain();
     gain.gain.value = volume;
     gain.connect(ctx.destination);
     const source = ctx.createBufferSource();
-    source.buffer = await buffer(id);
+    source.buffer = decoded;
     source.loop = loop;
     source.connect(gain);
     source.start();
@@ -64,12 +72,14 @@ const KagazRing = (() => {
 
   // Ring for `peer` (a device's or person's name) of `kind`.
   async function start(peer, kind) {
+    const mine = ++turn;
     try {
       const { settings } = await tones();
-      await play(toneFor(settings, peer, kind), true, settings.volume);
+      if (mine !== turn) return;
+      await play(toneFor(settings, peer, kind), true, settings.volume, mine);
     } catch (e) {
       // No sound file could be played: a plain two-note chime instead.
-      beep();
+      if (mine === turn) beep();
     }
   }
 
@@ -89,16 +99,24 @@ const KagazRing = (() => {
     }
   }
 
-  function stop() {
+  // Silence what plays now.
+  function halt() {
     if (!playing) return;
     try { playing.source.stop(); } catch (_) {}
     try { playing.gain.disconnect(); } catch (_) {}
     ended();
   }
 
+  // Stop: what plays now, and a tone still loading.
+  function stop() {
+    turn++;
+    halt();
+  }
+
   // Hear a tone once (Settings).
   async function preview(id, volume) {
-    try { await play(id, false, volume); } catch (e) { beep(); }
+    const mine = ++turn;
+    try { await play(id, false, volume, mine); } catch (e) { if (mine === turn) beep(); }
   }
 
   return { start, stop, preview, tones, forget, toneFor, whenStopped, isPlaying: () => !!playing };
