@@ -101,6 +101,16 @@ with the commit that closes them.
 - [ ] **Light, sleep, timer, brightness on real fans.** Written from the
       community's notes; only power and speed are exercised so far. Check
       an Aris (I1, dimmable, colour modes) and an Efficio (M1).
+- [ ] **Push instead of read**: the command characteristic allows notify
+      (checked on an Efficio, 2026-10-22). Subscribing would let a fan tell
+      Kagaz when its remote changes it, without reading on demand.
+- [ ] **How a fan gets onto Wi-Fi** (2026-10-22): an unconfigured fan sends
+      nothing on Wi-Fi (no network of its own, no broadcasts) and nothing
+      over classic Bluetooth; its Wi-Fi radio only scans (it lists the
+      networks it sees over Bluetooth). Setup goes through the Wi-Fi
+      characteristic, encrypted per the community notes; one more
+      characteristic, undocumented, reads "2". Either put a fan on Wi-Fi
+      with the Atomberg app, or learn the setup format from the app's code.
 - [ ] **Wi-Fi route.** No fan here is on the network. The broadcast
       listener (UDP 5625) and the command path (UDP 5600) are written from
       the community's notes; put a fan on Wi-Fi with the Atomberg app and
