@@ -1123,8 +1123,74 @@ function isPlayback() {
   return $("cam-when").value === "playback";
 }
 
+// ---- talking through a camera's speaker: one camera at a time ----
+
+let camTalk = null; // { tile, cam, stream, ctx }
+
+async function startTalk(tile, cam) {
+  stopTalk();
+  const button = tile.querySelector(".cam-talk");
+  if (isPlayback()) { setNote(tile, "Talking works in the live view."); return; }
+  const mine = { tile, cam, stream: null, ctx: null };
+  camTalk = mine;
+  button.classList.add("on");
+  button.setAttribute("aria-pressed", "true");
+  try {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw new Error("this window cannot use the microphone");
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 },
+    });
+    if (camTalk !== mine) { stream.getTracks().forEach((t) => t.stop()); return; }
+    const ctx = new AudioContext();
+    await ctx.audioWorklet.addModule("call-mic.js");
+    const source = ctx.createMediaStreamSource(stream);
+    const node = new AudioWorkletNode(ctx, "kagaz-mic");
+    // Worklets run only while connected to the output; this one is silent.
+    const sink = ctx.createGain();
+    sink.gain.value = 0;
+    node.port.onmessage = (e) => {
+      if (camTalk !== mine) return;
+      const bytes = new Uint8Array(e.data.buffer);
+      let bin = "";
+      for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+      invoke("camera_talk", { deviceId: cam.device_id, data: btoa(bin) }).catch((err) => { setNote(tile, "" + err); stopTalk(); });
+    };
+    source.connect(node);
+    node.connect(sink);
+    sink.connect(ctx.destination);
+    Object.assign(mine, { stream, ctx });
+  } catch (e) {
+    const where = /Android/i.test(navigator.userAgent) ? "Settings › Apps › Kagaz › Permissions" : "the system's privacy settings";
+    setNote(tile, e && e.name === "NotAllowedError"
+      ? `Kagaz may not use the microphone. Allow it in ${where}.`
+      : "The microphone is not available: " + ((e && e.message) || e));
+    stopTalk();
+  }
+}
+
+function stopTalk() {
+  const t = camTalk;
+  if (!t) return;
+  camTalk = null;
+  if (t.stream) t.stream.getTracks().forEach((x) => x.stop());
+  if (t.ctx) t.ctx.close().catch(() => {});
+  invoke("camera_talk_stop", { deviceId: t.cam.device_id }).catch(() => {});
+  const b = t.tile.querySelector(".cam-talk");
+  if (b) { b.classList.remove("on"); b.setAttribute("aria-pressed", "false"); }
+}
+
+// A short line over a tile, gone after a while.
+function setNote(tile, text) {
+  let n = tile.querySelector(".cam-note");
+  if (!n) { n = document.createElement("div"); n.className = "cam-note"; tile.appendChild(n); }
+  n.textContent = text;
+  clearTimeout(n._t);
+  n._t = setTimeout(() => n.remove(), 6000);
+}
+
 // Release a tile's player, its connection and any playback it holds.
 function teardownTile(tile) {
+  if (camTalk && camTalk.tile === tile) stopTalk();
   const v = tile.querySelector("video");
   if (v) {
     try { v.pause(); v.removeAttribute("src"); v.load(); } catch (_) {}
@@ -1698,6 +1764,21 @@ function buildTile(cam) {
   more.setAttribute("aria-label", `Settings for ${camName(cam)}`);
   more.addEventListener("click", (ev) => { ev.stopPropagation(); cameraSettings(cam); });
   tile.appendChild(more);
+  // Talk through the camera's speaker (Xiaomi cameras), as their app does.
+  if (cam.brand === "xiaomi") {
+    const talk = document.createElement("button");
+    talk.type = "button";
+    talk.className = "cam-talk";
+    talk.textContent = "\u{1F3A4}";
+    talk.title = `Talk through ${camName(cam)}'s speaker`;
+    talk.setAttribute("aria-label", talk.title);
+    talk.setAttribute("aria-pressed", "false");
+    talk.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      if (camTalk && camTalk.tile === tile) stopTalk(); else startTalk(tile, cam);
+    });
+    tile.appendChild(talk);
+  }
   const speaker = document.createElement("button");
   speaker.type = "button";
   speaker.className = "cam-speaker";

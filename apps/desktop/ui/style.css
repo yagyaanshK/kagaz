@@ -481,6 +481,9 @@ label small { font-size: 12px; min-height: 1.2em; }
 .cam-tile .cam-quality { position: absolute; right: 8px; bottom: 6px; font-size: 11px; padding: 1px 4px; min-height: 0; width: auto; max-width: 9em; background: rgba(0,0,0,0.5); color: #fff; border: 1px solid rgba(255,255,255,0.4); border-radius: 4px; }
 .cam-tile .cam-quality option { color: var(--text); background: var(--panel); }
 .cam-tile .cam-more { position: absolute; top: 6px; left: 8px; z-index: 2; min-height: 0; width: 30px; height: 30px; padding: 0; font-size: 18px; line-height: 1; background: rgba(0,0,0,0.55); color: #fff; border: 1px solid rgba(255,255,255,0.5); border-radius: 6px; }
+.cam-tile .cam-talk { position: absolute; top: 6px; left: 44px; z-index: 2; min-height: 0; width: 30px; height: 30px; padding: 0; font-size: 15px; line-height: 1; background: rgba(0,0,0,0.55); color: #fff; border: 1px solid rgba(255,255,255,0.5); border-radius: 6px; }
+.cam-tile .cam-talk.on { background: var(--bad, #c0392b); border-color: transparent; }
+.cam-tile .cam-note { position: absolute; left: 8px; right: 8px; top: 42px; z-index: 3; padding: 6px 8px; border-radius: 6px; background: rgba(0,0,0,0.75); color: #fff; font-size: 12px; }
 .cam-tile .cam-more:hover { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
 .cam-settings-form { display: flex; flex-direction: column; gap: 10px; min-width: min(340px, calc(100vw - 72px)); }
 .cam-settings-form .ask-field { display: flex; flex-direction: column; gap: 4px; margin: 0; font-size: 13px; color: var(--muted); }
@@ -756,7 +759,8 @@ ul.cards li.add .name { color: var(--accent); }
   .cam-tile .cam-quality, .cam-tile .cam-speaker { padding: 6px 10px; font-size: 12px; }
   .cam-tile .cam-speaker { right: 112px; }
   .cam-tile .cam-volume { right: 160px; bottom: 12px; }
-  .cam-tile .cam-more { width: 40px; height: 40px; }
+  .cam-tile .cam-more, .cam-tile .cam-talk { width: 40px; height: 40px; }
+  .cam-tile .cam-talk { left: 54px; }
   .cam-reload { width: 64px; height: 64px; }
   #categories li { min-height: 48px; }
 }
