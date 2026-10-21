@@ -177,7 +177,8 @@ fn whiten_outside_card(img: &mut RgbImage, dpi: u32) -> bool {
         return false;
     };
     let (w, h) = img.dimensions();
-    let not_lid = |p: &Rgb<u8>| luma(p) + 30 < lid || chroma(p) > 40;
+    // In u16: a bright pixel plus the margin passes 255.
+    let not_lid = |p: &Rgb<u8>| (luma(p) as u16) + 30 < lid as u16 || chroma(p) > 40;
     let mut cols = vec![0u32; w as usize];
     let mut rows = vec![0u32; h as usize];
     for (x, y, p) in img.enumerate_pixels() {
@@ -315,6 +316,21 @@ mod tests {
             &Rgb([214, 214, 210]),
             "within the margin stays"
         );
+    }
+
+    #[test]
+    fn a_bright_white_lid_is_lid_too() {
+        // Pure white and near-white (brighter than 225) around a card.
+        let mut img = RgbImage::from_pixel(200, 140, Rgb([250, 250, 250]));
+        for y in 15..65 {
+            for x in 20..100 {
+                img.put_pixel(x, y, Rgb([90, 120, 160]));
+            }
+        }
+        img.put_pixel(150, 100, Rgb([255, 255, 255]));
+        assert!(whiten_outside_card(&mut img, 25));
+        assert_eq!(img.get_pixel(150, 120), &Rgb([255, 255, 255]));
+        assert_eq!(img.get_pixel(40, 30), &Rgb([90, 120, 160]));
     }
 
     #[test]

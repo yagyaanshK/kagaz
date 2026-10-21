@@ -483,25 +483,25 @@ pub async fn copy_picture(state: State<'_, CopyState>, index: usize) -> Result<S
     blocking(move || shrunk(&page, 2000, 85).map(|(src, _, _)| src)).await
 }
 
-/// What tidying a saved file made.
+/// A saved file, tidied and waiting to be looked at, then saved.
+static TIDIED: Mutex<Option<Vec<Page>>> = Mutex::new(None);
+
+/// What tidying a saved file made, to look at before saving.
 #[derive(Debug, Clone, Serialize)]
 pub struct Tidied {
-    path: String,
+    /// The first page, small and full size (data: URLs).
+    thumb: String,
+    view: String,
+    pages: usize,
     /// Where a card was not found (that part is left as it was).
     notes: Vec<String>,
 }
 
 /// Tidy a saved scan or photo (PDF, JPEG or PNG) with Clean background
-/// and Find the card, no printer needed; the result is a new file at
-/// `out`, in that file's format. The original is not touched.
+/// and Find the card, no printer needed. The result waits here to be
+/// looked at; [`tidy_save`] writes it. The original is not touched.
 #[tauri::command]
-pub async fn tidy_file(
-    app: AppHandle,
-    path: String,
-    tidy: kagaz_core::scan::id::Tidy,
-    out: String,
-) -> Result<Tidied, String> {
-    use kagaz_core::output::Format;
+pub async fn tidy_preview(path: String, tidy: kagaz_core::scan::id::Tidy) -> Result<Tidied, String> {
     use kagaz_core::scan::ColorMode;
     blocking(move || {
         let data = std::fs::read(&path).map_err(|e| format!("could not read {path}: {e}"))?;
@@ -550,16 +550,37 @@ pub async fn tidy_file(
                 .map_err(|e| e.to_string())?;
             pages.push(Page { data: png, mime: "image/png", dpi, color: ColorMode::Color });
         }
+        let first = pages.first().ok_or("the file has no pages")?;
+        let ((thumb, _, _), view) = thumb_and_view(first)?;
+        let count = pages.len();
+        *TIDIED.lock().unwrap() = Some(pages);
+        Ok(Tidied { thumb, view, pages: count, notes })
+    })
+    .await
+}
+
+/// Save the tidied file at `out`, in that file's format (PDF, JPEG, PNG).
+#[tauri::command]
+pub async fn tidy_save(app: AppHandle, out: String) -> Result<String, String> {
+    use kagaz_core::output::Format;
+    let pages = TIDIED
+        .lock()
+        .unwrap()
+        .clone()
+        .ok_or_else(|| "choose a file to tidy first".to_string())?;
+    blocking(move || {
         let format = std::path::Path::new(&out)
             .extension()
             .and_then(|e| Format::from_extension(&e.to_string_lossy()))
             .unwrap_or(Format::Pdf);
-        let output = super::OutputRequest { format, color: ColorMode::Color, quality: Some(92), max_bytes: None };
+        let output = super::OutputRequest {
+            format,
+            color: kagaz_core::scan::ColorMode::Color,
+            quality: Some(92),
+            max_bytes: None,
+        };
         let written = super::write_scan(&app, &pages, &output, out)?;
-        Ok(Tidied {
-            path: written.first().map(|w| w.path.clone()).unwrap_or_default(),
-            notes,
-        })
+        Ok(written.first().map(|w| w.path.clone()).unwrap_or_default())
     })
     .await
 }

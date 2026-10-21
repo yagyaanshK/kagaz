@@ -102,10 +102,17 @@
       <!-- No printer needed: tidy a file already on this device (tidy.js). -->
       <details id="tidy-box" class="set-more">
         <summary>Tidy a saved scan or photo</summary>
-        <p class="muted small">Make the background white, or everything outside the card, on a PDF, JPEG or PNG on this device. The result is saved as a new file; the original stays as it was. A page is taken as an ID page, each half one side.</p>
+        <p class="muted small">Make the background white, or everything outside the card, on a PDF, JPEG or PNG on this device. You see the result first; saving makes a new file, and the original stays as it was. A page is taken as an ID page, each half one side.</p>
         <label class="switch"><input type="checkbox" id="tidy-clean"> Clean background (the lid's grey becomes white)</label>
         <label class="switch"><input type="checkbox" id="tidy-card"> Find the card (white outside it)</label>
         <div class="actions"><button type="button" id="tidy-go" class="accent">Choose a file…</button></div>
+        <div id="tidy-result" class="hidden">
+          <p class="small muted" id="tidy-what"></p>
+          <div class="id-row">
+            <button type="button" id="tidy-look" class="id-thumb id-page" aria-label="See the tidied file full size"><img alt=""></button>
+            <div class="actions"><button type="button" id="tidy-save" class="accent">Save…</button><button type="button" id="tidy-discard">Discard</button></div>
+          </div>
+        </div>
         <p id="tidy-note" class="small" role="status"></p>
       </details>
     </section>
