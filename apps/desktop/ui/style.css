@@ -120,26 +120,32 @@ h3 { font-size: 14px; margin: 18px 0 6px; }
 /* The available devices of the chosen category, in the main area. */
 #picker.pane { max-width: 980px; }
 .pane-head { display: flex; align-items: center; justify-content: space-between; gap: var(--area); flex-wrap: wrap; margin-bottom: 6px; }
-#devices {
+/* My printers, then Found nearby: the same cards; found ones carry Add. */
+.list-head { margin: 18px 0 4px; font-size: 15px; }
+#devices, #found-devices {
   list-style: none;
-  margin: 14px 0 0;
+  margin: 8px 0 0;
   padding: 0;
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
   gap: 10px;
 }
-#devices li {
+#devices li, #found-devices li {
+  position: relative;
   padding: 12px 14px;
   border-radius: 10px;
   cursor: default;
   border: 1px solid var(--line);
   background: var(--bg);
 }
-#devices li:hover { border-color: var(--accent); }
-#devices li.active { border-color: var(--accent); }
-#devices .name { font-weight: 600; }
-#devices .where { font-size: 12px; color: var(--muted); margin-top: 2px; }
-#devices .caps { font-size: 12px; margin-top: 6px; }
+#found-devices li { padding-right: 76px; }
+@media (hover: hover) { #devices li:hover, #found-devices li:hover { border-color: var(--accent); } }
+#devices li.active, #found-devices li.active { border-color: var(--accent); }
+#devices .name, #found-devices .name { font-weight: 600; }
+#devices .where, #found-devices .where { font-size: 12px; color: var(--muted); margin-top: 2px; }
+#devices .caps, #found-devices .caps { font-size: 12px; margin-top: 6px; }
+#devices .caps { font-size: 13px; font-weight: 600; }
+#found-devices .add-printer { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); }
 
 .back {
   background: none;
@@ -762,7 +768,7 @@ button.link { background: none; border: none; color: var(--accent); padding: 4px
 .soon-badge { font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
 .brands .brand-tile:not(.soon) { border-color: var(--accent); }
 #cam-signin { margin-top: 12px; }
-#devices li .brand-mark { float: right; height: 20px; max-width: 72px; object-fit: contain; margin-left: 8px; background: #fff; border-radius: 4px; padding: 2px 4px; }
+#devices li .brand-mark, #found-devices li .brand-mark { float: right; height: 20px; max-width: 72px; object-fit: contain; margin-left: 8px; background: #fff; border-radius: 4px; padding: 2px 4px; }
 
 /* Chips: a row of filters. */
 .chips { display: flex; gap: 6px; flex-wrap: wrap; margin: 10px 0 4px; }

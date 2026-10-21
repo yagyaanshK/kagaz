@@ -18,6 +18,7 @@ mod media;
 mod onetouch;
 #[cfg(mobile)]
 mod mobile;
+mod printers;
 mod printing;
 #[cfg(desktop)]
 mod ring_notice;
@@ -1354,6 +1355,11 @@ pub fn run() {
             doorbell::doorbell_probe,
             doorbell::doorbell_discover,
             printing::printer_status,
+            printers::printers_saved,
+            printers::printer_add,
+            printers::printer_forget,
+            printers::printers_seen,
+            printers::printer_state,
             printing::print_queues,
             printing::choose_print_file,
             printing::print_file,
