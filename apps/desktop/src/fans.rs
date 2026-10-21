@@ -1,21 +1,34 @@
 //! Ceiling fans (Atomberg) for the window: the fans the person added, by
 //! room, kept in `<config>/fans.toml` (kagaz-core `fans::store`), the fans
-//! within reach, and the controls. One exchange with a fan at a time: the
-//! Bluetooth adapter is shared, and two at once make both fail.
+//! within reach, and the controls.
+//!
+//! Two locks. `RADIO`: one exchange with fans at a time, as the Bluetooth
+//! adapter is shared and two at once make both fail. `LIST`: every change
+//! to the list is load, change, save in one go, on the list as it is on
+//! disk then. A scan or a command works on a copy while it talks to the
+//! fans (seconds over Bluetooth) and notes what it learnt at the end, so a
+//! rename or a move made meanwhile is kept.
 
 use super::blocking;
+use kagaz_core::fans::store::StoreError;
 use kagaz_core::fans::{self, Command, FanState, Fans, Found, Reach};
 use serde::Serialize;
 use std::sync::Mutex;
 
-static BUSY: Mutex<()> = Mutex::new(());
+static RADIO: Mutex<()> = Mutex::new(());
+static LIST: Mutex<()> = Mutex::new(());
 
 fn load() -> Result<Fans, String> {
+    let _list = LIST.lock().map_err(|e| e.to_string())?;
     Fans::load(&Fans::default_path()).map_err(|e| e.to_string())
 }
 
-fn save(fans: &Fans) -> Result<(), String> {
-    fans.save(&Fans::default_path()).map_err(|e| e.to_string())
+/// Change the saved list and return it as saved.
+fn update(change: impl FnOnce(&mut Fans) -> Result<(), StoreError>) -> Result<Fans, String> {
+    let _list = LIST.lock().map_err(|e| e.to_string())?;
+    Fans::update(&Fans::default_path(), change)
+        .map(|((), fans)| fans)
+        .map_err(|e| e.to_string())
 }
 
 /// What a scan found: the remembered fans, refreshed, with which of them
@@ -48,23 +61,31 @@ pub fn fans_saved() -> Result<Fans, String> {
 #[tauri::command]
 pub async fn fans_scan(seconds: f32) -> Result<Scan, String> {
     blocking(move || {
-        let _one = BUSY.lock().map_err(|e| e.to_string())?;
-        let mut fans = load()?;
+        let _radio = RADIO.lock().map_err(|e| e.to_string())?;
         let (found, trouble) = fans::scan(seconds.clamp(1.0, 30.0));
-        fans.note_seen(&found);
+        let known = update(|f| {
+            f.note_seen(&found);
+            Ok(())
+        })?;
         let mut reachable: Vec<String> = found.iter().map(|f| f.id.clone()).collect();
         let to_ask: Vec<fans::Fan> = found
             .iter()
             .filter(|f| f.state.is_none())
-            .filter_map(|f| fans.find(&f.id).cloned())
+            .filter_map(|f| known.find(&f.id).cloned())
             .collect();
+        let mut answers = Vec::new();
         for fan in to_ask {
             match fans::read(&fan) {
-                Ok((state, reach)) => fans.note_state(&fan.id, &state, reach.label()),
+                Ok((state, reach)) => answers.push((fan.id, state, reach)),
                 Err(_) => reachable.retain(|id| id != &fan.id),
             }
         }
-        save(&fans)?;
+        let fans = update(|f| {
+            for (id, state, reach) in &answers {
+                f.note_state(id, state, reach.label());
+            }
+            Ok(())
+        })?;
         let others = found
             .into_iter()
             .filter(|f| !fans.is_remembered(&f.id))
@@ -81,66 +102,48 @@ pub async fn fans_scan(seconds: f32) -> Result<Scan, String> {
 
 #[tauri::command]
 pub fn fan_add(found: Found, name: String, room: String) -> Result<Fans, String> {
-    let mut fans = load()?;
-    fans.add(&found, &name, &room).map_err(|e| e.to_string())?;
-    save(&fans)?;
-    Ok(fans)
+    update(|f| f.add(&found, &name, &room).map(|_| ()))
 }
 
 #[tauri::command]
 pub fn fan_forget(id: String) -> Result<Fans, String> {
-    let mut fans = load()?;
-    fans.forget(&id).map_err(|e| e.to_string())?;
-    save(&fans)?;
-    Ok(fans)
+    update(|f| f.forget(&id).map(|_| ()))
 }
 
 #[tauri::command]
 pub fn fan_rename(id: String, name: String) -> Result<Fans, String> {
-    let mut fans = load()?;
-    fans.rename(&id, &name).map_err(|e| e.to_string())?;
-    save(&fans)?;
-    Ok(fans)
+    update(|f| f.rename(&id, &name))
 }
 
 #[tauri::command]
 pub fn fan_set_room(id: String, room: String) -> Result<Fans, String> {
-    let mut fans = load()?;
-    fans.set_room(&id, &room).map_err(|e| e.to_string())?;
-    save(&fans)?;
-    Ok(fans)
+    update(|f| f.set_room(&id, &room))
 }
 
 #[tauri::command]
 pub fn room_add(name: String) -> Result<Fans, String> {
-    let mut fans = load()?;
-    fans.room_add(&name).map_err(|e| e.to_string())?;
-    save(&fans)?;
-    Ok(fans)
+    update(|f| f.room_add(&name))
 }
 
 #[tauri::command]
 pub fn room_rename(old: String, new: String) -> Result<Fans, String> {
-    let mut fans = load()?;
-    fans.room_rename(&old, &new).map_err(|e| e.to_string())?;
-    save(&fans)?;
-    Ok(fans)
+    update(|f| f.room_rename(&old, &new))
 }
 
 #[tauri::command]
 pub fn room_remove(name: String) -> Result<Fans, String> {
-    let mut fans = load()?;
-    fans.room_remove(&name);
-    save(&fans)?;
-    Ok(fans)
+    update(|f| {
+        f.room_remove(&name);
+        Ok(())
+    })
 }
 
 #[tauri::command]
 pub fn room_order(order: Vec<String>) -> Result<Fans, String> {
-    let mut fans = load()?;
-    fans.room_order(&order);
-    save(&fans)?;
-    Ok(fans)
+    update(|f| {
+        f.room_order(&order);
+        Ok(())
+    })
 }
 
 /// Tell a remembered fan something (or ask, with `read`) and bring its
@@ -148,15 +151,16 @@ pub fn room_order(order: Vec<String>) -> Result<Fans, String> {
 #[tauri::command]
 pub async fn fan_send(id: String, command: Command) -> Result<Outcome, String> {
     blocking(move || {
-        let _one = BUSY.lock().map_err(|e| e.to_string())?;
-        let mut fans = load()?;
-        let fan = fans
+        let _radio = RADIO.lock().map_err(|e| e.to_string())?;
+        let fan = load()?
             .find(&id)
             .cloned()
             .ok_or_else(|| format!("no fan \"{id}\""))?;
         let (state, reach) = fans::send(&fan, &command).map_err(|e| e.to_string())?;
-        fans.note_state(&fan.id, &state, reach.label());
-        save(&fans)?;
+        let fans = update(|f| {
+            f.note_state(&fan.id, &state, reach.label());
+            Ok(())
+        })?;
         Ok(Outcome { state, reach, fans })
     })
     .await

@@ -100,6 +100,21 @@ impl Fans {
         std::fs::write(path, text).map_err(io)
     }
 
+    /// Load the list from `path`, change it and save it: the change lands
+    /// on the list as it is on disk now, not on a copy read earlier. A
+    /// long job (a scan, a command over Bluetooth) must work on a copy and
+    /// note its findings through here at the end, or it undoes the renames
+    /// and moves made while it ran.
+    pub fn update<T>(
+        path: &Path,
+        change: impl FnOnce(&mut Fans) -> Result<T, StoreError>,
+    ) -> Result<(T, Fans), StoreError> {
+        let mut fans = Fans::load(path)?;
+        let out = change(&mut fans)?;
+        fans.save(path)?;
+        Ok((out, fans))
+    }
+
     /// The fan called `which`: its name (any case), its id, or the end of its id.
     pub fn find(&self, which: &str) -> Option<&Fan> {
         let w = which.trim().to_ascii_lowercase();
@@ -366,6 +381,40 @@ mod tests {
             back.room_add("main BEDROOM"),
             Err(StoreError::RoomExists(_))
         ));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_long_scan_does_not_undo_a_rename_made_while_it_ran() {
+        let dir = std::env::temp_dir().join(format!("kagaz-fans-race-{}", std::process::id()));
+        let path = dir.join("fans.toml");
+        let _ = std::fs::remove_dir_all(&dir);
+        Fans::update(&path, |f| {
+            f.add(&found("a1b2c3d4e5f6", "R1"), "Renesa e5f6", "")
+                .map(|_| ())
+        })
+        .unwrap();
+        // A scan starts: it works on a copy while it asks the fans.
+        let copy = Fans::load(&path).unwrap();
+        let seen = vec![found("a1b2c3d4e5f6", "R1")];
+        // Meanwhile the person renames the fan and puts it in a room.
+        Fans::update(&path, |f| f.rename("e5f6", "Bedroom fan")).unwrap();
+        Fans::update(&path, |f| f.set_room("e5f6", "Bedroom")).unwrap();
+        // The scan ends and notes what it learnt.
+        let state = FanState::decode("0,0,0,0,0,0,0,R1").unwrap();
+        let ((), after) = Fans::update(&path, |f| {
+            f.note_seen(&seen);
+            f.note_state("a1b2c3d4e5f6", &state, "bluetooth");
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(after.fans[0].name, "Bedroom fan");
+        assert_eq!(after.fans[0].room, "Bedroom");
+        assert!(!after.fans[0].last_state.as_ref().unwrap().power);
+        assert_eq!(
+            copy.fans[0].name, "Renesa e5f6",
+            "the copy was taken before the rename"
+        );
         let _ = std::fs::remove_dir_all(dir);
     }
 

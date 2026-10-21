@@ -39,7 +39,11 @@ pub enum FanAction {
     /// Boost on or off
     Boost { state: OnOff },
     /// Ask the fan how it is, without changing anything
-    Read,
+    Read {
+        /// Also print the fan's state string as it came, bit by bit
+        #[arg(long)]
+        raw: bool,
+    },
     /// Remember a fan found nearby (by its id or the end of it), with a name and a room
     Add {
         /// What to call it ("Bedroom fan"); without it, the product name and the end of its id
@@ -78,6 +82,15 @@ fn save(fans: &Fans) -> Result<()> {
     fans.save(&Fans::default_path()).map_err(|e| anyhow!("{e}"))
 }
 
+/// Change the saved list as it is on disk now, and return it as saved.
+fn update(
+    change: impl FnOnce(&mut Fans) -> Result<(), kagaz_core::fans::store::StoreError>,
+) -> Result<Fans> {
+    Fans::update(&Fans::default_path(), change)
+        .map(|((), fans)| fans)
+        .map_err(|e| anyhow!("{e}"))
+}
+
 fn reach_word(f: &fans::Fan) -> &'static str {
     match f.last_reach.as_deref() {
         Some("wifi") => "Wi-Fi",
@@ -89,15 +102,21 @@ fn reach_word(f: &fans::Fan) -> &'static str {
 /// `kagaz fans`: the remembered fans by room with how each is, then the
 /// fans within reach that are not remembered.
 pub fn list(seconds: f32, no_scan: bool, json: bool) -> Result<()> {
-    let mut fans = load()?;
     let (found, trouble) = if no_scan {
         (Vec::new(), None)
     } else {
         fans::scan(seconds)
     };
-    if !no_scan && fans.note_seen(&found) {
-        save(&fans)?;
-    }
+    // The window may change the list meanwhile: each finding is noted on
+    // the list as it is on disk then.
+    let mut fans = if no_scan {
+        load()?
+    } else {
+        update(|f| {
+            f.note_seen(&found);
+            Ok(())
+        })?
+    };
     // A fan seen over Bluetooth tells its state only when asked.
     let mut reachable: Vec<String> = found.iter().map(|f| f.id.clone()).collect();
     if !no_scan {
@@ -106,13 +125,19 @@ pub fn list(seconds: f32, no_scan: bool, json: bool) -> Result<()> {
             .filter(|f| f.state.is_none())
             .filter_map(|f| fans.find(&f.id).cloned())
             .collect();
+        let mut answers = Vec::new();
         for fan in to_ask {
             match fans::read(&fan) {
-                Ok((state, reach)) => fans.note_state(&fan.id, &state, reach.label()),
+                Ok((state, reach)) => answers.push((fan.id, state, reach)),
                 Err(_) => reachable.retain(|id| id != &fan.id),
             }
         }
-        save(&fans)?;
+        fans = update(|f| {
+            for (id, state, reach) in &answers {
+                f.note_state(id, state, reach.label());
+            }
+            Ok(())
+        })?;
     }
     if json {
         let others: Vec<&Found> = found
@@ -229,7 +254,31 @@ pub fn fan(which: &str, action: FanAction) -> Result<()> {
             FanCommand::Timer(i as u8)
         }
         FanAction::Boost { state } => FanCommand::Boost(state.into()),
-        FanAction::Read => FanCommand::Read,
+        FanAction::Read { raw: true } => {
+            let fan = fans
+                .find(which)
+                .cloned()
+                .ok_or_else(|| anyhow!("no fan called \"{which}\"; kagaz fans lists them"))?;
+            let (text, reach) = fans::send_raw(&fan, &FanCommand::Read)
+                .with_context(|| format!("could not reach {}", fan.name))?;
+            println!("{} over {}: {text}", fan.name, reach.label());
+            if let Some(v) = text
+                .split(',')
+                .next()
+                .and_then(|f| f.trim().parse::<i64>().ok())
+            {
+                let bits: Vec<String> = (0..24)
+                    .filter(|b| v & (1 << b) != 0)
+                    .map(|b| format!("0x{:x}", 1i64 << b))
+                    .collect();
+                println!("field 0 = {v} = 0x{v:x}; bits set: {}", bits.join(" "));
+            }
+            if let Some(state) = kagaz_core::fans::FanState::decode(&text) {
+                println!("decoded as: {}", state.words());
+            }
+            return Ok(());
+        }
+        FanAction::Read { raw: false } => FanCommand::Read,
         FanAction::Add {
             name,
             room,
@@ -302,8 +351,10 @@ pub fn fan(which: &str, action: FanAction) -> Result<()> {
     }
     let (state, reach) =
         fans::send(&fan, &command).with_context(|| format!("could not reach {}", fan.name))?;
-    fans.note_state(&fan.id, &state, reach.label());
-    save(&fans)?;
+    update(|f| {
+        f.note_state(&fan.id, &state, reach.label());
+        Ok(())
+    })?;
     let how = match reach {
         fans::Reach::Wifi => "Wi-Fi",
         fans::Reach::Bluetooth => "Bluetooth",
