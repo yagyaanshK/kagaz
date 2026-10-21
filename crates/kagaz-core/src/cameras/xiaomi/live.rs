@@ -151,4 +151,8 @@ impl Live {
         }
         self.client.start_speaker()
     }
+
+    pub fn stop_talking(&mut self) -> Result<(), String> {
+        self.client.stop_speaker()
+    }
 }

@@ -19,6 +19,7 @@ const CMD_AUTH: u32 = 0x100;
 const CMD_VIDEO_START: u32 = 0x102;
 const CMD_VIDEO_STOP: u32 = 0x103;
 const CMD_SPEAKER_START: u32 = 0x106;
+const CMD_SPEAKER_STOP: u32 = 0x108;
 const CMD_PLAYBACK: u32 = 0x10D;
 const CMD_PLAYBACK_ANSWER: u32 = 0x10E;
 const CMD_PLAYBACK_SPEED: u32 = 0x10F;
@@ -231,6 +232,10 @@ impl Client {
     /// Ask for the camera's speaker (talk-back).
     pub fn start_speaker(&mut self) -> Result<(), String> {
         self.command(CMD_SPEAKER_START, "")
+    }
+
+    pub fn stop_speaker(&mut self) -> Result<(), String> {
+        self.command(CMD_SPEAKER_STOP, "")
     }
 
     /// The codec the camera's speaker takes, when it is not the usual A-law.

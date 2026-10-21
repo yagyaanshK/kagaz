@@ -362,6 +362,40 @@ fn xiaomi_playback(
     }
 }
 
+/// Sound from the window's microphone for a camera's speaker.
+enum Talk {
+    Sound(Vec<i16>),
+    Stop,
+}
+
+/// Where to send talk-back for each camera with a live view open (by its
+/// window id); the live view's own loop passes it on to the camera.
+static TALK: std::sync::Mutex<Option<std::collections::HashMap<String, std::sync::mpsc::SyncSender<Talk>>>> =
+    std::sync::Mutex::new(None);
+
+/// Talk through a camera's speaker: 8 kHz 16-bit mono sound, base64.
+#[tauri::command]
+fn camera_talk(device_id: String, data: String) -> Result<(), String> {
+    use base64::Engine;
+    let bytes = base64::engine::general_purpose::STANDARD.decode(data).map_err(|e| e.to_string())?;
+    let pcm: Vec<i16> = bytes.chunks_exact(2).map(|b| i16::from_le_bytes([b[0], b[1]])).collect();
+    let talk = TALK.lock().unwrap();
+    let tx = talk
+        .as_ref()
+        .and_then(|m| m.get(&device_id))
+        .ok_or("this camera's live view is not open")?;
+    // A full queue drops this piece rather than delay what follows.
+    let _ = tx.try_send(Talk::Sound(pcm));
+    Ok(())
+}
+
+#[tauri::command]
+fn camera_talk_stop(device_id: String) {
+    if let Some(tx) = TALK.lock().unwrap().as_ref().and_then(|m| m.get(&device_id)) {
+        let _ = tx.try_send(Talk::Stop);
+    }
+}
+
 /// A Xiaomi camera's live view for the window's own player, until nobody
 /// watches (`hand` says so) or the camera stops; returns why it ended.
 fn xiaomi_live(
@@ -384,17 +418,43 @@ fn xiaomi_live(
         Ok(v) => v,
         Err(e) => return e,
     };
-    loop {
+    let id = format!("xiaomi:{}", cam.did);
+    let (tx, talk) = std::sync::mpsc::sync_channel::<Talk>(50);
+    TALK.lock().unwrap().get_or_insert_with(Default::default).insert(id.clone(), tx);
+    let mut talking = false;
+    let why = loop {
+        // Talk-back first: it waits for nothing.
+        while let Ok(t) = talk.try_recv() {
+            let sent = match t {
+                Talk::Sound(pcm) => {
+                    let started = if talking { Ok(()) } else { view.start_talking() };
+                    talking = started.is_ok();
+                    started.and_then(|_| view.talk(&pcm))
+                }
+                Talk::Stop if talking => {
+                    talking = false;
+                    view.stop_talking()
+                }
+                Talk::Stop => Ok(()),
+            };
+            if let Err(e) = sent {
+                kagaz_core::cameras::tapo::serve::log(&format!("talk to {}: {e}", cam.name));
+            }
+        }
         match view.next() {
             Ok(items) if items.is_empty() => continue,
             Ok(items) => {
                 if !hand(items) {
-                    return String::new();
+                    break String::new();
                 }
             }
-            Err(e) => return e,
+            Err(e) => break e,
         }
+    };
+    if let Some(m) = TALK.lock().unwrap().as_mut() {
+        m.remove(&id);
     }
+    why
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1723,6 +1783,8 @@ pub fn run() {
             cameras_status,
             cameras_start,
             cameras_restart,
+            camera_talk,
+            camera_talk_stop,
             xiaomi::xiaomi_signed_in,
             xiaomi::xiaomi_login_password,
             xiaomi::xiaomi_login_phone,
