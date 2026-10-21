@@ -7,15 +7,18 @@
 //   const panel = KagazBench.attach(box, {
 //     bench: "scan",                       // which bench
 //     paper: () => "A4",                   // the page Crop's Fill fills
-//     finish: [{ label: "Save…", accent: true, run: async (view) => "Saved …" }],
+//     finish: [{ label: "Save…", accent: true,
+//                run: async (view) => ({ text: "Saved …", path }) }],  // or just the text
 //   });
 //   panel.show(view);   // after putting pictures on the bench
 //
 // Tidy: Clean background, Find the card (frames to adjust). Crop: a frame,
 // then just the area (default), fill the page, or keep the page. Compress:
-// under a size. Undo goes back one tool; Start over to how it came.
+// under a size. Undo goes back one tool; Start over to how it came. A
+// saved file can be shown in its folder (Downloads on a phone).
 
 const KagazBench = (() => {
+  const onPhone = /Android|iPhone|iPad/i.test(navigator.userAgent);
   const SIZES = [["200000", "200 KB"], ["500000", "500 KB"], ["1000000", "1 MB"], ["2000000", "2 MB"], ["5000000", "5 MB"]];
 
   function attach(box, { bench, paper = () => "A4", finish = [] }) {
@@ -42,7 +45,7 @@ const KagazBench = (() => {
         </div>
       </div>
       <div class="bench-panel" data-panel="crop" hidden>
-        <p class="small muted">Drag the frame's corners around what to keep (a photo, a signature).</p>
+        <p class="small muted">Drag the frame's corners around what to keep (a photo, a signature). A tilted frame comes out level, along its bottom side.</p>
         <div class="bench-crop-editor"></div>
         <fieldset class="bench-modes"><legend class="small">Then</legend>
           <label class="switch"><input type="radio" name="${bench}-crop-mode" value="Area" checked> Just the cropped area, at its real size</label>
@@ -59,14 +62,20 @@ const KagazBench = (() => {
         <div class="actions"><button type="button" class="bench-compress-go accent">Make it smaller</button></div>
       </div>
       <div class="actions bench-finish"></div>
-      <p class="bench-note small" role="status"></p>`;
+      <p class="bench-note small" role="status"></p>
+      <div class="actions bench-saved hidden"><button type="button" class="bench-show">${onPhone ? "Show in Downloads" : "Show in folder"}</button></div>`;
     const q = (s) => box.querySelector(s);
     let view = null;
     let page = 0;
     let busy = false;
     let tidyCrop = null;
     let cropCrop = null;
+    let saved = null;
 
+    const savedAt = (path) => {
+      saved = path || null;
+      q(".bench-saved").classList.toggle("hidden", !saved);
+    };
     const say = (text, cls) => {
       q(".bench-note").textContent = text || "";
       q(".bench-note").className = "bench-note small" + (cls ? " " + cls : "");
@@ -91,6 +100,7 @@ const KagazBench = (() => {
     async function run(cmd, args, working) {
       if (busy) return null;
       busy = true;
+      savedAt(null);
       box.querySelectorAll("button").forEach((b) => (b.dataset.was = b.disabled, b.disabled = true));
       say(working, "working");
       try {
@@ -127,6 +137,9 @@ const KagazBench = (() => {
       });
     }
 
+    q(".bench-show").addEventListener("click", () => {
+      if (saved) invoke("show_in_folder", { path: saved }).catch((e) => say(String(e), "cap-warn"));
+    });
     q(".bench-look").addEventListener("click", () => {
       if (view) KagazHistory.picture(view.name, view.view);
     });
@@ -176,7 +189,9 @@ const KagazBench = (() => {
         busy = true;
         try {
           const done = await f.run(view, { compressed: view.size != null ? q(".bench-format").value : null });
-          if (done) say(done, "cap-ok");
+          const text = typeof done === "string" ? done : done && done.text;
+          if (text) say(text, "cap-ok");
+          savedAt(done && done.path);
         } catch (e) {
           say(String(e), "cap-warn");
         }
@@ -195,6 +210,7 @@ const KagazBench = (() => {
         }
         q(".bench-frames").classList.add("hidden");
         say("");
+        savedAt(null);
         show(v);
       },
       say,

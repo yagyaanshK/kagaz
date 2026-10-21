@@ -298,6 +298,14 @@ pub fn publish(app: &AppHandle, path: &Path) -> Result<String, String> {
     Ok(saved.location)
 }
 
+#[derive(Serialize)]
+struct Nothing {}
+
+/// The phone's Downloads, where saved files go (Kagaz's folder in it).
+pub fn show_downloads(app: &AppHandle) -> Result<(), String> {
+    phone(app)?.run_mobile_plugin::<()>("showDownloads", Nothing {}).map_err(|e| e.to_string())
+}
+
 /// Where a file the person will save goes first: the cache, then
 /// [`publish`] moves it to Downloads.
 pub fn save_path(name: &str) -> Result<String, String> {
