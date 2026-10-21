@@ -176,9 +176,9 @@ const KagazFans = (() => {
       b.setAttribute("aria-pressed", String(here));
       speeds.appendChild(b);
     }
-    // Which command starts Boost is not yet checked on a fan; speed 6 is
-    // what the fan reports in Boost.
-    const boost = button("chip" + (boosting ? " active" : ""), "Boost", () => send(f, { kind: "speed", value: 6 }, c), `Boost ${f.name}`);
+    // Boost on and off, as the remote's button: checked on an Aris (Boost
+    // off goes back to speed 5).
+    const boost = button("chip" + (boosting ? " active" : ""), "Boost", () => send(f, { kind: "boost", value: !boosting }, c), `Boost ${f.name}`);
     boost.setAttribute("aria-pressed", String(boosting));
     speeds.appendChild(boost);
     controls.appendChild(speeds);
@@ -190,8 +190,8 @@ const KagazFans = (() => {
       b.setAttribute("aria-pressed", String(led));
       extras.appendChild(b);
     }
-    // The light's colour and brightness, on fans that have them (read as
-    // checked on an Aris; the commands that set them are not yet checked).
+    // The light's colour and brightness, on fans that have them: read and
+    // set as checked on an Aris.
     if (p.light && p.color) {
       const pick = el("label", "fan-timer", "Colour ");
       const sel = el("select");
@@ -224,7 +224,7 @@ const KagazFans = (() => {
     }
     const sleep = !!(s && s.sleep);
     const sb = button("chip" + (sleep ? " active" : ""), "Sleep", () => send(f, { kind: "sleep", value: !sleep }, c), `Sleep mode of ${f.name}: turn ${sleep ? "off" : "on"}`);
-    sb.title = "Sleep mode: the fan slows down through the night";
+    sb.title = "Sleep mode: the fan takes it (checked), though its remote has no button; what it does through the night is not yet known";
     sb.setAttribute("aria-pressed", String(sleep));
     extras.appendChild(sb);
     const timer = el("label", "fan-timer", "Turn off after ");

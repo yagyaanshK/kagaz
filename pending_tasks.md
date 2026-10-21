@@ -61,21 +61,23 @@ with the commit that closes them.
       Boost is speed 6 with bit 0x40, and 0x40 stays set after turning off
       from Boost. Fields 11 and 13 count seconds running and switched off,
       shown on the fan's menu. Fixtures in `fans/atomberg.rs`.
-- [ ] **A fan takes only so many new connections** (2026-10-21). After
-      many connections the Aris and the Renesa first listed no services,
-      then (the Aris, after a power cycle and about a dozen one-reading
-      connections) refused to connect at all, while still advertising.
-      Switching off at the wall brings a fan back. The untouched Efficio
-      was fine throughout. Kagaz now keeps one connection per fan while it
-      is in use (window: closed after 45 s idle and on exit; CLI: `kagaz fan
-      <name> console`), so a session costs one connection. To verify: power
-      cycle, run the console through the Part B steps on one connection,
-      and see that the fan still answers afterwards.
+- [x] **A fan takes only so many new connections** (2026-10-21). After
+      many connections a fan stops listing services, then refuses to
+      connect, until switched off at the wall. Kagaz keeps one connection
+      per fan while in use; a 20-command console session on one connection
+      left the Aris answering normally.
+- [x] **Commands checked on the Aris** (2026-10-21): power, speeds, Boost
+      on/off, light, colours, brightness 50/100. Sleep and timer are taken
+      and reported back.
+- [ ] **What Sleep and the timer do over time**: set `timer 1` and see the
+      fan switch off an hour later; leave Sleep on overnight.
+- [ ] **Brightness levels**: the Aris has 4 visible levels; `brightness 10`
+      showed no change. Find the four values the fan uses and make the
+      slider snap to them.
+- [ ] **Renesa**: needs a power cycle at the wall before Kagaz can reach it.
 - [x] **Light read from the real fan** (2026-10-21): on/off, three colours
       (warm, white, natural white) and brightness 10 to 100 decoded from an
       Aris set with its remote; the card shows colour and brightness.
-- [ ] **Which command starts Boost**: the card sends speed 6 (what the fan
-      reports in Boost); the community's `boost` key is untested.
 - [ ] **Light, sleep, timer, brightness on real fans.** Written from the
       community's notes; only power and speed are exercised so far. Check
       an Aris (I1, dimmable, colour modes) and an Efficio (M1).

@@ -85,9 +85,9 @@ pub fn profile(series: &str) -> Profile {
 /// counts seconds running and field 13 seconds switched off, each moving
 /// only in its own state. The light, checked the same way: 0x20 is on;
 /// colour 0x8000 alone is warm, 0x08 alone white ("cool"), both natural
-/// white ("daylight"); bits 8 to 14 are the brightness, 10 to 100. Still
-/// from the community's notes, not yet checked: sleep (0x80) and the
-/// timer (bits 16 to 19); the remote has neither.
+/// white ("daylight"); bits 8 to 14 are the brightness, 10 to 100. Sleep
+/// (0x80) and the timer's hours (bits 16 to 19) come back as set by a
+/// command (checked); the remote has neither button.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FanState {
     pub power: bool,
@@ -210,6 +210,13 @@ pub fn span_words(seconds: u64) -> String {
 
 /// One thing to tell the fan. The fan acts on the first key of a command
 /// only, so each command carries exactly one.
+///
+/// Checked on an Aris on 2026-10-21, over one connection, watching the fan:
+/// power, speed 1 to 5, speed 6 (Boost), boost on and off (off returns to
+/// speed 5), led, light_mode warm/cool/daylight, brightness (50 and 100
+/// visibly brighter; 10 showed no change though the fan reported it).
+/// The fan takes sleep and timer and reports them back; their effect over
+/// time is not yet seen.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "value", rename_all = "snake_case")]
 pub enum Command {
