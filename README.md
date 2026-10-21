@@ -176,13 +176,17 @@ Atomberg ceiling fans, the way their app and remote reach them: over
 Bluetooth from this computer (a fan answers from the day it is unboxed, no
 Wi-Fi setup needed) and over the Wi-Fi network once a fan is on it. `fans`
 lists the fans you added, by room, with how each is now (Off, Speed 3,
-light on, hours left on the timer) or "out of reach", then the fans within
-reach that are not added yet. `fan <name> on|off|speed N|light on|off|
+Boost, light on, hours left on the timer) or "out of reach", then the fans
+within reach that are not added yet. `fan <name> on|off|speed N|light on|off|
 brightness N|sleep on|off|timer 1|2|3|6|read` does one thing at a time, as
-the fan wants it. `fan <id> add`, `rename`, `room` and `forget` keep the
+the fan wants it; `read` also gives the fan's own count of how long it has
+run and been switched off to date, and `read --raw` its state as it came.
+`fan <id> add`, `rename`, `room` and `forget` keep the
 list, and `kagaz rooms` keeps the rooms, in `~/.config/kagaz/fans.toml`.
-Verified on a Renesa over Bluetooth: found, state read, commands taken.
-Wi-Fi is written from the community's notes and awaits a fan on the network.
+Verified over Bluetooth: found, state read, on, speeds 1 to 5 and Boost
+decoded from an Aris set with its remote, a command taken by a Renesa.
+Light, colour, brightness, sleep and timer are still from the community's
+notes, as is Wi-Fi, which awaits a fan on the network.
 
 ```
 kagaz tapo login

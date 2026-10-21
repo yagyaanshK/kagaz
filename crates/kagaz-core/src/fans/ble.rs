@@ -126,16 +126,42 @@ async fn find(
     found.ok_or(FanError::OutOfReach)
 }
 
+/// When each fan was last let go, so the next connection waits a little.
+static LAST: std::sync::Mutex<Vec<(String, Instant)>> = std::sync::Mutex::new(Vec::new());
+/// The least time between two connections to the same fan.
+const GAP: Duration = Duration::from_secs(2);
+
 /// Connect to the fan at `address`, send `command` (when given) and read
 /// the state string back.
+///
+/// Gentle on purpose. On 2026-10-21 two fans that Kagaz had connected to
+/// many times in quick succession (up to four tries per request, timed-out
+/// tries never cancelled) went on accepting connections but offered no
+/// services, while an untouched fan was fine. So: two tries at most, three
+/// seconds apart; every try that fails or times out is cancelled with a
+/// disconnect, so no half-open link is left with the fan; and a pause of
+/// at least two seconds between connections to the same fan.
 pub fn exchange(address: &str, command: Option<&str>) -> Result<String, FanError> {
-    runtime()?.block_on(async {
+    let key = address.to_ascii_uppercase();
+    let wait = LAST
+        .lock()
+        .ok()
+        .and_then(|l| l.iter().find(|(a, _)| *a == key).map(|(_, t)| *t))
+        .map(|t| GAP.saturating_sub(t.elapsed()))
+        .unwrap_or_default();
+    if !wait.is_zero() {
+        std::thread::sleep(wait);
+    }
+    let result = runtime()?.block_on(async {
         let adapter = adapter().await?;
-        // A fan advertises slowly, and BlueZ gives up on a connection it
-        // cannot start from a recent advert ("abort-by-local"), so a failed
-        // try is followed by a fresh scan and another go.
         let mut last = FanError::OutOfReach;
-        for attempt in 0..4 {
+        for attempt in 0..2 {
+            if attempt > 0 {
+                tokio::time::sleep(Duration::from_secs(3)).await;
+            }
+            // A fan advertises slowly and BlueZ gives up on a connection it
+            // cannot start from a recent advert ("abort-by-local"), so the
+            // second try looks for a fresh advert first.
             let p = match find(&adapter, address, Duration::from_secs(6), attempt > 0).await {
                 Ok(p) => p,
                 Err(e) => {
@@ -152,10 +178,16 @@ pub fn exchange(address: &str, command: Option<&str>) -> Result<String, FanError
                 Ok(Err(e)) => last = bt(e),
                 Err(_) => last = FanError::OutOfReach,
             }
-            tokio::time::sleep(Duration::from_millis(700)).await;
+            // Cancel whatever BlueZ still has under way with the fan.
+            let _ = p.disconnect().await;
         }
         Err(last)
-    })
+    });
+    if let Ok(mut l) = LAST.lock() {
+        l.retain(|(a, _)| *a != key);
+        l.push((key, Instant::now()));
+    }
+    result
 }
 
 async fn talk(p: &Peripheral, command: Option<&str>) -> Result<String, FanError> {

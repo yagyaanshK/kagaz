@@ -990,6 +990,7 @@ body.pip .pip-target .call-body, body.pip .pip-target .door-call-body { position
 .fan-text { display: flex; flex-direction: column; min-width: 0; flex: 1 1 auto; }
 .fan-text strong { overflow-wrap: anywhere; }
 .fan-more, .fan-arrange { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
+.fan-times { flex-basis: 100%; margin: 0 0 4px; }
 .fan-room-pick { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
 button.danger-text { background: none; border-color: transparent; color: var(--bad); }
 .fan-controls { margin-top: 12px; display: flex; flex-direction: column; gap: 8px; }
