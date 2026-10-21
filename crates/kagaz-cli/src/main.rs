@@ -403,6 +403,17 @@ enum XiaomiCommand {
         #[arg(long)]
         from: Option<i64>,
     },
+    /// Which times the camera's SD card holds footage for, between two unix times
+    Footage {
+        camera: String,
+        #[arg(long)]
+        from: i64,
+        #[arg(long)]
+        to: i64,
+        /// Ask every this many seconds
+        #[arg(long, default_value_t = 600)]
+        step: i64,
+    },
 }
 
 #[derive(Subcommand)]
@@ -2858,7 +2869,7 @@ fn xiaomi_command(cmd: XiaomiCommand) -> Result<()> {
             let _ = session.save(&path);
             println!("Connected to {} over {} in {:.1} s.", cam.name, view.protocol(), started.elapsed().as_secs_f32());
             if from.is_some() {
-                match view.answer(std::time::Duration::from_secs(3)) {
+                match view.answer(std::time::Duration::from_secs(6)) {
                     Some((cmd, text)) => println!("The camera answered {cmd:#x}: {}", text.chars().take(300).collect::<String>()),
                     None => println!("No answer to the playback request within 3 s."),
                 }
@@ -2895,6 +2906,42 @@ fn xiaomi_command(cmd: XiaomiCommand) -> Result<()> {
                 bytes / 1000,
                 sound as f32 / 8000.0
             );
+            Ok(())
+        }
+        XiaomiCommand::Footage { camera, from, to, step } => {
+            let mut session = Session::load(&path)
+                .map_err(|_| anyhow::anyhow!("not signed in; run `kagaz xiaomi login` first"))?;
+            let mut cams = xiaomi_cameras(&mut session, &path)?;
+            let known: Vec<std::net::Ipv4Addr> = cams.iter().filter_map(|c| c.ip.parse().ok()).collect();
+            let here = kagaz_core::cameras::xiaomi::local::find(&known, std::time::Duration::from_secs(2));
+            for c in &mut cams {
+                if let Some(ip) = here.get(&c.did) {
+                    c.ip = ip.to_string();
+                }
+            }
+            let cam = cams
+                .iter()
+                .find(|c| c.did == camera || c.name.to_lowercase().contains(&camera.to_lowercase()))
+                .ok_or_else(|| anyhow::anyhow!("no camera called {camera}"))?
+                .clone();
+            let started = std::time::Instant::now();
+            let mut asked = 0;
+            let mut card = kagaz_core::cameras::xiaomi::card::Card::open(&mut session, &cam).map_err(|e| anyhow::anyhow!(e))?;
+            let mut files = Vec::new();
+            let mut t = from;
+            while t < to {
+                if let Some(file) = card.at(t).map_err(|e| anyhow::anyhow!(e))? {
+                    if !files.contains(&file) {
+                        files.push(file);
+                    }
+                }
+                asked += 1;
+                t += step.max(60);
+            }
+            println!("Asked {asked} times in {:.1} s; {} files:", started.elapsed().as_secs_f32(), files.len());
+            for (start, length) in files {
+                println!("  {start} +{length}s");
+            }
             Ok(())
         }
         XiaomiCommand::Cameras { json } => {

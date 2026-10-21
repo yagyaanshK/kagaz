@@ -20,6 +20,7 @@ const CMD_VIDEO_START: u32 = 0x102;
 const CMD_VIDEO_STOP: u32 = 0x103;
 const CMD_SPEAKER_START: u32 = 0x106;
 const CMD_PLAYBACK: u32 = 0x10D;
+const CMD_PLAYBACK_ANSWER: u32 = 0x10E;
 const CMD_PLAYBACK_SPEED: u32 = 0x10F;
 const CMD_ENCODED: u32 = 0x1001;
 
@@ -170,6 +171,41 @@ impl Client {
                 r#"{{"sessionid":{start},"starttime":{start},"endtime":{end},"autoswitchtolive":0,"offset":0,"speed":{speed},"avchannelmerge":1}}"#
             ),
         )
+    }
+
+    /// Whether the card holds footage at `at` (unix seconds): the file's
+    /// start and length when it does. The camera answers only when it
+    /// finds one, so silence for `wait` means none.
+    pub fn footage_at(&mut self, at: i64, wait: Duration) -> Result<Option<(i64, i64)>, String> {
+        self.conn.drain_media();
+        self.playback(at, at + 60, 1)?;
+        let until = std::time::Instant::now() + wait;
+        let mut found = None;
+        loop {
+            let left = until.saturating_duration_since(std::time::Instant::now());
+            if left.is_zero() {
+                break;
+            }
+            match self.read_answer(left) {
+                Ok((CMD_PLAYBACK_ANSWER, text)) => {
+                    // The camera ends its answers with a zero byte.
+                    let text = text.strip_suffix(&[0]).unwrap_or(&text);
+                    let v: serde_json::Value = serde_json::from_slice(text).unwrap_or_default();
+                    if v.get("status").and_then(|s| s.as_str()) == Some("filefound") {
+                        let start = v.get("starttime").and_then(|s| s.as_i64()).unwrap_or(at);
+                        let length = v.get("duration").and_then(|s| s.as_i64()).unwrap_or(60);
+                        found = Some((start, length));
+                    }
+                    break;
+                }
+                Ok(_) => continue,
+                Err(e) if e.contains("did not answer") => break,
+                Err(e) => return Err(e),
+            }
+        }
+        self.stop()?;
+        self.conn.drain_media();
+        Ok(found)
     }
 
     pub fn playback_speed(&mut self, speed: u32) -> Result<(), String> {

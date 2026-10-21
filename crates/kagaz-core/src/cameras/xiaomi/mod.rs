@@ -8,6 +8,7 @@
 
 pub mod account;
 pub mod api;
+pub mod card;
 pub mod cs2;
 pub mod live;
 pub mod local;

@@ -162,8 +162,20 @@ pub async fn playback_watch(
     channel: Channel<InvokeResponseBody>,
 ) -> Result<PlaybackWatch, String> {
     let e = super::running(&app.state::<super::CameraState>())?;
-    let (_, cam) = super::camera_of(&e, &device_id)?;
     let speed = speed.unwrap_or(1.0).clamp(0.25, 8.0);
+    // A Xiaomi camera's card, played by the camera itself.
+    if let Some(x) = super::xiaomi_of(&e, &device_id) {
+        let (token, watcher) = super::blocking(move || {
+            e._server.watch_playback_with(speed, move |hand| super::xiaomi_playback(&x.cam, from, to, hand))
+        })
+        .await?;
+        return Ok(PlaybackWatch {
+            id: forward(app, watcher.rx, channel),
+            token,
+            cached: false,
+        });
+    }
+    let (_, cam) = super::camera_of(&e, &device_id)?;
     let (from, to) = super::camera_span(&device_id, from, to);
     let (token, watcher, cached) = super::blocking(move || {
         let (token, w) = e._server.watch_playback(&cam.device_id, from, to, speed)?;

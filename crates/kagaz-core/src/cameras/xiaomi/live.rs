@@ -82,6 +82,16 @@ impl Live {
         self.client.protocol()
     }
 
+    /// Stop the pictures (live or played back).
+    pub fn stop(&mut self) -> Result<(), String> {
+        self.client.stop()
+    }
+
+    /// The card's file holding moment `at`, if it has one (see [`super::card`]).
+    pub fn footage_at(&mut self, at: i64, wait: Duration) -> Result<Option<(i64, i64)>, String> {
+        self.client.footage_at(at, wait)
+    }
+
     /// What the camera answered to a request, if it has (within `wait`).
     pub fn answer(&self, wait: Duration) -> Option<(u32, String)> {
         self.client

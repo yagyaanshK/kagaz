@@ -335,6 +335,33 @@ impl XiaomiCamera {
     }
 }
 
+/// A Xiaomi camera's card from `from` to `to` for the window's own player.
+fn xiaomi_playback(
+    cam: &kagaz_core::cameras::xiaomi::Camera,
+    from: i64,
+    to: i64,
+    hand: &mut dyn FnMut(Vec<kagaz_core::media::Media>) -> bool,
+) -> String {
+    use kagaz_core::cameras::xiaomi::live;
+    let mut view = match with_xiaomi_session(|s| live::open_playback(s, cam, from, to)) {
+        Ok(v) => v,
+        Err(e) => return e,
+    };
+    loop {
+        match view.next() {
+            Ok(items) if items.is_empty() => continue,
+            Ok(items) => {
+                if !hand(items) {
+                    return String::new();
+                }
+            }
+            // The camera stops sending at the end of what was asked for.
+            Err(e) if e.contains("stopped sending") => return String::new(),
+            Err(e) => return e,
+        }
+    }
+}
+
 /// A Xiaomi camera's live view for the window's own player, until nobody
 /// watches (`hand` says so) or the camera stops; returns why it ended.
 fn xiaomi_live(
@@ -449,6 +476,79 @@ fn camera_views(e: &CameraEngine) -> Vec<CameraView> {
             }
         }))
         .collect()
+}
+
+fn xiaomi_of(e: &CameraEngine, id: &str) -> Option<XiaomiCamera> {
+    e.xiaomi.iter().find(|x| x.id() == id).cloned()
+}
+
+/// The saved Xiaomi sign-in, saved again when its token was renewed on the way.
+fn with_xiaomi_session<T>(f: impl FnOnce(&mut kagaz_core::cameras::xiaomi::Session) -> Result<T, String>) -> Result<T, String> {
+    use kagaz_core::cameras::xiaomi::Session;
+    let path = Session::default_path();
+    let mut session = Session::load(&path).map_err(|_| "Sign in to Xiaomi again.".to_string())?;
+    let before = session.pass_token.clone();
+    let out = f(&mut session);
+    if session.pass_token != before {
+        let _ = session.save(&path);
+    }
+    out
+}
+
+/// Days with footage on a Xiaomi camera's card (local days).
+fn xiaomi_days(app: &AppHandle, cam: &kagaz_core::cameras::xiaomi::Camera, days: u32) -> Result<RecordingDays, String> {
+    use kagaz_core::cameras::tapo::recordings;
+    let offset = local_utc_offset_minutes();
+    let now = unix_now();
+    let today = recordings::day_of(now, offset);
+    let today_start = recordings::day_start(&today, offset).ok_or("no today")?;
+    let _ = app.emit("cameras-progress", format!("{}: looking at its card…", cam.name));
+    let starts = with_xiaomi_session(|s| kagaz_core::cameras::xiaomi::card::days(s, cam, today_start, days.min(30)))?;
+    let mut dates: Vec<String> = starts.iter().map(|&t| recordings::dash_date(&recordings::day_of(t + 3600, offset))).collect();
+    dates.sort();
+    Ok(RecordingDays {
+        utc_offset_minutes: offset,
+        dates,
+        today: recordings::dash_date(&today),
+    })
+}
+
+/// A day's footage on a Xiaomi camera's card, as stretches (asked every
+/// ten minutes, so a gap shorter than that may not show).
+fn xiaomi_clips(app: &AppHandle, cam: &kagaz_core::cameras::xiaomi::Camera, date: &str) -> Result<RecordingClips, String> {
+    use kagaz_core::cameras::tapo::{recordings, Clip, SdCard};
+    use kagaz_core::cameras::xiaomi::card;
+    let offset = local_utc_offset_minutes();
+    let day_start = recordings::day_start(&date.replace('-', ""), offset).ok_or("not a date")?;
+    let now = unix_now();
+    let name = cam.name.clone();
+    let files = with_xiaomi_session(|s| {
+        card::day(s, cam, day_start, now, &mut |t| {
+            let s = (t + i64::from(offset) * 60).rem_euclid(86_400);
+            let _ = app.emit("cameras-progress", format!("{name}: card checked up to {:02}:{:02}", s / 3600, s % 3600 / 60));
+        })
+    })?;
+    let _ = app.emit("cameras-progress", String::new());
+    Ok(RecordingClips {
+        utc_offset_minutes: offset,
+        sd_card: SdCard {
+            state: "normal".into(),
+            total_bytes: 0,
+            free_bytes: 0,
+            loop_recording: true,
+            recording_since: 0,
+        },
+        clips: card::stretches(&files)
+            .into_iter()
+            .map(|(start, end)| Clip { start, end, video_type: 1 })
+            .collect(),
+        detections: Vec::new(),
+        day_start,
+        source: "camera".into(),
+        whole_day: day_start + 86_400 <= now,
+        restarts: Vec::new(),
+        corrections: Vec::new(),
+    })
 }
 
 /// The Xiaomi account's cameras. Each is looked for on this network by its
@@ -672,12 +772,16 @@ struct RecordingDays {
 /// Days with footage on this camera's card over the last `days`.
 #[tauri::command]
 async fn recording_days(
+    app: AppHandle,
     state: tauri::State<'_, CameraState>,
     device_id: String,
     days: u32,
 ) -> Result<RecordingDays, String> {
     use kagaz_core::cameras::tapo::recordings::{self, Recordings};
     let e = running(&state)?;
+    if let Some(x) = xiaomi_of(&e, &device_id) {
+        return blocking(move || xiaomi_days(&app, &x.cam, days)).await;
+    }
     let (_, cam) = camera_of(&e, &device_id)?;
     blocking(move || {
         let session = e._server.session();
@@ -765,10 +869,14 @@ struct DetectionView {
 /// footage shows where recordings exist.
 #[tauri::command]
 async fn recording_clips(
+    app: AppHandle,
     state: tauri::State<'_, CameraState>,
     device_id: String,
     date: String,
 ) -> Result<RecordingClips, String> {
+    if let Some(x) = running(&state).ok().and_then(|e| xiaomi_of(&e, &device_id)) {
+        return blocking(move || xiaomi_clips(&app, &x.cam, &date)).await;
+    }
     let list = recording_clips_as_labelled(state, device_id.clone(), date).await?;
     Ok(in_real_time(list, &device_id))
 }

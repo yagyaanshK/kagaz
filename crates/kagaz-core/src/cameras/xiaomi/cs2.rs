@@ -178,6 +178,11 @@ impl Conn {
         }
     }
 
+    /// Throw away media pieces waiting to be read.
+    pub fn drain_media(&self) {
+        while self.media.try_recv().is_ok() {}
+    }
+
     /// Send a media piece (talk-back sound) on channel 3.
     pub fn write_packet(&mut self, header: &[u8; 32], payload: &[u8]) -> Result<(), String> {
         let n = 32 + payload.len();
