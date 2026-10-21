@@ -248,7 +248,11 @@ JPEG or PNG), Copy prints it at real size. Two options, off unless ticked, tidy 
 **Clean background** turns the lid's grey around the card white, and
 **Find the card** whitens everything outside the card. The same two work on a file already on this
 device, no printer needed: **Tidy a saved scan or photo**, under the
-printers, shows a PDF, JPEG or PNG tidied, then saves it as a new file. A scan under way can
+printers, shows a PDF, JPEG or PNG tidied, then saves it as a new file. With
+Find the card, the preview puts a frame around each card (one per half of
+an ID page), as Adobe Scan does: drag its corners onto the card, a tilted
+one too, and outside the frames turns white; remove a frame for a
+one-sided ID. The card is never stretched, so it keeps its real size. A scan under way can
 be stopped with **Cancel scan**: the scanner is told to stop.
 
 Each page keeps its place: leave a printer's page with a scan under way

@@ -13,6 +13,7 @@
   };
   let chosen = null; // { path, name }
   let view = null; // the full-size picture of the result
+  let crop = null; // the frames on the first page (Find the card), adjustable
   let busy = false;
 
   const tidy = () => ({ background: $("tidy-clean").checked, card: $("tidy-card").checked });
@@ -37,9 +38,29 @@
       const r = await invoke("tidy_preview", { path: chosen.path, tidy: tidy() });
       view = r.view;
       $("tidy-look").querySelector("img").src = r.thumb;
-      $("tidy-what").textContent = `${chosen.name}${r.pages > 1 ? ` · ${r.pages} pages (the first shown)` : ""} · tap to see it full size`;
+      const pages = r.pages > 1 ? ` · ${r.pages} pages (the first shown)` : "";
+      // Find the card: the page with a frame per card, to adjust by hand.
+      const framed = r.outlines.length > 0;
+      crop = framed
+        ? KagazCrop.attach($("tidy-crop"), {
+            src: r.original,
+            outlines: r.outlines,
+            names: r.outlines.length === 2 ? ["front", "back"] : ["card"],
+          })
+        : null;
+      $("tidy-crop").classList.toggle("hidden", !framed);
+      $("tidy-look").classList.toggle("hidden", framed);
+      $("tidy-result-see").classList.toggle("hidden", !framed);
+      $("tidy-what").textContent = framed
+        ? `${chosen.name}${pages} · drag each frame's corners onto its card; outside the frames turns white. Remove a frame for a one-sided ID.`
+        : `${chosen.name}${pages} · tap to see it full size`;
       showResult(true);
-      say(r.notes.join(" "), r.notes.length ? "cap-warn" : "");
+      if (framed) {
+        const missed = r.outlines.map((o, i) => (o.found ? null : r.outlines.length === 2 ? ["top", "bottom"][i] : "picture")).filter(Boolean);
+        say(missed.length ? `No card stood out in the ${missed.join(" or ")} half; its frame covers it all, so drag its corners onto the card.`.replace("picture half", "picture") : "", missed.length ? "cap-warn" : "");
+      } else {
+        say(r.notes.join(" "), r.notes.length ? "cap-warn" : "");
+      }
     } catch (e) {
       showResult(false);
       say("Could not tidy it: " + e, "cap-warn");
@@ -91,8 +112,22 @@
   $("tidy-look").addEventListener("click", () => {
     if (view) KagazHistory.picture("Tidied: " + chosen.name, view);
   });
+  // The frames as set now, applied to the first page.
+  async function applyFrames() {
+    return invoke("tidy_outlines", { outlines: crop.quads(), background: $("tidy-clean").checked });
+  }
+  $("tidy-result-see").addEventListener("click", async () => {
+    if (!crop || busy) return;
+    try {
+      KagazHistory.picture("Tidied: " + chosen.name, await applyFrames());
+    } catch (e) {
+      say("Could not tidy it: " + e, "cap-warn");
+    }
+  });
   $("tidy-discard").addEventListener("click", () => {
     chosen = null;
+    crop = null;
+    $("tidy-crop").classList.add("hidden");
     showResult(false);
     say("");
   });
@@ -106,6 +141,7 @@
       const out = await invoke("choose_save_path", { suggestedName: `${base}-tidied.${ext}`, extension: ext });
       if (!out) return;
       say("Saving…", "working");
+      if (crop) await applyFrames();
       const saved = await invoke("tidy_save", { out });
       say("Saved " + saved + ".", "cap-ok");
     } catch (e) {

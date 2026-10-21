@@ -1431,6 +1431,7 @@ pub fn run() {
             printing::scan_cancel,
             printing::tidy_preview,
             printing::tidy_save,
+            printing::tidy_outlines,
             printing::id_picture,
             printing::copy_picture,
             scan_max_bytes,
