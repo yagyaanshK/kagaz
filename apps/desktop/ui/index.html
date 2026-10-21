@@ -108,9 +108,11 @@
         <div class="actions"><button type="button" id="tidy-go" class="accent">Choose a file…</button></div>
         <div id="tidy-result" class="hidden">
           <p class="small muted" id="tidy-what"></p>
+          <!-- With Find the card: the page with a frame per card, to adjust (crop.js). -->
+          <div id="tidy-crop" class="hidden"></div>
           <div class="id-row">
             <button type="button" id="tidy-look" class="id-thumb id-page" aria-label="See the tidied file full size"><img alt=""></button>
-            <div class="actions"><button type="button" id="tidy-save" class="accent">Save…</button><button type="button" id="tidy-discard">Discard</button></div>
+            <div class="actions"><button type="button" id="tidy-result-see" class="hidden">See the result</button><button type="button" id="tidy-save" class="accent">Save…</button><button type="button" id="tidy-discard">Discard</button></div>
           </div>
         </div>
         <p id="tidy-note" class="small" role="status"></p>
@@ -641,6 +643,7 @@
   <script src="idscan.js"></script>
   <script src="app.js"></script>
   <script src="printing.js"></script>
+  <script src="crop.js"></script>
   <script src="tidy.js"></script>
   <script src="onetouch.js"></script>
   <script src="calls.js"></script>

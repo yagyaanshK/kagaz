@@ -114,13 +114,7 @@ pub fn page_tidied(
 pub fn tidy_image(img: &mut RgbImage, dpi: u32, tidy: Tidy) -> Vec<String> {
     let mut notes = Vec::new();
     let (w, h) = img.dimensions();
-    let ratio = h as f64 / w.max(1) as f64;
-    let parts: Vec<(u32, u32, &str)> = if (1.25..=1.5).contains(&ratio) {
-        vec![(0, h / 2, "top half"), (h / 2, h - h / 2, "bottom half")]
-    } else {
-        vec![(0, h, "picture")]
-    };
-    for (top, height, name) in parts {
+    for (top, height, name) in parts(w, h) {
         let mut part = imageops::crop_imm(img, 0, top, w, height).to_image();
         if tidy.card && !whiten_outside_card(&mut part, dpi) {
             notes.push(format!("No card stood out in the {name}, so it is left as it was."));
@@ -173,9 +167,21 @@ fn whiten_background(img: &mut RgbImage) {
 /// it white, keeping a small margin. False, with nothing changed, when no
 /// card-sized thing stands out.
 fn whiten_outside_card(img: &mut RgbImage, dpi: u32) -> bool {
-    let Some(lid) = lid_level(img) else {
+    let Some((x0, y0, x1, y1)) = find_card(img, dpi) else {
         return false;
     };
+    for (x, y, p) in img.enumerate_pixels_mut() {
+        if x < x0 || x > x1 || y < y0 || y > y1 {
+            *p = Rgb([255, 255, 255]);
+        }
+    }
+    true
+}
+
+/// The card's box (left, top, right, bottom, in pixels): whatever is clearly
+/// not lid, with a small margin. None when no card-sized thing stands out.
+fn find_card(img: &RgbImage, dpi: u32) -> Option<(u32, u32, u32, u32)> {
+    let lid = lid_level(img)?;
     let (w, h) = img.dimensions();
     // In u16: a bright pixel plus the margin passes 255.
     let not_lid = |p: &Rgb<u8>| (luma(p) as u16) + 30 < lid as u16 || chroma(p) > 40;
@@ -196,25 +202,99 @@ fn whiten_outside_card(img: &mut RgbImage, dpi: u32) -> bool {
         let last = counts.iter().rposition(|&c| c >= min)?;
         Some((first as u32, last as u32))
     };
-    let (Some((x0, x1)), Some((y0, y1))) = (span(&cols, min_col), span(&rows, min_row)) else {
-        return false;
-    };
+    let (x0, x1) = span(&cols, min_col)?;
+    let (y0, y1) = span(&rows, min_row)?;
     // About 2 mm around what was found, for the card's own pale edge.
     let margin = (dpi as f32 * 2.0 / 25.4).round() as u32;
     let (x0, y0) = (x0.saturating_sub(margin), y0.saturating_sub(margin));
     let (x1, y1) = ((x1 + margin).min(w - 1), (y1 + margin).min(h - 1));
     let found = (x1 - x0 + 1) as f64 * (y1 - y0 + 1) as f64;
     let share = found / (w as f64 * h as f64);
-    // A card is about 15% of half the glass, a passport page about 35%.
-    if !(0.03..=0.85).contains(&share) {
-        return false;
+    // A card is about 15% of half the glass, an open passport most of it;
+    // nearly all of it is no card standing out.
+    (0.03..=0.97).contains(&share).then_some((x0, y0, x1, y1))
+}
+
+/// An outline around a card: four corners in order around it, each (x, y)
+/// as fractions of the whole picture's width and height (0 to 1).
+pub type Quad = [[f32; 2]; 4];
+
+/// The parts a picture is tidied in: each half of a page shape (an ID
+/// page), else the whole. (top row, rows, name).
+fn parts(w: u32, h: u32) -> Vec<(u32, u32, &'static str)> {
+    let ratio = h as f64 / w.max(1) as f64;
+    if (1.25..=1.5).contains(&ratio) {
+        vec![(0, h / 2, "top half"), (h / 2, h - h / 2, "bottom half")]
+    } else {
+        vec![(0, h, "picture")]
     }
-    for (x, y, p) in img.enumerate_pixels_mut() {
-        if x < x0 || x > x1 || y < y0 || y > y1 {
-            *p = Rgb([255, 255, 255]);
+}
+
+/// Where the cards are, to start the outlines the person can adjust: one
+/// per part (each half of a page, or the whole), with whether a card was
+/// found there. Where none was, the outline is the part, a little inset.
+pub fn find_cards(img: &RgbImage, dpi: u32) -> Vec<(Quad, bool)> {
+    let (w, h) = img.dimensions();
+    let (fw, fh) = (w.max(1) as f32, h.max(1) as f32);
+    parts(w, h)
+        .into_iter()
+        .map(|(top, height, _)| {
+            let part = imageops::crop_imm(img, 0, top, w, height).to_image();
+            let (found, (x0, y0, x1, y1)) = match find_card(&part, dpi) {
+                Some(b) => (true, b),
+                None => {
+                    let (dx, dy) = (w / 50, height / 50);
+                    (false, (dx, dy, w - 1 - dx, height - 1 - dy))
+                }
+            };
+            let (l, r) = (x0 as f32 / fw, (x1 + 1) as f32 / fw);
+            let (t, b) = ((top + y0) as f32 / fh, (top + y1 + 1) as f32 / fh);
+            ([[l, t], [r, t], [r, b], [l, b]], found)
+        })
+        .collect()
+}
+
+/// White everywhere outside the outlines; with none, all white.
+pub fn whiten_outside(img: &mut RgbImage, quads: &[Quad]) {
+    let (w, h) = img.dimensions();
+    let (fw, fh) = (w as f32, h as f32);
+    let mut spans: Vec<(f32, f32)> = Vec::new();
+    for y in 0..h {
+        // Where this row (through the pixels' middles) is inside an outline.
+        let row = y as f32 + 0.5;
+        spans.clear();
+        for q in quads {
+            let mut xs: Vec<f32> = Vec::with_capacity(4);
+            for i in 0..4 {
+                let (ax, ay) = (q[i][0] * fw, q[i][1] * fh);
+                let (bx, by) = (q[(i + 1) % 4][0] * fw, q[(i + 1) % 4][1] * fh);
+                if (ay <= row && row < by) || (by <= row && row < ay) {
+                    xs.push(ax + (row - ay) * (bx - ax) / (by - ay));
+                }
+            }
+            xs.sort_by(|a, b| a.total_cmp(b));
+            for pair in xs.chunks(2) {
+                if let [a, b] = pair {
+                    spans.push((*a, *b));
+                }
+            }
+        }
+        for x in 0..w {
+            let mid = x as f32 + 0.5;
+            if !spans.iter().any(|&(a, b)| a <= mid && mid <= b) {
+                img.put_pixel(x, y, Rgb([255, 255, 255]));
+            }
         }
     }
-    true
+}
+
+/// Tidy with outlines the person set (in place of Find the card's own),
+/// then Clean background if asked.
+pub fn tidy_outlined(img: &mut RgbImage, quads: &[Quad], background: bool) {
+    whiten_outside(img, quads);
+    if background {
+        whiten_background(img);
+    }
 }
 
 fn decode(p: &Page) -> image::ImageResult<DynamicImage> {
@@ -316,6 +396,39 @@ mod tests {
             &Rgb([214, 214, 210]),
             "within the margin stays"
         );
+    }
+
+    #[test]
+    fn outlines_start_on_the_cards_and_whiten_outside() {
+        // An ID page's shape, a card in each half.
+        let mut img = RgbImage::from_pixel(210, 297, Rgb([214, 214, 210]));
+        for (x0, y0) in [(20u32, 20u32), (110, 170)] {
+            for y in y0..y0 + 54 {
+                for x in x0..x0 + 86 {
+                    img.put_pixel(x, y, Rgb([90, 120, 160]));
+                }
+            }
+        }
+        let found = find_cards(&img, 25);
+        assert_eq!(found.len(), 2);
+        assert!(found.iter().all(|(_, f)| *f));
+        let top = found[0].0;
+        assert!(top[0][0] < 20.0 / 210.0 && top[1][0] > 106.0 / 210.0, "{top:?}");
+        // Keep only the front (a one-sided ID): the back half goes white.
+        whiten_outside(&mut img, &[top]);
+        assert_eq!(img.get_pixel(50, 40), &Rgb([90, 120, 160]));
+        assert_eq!(img.get_pixel(150, 200), &Rgb([255, 255, 255]));
+        assert_eq!(img.get_pixel(180, 100), &Rgb([255, 255, 255]));
+    }
+
+    #[test]
+    fn a_tilted_outline_keeps_what_is_inside_it() {
+        let mut img = RgbImage::from_pixel(100, 100, Rgb([0, 0, 0]));
+        // A diamond: the middle stays, the corners go white.
+        whiten_outside(&mut img, &[[[0.5, 0.1], [0.9, 0.5], [0.5, 0.9], [0.1, 0.5]]]);
+        assert_eq!(img.get_pixel(50, 50), &Rgb([0, 0, 0]));
+        assert_eq!(img.get_pixel(5, 5), &Rgb([255, 255, 255]));
+        assert_eq!(img.get_pixel(95, 95), &Rgb([255, 255, 255]));
     }
 
     #[test]

@@ -198,6 +198,18 @@ fn thumbnail(page: &Page) -> Result<(String, u32, u32), String> {
     shrunk(page, 360, 75)
 }
 
+/// A picture as a JPEG data: URL.
+fn data_url(img: &image::DynamicImage, quality: u8) -> Result<String, String> {
+    let mut jpeg = Vec::new();
+    image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpeg, quality)
+        .encode_image(&img.to_rgb8())
+        .map_err(|e| e.to_string())?;
+    Ok(format!(
+        "data:image/jpeg;base64,{}",
+        base64::engine::general_purpose::STANDARD.encode(jpeg)
+    ))
+}
+
 /// The thumbnail and the full-size view of a page, from one decoding: a
 /// 1200 dpi scan takes a while to open, so it is opened once.
 fn thumb_and_view(page: &Page) -> Result<((String, u32, u32), String), String> {
@@ -483,15 +495,29 @@ pub async fn copy_picture(state: State<'_, CopyState>, index: usize) -> Result<S
     blocking(move || shrunk(&page, 2000, 85).map(|(src, _, _)| src)).await
 }
 
-/// A saved file, tidied and waiting to be looked at, then saved.
+/// A saved file, tidied and waiting to be looked at, then saved; and its
+/// pages as they were, for outlines the person adjusts on the first.
 static TIDIED: Mutex<Option<Vec<Page>>> = Mutex::new(None);
+static TIDY_SOURCE: Mutex<Option<Vec<(image::RgbImage, u32)>>> = Mutex::new(None);
+
+/// One card's outline on the first page, where it starts.
+#[derive(Debug, Clone, Serialize)]
+pub struct Outline {
+    quad: kagaz_core::scan::id::Quad,
+    /// Find the card saw a card there (else it is the whole half).
+    found: bool,
+}
 
 /// What tidying a saved file made, to look at before saving.
 #[derive(Debug, Clone, Serialize)]
 pub struct Tidied {
-    /// The first page, small and full size (data: URLs).
+    /// The first page tidied, small and full size (data: URLs).
     thumb: String,
     view: String,
+    /// The first page as it was, full size, under the outlines.
+    original: String,
+    /// With Find the card: an outline per card (each half of a page).
+    outlines: Vec<Outline>,
     pages: usize,
     /// Where a card was not found (that part is left as it was).
     notes: Vec<String>,
@@ -542,6 +568,17 @@ pub async fn tidy_preview(path: String, tidy: kagaz_core::scan::id::Tidy) -> Res
         }
         let mut notes = Vec::new();
         let mut pages = Vec::new();
+        let (first_img, first_dpi) = pictures.first().cloned().ok_or("the file has no pages")?;
+        let outlines = if tidy.card {
+            kagaz_core::scan::id::find_cards(&first_img, first_dpi)
+                .into_iter()
+                .map(|(quad, found)| Outline { quad, found })
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let original = data_url(&image::DynamicImage::ImageRgb8(first_img).thumbnail(2000, 2000), 85)?;
+        *TIDY_SOURCE.lock().unwrap() = Some(pictures.clone());
         for (mut img, dpi) in pictures {
             notes.extend(kagaz_core::scan::id::tidy_image(&mut img, dpi, tidy));
             let mut png = Vec::new();
@@ -554,7 +591,39 @@ pub async fn tidy_preview(path: String, tidy: kagaz_core::scan::id::Tidy) -> Res
         let ((thumb, _, _), view) = thumb_and_view(first)?;
         let count = pages.len();
         *TIDIED.lock().unwrap() = Some(pages);
-        Ok(Tidied { thumb, view, pages: count, notes })
+        Ok(Tidied { thumb, view, original, outlines, pages: count, notes })
+    })
+    .await
+}
+
+/// The first page with the person's outlines (white outside them), then
+/// Clean background if ticked; it takes the auto-tidied first page's place.
+/// Returns its full-size view.
+#[tauri::command]
+pub async fn tidy_outlines(
+    outlines: Vec<kagaz_core::scan::id::Quad>,
+    background: bool,
+) -> Result<String, String> {
+    let (mut img, dpi) = TIDY_SOURCE
+        .lock()
+        .unwrap()
+        .as_ref()
+        .and_then(|p| p.first().cloned())
+        .ok_or_else(|| "choose a file to tidy first".to_string())?;
+    blocking(move || {
+        kagaz_core::scan::id::tidy_outlined(&mut img, &outlines, background);
+        let view = data_url(&image::DynamicImage::ImageRgb8(img.clone()).thumbnail(2000, 2000), 85)?;
+        let mut png = Vec::new();
+        image::DynamicImage::ImageRgb8(img)
+            .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+            .map_err(|e| e.to_string())?;
+        let page = Page { data: png, mime: "image/png", dpi, color: kagaz_core::scan::ColorMode::Color };
+        if let Some(pages) = TIDIED.lock().unwrap().as_mut() {
+            if let Some(first) = pages.first_mut() {
+                *first = page;
+            }
+        }
+        Ok(view)
     })
     .await
 }
