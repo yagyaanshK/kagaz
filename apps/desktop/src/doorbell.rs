@@ -380,6 +380,19 @@ pub fn ringing(app: &AppHandle) -> bool {
     app.state::<DoorbellState>().status.lock().unwrap().phase == "ringing"
 }
 
+/// Is a door station's call in progress (picture-in-picture's Hang up acts on it)?
+#[cfg_attr(not(mobile), allow(dead_code))]
+pub fn in_call(app: &AppHandle) -> bool {
+    app.state::<DoorbellState>().status.lock().unwrap().phase == "in_call"
+}
+
+/// Hang up from the phone's picture-in-picture window.
+#[cfg_attr(not(mobile), allow(dead_code))]
+pub fn hangup_here(app: &AppHandle) {
+    let state = app.state::<DoorbellState>();
+    let _ = send(&state, Command::Hangup);
+}
+
 /// Answer or decline from the phone's ring card.
 #[cfg_attr(not(mobile), allow(dead_code))]
 pub fn answer_here(app: &AppHandle, answer: bool) {

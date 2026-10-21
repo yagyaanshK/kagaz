@@ -918,3 +918,16 @@ form.id-mode .no-id, form.id-mode > .actions.bar { display: none; }
 .id-note { margin: 10px 0 0; min-height: 1.4em; }
 .id-tidy { display: flex; flex-direction: column; gap: 2px; margin: 0 0 8px; font-size: 14px; }
 .id-tidy .switch { white-space: normal; }
+
+/* The call in Android's picture-in-picture window (app.js): only its
+   picture, who and the clock; Hang up is the window's own button. */
+body.pip { background: #000; }
+body.pip * { visibility: hidden; }
+body.pip .pip-target, body.pip .pip-target * { visibility: visible; }
+body.pip #call-card.pip-target, body.pip #door-call.pip-target { position: fixed; inset: 0; z-index: 10000; display: block; margin: 0; padding: 0; border: 0; border-radius: 0; background: #000; animation: none; }
+body.pip .pip-target .call-video, body.pip .pip-target .door-video { position: absolute; inset: 0; aspect-ratio: auto; border-radius: 0; }
+body.pip .pip-target .kz-stage { max-height: 100vh; height: 100%; border-radius: 0; }
+body.pip .pip-target .kz-top, body.pip .pip-target .kz-bar,
+body.pip .pip-target .call-actions, body.pip .pip-target .door-call-actions,
+body.pip .pip-target .call-volume, body.pip #call-note, body.pip #door-call-note { display: none; }
+body.pip .pip-target .call-body, body.pip .pip-target .door-call-body { position: absolute; left: 0; right: 0; bottom: 0; z-index: 2; padding: 4px 8px; background: linear-gradient(transparent, rgba(0, 0, 0, 0.7)); color: #fff; font-size: 12px; }

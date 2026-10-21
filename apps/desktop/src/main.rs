@@ -1235,8 +1235,22 @@ mod reopen {
         });
     }
 
+    /// The call went into (or out of) Android's picture-in-picture window:
+    /// the page shows only the call while it is in one (KagazNative.kt).
+    #[no_mangle]
+    pub extern "system" fn Java_life_omniverse_kagaz_KagazNative_pip(
+        _env: *mut std::ffi::c_void,
+        _class: *mut std::ffi::c_void,
+        on: u8,
+    ) {
+        if let Some(app) = APP.get() {
+            use tauri::Emitter;
+            let _ = app.emit("picture-in-picture", on != 0);
+        }
+    }
+
     /// The ring notification (KagazNative.kt): 0 its card was tapped (show
-    /// the ring), 1 Answer, 2 Decline.
+    /// the ring), 1 Answer, 2 Decline; 3 Hang up (picture-in-picture).
     #[no_mangle]
     pub extern "system" fn Java_life_omniverse_kagaz_KagazNative_ring(
         _env: *mut std::ffi::c_void,
@@ -1248,6 +1262,15 @@ mod reopen {
         };
         // A door station on the network, if one rings; else the OneTouch call.
         std::thread::spawn(move || {
+            if action == 3 {
+                // Hang up, from the call's picture-in-picture window.
+                if super::doorbell::in_call(&app) {
+                    super::doorbell::hangup_here(&app);
+                } else {
+                    let _ = super::calls::calls_hangup(app);
+                }
+                return;
+            }
             let door = super::doorbell::ringing(&app);
             match (action, door) {
                 (0, _) => super::calls::open_ring(&app),
