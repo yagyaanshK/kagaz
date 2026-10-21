@@ -3,7 +3,7 @@ name = "kagaz-desktop"
 description = "Kagaz desktop app: a small window over the core"
 version.workspace = true
 edition.workspace = true
-license.workspace = true
+license-file.workspace = true
 repository.workspace = true
 authors.workspace = true
 

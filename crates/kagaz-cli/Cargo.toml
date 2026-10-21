@@ -3,7 +3,7 @@ name = "kagaz-cli"
 description = "Kagaz command line: printers and scanners that just work"
 version.workspace = true
 edition.workspace = true
-license.workspace = true
+license-file.workspace = true
 repository.workspace = true
 authors.workspace = true
 

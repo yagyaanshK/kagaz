@@ -30,4 +30,4 @@ advertised capabilities and nothing personal.
 
 ## Licensing
 
-Kagaz is GPL-3.0-or-later. Contributions need the [Contributor License Agreement](CLA.md): comment "I have read and agree to the CLA" on your first pull request. It keeps your copyright and lets the project offer commercial licenses alongside the GPL.
+Kagaz is source-available under the [Kagaz License](LICENSE): you may change the code only to contribute those changes back here, and use them for nothing else. Contributions need the [Contributor License Agreement](CLA.md): comment "I have read and agree to the CLA" on your first pull request. You keep your copyright; the licensor may license your contribution as part of Kagaz, under the Kagaz License or other terms.

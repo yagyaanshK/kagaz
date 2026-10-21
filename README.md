@@ -4,7 +4,7 @@
 
 **Devices that just work. Any OS, any device, any connection.**
 
-Kagaz (कागज़, "paper") is a free, open-source toolbox for the devices around
+Kagaz (कागज़, "paper") is a free, source-available toolbox for the devices around
 you that come with bad software: printers and scanners first, then robot
 vacuums, IP cameras, doorbells and whatever else answers on the network or a
 cable. It finds the device, tells you what it can do, gets the official
@@ -434,4 +434,10 @@ model, pointing at the vendor's official downloads.
 
 ## License
 
-GPL-3.0-or-later. See [LICENSE](LICENSE). Contributions are accepted under the [CLA](CLA.md), which lets the project also be licensed commercially to parties who cannot use the GPL.
+Kagaz is source-available under the [Kagaz License](LICENSE) (the Kagaz Additional Terms with the PolyForm Strict License 1.0.0). It is not open source.
+
+- **Use:** anyone may use the official releases, or the code from this repository built without changes, for any purpose, at home or at work, free of charge.
+- **Contribute:** anyone may read the code, check it, and send changes back to this repository, under the [CLA](CLA.md).
+- **Not allowed without written permission:** passing on Kagaz or any build of it, changed or not; forks or other works based on it (except contributions here); copying its code into other software; translating or porting it to another language; and making money from it.
+
+To ask for permission, open an issue.

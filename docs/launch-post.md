@@ -17,7 +17,7 @@ The printer wanted a vendor download and a second tool for its Scan button.
 The cameras wanted an account and only showed one at a time. The doorbell
 wanted an app that signed me out whenever my partner signed in.
 
-So I built Kagaz: one small, free, open-source app for Linux, Windows,
+So I built Kagaz: one small, free app for Linux, Windows,
 macOS and Android that finds the device, says in plain words what this
 computer can do with it, and lets you do it. Print, scan, copy an ID card,
 watch every camera at once, answer the door.
@@ -63,7 +63,7 @@ front of you.
 Today: printers and scanners (driverless on every OS), Tapo cameras, and
 video doorbells. Next: TVs and ceiling fans.
 
-Free, open source, GPL. Link in the comments.
+Free to use, with its code in the open. Link in the comments.
 
 ## Long post or article (about 600 words)
 
@@ -136,7 +136,7 @@ vacuums, local cameras over ONVIF, and whatever contributors bring. Each
 device class follows the same shape: find it, explain it, use it, wrap the
 vendor, tell the truth.
 
-Kagaz means paper in Hindi. Free and open source under the GPL. Link in the
+Kagaz means paper in Hindi. Free to use, with its code in the open. Link in the
 comments.
 
 ## Hooks to try as the first line
