@@ -54,7 +54,7 @@ pub enum XiaomiError {
     },
 }
 
-fn unexpected(step: &str, detail: impl Into<String>) -> XiaomiError {
+pub(super) fn unexpected(step: &str, detail: impl Into<String>) -> XiaomiError {
     XiaomiError::Unexpected {
         step: step.into(),
         detail: detail.into(),
@@ -266,9 +266,25 @@ impl Login {
                 enc(&self.context)
             )
         });
-        c.follow("finish", &next)?;
+        let end = c.follow("finish", &next)?;
         self.jar = c.jar.clone();
-        self.done(&c)
+        self.done_or_page(&c, end)
+    }
+
+    /// Done when the chain left the pass token; otherwise Xiaomi stopped on
+    /// one of its own pages (such as adding an email to the account), which
+    /// only that page can finish.
+    fn done_or_page(&self, c: &Client, end: Followed) -> Result<Step, XiaomiError> {
+        if c.jar.get("passToken").is_some_and(|t| !t.is_empty()) {
+            return self.done(c);
+        }
+        let title = if end.url.contains("/userinfo/") || end.url.contains("/security/info") {
+            "add security information to the account".to_string()
+        } else {
+            end.title
+        };
+        Trace::note(&format!("stopped on a page: {}", bare(&end.url)));
+        Err(XiaomiError::Page { url: end.url, title })
     }
 
     fn way(&self) -> &'static str {
@@ -299,7 +315,7 @@ impl Login {
         }
         if b64_field(&v, "ssecurity").is_some_and(|s| s.len() > 4) {
             // Known device, right password: finish through the location.
-            if let Some(loc) = str_field(&v, "location") {
+            if let Some(loc) = str_field(&v, "location").filter(|l| !l.is_empty()) {
                 c.follow("finish", &loc)?;
             }
             for k in ["passToken", "userId"] {
@@ -441,6 +457,8 @@ impl Login {
 pub struct QrLogin {
     pub login_url: String,
     pub image_url: String,
+    /// Xiaomi's own words on where to scan it.
+    pub tips: String,
     poll_url: String,
     deadline: Instant,
     client: Client,
@@ -463,6 +481,7 @@ impl QrLogin {
         Ok(QrLogin {
             login_url: field("loginUrl")?,
             image_url: field("qr")?,
+            tips: str_field(&v, "qrTips").unwrap_or_default(),
             poll_url: field("lp")?,
             deadline: Instant::now() + Duration::from_secs(timeout.clamp(30, 600)),
             client: c,
@@ -510,13 +529,13 @@ impl QrLogin {
 // ---- HTTP with a small cookie jar ----
 
 #[derive(Default, Clone, Serialize, Deserialize)]
-struct Jar(BTreeMap<String, String>);
+pub(super) struct Jar(BTreeMap<String, String>);
 
 impl Jar {
-    fn set(&mut self, k: &str, v: &str) {
+    pub(super) fn set(&mut self, k: &str, v: &str) {
         self.0.insert(k.to_string(), v.to_string());
     }
-    fn get(&self, k: &str) -> Option<String> {
+    pub(super) fn get(&self, k: &str) -> Option<String> {
         self.0.get(k).cloned()
     }
     fn header(&self) -> String {
@@ -549,9 +568,19 @@ impl Jar {
 
 pub(super) struct Client {
     agent: ureq::Agent,
-    jar: Jar,
+    pub(super) jar: Jar,
     device_id: String,
-    agent_name: String,
+    pub(super) agent_name: String,
+    /// Headers sent with every request (a web page's Origin, Referer...).
+    pub(super) headers: Vec<(String, String)>,
+}
+
+/// Where a redirect chain ended.
+pub(super) struct Followed {
+    #[allow(dead_code)]
+    pub(super) ssecurity: Option<Vec<u8>>,
+    pub(super) url: String,
+    pub(super) title: String,
 }
 
 pub(super) struct Reply {
@@ -572,7 +601,7 @@ impl Reply {
         let t = t.strip_prefix("&&&START&&&").unwrap_or(t);
         serde_json::from_str(t).ok()
     }
-    fn page_error(&self, step: &str) -> XiaomiError {
+    pub(super) fn page_error(&self, step: &str) -> XiaomiError {
         if looks_html(self.text()) {
             XiaomiError::Page {
                 url: self.url.clone(),
@@ -600,29 +629,37 @@ impl Client {
             jar,
             device_id: device_id.to_string(),
             agent_name: user_agent(device_id),
+            headers: Vec::new(),
         }
     }
 
-    fn get(&mut self, step: &str, url: &str) -> Result<Reply, XiaomiError> {
-        self.send(step, "GET", url, None)
+    pub(super) fn get(&mut self, step: &str, url: &str) -> Result<Reply, XiaomiError> {
+        self.send(step, "GET", url, None, &[])
     }
 
-    fn post(&mut self, step: &str, url: &str, form: &[(&str, &str)]) -> Result<Reply, XiaomiError> {
-        self.send(step, "POST", url, Some(form))
+    pub(super) fn post(&mut self, step: &str, url: &str, form: &[(&str, &str)]) -> Result<Reply, XiaomiError> {
+        self.send(step, "POST", url, Some(form), &[])
     }
 
-    fn send(
+    pub(super) fn send(
         &mut self,
         step: &str,
         method: &str,
         url: &str,
         form: Option<&[(&str, &str)]>,
+        extra: &[(&str, &str)],
     ) -> Result<Reply, XiaomiError> {
-        let req = self
+        let mut req = self
             .agent
             .request(method, url)
             .set("User-Agent", &self.agent_name)
             .set("Cookie", &self.jar.header());
+        for (k, v) in &self.headers {
+            req = req.set(k, v);
+        }
+        for (k, v) in extra {
+            req = req.set(k, v);
+        }
         let res = match form {
             Some(f) => req.send_form(f),
             None => req.call(),
@@ -631,8 +668,9 @@ impl Client {
             Ok(r) => r,
             Err(ureq::Error::Status(_, r)) => r,
             Err(e) => {
-                Trace::note(&format!("{step}: {method} {} failed: {e}", bare(url)));
-                return Err(XiaomiError::Transport(e.to_string()));
+                let why = without_values(&e.to_string());
+                Trace::note(&format!("{step}: {method} {} failed: {why}", bare(url)));
+                return Err(XiaomiError::Transport(why));
             }
         };
         let status = resp.status();
@@ -655,12 +693,14 @@ impl Client {
 
     /// Follow a redirect chain by hand, keeping every cookie, and note the
     /// `ssecurity` Xiaomi puts in a header on the way.
-    fn follow(&mut self, step: &str, start: &str) -> Result<Option<Vec<u8>>, XiaomiError> {
-        let mut url = start.to_string();
+    pub(super) fn follow(&mut self, step: &str, start: &str) -> Result<Followed, XiaomiError> {
+        let mut url = absolute(ACCOUNT, start);
         let mut ssecurity = None;
         let mut tips_retry = true;
+        let mut title = String::new();
         for _ in 0..10 {
             let r = self.get(step, &url)?;
+            title = if looks_html(r.text()) { html_title(r.text()) } else { String::new() };
             if let Some(p) = r.pragma.as_deref().and_then(|p| serde_json::from_str::<Value>(p).ok()) {
                 if let Some(s) = b64_field(&p, "ssecurity") {
                     ssecurity = Some(s);
@@ -676,28 +716,28 @@ impl Client {
                 _ => break,
             }
         }
-        Ok(ssecurity)
+        Ok(Followed { ssecurity, url, title })
     }
 }
 
 // ---- the private log ----
 
-struct Trace;
+pub(super) struct Trace;
 
 impl Trace {
     fn path() -> PathBuf {
         crate::paths::cache_dir().join("xiaomi-login.log")
     }
 
-    fn start(what: &str) {
+    pub(super) fn start(what: &str) {
         if cfg!(test) {
             return;
         }
-        let kind = if what == "qr" { "QR code" } else if what.contains('@') { "email" } else if what.starts_with('+') || what.chars().all(|c| c.is_ascii_digit()) { "number" } else { "name" };
+        let kind = if what == "qr" { "QR code" } else if what == "phone" { "phone number and text message" } else if what.contains('@') { "email" } else if what.starts_with('+') || what.chars().all(|c| c.is_ascii_digit()) { "number" } else { "name" };
         let _ = write_private(&Self::path(), format!("{} sign-in by {kind}\n", stamp()).as_bytes());
     }
 
-    fn note(line: &str) {
+    pub(super) fn note(line: &str) {
         if cfg!(test) {
             return;
         }
@@ -839,7 +879,7 @@ fn looks_html(t: &str) -> bool {
 }
 
 /// An address without its query values (names kept).
-fn bare(url: &str) -> String {
+pub(super) fn bare(url: &str) -> String {
     match url.split_once('?') {
         Some((base, q)) => {
             let names: Vec<&str> = q.split('&').map(|p| p.split('=').next().unwrap_or("")).collect();
@@ -847,6 +887,14 @@ fn bare(url: &str) -> String {
         }
         None => url.to_string(),
     }
+}
+
+/// Text with every address in it reduced to [`bare`].
+fn without_values(text: &str) -> String {
+    text.split(' ')
+        .map(|w| if w.contains("://") { bare(w.trim_end_matches(':')) + if w.ends_with(':') { ":" } else { "" } } else { w.to_string() })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn absolute(base: &str, loc: &str) -> String {
@@ -864,11 +912,11 @@ fn query_value(url: &str, key: &str) -> Option<String> {
     u.query_pairs().find(|(k, _)| k == key).map(|(_, v)| v.into_owned())
 }
 
-fn enc(s: &str) -> String {
+pub(super) fn enc(s: &str) -> String {
     url::form_urlencoded::byte_serialize(s.as_bytes()).collect()
 }
 
-fn str_field(v: &Value, k: &str) -> Option<String> {
+pub(super) fn str_field(v: &Value, k: &str) -> Option<String> {
     match v.get(k)? {
         Value::String(s) => Some(s.clone()),
         Value::Number(n) => Some(n.to_string()),
@@ -881,7 +929,7 @@ fn b64_field(v: &Value, k: &str) -> Option<Vec<u8>> {
     base64::engine::general_purpose::STANDARD.decode(s).ok().filter(|b| !b.is_empty())
 }
 
-fn describe(v: &Value) -> String {
+pub(super) fn describe(v: &Value) -> String {
     let code = v.get("code").map(|c| c.to_string()).unwrap_or_default();
     let desc = str_field(v, "desc")
         .or_else(|| str_field(v, "description"))
@@ -902,7 +950,7 @@ fn user_agent(device_id: &str) -> String {
     format!("{pre}-{text} APP/com.xiaomi.mihome APPV/10.5.201")
 }
 
-fn now_secs() -> u64 {
+pub(super) fn now_secs() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
@@ -994,6 +1042,23 @@ mod tests {
         assert!(s.contains("names=[ticket]"));
         assert!(s.contains("Enter the code we sent"));
         assert!(!s.contains("SECRET") && !s.contains("var x"));
+    }
+
+    #[test]
+    fn errors_lose_their_addresses_values() {
+        assert_eq!(
+            without_values("https://lp.example.com/lp/s?k=SECRET: Network Error: timed out"),
+            "https://lp.example.com/lp/s?k: Network Error: timed out"
+        );
+    }
+
+    #[test]
+    fn relative_addresses_are_made_whole() {
+        assert_eq!(
+            absolute(ACCOUNT, "/identity/set/security/info/strat"),
+            "https://account.xiaomi.com/identity/set/security/info/strat"
+        );
+        assert_eq!(absolute(ACCOUNT, "https://sts.api.io.mi.com/sts?x=1"), "https://sts.api.io.mi.com/sts?x=1");
     }
 
     #[test]

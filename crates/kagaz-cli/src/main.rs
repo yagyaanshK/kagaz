@@ -369,9 +369,12 @@ enum XiaomiCommand {
         /// Read the password from standard input instead of asking for it
         #[arg(long)]
         password_stdin: bool,
-        /// Sign in by scanning a QR code with the Mi Home app instead: no password, no codes
-        #[arg(long)]
+        /// Sign in by scanning a QR code instead: no password, no codes
+        #[arg(long, conflicts_with = "phone")]
         qr: bool,
+        /// Sign in with your phone number and a code Xiaomi texts to it, no password (--user takes the number)
+        #[arg(long)]
+        phone: bool,
     },
     /// Continue a sign-in with the code Xiaomi sent by email or text message
     Code { code: String },
@@ -2725,28 +2728,43 @@ fn intercom_command(cmd: IntercomCommand) -> Result<()> {
 }
 
 fn xiaomi_command(cmd: XiaomiCommand) -> Result<()> {
-    use kagaz_core::cameras::xiaomi::{Login, QrLogin, Session};
+    use kagaz_core::cameras::xiaomi::{Login, PhoneLogin, QrLogin, Session};
     use std::io::IsTerminal;
     let path = Session::default_path();
     let pending = Login::pending_path();
     let interactive = std::io::stdin().is_terminal();
     let old_device = Session::load(&path).ok().map(|s| s.device_id);
     match cmd {
-        XiaomiCommand::Login { user, password_stdin, qr } => {
+        XiaomiCommand::Login { user, password_stdin, qr, phone } => {
             if qr {
                 let mut qr = QrLogin::start(old_device.as_deref())?;
-                println!("Scan this with the Mi Home app (Profile, then the scan button at the top), and confirm on the phone:\n");
+                println!(
+                    "Scan this with a Xiaomi phone (Settings > Xiaomi Account) or any QR code scanner, such as a phone's camera \
+                     or Google Lens: it opens Xiaomi's sign-in page on the phone, and signing in there signs in Kagaz.\n"
+                );
                 print_qr(&qr.login_url)?;
                 let picture = kagaz_core::paths::cache_dir().join("xiaomi-qr.png");
                 if let Ok(png) = qr.image() {
                     kagaz_core::cameras::xiaomi::account::write_private(&picture, &png)?;
                     println!("The same code as a picture: {}", picture.display());
                 }
-                println!("Or open this link on a phone signed in to Xiaomi:\n  {}\n", qr.login_url);
+                if !qr.tips.is_empty() {
+                    println!("Xiaomi says: {}", qr.tips);
+                }
+                println!("Or open this link on a phone signed in to Xiaomi (this may fail with error 70036):\n  {}\n", qr.login_url);
                 println!("Waiting for the scan (Ctrl+C to stop)...");
                 let session = qr.wait();
                 let _ = std::fs::remove_file(&picture);
                 return xiaomi_finish(session?, &path);
+            }
+            if phone {
+                let number = match user {
+                    Some(u) => u,
+                    None => prompt("Phone number with its country code (such as +91 98765 43210): ")?,
+                };
+                let mut login = PhoneLogin::new(&number)?;
+                let step = login.send();
+                return xiaomi_drive(login, step, interactive, &path, &PhoneLogin::pending_path());
             }
             let user = match user {
                 Some(u) => u,
@@ -2764,17 +2782,26 @@ fn xiaomi_command(cmd: XiaomiCommand) -> Result<()> {
             xiaomi_drive(login, step, interactive, &path, &pending)
         }
         XiaomiCommand::Code { code } => {
+            if let Some(mut login) = PhoneLogin::load(&PhoneLogin::pending_path()) {
+                let step = login.code(&code);
+                return xiaomi_drive(login, step, interactive, &path, &PhoneLogin::pending_path());
+            }
             let mut login = Login::load(&pending).ok_or_else(xiaomi_nothing_pending)?;
             let step = login.code(&code);
             xiaomi_drive(login, step, interactive, &path, &pending)
         }
         XiaomiCommand::Captcha { text } => {
+            if let Some(mut login) = PhoneLogin::load(&PhoneLogin::pending_path()) {
+                let step = login.captcha(&text);
+                return xiaomi_drive(login, step, interactive, &path, &PhoneLogin::pending_path());
+            }
             let mut login = Login::load(&pending).ok_or_else(xiaomi_nothing_pending)?;
             let step = login.captcha(&text);
             xiaomi_drive(login, step, interactive, &path, &pending)
         }
         XiaomiCommand::Logout => {
             let _ = std::fs::remove_file(&pending);
+            let _ = std::fs::remove_file(PhoneLogin::pending_path());
             match std::fs::remove_file(&path) {
                 Ok(()) => println!("Forgot the Xiaomi sign-in at {}.", path.display()),
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => println!("No saved Xiaomi sign-in."),
@@ -2800,10 +2827,35 @@ fn xiaomi_nothing_pending() -> anyhow::Error {
     anyhow::anyhow!("no Xiaomi sign-in is waiting (they last 15 minutes); run `kagaz xiaomi login` again")
 }
 
-/// Take a password sign-in through Xiaomi's steps: asked for here in a
-/// terminal, or kept in a private file with the command that continues it.
+/// The steps a Xiaomi sign-in can be continued with.
+trait XiaomiSteps {
+    fn captcha(&mut self, text: &str) -> Result<kagaz_core::cameras::xiaomi::Step, kagaz_core::cameras::xiaomi::XiaomiError>;
+    fn code(&mut self, code: &str) -> Result<kagaz_core::cameras::xiaomi::Step, kagaz_core::cameras::xiaomi::XiaomiError>;
+    fn save(&self, path: &std::path::Path) -> Result<(), kagaz_core::cameras::xiaomi::XiaomiError>;
+}
+
+macro_rules! xiaomi_steps {
+    ($t:ty) => {
+        impl XiaomiSteps for $t {
+            fn captcha(&mut self, text: &str) -> Result<kagaz_core::cameras::xiaomi::Step, kagaz_core::cameras::xiaomi::XiaomiError> {
+                <$t>::captcha(self, text)
+            }
+            fn code(&mut self, code: &str) -> Result<kagaz_core::cameras::xiaomi::Step, kagaz_core::cameras::xiaomi::XiaomiError> {
+                <$t>::code(self, code)
+            }
+            fn save(&self, path: &std::path::Path) -> Result<(), kagaz_core::cameras::xiaomi::XiaomiError> {
+                <$t>::save(self, path)
+            }
+        }
+    };
+}
+xiaomi_steps!(kagaz_core::cameras::xiaomi::Login);
+xiaomi_steps!(kagaz_core::cameras::xiaomi::PhoneLogin);
+
+/// Take a sign-in through Xiaomi's steps: asked for here in a terminal, or
+/// kept in a private file with the command that continues it.
 fn xiaomi_drive(
-    mut login: kagaz_core::cameras::xiaomi::Login,
+    mut login: impl XiaomiSteps,
     mut step: Result<kagaz_core::cameras::xiaomi::Step, kagaz_core::cameras::xiaomi::XiaomiError>,
     interactive: bool,
     path: &std::path::Path,
@@ -2852,11 +2904,21 @@ fn xiaomi_drive(
                 let again = prompt(if asked == Some(true) { "Characters: " } else { "Code: " })?;
                 step = if asked == Some(true) { login.captcha(&again) } else { login.code(&again) };
             }
+            Err(XiaomiError::Page { title, .. }) if title.contains("security information") => {
+                let _ = std::fs::remove_file(pending);
+                anyhow::bail!(
+                    "Xiaomi accepted the sign-in but wants an email address added to the account before \
+                     it lets a new device in, and only its own web page can do that. Either add an email at \
+                     https://account.xiaomi.com (Security), then run `kagaz xiaomi login` again, or sign in \
+                     with `kagaz xiaomi login --qr` (scan the code with the Mi Home app's scanner). The steps are in {}.",
+                    log.display()
+                );
+            }
             Err(XiaomiError::Page { title, .. }) => {
                 let _ = std::fs::remove_file(pending);
                 anyhow::bail!(
                     "Xiaomi wants this sign-in finished on its own web page{}, which a terminal cannot show. \
-                     Sign in with `kagaz xiaomi login --qr` instead (scan the code with the Mi Home app), \
+                     Sign in with `kagaz xiaomi login --qr` instead (scan the code with the Mi Home app's scanner), \
                      or sign in once from the Kagaz window. The steps, without passwords or codes, are in {}.",
                     if title.is_empty() { String::new() } else { format!(" (\"{title}\")") },
                     log.display()

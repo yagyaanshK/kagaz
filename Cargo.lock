@@ -2692,6 +2692,7 @@ dependencies = [
  "lzma-rs",
  "md-5",
  "mdns-sd",
+ "num-bigint",
  "nusb",
  "roxmltree",
  "rustls",

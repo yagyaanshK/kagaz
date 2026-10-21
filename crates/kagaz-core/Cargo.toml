@@ -35,6 +35,7 @@ tar = "0.4"
 url = "2"
 aes = "0.8"
 cbc = { version = "0.1", features = ["alloc"] }
+num-bigint = "0.4"
 
 [target.'cfg(not(target_os = "android"))'.dependencies]
 nusb = "0.2"
