@@ -166,6 +166,25 @@ it so Brother's default applies again. The window has the same under
 "Scan button".
 
 ```
+kagaz fans
+kagaz fan 4a24 add --name "Bedroom fan" --room Bedroom
+kagaz fan "Bedroom fan" speed 3
+kagaz fan "Bedroom fan" off
+```
+
+Atomberg ceiling fans, the way their app and remote reach them: over
+Bluetooth from this computer (a fan answers from the day it is unboxed, no
+Wi-Fi setup needed) and over the Wi-Fi network once a fan is on it. `fans`
+lists the fans you added, by room, with how each is now (Off, Speed 3,
+light on, hours left on the timer) or "out of reach", then the fans within
+reach that are not added yet. `fan <name> on|off|speed N|light on|off|
+brightness N|sleep on|off|timer 1|2|3|6|read` does one thing at a time, as
+the fan wants it. `fan <id> add`, `rename`, `room` and `forget` keep the
+list, and `kagaz rooms` keeps the rooms, in `~/.config/kagaz/fans.toml`.
+Verified on a Renesa over Bluetooth: found, state read, commands taken.
+Wi-Fi is written from the community's notes and awaits a fan on the network.
+
+```
 kagaz tapo login
 kagaz cameras
 ```
@@ -220,7 +239,7 @@ needs the webkit2gtk and gtk3 development packages to build.
 
 The window opens on **Home**: the devices set up on this computer or
 phone, grouped by kind (doorbell, security cameras, printers and
-scanners), each kind collapsed until you tap it. **Add a device** starts
+scanners, ceiling fans), each kind collapsed until you tap it. **Add a device** starts
 from the kind of device, then its brand: brands Kagaz works with show in
 colour, the ones planned show greyed as "coming soon" (cameras such as
 DSLRs, robot vacuums, TVs, fridges, washing machines and air conditioners
@@ -270,6 +289,16 @@ Undo goes back one tool, Start over to the page as it came. Nothing is
 stretched by Tidy or plain Crop, so a card or signature keeps its real size.
 The tools are written once (kagaz-core `tools`, the window's `bench.js`), so
 a new source, such as a camera, only adds a button.
+
+On **Ceiling fans**, the fans you added show at once, by room, each with
+how it was last seen; a look around runs alongside and the ones within
+reach get their controls: Turn on and off, the speed, the light (on fans
+that have one), Sleep and a timer. A fan that does not answer stays listed
+as out of reach rather than vanishing. **Found nearby** lists the fans
+within reach that are not added yet; **Add** asks for a name and a room.
+**Rearrange** makes, renames and removes rooms, and moves fans between
+them; the fan's own menu does the same for one fan. Rooms and names live
+in `~/.config/kagaz/fans.toml`, shared with the command line.
 
 Each page keeps its place: leave a printer's page with a scan under way
 for the cameras, and coming back finds the scan where it was. Camera
@@ -370,7 +399,9 @@ still needs verification with a real account. See [protocol notes and limits](do
   > protocol covers Xiaomi, TCL, Sony, OnePlus and some Hisense and
   > Philips), Samsung Tizen, Roku, Sony Bravia, Hisense VIDAA.
   >
-  > **Ceiling fans, Atomberg first.** Most fans have no network at all;
+  > **Ceiling fans, Atomberg first** (Bluetooth route in since 2026-10-21:
+  > find, remember by room and name, control; Wi-Fi written, unverified).
+  > Most fans have no network at all;
   > Kagaz will say so honestly, and whether a bridge (Bond, Broadlink, an
   > RF dongle) is ever acceptable is left open. Atomberg fans advertise
   > over Bluetooth LE even before they are put on Wi-Fi, and three on the

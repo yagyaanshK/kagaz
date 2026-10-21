@@ -45,6 +45,11 @@
         <span class="cat-name">Printers &amp; scanners</span>
         <span class="cat-note muted">on the network and USB</span>
       </li>
+      <li data-cat="fans" tabindex="0" role="button">
+        <span class="cat-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 12m-2 0a2 2 0 1 0 4 0a2 2 0 1 0-4 0M12 10c0-4 1-7 3-7s3 3 0 7M14 12c4 0 7 1 7 3s-3 3-7 0M12 14c0 4-1 7-3 7s-3-3 0-7M10 12c-4 0-7-1-7-3s3-3 7 0"/></svg></span>
+        <span class="cat-name">Ceiling fans</span>
+        <span class="cat-note muted">Atomberg, over Bluetooth</span>
+      </li>
     </ul>
   </aside>
 
@@ -104,6 +109,25 @@
       <h3 id="found-head" class="list-head">Found nearby</h3>
       <p id="search-note" class="muted" role="status"></p>
       <ul id="found-devices"></ul>
+    </section>
+
+    <!-- Ceiling fans (fans.js): rooms of fans with their controls, and the
+         fans within reach that are not added yet. -->
+    <section id="fans" class="pane hidden">
+      <button type="button" class="back to-home">&#x2190; Home</button>
+      <div class="pane-head">
+        <h2>Ceiling fans</h2>
+        <div class="fan-tools">
+          <button id="fans-arrange" type="button" class="hidden" title="Make rooms, name fans and move them between rooms" aria-pressed="false">Rearrange</button>
+          <button id="fans-rescan" type="button" title="Look again for fans over Bluetooth and on the Wi-Fi network">Look again</button>
+        </div>
+      </div>
+      <p id="fans-note" class="muted" role="status"></p>
+      <p id="fans-empty" class="muted">No fans added yet. Add one from the fans found nearby, and it shows here every time, with how it is, even when it is out of reach.</p>
+      <div id="fan-rooms"></div>
+      <h3 id="fans-found-head" class="list-head hidden">Found nearby</h3>
+      <p id="fans-found-note" class="muted" role="status"></p>
+      <ul id="fans-found"></ul>
     </section>
 
     <!-- Tools for any file on this device, no printer needed (tools.js;
@@ -651,6 +675,7 @@
   <script src="call-camera.js"></script>
   <script src="calls.js"></script>
   <script src="brands.js"></script>
+  <script src="fans.js"></script>
   <script src="history.js"></script>
   <script src="settings.js"></script>
   <script src="home.js"></script>

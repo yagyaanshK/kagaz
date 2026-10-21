@@ -8,6 +8,7 @@ pub mod dns;
 pub mod drivers;
 pub mod explain;
 pub mod extras;
+pub mod fans;
 pub mod intercom;
 pub mod ipp;
 pub mod localtime;

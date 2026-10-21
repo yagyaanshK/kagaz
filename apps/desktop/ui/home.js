@@ -164,10 +164,23 @@ const KagazHome = (() => {
     return true;
   }
 
+  // The fans the person added, by room, as last seen (the Fans page
+  // looks for them; Home does not, so it opens at once).
+  async function fansGroup(root) {
+    const data = await invoke("fans_saved").catch(() => null);
+    if (!data || !data.fans.length) return false;
+    const g = group("fan", "Ceiling fans", "Atomberg", () => selectCategory("fans"));
+    const fans = data.fans.slice().sort((a, b) => (a.room || "\uffff").localeCompare(b.room || "\uffff") || a.name.localeCompare(b.name));
+    for (const f of fans) g.tiles.appendChild(tile(f.name, KagazFans.homeWords(f), KagazBrands.ICON.fan, () => selectCategory("fans")));
+    g.count();
+    root.appendChild(g.box);
+    return true;
+  }
+
   async function show() {
     const root = $("home-groups");
     const fresh = document.createElement("div");
-    const shown = [await doorbellGroup(fresh), await camerasGroup(fresh), printersGroup(fresh)];
+    const shown = [await doorbellGroup(fresh), await camerasGroup(fresh), printersGroup(fresh), await fansGroup(fresh)];
     root.replaceChildren(...fresh.childNodes);
     $("home-empty").classList.toggle("hidden", shown.some(Boolean));
     // The added printers' states; their addresses are refreshed by a quiet
@@ -230,6 +243,9 @@ const KagazHome = (() => {
       printBrand = b.id === "other" ? null : b.id;
       selectCategory("print");
       rescan();
+    } else if (kind.id === "fan") {
+      selectCategory("fans");
+      KagazFans.rescan();
     }
   }
 
