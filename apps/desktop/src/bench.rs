@@ -206,7 +206,8 @@ pub async fn bench_crop_start(app: AppHandle, bench: String, page: usize) -> Res
     .await
 }
 
-/// Crop `page` to the frame.
+/// Crop `page` to the frame; `size_mm` makes it exactly that size (a
+/// passport photo's 35 x 45 mm).
 #[tauri::command]
 pub async fn bench_crop(
     app: AppHandle,
@@ -215,11 +216,12 @@ pub async fn bench_crop(
     shape: Shape,
     mode: CropMode,
     paper: Option<Paper>,
+    size_mm: Option<[f32; 2]>,
 ) -> Result<View, String> {
     work(app, bench, move |b| {
         step(b);
         let p = b.current.get(page).ok_or("no such page")?;
-        b.current[page] = tools::crop(p, &shape, mode, paper.unwrap_or(Paper::A4));
+        b.current[page] = tools::crop(p, &shape, mode, paper.unwrap_or(Paper::A4), size_mm);
         view(b, page, Vec::new(), Vec::new(), false)
     })
     .await
