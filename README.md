@@ -341,11 +341,48 @@ still needs verification with a real account. See [protocol notes and limits](do
   with on-device models, print queue and supplies view.
 - **M6 Module host.** Move the printer/scanner support into the first
   WebAssembly module; the base app becomes device-agnostic.
+  > *Update, 2026-10-21:* kept as written, but no longer the next step.
+  > The three classes shipped so far (printers and scanners, Tapo cameras,
+  > doorbells) all needed things a sandbox cannot do on its own: multicast
+  > and SIP, sound and video decoding, raster rendering, the OS password
+  > vault, notifications, a foreground service on Android. A module runtime
+  > would add megabytes and a serialisation boundary without making any of
+  > that faster or safer. New classes stay native in kagaz-core, split by
+  > Cargo features if binary size ever matters. The sandbox is for M8,
+  > where code nobody has reviewed must run.
 - **M7 More device classes, each its own module.** Robot vacuums (starting
   with devices on the Tuya/SmartLife platform), IP cameras and doorbells
   (ONVIF, RTSP), and onward as contributors bring devices. Tapo cameras over
   the TP-Link cloud are in (pulled forward by need); local ONVIF/RTSP cameras
   next.
+  > *Update, 2026-10-21:* the next two classes are **TVs** and **ceiling
+  > fans**, before robot vacuums and local ONVIF cameras.
+  >
+  > **TVs, LG webOS first.** The pains to solve: a remote on the laptop or
+  > phone, and sending the screen or a file to the TV. Discovery is mDNS
+  > plus a probe of the webOS control ports: a 2024 webOS TV on the test
+  > network answered no SSDP search at all, which most webOS libraries rely
+  > on. Pairing goes through the TV's own on-screen prompt, the way its
+  > app does. Order: pair and remote (keys, text entry, volume, input,
+  > launch an app, turn on by Wake-on-LAN), then casting (a file or page
+  > from this computer; mirroring last, it is the hardest). Other brands
+  > follow by protocol family: Android TV / Google TV (one pairing
+  > protocol covers Xiaomi, TCL, Sony, OnePlus and some Hisense and
+  > Philips), Samsung Tizen, Roku, Sony Bravia, Hisense VIDAA.
+  >
+  > **Ceiling fans, Atomberg first.** Most fans have no network at all;
+  > Kagaz will say so honestly, and whether a bridge (Bond, Broadlink, an
+  > RF dongle) is ever acceptable is left open. Atomberg fans advertise
+  > over Bluetooth LE even before they are put on Wi-Fi, and three on the
+  > test home were reachable that way and not on the network, so the
+  > first route is Bluetooth from a laptop or phone (no hub, no account).
+  > Wi-Fi comes second: the community-documented local protocol (state
+  > broadcast over UDP, JSON commands with a direct reply; unofficial and
+  > may change with firmware) and, if needed, Atomberg's cloud API with
+  > the key from their developer portal. Verbs: on and off, speed, light,
+  > timer, sleep. This is the first class where a home-automation hub has
+  > more to offer than Kagaz; Kagaz's part is the vendor-app replacement,
+  > not rules.
 - **Print from anywhere.** Send a document to your own printer at home
   from a phone or laptop elsewhere, through a Kagaz device on the printer's
   network that you set up for it; no vendor cloud.
