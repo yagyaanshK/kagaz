@@ -45,6 +45,7 @@
         ? KagazCrop.attach($("tidy-crop"), {
             src: r.original,
             outlines: r.outlines,
+            radius: r.radius,
             names: r.outlines.length === 2 ? ["front", "back"] : ["card"],
           })
         : null;
@@ -52,7 +53,7 @@
       $("tidy-look").classList.toggle("hidden", framed);
       $("tidy-result-see").classList.toggle("hidden", !framed);
       $("tidy-what").textContent = framed
-        ? `${chosen.name}${pages} · drag each frame's corners onto its card; outside the frames turns white. Remove a frame for a one-sided ID.`
+        ? `${chosen.name}${pages} · drag each frame's corners onto its card, and a side's middle to bend it; outside the frames turns white. Remove a frame (✕) for a one-sided ID.`
         : `${chosen.name}${pages} · tap to see it full size`;
       showResult(true);
       if (framed) {
