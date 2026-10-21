@@ -27,6 +27,11 @@ pub enum FanError {
     Bluetooth(String),
     #[error("the fan is out of reach")]
     OutOfReach,
+    /// Seen 2026-10-21 on two fans at once: the link comes up, the fan
+    /// lists no services at all. Not yet proven to be another phone's
+    /// connection; the words say "probably".
+    #[error("the fan let Kagaz connect but offered none of its controls; another phone or app is probably connected to it over Bluetooth (close the Atomberg app on nearby phones, then try again)")]
+    Busy,
     #[error("the fan is not on this network and not within Bluetooth reach")]
     NoWay,
     #[error("the fan answered with something other than its state: {0}")]
