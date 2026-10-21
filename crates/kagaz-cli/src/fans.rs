@@ -115,7 +115,7 @@ fn reach_word(f: &fans::Fan) -> &'static str {
 
 /// `kagaz fans`: the remembered fans by room with how each is, then the
 /// fans within reach that are not remembered.
-pub fn list(seconds: f32, no_scan: bool, json: bool) -> Result<()> {
+pub fn list(seconds: f32, no_scan: bool, read: bool, json: bool) -> Result<()> {
     let (found, trouble) = if no_scan {
         (Vec::new(), None)
     } else {
@@ -133,7 +133,9 @@ pub fn list(seconds: f32, no_scan: bool, json: bool) -> Result<()> {
     };
     // A fan seen over Bluetooth tells its state only when asked.
     let mut reachable: Vec<String> = found.iter().map(|f| f.id.clone()).collect();
-    if !no_scan {
+    // Seen over Bluetooth means within reach; its state needs a connection,
+    // made only when asked for.
+    if !no_scan && read {
         let to_ask: Vec<fans::Fan> = found
             .iter()
             .filter(|f| f.state.is_none())

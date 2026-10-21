@@ -269,6 +269,11 @@ enum Command {
         /// List the remembered fans only, without looking for them
         #[arg(long)]
         no_scan: bool,
+        /// Also connect to each added fan within Bluetooth reach to read how it
+        /// is now (a fan takes only so many connections before it needs
+        /// switching off at the wall, so a plain listing only listens)
+        #[arg(long)]
+        read: bool,
         /// Machine-readable output
         #[arg(long)]
         json: bool,
@@ -1179,7 +1184,12 @@ fn main() -> Result<()> {
             println!("{} should be flashing its display now.", title(d));
             Ok(())
         }
-        Command::Fans { seconds, no_scan, json } => fans::list(seconds, no_scan, json),
+        Command::Fans {
+            seconds,
+            no_scan,
+            read,
+            json,
+        } => fans::list(seconds, no_scan, read, json),
         Command::Fan { fan, action } => fans::fan(&fan, action),
         Command::Rooms { action } => fans::rooms(action),
     }
