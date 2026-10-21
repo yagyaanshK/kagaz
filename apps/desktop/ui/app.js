@@ -592,26 +592,27 @@ const scanId = KagazId.attach({
     const f = new FormData($("scan-form"));
     return { source: "Glass", dpi: Number(f.get("dpi")), color: f.get("color"), paper: f.get("paper"), engine: f.get("engine"), half_page: true };
   },
-  finish: {
+  // The ID page is saved as a scan is: the format and size chosen above,
+  // or the one Compress made.
+  finish: [{
     label: "Save…",
-    run: async () => {
+    accent: true,
+    run: async (view, { compressed }) => {
       const f = new FormData($("scan-form"));
-      const format = f.get("format");
+      const format = compressed || f.get("format");
       const ext = { Pdf: "pdf", Jpeg: "jpg", Png: "png" }[format];
       const suggested = await invoke("default_scan_name", { extension: ext });
-      const path = await invoke("choose_save_path", { suggestedName: suggested, extension: ext });
-      if (!path) return "";
-      const written = await invoke("id_save", {
-        output: { format, color: f.get("color"), quality: null, max_bytes: f.get("max") ? Number(f.get("max")) : null },
-        path,
-      });
+      const out = await invoke("choose_save_path", { suggestedName: suggested, extension: ext });
+      if (!out) return "";
+      const maxBytes = compressed ? null : f.get("max") ? Number(f.get("max")) : null;
+      const written = await invoke("bench_save", { bench: "id", out, maxBytes });
       for (const w of written) {
         log(`Saved ${w.path} (${human(w.bytes)})`, "ok");
         if (w.warning) log("Warning: " + w.warning, "warn");
       }
-      return written.length ? `Saved ${written[0].path}` : "";
+      return written.length ? `Saved ${written[0].path}.` : "";
     },
-  },
+  }],
 });
 
 // Stop the scan under way: the scanner is told to stop.
@@ -621,17 +622,38 @@ $("scan-cancel").addEventListener("click", () => {
   invoke("scan_cancel").catch(() => {});
 });
 
+// A scan lands on the "scan" workbench: look at it, use the tools (Tidy,
+// Crop, Compress: bench.js), then Save in the format and size chosen above
+// (or the one Compress made).
+const scanPanel = KagazBench.attach($("scan-bench"), {
+  bench: "scan",
+  paper: () => new FormData($("scan-form")).get("paper"),
+  finish: [{
+    label: "Save…",
+    accent: true,
+    run: async (view, { compressed }) => {
+      const f = new FormData($("scan-form"));
+      const format = compressed || f.get("format");
+      const ext = { Pdf: "pdf", Jpeg: "jpg", Png: "png" }[format];
+      const suggested = await invoke("default_scan_name", { extension: ext });
+      const out = await invoke("choose_save_path", { suggestedName: suggested, extension: ext });
+      if (!out) return "";
+      const maxBytes = compressed ? null : f.get("max") ? Number(f.get("max")) : null;
+      const written = await invoke("bench_save", { bench: "scan", out, maxBytes });
+      for (const w of written) {
+        log(`Saved ${w.path} (${w.pages} page${w.pages === 1 ? "" : "s"}, ${human(w.bytes)})`, "ok");
+        if (w.warning) log("Warning: " + w.warning, "warn");
+      }
+      return written.length ? `Saved ${written.map((w) => w.path).join(", ")}.` : "";
+    },
+  }],
+});
+
 $("scan-form").addEventListener("submit", async (ev) => {
   ev.preventDefault();
   if (current === null || scanId.active()) return;
   const d = devices[current];
   const f = new FormData(ev.target);
-  const format = f.get("format");
-  const ext = { Pdf: "pdf", Jpeg: "jpg", Png: "png" }[format];
-  const suggested = await invoke("default_scan_name", { extension: ext });
-  const path = await invoke("choose_save_path", { suggestedName: suggested, extension: ext });
-  if (!path) return;
-
   $("scan-log").innerHTML = "";
   $("scan-go").disabled = true;
   $("scan-state").textContent = "Scanning…";
@@ -639,7 +661,7 @@ $("scan-form").addEventListener("submit", async (ev) => {
   $("scan-cancel").classList.remove("hidden");
   $("scan-cancel").disabled = false;
   try {
-    const written = await invoke("scan", {
+    const view = await invoke("scan_to_bench", {
       device: d,
       request: {
         source: f.get("source"),
@@ -648,19 +670,10 @@ $("scan-form").addEventListener("submit", async (ev) => {
         paper: f.get("paper"),
         engine: f.get("engine"),
       },
-      output: {
-        format,
-        color: f.get("color"),
-        quality: null,
-        max_bytes: f.get("max") ? Number(f.get("max")) : null,
-      },
-      path,
     });
-    for (const w of written) {
-      log(`Saved ${w.path} (${w.pages} page${w.pages === 1 ? "" : "s"}, ${human(w.bytes)})`, "ok");
-      if (w.warning) log("Warning: " + w.warning, "warn");
-    }
-    $("scan-state").textContent = "Done.";
+    $("scan-bench").classList.remove("hidden");
+    scanPanel.fresh(view);
+    $("scan-state").textContent = "Scanned. Look it over, then Save.";
   } catch (err) {
     if (/cancelled/.test(String(err))) log("Scan cancelled.");
     else log("Failed: " + err, "bad");
@@ -694,7 +707,7 @@ function showCameras() {
 // device (each with its own settings). The sidebar (wide windows) and the
 // bottom bar (phones) switch between them; every kind's page has a way
 // back to Home.
-const PANES = ["empty", "home", "add", "settings", "picker", "detail", "cameras", "doorbell"];
+const PANES = ["empty", "home", "add", "settings", "tools", "picker", "detail", "cameras", "doorbell"];
 let currentView = null;
 
 function selectCategory(cat) {

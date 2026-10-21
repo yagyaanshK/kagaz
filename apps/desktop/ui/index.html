@@ -24,6 +24,11 @@
         <span class="cat-name">Settings</span>
         <span class="cat-note muted">accounts, about</span>
       </li>
+      <li data-cat="tools" tabindex="0" role="button">
+        <span class="cat-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.5 2.5-2.4-.6-.6-2.4z"/></svg></span>
+        <span class="cat-name">Tools</span>
+        <span class="cat-note muted">tidy, crop, compress a file</span>
+      </li>
       <li class="cat-label muted" aria-hidden="true">My devices</li>
       <li data-cat="doorbell" tabindex="0" role="button">
         <span class="cat-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M6 8a6 6 0 0 1 12 0v5l2 3H4l2-3zM10 19a2 2 0 0 0 4 0"/></svg></span>
@@ -99,24 +104,17 @@
       <h3 id="found-head" class="list-head">Found nearby</h3>
       <p id="search-note" class="muted" role="status"></p>
       <ul id="found-devices"></ul>
-      <!-- No printer needed: tidy a file already on this device (tidy.js). -->
-      <details id="tidy-box" class="set-more">
-        <summary>Tidy a saved scan or photo</summary>
-        <p class="muted small">Make the background white, or everything outside the card, on a PDF, JPEG or PNG on this device. You see the result first; saving makes a new file, and the original stays as it was. A page is taken as an ID page, each half one side.</p>
-        <label class="switch"><input type="checkbox" id="tidy-clean"> Clean background (the lid's grey becomes white)</label>
-        <label class="switch"><input type="checkbox" id="tidy-card"> Find the card (white outside it)</label>
-        <div class="actions"><button type="button" id="tidy-go" class="accent">Choose a file…</button></div>
-        <div id="tidy-result" class="hidden">
-          <p class="small muted" id="tidy-what"></p>
-          <!-- With Find the card: the page with a frame per card, to adjust (crop.js). -->
-          <div id="tidy-crop" class="hidden"></div>
-          <div class="id-row">
-            <button type="button" id="tidy-look" class="id-thumb id-page" aria-label="See the tidied file full size"><img alt=""></button>
-            <div class="actions"><button type="button" id="tidy-result-see" class="hidden">See the result</button><button type="button" id="tidy-save" class="accent">Save…</button><button type="button" id="tidy-discard">Discard</button></div>
-          </div>
-        </div>
-        <p id="tidy-note" class="small" role="status"></p>
-      </details>
+    </section>
+
+    <!-- Tools for any file on this device, no printer needed (tools.js;
+         the panel is bench.js, the same one scans and ID pages use). -->
+    <section id="tools" class="pane hidden">
+      <button type="button" class="back to-home">&#x2190; Home</button>
+      <div class="pane-head"><h2>Tools</h2></div>
+      <p class="muted">Tidy, crop or make smaller a PDF, JPEG or PNG on this device: a scan, a photo of a document, a signature. You see each change first; saving makes a new file, and the original stays as it was.</p>
+      <div class="actions"><button type="button" id="tools-open" class="accent">Open a file…</button></div>
+      <p id="tools-note" class="small" role="status"></p>
+      <div id="tools-bench" class="hidden"></div>
     </section>
 
     <section id="doorbell" class="pane hidden">
@@ -531,11 +529,13 @@
             </label>
           </div>
           <div class="actions bar">
-            <button type="submit" id="scan-go" class="accent">Scan…</button>
+            <button type="submit" id="scan-go" class="accent">Scan</button>
             <button type="button" id="scan-cancel" class="hidden">Cancel scan</button>
             <span id="scan-state" class="muted"></span>
           </div>
         </form>
+        <!-- The scan, to look at, use the tools on, then save (bench.js). -->
+        <div id="scan-bench" class="hidden"></div>
         <ul id="scan-log"></ul>
 
         <section id="button-panel" class="hidden">
@@ -631,6 +631,7 @@
   <!-- A phone: the three kinds of device along the bottom, under the thumb. -->
   <nav id="bottom-nav" aria-label="Kagaz">
     <button type="button" data-cat="home" class="active"><span class="cat-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 11l9-7 9 7M5 10v10h5v-6h4v6h5V10"/></svg></span><span>Home</span></button>
+    <button type="button" data-cat="tools"><span class="cat-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.5 2.5-2.4-.6-.6-2.4z"/></svg></span><span>Tools</span></button>
     <button type="button" data-cat="settings"><span class="cat-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></span><span>Settings</span></button>
   </nav>
 
@@ -640,11 +641,12 @@
   <script src="pictures.js"></script>
   <script src="timeline.js"></script>
   <script src="player.js"></script>
+  <script src="crop.js"></script>
+  <script src="bench.js"></script>
   <script src="idscan.js"></script>
   <script src="app.js"></script>
   <script src="printing.js"></script>
-  <script src="crop.js"></script>
-  <script src="tidy.js"></script>
+  <script src="tools.js"></script>
   <script src="onetouch.js"></script>
   <script src="calls.js"></script>
   <script src="brands.js"></script>

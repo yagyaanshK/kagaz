@@ -69,17 +69,23 @@ pub enum OutputError {
     NoPages,
 }
 
-/// Write `pages` to `path` (PDF: one file; JPEG/PNG: one file per page, with
-/// `-1`, `-2`, ... before the extension when there are several).
-pub fn write(
-    pages: &[Page],
-    opts: &OutputOptions,
-    path: &Path,
-) -> Result<Vec<Written>, OutputError> {
+/// One file's worth of pages, encoded but not yet written.
+#[derive(Debug, Clone)]
+pub struct Encoded {
+    pub bytes: Vec<u8>,
+    pub pages: usize,
+    /// Set when the size limit could not be met.
+    pub warning: Option<String>,
+}
+
+/// Encode `pages` as files (PDF: one; JPEG/PNG: one per page), each kept
+/// under the size limit if one is set; nothing is written. Compress uses
+/// this to show the size before saving.
+pub fn encode_files(pages: &[Page], opts: &OutputOptions) -> Result<Vec<Encoded>, OutputError> {
     if pages.is_empty() {
         return Err(OutputError::NoPages);
     }
-    let mut written = Vec::new();
+    let mut files = Vec::new();
     match opts.format {
         Format::Pdf => {
             let (bytes, warning) = fit(opts, |q, s| {
@@ -107,21 +113,10 @@ pub fn write(
                     .collect();
                 Ok(pdf::write(&pdf_pages))
             })?;
-            save(path, &bytes)?;
-            written.push(Written {
-                path: path.to_path_buf(),
-                bytes: bytes.len() as u64,
-                pages: pages.len(),
-                warning,
-            });
+            files.push(Encoded { bytes, pages: pages.len(), warning });
         }
         Format::Jpeg | Format::Png => {
-            for (i, page) in pages.iter().enumerate() {
-                let file = if pages.len() == 1 {
-                    path.to_path_buf()
-                } else {
-                    numbered(path, i + 1)
-                };
+            for page in pages {
                 let (bytes, warning) = fit(opts, |q, s| {
                     let r = render(page, opts.color, opts.format, q, s)?;
                     // With its resolution, so it shows and prints at real size.
@@ -133,15 +128,37 @@ pub fn write(
                         }
                     })
                 })?;
-                save(&file, &bytes)?;
-                written.push(Written {
-                    path: file,
-                    bytes: bytes.len() as u64,
-                    pages: 1,
-                    warning,
-                });
+                files.push(Encoded { bytes, pages: 1, warning });
             }
         }
+    }
+    Ok(files)
+}
+
+/// Write `pages` to `path` (PDF: one file; JPEG/PNG: one file per page, with
+/// `-1`, `-2`, ... before the extension when there are several).
+pub fn write(
+    pages: &[Page],
+    opts: &OutputOptions,
+    path: &Path,
+) -> Result<Vec<Written>, OutputError> {
+    write_encoded(encode_files(pages, opts)?, path)
+}
+
+/// Write files already encoded (see [`encode_files`]) at `path`, numbered when
+/// there are several.
+pub fn write_encoded(files: Vec<Encoded>, path: &Path) -> Result<Vec<Written>, OutputError> {
+    let n = files.len();
+    let mut written = Vec::new();
+    for (i, f) in files.into_iter().enumerate() {
+        let file = if n == 1 { path.to_path_buf() } else { numbered(path, i + 1) };
+        save(&file, &f.bytes)?;
+        written.push(Written {
+            path: file,
+            bytes: f.bytes.len() as u64,
+            pages: f.pages,
+            warning: f.warning,
+        });
     }
     Ok(written)
 }

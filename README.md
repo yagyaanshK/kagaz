@@ -238,23 +238,38 @@ printer's own words, such as "out of paper") or Offline. A search still
 runs alongside, lists new printers under **Found nearby**, and catches a
 printer that the router has given a new address.
 
+A scan shows first, then you save it: press **Scan**, look the page over,
+use the tools on it, then **Save…** (PDF, JPEG or PNG, under the size
+chosen). A scan under way can be stopped with **Cancel scan**: the scanner
+is told to stop.
+
 Scan and Copy can also take **both sides of an ID card or a passport page
 on one page**, as a printer's 2-in-1 ID copy does, for any scanner Kagaz
 reaches, including ones whose panel offers ID copy only for copying. Put the
 card face down in the half of the glass by its corner mark and scan the
 front; turn it over in the same place and scan the back. The page has the
-front's half above the back's, each just where it lay; Scan saves it (PDF,
-JPEG or PNG), Copy prints it at real size. Two options, off unless ticked, tidy the page:
-**Clean background** turns the lid's grey around the card white, and
-**Find the card** whitens everything outside the card. The same two work on a file already on this
-device, no printer needed: **Tidy a saved scan or photo**, under the
-printers, shows a PDF, JPEG or PNG tidied, then saves it as a new file. With
-Find the card, the preview puts a frame around each card (one per half of
-an ID page), as Adobe Scan does: drag its corners onto the card, a tilted
-one too, and the middle of a side to bend it for a page that bows; the
-frames' corners are rounded as a card's are, and outside them turns white; remove a frame for a
-one-sided ID. The card is never stretched, so it keeps its real size. A scan under way can
-be stopped with **Cancel scan**: the scanner is told to stop.
+front's half above the back's, each just where it lay; Scan saves it, Copy
+prints it at real size.
+
+The same three **tools** work on every scan, every ID page, and any PDF,
+JPEG or PNG on this device from the **Tools** page (no printer needed; the
+original stays as it was):
+
+- **Tidy**: **Clean background** turns the lid's grey white; **Find the
+  card** puts a frame around each card (one per half of an ID page), as
+  Adobe Scan does. Drag a frame's corners onto the card, a tilted one too,
+  and a side's middle to bend it for a page that bows; corners are rounded
+  as a card's are, and outside the frames turns white. Remove a frame for a
+  one-sided ID.
+- **Crop**: a frame around what to keep (a photo, a signature), then just
+  that area at its real size, enlarged to fill the page without
+  stretching, or the whole page with the rest white.
+- **Compress**: under 200 KB to 5 MB, as PDF, JPEG or PNG; it says the size.
+
+Undo goes back one tool, Start over to the page as it came. Nothing is
+stretched by Tidy or plain Crop, so a card or signature keeps its real size.
+The tools are written once (kagaz-core `tools`, the window's `bench.js`), so
+a new source, such as a camera, only adds a button.
 
 Each page keeps its place: leave a printer's page with a scan under way
 for the cameras, and coming back finds the scan where it was. Camera

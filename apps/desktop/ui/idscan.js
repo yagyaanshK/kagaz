@@ -5,11 +5,12 @@
 // front's half above the back's, each just as it lay (printing.rs, id_*).
 //
 //   KagazId.attach({ form, kind: "scan" | "copy", device: () => d,
-//                    request: () => scanRequest, finish: { label, run } })
+//                    request: () => scanRequest, finish: [{ label, run }] })
 //
 // adds a "What to scan" choice to `form`; with "ID card or passport page"
-// the form's own button gives way to three steps. `finish.run()` saves or
-// prints the page once both sides are in.
+// the form's own button gives way to three steps. The page lands on the
+// "id" workbench, with the same tools panel as any scan (bench.js: Tidy,
+// Crop, Compress); `finish` are its ending buttons (Save…, Print).
 
 const KagazId = (() => {
   function el(tag, cls, text) {
@@ -19,7 +20,7 @@ const KagazId = (() => {
     return e;
   }
 
-  function attach({ form, kind, device, request, finish }) {
+  function attach({ form, kind, device, request, finish = [] }) {
     const copy = kind === "copy";
     const grid = form.querySelector(".grid");
 
@@ -48,12 +49,8 @@ const KagazId = (() => {
           <div class="id-row"><button type="button" class="id-scan" disabled>Scan the back</button><button type="button" class="id-thumb hidden" data-which="1" aria-label="See the back full size"><img alt=""></button></div>
         </li>
         <li data-side="page">
-          <p><strong>The page.</strong> The front in the top half, the back below, each where it lay on the glass.</p>
-          <div class="id-tidy">
-            <label class="switch"><input type="checkbox" class="id-clean"> Clean background (the lid's grey becomes white)</label>
-            <label class="switch"><input type="checkbox" class="id-card"> Find the card (white outside it)</label>
-          </div>
-          <div class="id-row"><button type="button" class="id-finish" disabled></button><button type="button" class="id-thumb id-page hidden" data-which="2" aria-label="See the page full size"><img alt=""></button></div>
+          <p><strong>The page.</strong> The front in the top half, the back below, each where it lay on the glass. Tidy, crop or make it smaller if you like, then ${copy ? "print" : "save"} it.</p>
+          <div class="id-bench hidden"></div>
         </li>
       </ol>
       <p class="id-note small" role="status"></p>
@@ -61,8 +58,8 @@ const KagazId = (() => {
     grid.after(box);
     const steps = box.querySelectorAll("li");
     const note = box.querySelector(".id-note");
-    const finishButton = box.querySelector(".id-finish");
-    finishButton.textContent = finish.label;
+    const benchBox = box.querySelector(".id-bench");
+    const panel = KagazBench.attach(benchBox, { bench: "id", paper: () => request().paper, finish });
     let busy = false;
 
     const cancel = box.querySelector(".id-cancel");
@@ -79,19 +76,18 @@ const KagazId = (() => {
       note.textContent = text || "";
       note.classList.toggle("working", on);
       note.classList.remove("cap-warn", "cap-ok");
-      box.querySelectorAll("button:not(.id-thumb):not(.id-cancel)").forEach((b) => { if (on) b.disabled = true; });
+      box.querySelectorAll(".id-scan").forEach((b) => { if (on) b.disabled = true; });
       if (!on) refresh();
     };
     let have = [false, false, false];
     const refresh = () => {
       steps[0].querySelector(".id-scan").disabled = false;
       steps[1].querySelector(".id-scan").disabled = !have[0];
-      finishButton.disabled = !have[2];
+      benchBox.classList.toggle("hidden", !have[2]);
       steps[0].querySelector(".id-scan").textContent = have[0] ? "Scan the front again" : "Scan the front";
       steps[1].querySelector(".id-scan").textContent = have[1] ? "Scan the back again" : "Scan the back";
       steps[0].querySelector(".id-scan").classList.toggle("accent", !have[0]);
       steps[1].querySelector(".id-scan").classList.toggle("accent", have[0] && !have[1]);
-      finishButton.classList.toggle("accent", have[2]);
     };
     const fail = (e) => {
       setBusy(false);
@@ -108,7 +104,7 @@ const KagazId = (() => {
     };
     // A tap on a scan shows it full size (from a larger copy: the scan
     // itself can be hundreds of megabytes).
-    const titles = ["The front", "The back", "Both sides on one page"];
+    const titles = ["The front", "The back"];
     box.querySelectorAll(".id-thumb").forEach((button) => button.addEventListener("click", async () => {
       const which = Number(button.dataset.which);
       try {
@@ -119,24 +115,14 @@ const KagazId = (() => {
       }
     }));
 
-    // Both sides on one page, tidied as chosen; again when a choice changes.
-    const tidy = () => ({ background: box.querySelector(".id-clean").checked, card: box.querySelector(".id-card").checked });
+    // Both sides on one page, onto the "id" workbench and its tools.
     async function makePage() {
       setBusy(true, "Putting both sides on one page…");
-      const page = await invoke("id_page", { paper: request().paper, tidy: tidy() });
-      show(steps[2].querySelector(".id-thumb"), page);
+      const view = await invoke("id_page", { paper: request().paper });
       have[2] = true;
-      setBusy(false, page.note || "");
-      if (page.note) note.classList.add("cap-warn");
+      setBusy(false, "");
+      panel.fresh(view);
     }
-    box.querySelectorAll(".id-tidy input").forEach((c) => c.addEventListener("change", async () => {
-      if (!have[1] || busy) return;
-      try {
-        await makePage();
-      } catch (e) {
-        fail(e);
-      }
-    }));
 
     for (const side of [0, 1]) {
       steps[side].querySelector(".id-scan").addEventListener("click", async () => {
@@ -149,30 +135,16 @@ const KagazId = (() => {
             // A new front starts over.
             have = [true, false, false];
             steps[1].querySelector(".id-thumb").classList.add("hidden");
-            steps[2].querySelector(".id-thumb").classList.add("hidden");
             setBusy(false, "Now turn the card over, in the same place.");
           } else {
             have[1] = true;
             await makePage();
-            finishButton.focus();
           }
         } catch (e) {
           fail(e);
         }
       });
     }
-    finishButton.addEventListener("click", async () => {
-      if (busy || !have[2]) return;
-      setBusy(true, copy ? "Printing…" : "");
-      try {
-        const done = await finish.run();
-        setBusy(false, done || "");
-        if (done) note.classList.add("cap-ok");
-      } catch (e) {
-        fail(e);
-      }
-    });
-
     // Only A4 and Letter halve into a card's place; the glass is the source.
     const paper = form.querySelector('select[name="paper"]');
     const dpi = form.querySelector('select[name="dpi"]');

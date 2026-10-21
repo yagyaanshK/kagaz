@@ -184,7 +184,7 @@ pub fn corner_radius(dpi: u32) -> f32 {
 
 /// The card's box (left, top, right, bottom, in pixels): whatever is clearly
 /// not lid, with a small margin. None when no card-sized thing stands out.
-fn find_card(img: &RgbImage, dpi: u32) -> Option<(u32, u32, u32, u32)> {
+pub fn find_card(img: &RgbImage, dpi: u32) -> Option<(u32, u32, u32, u32)> {
     let lid = lid_level(img)?;
     let (w, h) = img.dimensions();
     // In u16: a bright pixel plus the margin passes 255.
@@ -270,7 +270,7 @@ fn rounded(shape: &[[f32; 2]], w: f32, h: f32, radius: f32) -> Vec<(f32, f32)> {
     let pts: Vec<(f32, f32)> = shape.iter().map(|p| (p[0] * w, p[1] * h)).collect();
     let n = pts.len();
     // With eight points the corners are every other one; with four, all.
-    let corner = |i: usize| n != 8 || i % 2 == 0;
+    let corner = |i: usize| n != 8 || i.is_multiple_of(2);
     let mut out = Vec::with_capacity(n * 8);
     for i in 0..n {
         let c = pts[i];
