@@ -931,3 +931,7 @@ body.pip .pip-target .kz-top, body.pip .pip-target .kz-bar,
 body.pip .pip-target .call-actions, body.pip .pip-target .door-call-actions,
 body.pip .pip-target .call-volume, body.pip #call-note, body.pip #door-call-note { display: none; }
 body.pip .pip-target .call-body, body.pip .pip-target .door-call-body { position: absolute; left: 0; right: 0; bottom: 0; z-index: 2; padding: 4px 8px; background: linear-gradient(transparent, rgba(0, 0, 0, 0.7)); color: #fff; font-size: 12px; }
+
+/* Tidy a saved scan (tidy.js), under the printer lists. */
+#tidy-box { margin-top: 22px; }
+#tidy-box .switch { white-space: normal; }

@@ -59,6 +59,20 @@ mod tests {
     }
 }
 
+/// The resolution a JPEG says it has (its JFIF header, in dots per inch or
+/// per centimetre), when it says.
+pub fn dpi(data: &[u8]) -> Option<u32> {
+    if data.len() < 18 || data[..4] != [0xff, 0xd8, 0xff, 0xe0] || &data[6..11] != b"JFIF\0" {
+        return None;
+    }
+    let x = u16::from_be_bytes([data[14], data[15]]) as u32;
+    match data[13] {
+        1 if x > 1 => Some(x),
+        2 if x > 1 => Some((x as f64 * 2.54).round() as u32),
+        _ => None,
+    }
+}
+
 /// The JPEG with its resolution recorded (the JFIF header's dots per inch),
 /// so a viewer or a print dialog shows and prints it at its real size. The
 /// image data itself is not touched.

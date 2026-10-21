@@ -549,6 +549,7 @@ mod tests {
             paper: Paper::A4,
             engine: crate::scan::Engine::Driver,
             half_page: false,
+            cancel: Default::default(),
         };
         let c = choose(&caps, &req).unwrap();
         assert_eq!((c.dpi, c.intent, c.handling), (300, INTENT_GRAY, FLATBED));

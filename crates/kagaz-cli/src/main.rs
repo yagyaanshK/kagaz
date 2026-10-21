@@ -729,6 +729,7 @@ fn main() -> Result<()> {
                     EngineArg::Driver => kagaz_core::scan::Engine::Driver,
                 },
                 half_page: false,
+                cancel: Default::default(),
             };
 
             println!("Looking for \"{device}\"...");
@@ -912,6 +913,7 @@ fn main() -> Result<()> {
                     kagaz_core::scan::Engine::Driver
                 },
                 half_page: false,
+                cancel: Default::default(),
             };
             let print_req = PrintRequest {
                 copies,

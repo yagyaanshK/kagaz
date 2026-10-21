@@ -198,6 +198,44 @@ fn thumbnail(page: &Page) -> Result<(String, u32, u32), String> {
     shrunk(page, 360, 75)
 }
 
+/// The thumbnail and the full-size view of a page, from one decoding: a
+/// 1200 dpi scan takes a while to open, so it is opened once.
+fn thumb_and_view(page: &Page) -> Result<((String, u32, u32), String), String> {
+    let img = image::load_from_memory(&page.data).map_err(|e| e.to_string())?;
+    let (w, h) = (img.width(), img.height());
+    let view = img.thumbnail(2000, 2000);
+    let thumb = view.thumbnail(360, 360);
+    let url = |img: &image::DynamicImage, quality| -> Result<String, String> {
+        let mut jpeg = Vec::new();
+        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpeg, quality)
+            .encode_image(&img.to_rgb8())
+            .map_err(|e| e.to_string())?;
+        Ok(format!(
+            "data:image/jpeg;base64,{}",
+            base64::engine::general_purpose::STANDARD.encode(jpeg)
+        ))
+    };
+    Ok(((url(&thumb, 75)?, w, h), url(&view, 85)?))
+}
+
+/// The scan under way, so Cancel can stop it.
+static SCANNING: Mutex<Option<kagaz_core::scan::Cancel>> = Mutex::new(None);
+
+/// Give `request` a way to be stopped, as the scan under way.
+pub(crate) fn cancellable(request: &mut ScanRequest) {
+    let cancel = kagaz_core::scan::Cancel::default();
+    request.cancel = cancel.clone();
+    *SCANNING.lock().unwrap() = Some(cancel);
+}
+
+/// Stop the scan under way: the scanner is told to stop.
+#[tauri::command]
+pub fn scan_cancel() {
+    if let Some(cancel) = SCANNING.lock().unwrap().take() {
+        cancel.cancel();
+    }
+}
+
 /// The page as a JPEG data: URL at most `max` pixels on its long side, and
 /// the page's own size. A scan at 1200 dpi is far too big for the window.
 fn shrunk(page: &Page, max: u32, quality: u8) -> Result<(String, u32, u32), String> {
@@ -224,9 +262,10 @@ pub async fn copy_scan(
     app: AppHandle,
     state: State<'_, CopyState>,
     device: Device,
-    request: ScanRequest,
+    mut request: ScanRequest,
     keep: bool,
 ) -> Result<Vec<Thumb>, String> {
+    cancellable(&mut request);
     let scanned = blocking(move || {
         kagaz_core::scan::scan(&device, &request, &mut |e| {
             emit(&app, "copy-progress", Progress::Scan(e))
@@ -327,6 +366,9 @@ pub fn copy_discard(state: State<'_, CopyState>) {
 pub struct IdState {
     sides: Mutex<[Option<Page>; 2]>,
     sheet: Mutex<Option<Page>>,
+    /// Full-size views of the front, the back and the page, made as each
+    /// came, so opening one is instant.
+    views: Mutex<[Option<String>; 3]>,
 }
 
 /// Scan one side (0 the front, 1 the back): the top half of the glass.
@@ -349,6 +391,7 @@ pub async fn id_scan_side(
         request.paper = Paper::A4;
     }
     let channel = if copy { "copy-progress" } else { "scan-progress" };
+    cancellable(&mut request);
     let page = blocking(move || {
         let pages = kagaz_core::scan::scan(&device, &request, &mut |e| {
             if copy {
@@ -364,13 +407,21 @@ pub async fn id_scan_side(
             .ok_or_else(|| "the scanner sent no picture".to_string())
     })
     .await?;
-    let (src, width, height) = thumbnail(&page)?;
+    let (page, (src, width, height), view) = blocking(move || {
+        let (thumb, view) = thumb_and_view(&page)?;
+        Ok((page, thumb, view))
+    })
+    .await?;
     let dpi = page.dpi;
     let mut sides = state.sides.lock().unwrap();
+    let mut views = state.views.lock().unwrap();
     if side == 0 {
         sides[1] = None;
+        views[1] = None;
     }
     sides[side] = Some(page);
+    views[side] = Some(view);
+    views[2] = None;
     *state.sheet.lock().unwrap() = None;
     Ok(Thumb { index: side, src, width, height, dpi, note: String::new() })
 }
@@ -392,17 +443,24 @@ pub async fn id_page(
     };
     let paper = if paper == Paper::Max { Paper::A4 } else { paper };
     let tidy = tidy.unwrap_or_default();
-    let (sheet, notes) =
-        blocking(move || kagaz_core::scan::id::page_tidied(&front, &back, paper, tidy)).await?;
-    let (src, width, height) = thumbnail(&sheet)?;
+    let (sheet, notes, (src, width, height), view) = blocking(move || {
+        let (sheet, notes) = kagaz_core::scan::id::page_tidied(&front, &back, paper, tidy)?;
+        let (thumb, view) = thumb_and_view(&sheet)?;
+        Ok((sheet, notes, thumb, view))
+    })
+    .await?;
     let dpi = sheet.dpi;
     *state.sheet.lock().unwrap() = Some(sheet);
+    state.views.lock().unwrap()[2] = Some(view);
     Ok(Thumb { index: 0, src, width, height, dpi, note: notes.join(" ") })
 }
 
 /// A side (0, 1) or the page (2), big enough to look at closely.
 #[tauri::command]
 pub async fn id_picture(state: State<'_, IdState>, which: usize) -> Result<String, String> {
+    if let Some(view) = state.views.lock().unwrap().get(which).cloned().flatten() {
+        return Ok(view);
+    }
     let page = if which == 2 {
         state.sheet.lock().unwrap().clone()
     } else {
@@ -423,6 +481,87 @@ pub async fn copy_picture(state: State<'_, CopyState>, index: usize) -> Result<S
         .cloned()
         .ok_or_else(|| "that page is no longer here; scan again".to_string())?;
     blocking(move || shrunk(&page, 2000, 85).map(|(src, _, _)| src)).await
+}
+
+/// What tidying a saved file made.
+#[derive(Debug, Clone, Serialize)]
+pub struct Tidied {
+    path: String,
+    /// Where a card was not found (that part is left as it was).
+    notes: Vec<String>,
+}
+
+/// Tidy a saved scan or photo (PDF, JPEG or PNG) with Clean background
+/// and Find the card, no printer needed; the result is a new file at
+/// `out`, in that file's format. The original is not touched.
+#[tauri::command]
+pub async fn tidy_file(
+    app: AppHandle,
+    path: String,
+    tidy: kagaz_core::scan::id::Tidy,
+    out: String,
+) -> Result<Tidied, String> {
+    use kagaz_core::output::Format;
+    use kagaz_core::scan::ColorMode;
+    blocking(move || {
+        let data = std::fs::read(&path).map_err(|e| format!("could not read {path}: {e}"))?;
+        // Each page as a picture, with its resolution.
+        let mut pictures: Vec<(image::RgbImage, u32)> = Vec::new();
+        if data.starts_with(b"%PDF") {
+            // A PDF's pages drawn at 600 dpi on A4, sharp enough for a scan.
+            let plan = kagaz_core::print::Plan {
+                dpi: 600,
+                gray: false,
+                media: "iso_a4_210x297mm".into(),
+                width_pt: 595,
+                height_pt: 842,
+                sides: kagaz_core::print::Sides::OneSided,
+                sheet_back_rotated: false,
+                copies: 1,
+            };
+            for p in kagaz_core::print::render_file(std::path::Path::new(&path), &plan, &mut |_| {})
+                .map_err(|e| e.to_string())?
+            {
+                let img = if p.components == 1 {
+                    image::DynamicImage::ImageLuma8(
+                        image::GrayImage::from_raw(p.width, p.height, p.pixels)
+                            .ok_or("a page came out damaged")?,
+                    )
+                    .to_rgb8()
+                } else {
+                    image::RgbImage::from_raw(p.width, p.height, p.pixels)
+                        .ok_or("a page came out damaged")?
+                };
+                pictures.push((img, plan.dpi));
+            }
+        } else {
+            let img = image::load_from_memory(&data)
+                .map_err(|_| "this is not a PDF, JPEG or PNG file".to_string())?;
+            let dpi = kagaz_core::output::jpeg::dpi(&data).unwrap_or(300);
+            pictures.push((img.to_rgb8(), dpi));
+        }
+        let mut notes = Vec::new();
+        let mut pages = Vec::new();
+        for (mut img, dpi) in pictures {
+            notes.extend(kagaz_core::scan::id::tidy_image(&mut img, dpi, tidy));
+            let mut png = Vec::new();
+            image::DynamicImage::ImageRgb8(img)
+                .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+                .map_err(|e| e.to_string())?;
+            pages.push(Page { data: png, mime: "image/png", dpi, color: ColorMode::Color });
+        }
+        let format = std::path::Path::new(&out)
+            .extension()
+            .and_then(|e| Format::from_extension(&e.to_string_lossy()))
+            .unwrap_or(Format::Pdf);
+        let output = super::OutputRequest { format, color: ColorMode::Color, quality: Some(92), max_bytes: None };
+        let written = super::write_scan(&app, &pages, &output, out)?;
+        Ok(Tidied {
+            path: written.first().map(|w| w.path.clone()).unwrap_or_default(),
+            notes,
+        })
+    })
+    .await
 }
 
 /// Save the ID page (Scan tab), as a scan is saved.

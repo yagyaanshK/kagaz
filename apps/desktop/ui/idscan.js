@@ -56,7 +56,8 @@ const KagazId = (() => {
           <div class="id-row"><button type="button" class="id-finish" disabled></button><button type="button" class="id-thumb id-page hidden" data-which="2" aria-label="See the page full size"><img alt=""></button></div>
         </li>
       </ol>
-      <p class="id-note small" role="status"></p>`;
+      <p class="id-note small" role="status"></p>
+      <button type="button" class="id-cancel hidden">Cancel scan</button>`;
     grid.after(box);
     const steps = box.querySelectorAll("li");
     const note = box.querySelector(".id-note");
@@ -64,12 +65,21 @@ const KagazId = (() => {
     finishButton.textContent = finish.label;
     let busy = false;
 
+    const cancel = box.querySelector(".id-cancel");
+    cancel.addEventListener("click", () => {
+      cancel.disabled = true;
+      note.textContent = "Cancelling…";
+      invoke("scan_cancel").catch(() => {});
+    });
     const setBusy = (on, text) => {
       busy = on;
+      // While a side is being scanned, it can be stopped.
+      cancel.classList.toggle("hidden", !(on && /^Scanning/.test(text || "")));
+      cancel.disabled = false;
       note.textContent = text || "";
       note.classList.toggle("working", on);
       note.classList.remove("cap-warn", "cap-ok");
-      box.querySelectorAll("button:not(.id-thumb)").forEach((b) => { if (on) b.disabled = true; });
+      box.querySelectorAll("button:not(.id-thumb):not(.id-cancel)").forEach((b) => { if (on) b.disabled = true; });
       if (!on) refresh();
     };
     let have = [false, false, false];
@@ -85,6 +95,10 @@ const KagazId = (() => {
     };
     const fail = (e) => {
       setBusy(false);
+      if (/cancelled/.test(String(e))) {
+        note.textContent = "Scan cancelled.";
+        return;
+      }
       note.textContent = String(e);
       note.classList.add("cap-warn");
     };

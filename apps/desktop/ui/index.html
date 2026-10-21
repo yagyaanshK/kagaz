@@ -99,6 +99,15 @@
       <h3 id="found-head" class="list-head">Found nearby</h3>
       <p id="search-note" class="muted" role="status"></p>
       <ul id="found-devices"></ul>
+      <!-- No printer needed: tidy a file already on this device (tidy.js). -->
+      <details id="tidy-box" class="set-more">
+        <summary>Tidy a saved scan or photo</summary>
+        <p class="muted small">Make the background white, or everything outside the card, on a PDF, JPEG or PNG on this device. The result is saved as a new file; the original stays as it was. A page is taken as an ID page, each half one side.</p>
+        <label class="switch"><input type="checkbox" id="tidy-clean"> Clean background (the lid's grey becomes white)</label>
+        <label class="switch"><input type="checkbox" id="tidy-card"> Find the card (white outside it)</label>
+        <div class="actions"><button type="button" id="tidy-go" class="accent">Choose a file…</button></div>
+        <p id="tidy-note" class="small" role="status"></p>
+      </details>
     </section>
 
     <section id="doorbell" class="pane hidden">
@@ -514,6 +523,7 @@
           </div>
           <div class="actions bar">
             <button type="submit" id="scan-go" class="accent">Scan…</button>
+            <button type="button" id="scan-cancel" class="hidden">Cancel scan</button>
             <span id="scan-state" class="muted"></span>
           </div>
         </form>
@@ -586,6 +596,7 @@
           <div class="actions bar">
             <button type="submit" id="copy-go" class="accent big">Copy</button>
             <button type="button" id="copy-preview" title="Scan first, look at the pages, then print">Scan and look first</button>
+            <button type="button" id="copy-cancel" class="hidden">Cancel scan</button>
             <span id="copy-state" class="muted"></span>
           </div>
         </form>
@@ -623,6 +634,7 @@
   <script src="idscan.js"></script>
   <script src="app.js"></script>
   <script src="printing.js"></script>
+  <script src="tidy.js"></script>
   <script src="onetouch.js"></script>
   <script src="calls.js"></script>
   <script src="brands.js"></script>

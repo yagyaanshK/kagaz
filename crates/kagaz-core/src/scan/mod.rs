@@ -78,6 +78,23 @@ pub struct ScanRequest {
     /// scans it (see [`id`]). No effect with [`Paper::Max`].
     #[serde(default)]
     pub half_page: bool,
+    /// Set from elsewhere to stop the scan: the scanner is told to stop
+    /// (the driver's program ends, a WSD or eSCL job is cancelled).
+    #[serde(skip)]
+    pub cancel: Cancel,
+}
+
+/// A way to stop a scan under way; clones share it.
+#[derive(Debug, Clone, Default)]
+pub struct Cancel(std::sync::Arc<std::sync::atomic::AtomicBool>);
+
+impl Cancel {
+    pub fn cancel(&self) {
+        self.0.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+    pub fn is_cancelled(&self) -> bool {
+        self.0.load(std::sync::atomic::Ordering::SeqCst)
+    }
 }
 
 impl ScanRequest {
@@ -101,7 +118,14 @@ impl ScanRequest {
     pub fn largest_dpi(&self) -> u32 {
         [4800, 2400, 1200, 600, 400, 300, 200, 150, 100, 75]
             .into_iter()
-            .find(|&dpi| ScanRequest { dpi, ..self.clone() }.image_bytes() <= MAX_IMAGE_BYTES)
+            .find(|&dpi| {
+                ScanRequest {
+                    dpi,
+                    ..self.clone()
+                }
+                .image_bytes()
+                    <= MAX_IMAGE_BYTES
+            })
             .unwrap_or(75)
     }
 }
@@ -124,6 +148,7 @@ impl Default for ScanRequest {
             paper: Paper::A4,
             engine: Engine::Driverless,
             half_page: false,
+            cancel: Cancel::default(),
         }
     }
 }
@@ -167,8 +192,14 @@ pub enum ScanError {
     FeederEmpty,
     #[error("the scanner is busy or not ready: {0}")]
     Busy(String),
+    #[error("the scan was cancelled")]
+    Cancelled,
     #[error("at {dpi} dpi this would be about {size} once opened, more than this device can hold; choose {largest} dpi or less (300 dpi is plenty for documents and ID cards)")]
-    TooBig { dpi: u32, size: String, largest: u32 },
+    TooBig {
+        dpi: u32,
+        size: String,
+        largest: u32,
+    },
 }
 
 /// What one engine offers, in the terms the window and the CLI present.
@@ -451,7 +482,12 @@ mod size_tests {
     use super::*;
 
     fn half(dpi: u32, color: ColorMode) -> ScanRequest {
-        ScanRequest { dpi, color, half_page: true, ..Default::default() }
+        ScanRequest {
+            dpi,
+            color,
+            half_page: true,
+            ..Default::default()
+        }
     }
 
     #[test]
@@ -462,7 +498,14 @@ mod size_tests {
         match scan(&Device::default(), &req, &mut |_| {}) {
             // 1200 dpi is about 209 MB: within a computer's limit, not a phone's.
             Err(ScanError::TooBig { largest, .. }) => {
-                assert_eq!(largest, if MAX_IMAGE_BYTES >= 300_000_000 { 1200 } else { 600 })
+                assert_eq!(
+                    largest,
+                    if MAX_IMAGE_BYTES >= 300_000_000 {
+                        1200
+                    } else {
+                        600
+                    }
+                )
             }
             other => panic!("expected TooBig, got {other:?}"),
         }
@@ -471,7 +514,22 @@ mod size_tests {
     #[test]
     fn ordinary_scans_stay_within_the_limit() {
         assert!(half(300, ColorMode::Color).image_bytes() < 20_000_000);
-        assert!(ScanRequest { dpi: 600, ..Default::default() }.image_bytes() <= MAX_IMAGE_BYTES);
-        assert_eq!(ScanRequest { dpi: 300, color: ColorMode::Gray, ..Default::default() }.largest_dpi(), 2400);
+        assert!(
+            ScanRequest {
+                dpi: 600,
+                ..Default::default()
+            }
+            .image_bytes()
+                <= MAX_IMAGE_BYTES
+        );
+        assert_eq!(
+            ScanRequest {
+                dpi: 300,
+                color: ColorMode::Gray,
+                ..Default::default()
+            }
+            .largest_dpi(),
+            2400
+        );
     }
 }

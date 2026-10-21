@@ -31,7 +31,12 @@ pub fn page(front: &Page, back: &Page, paper: Paper) -> Result<Page, String> {
 
 /// [`page`], tidied as asked; with a note for each side whose card was not
 /// found (that side is left as scanned).
-pub fn page_tidied(front: &Page, back: &Page, paper: Paper, tidy: Tidy) -> Result<(Page, Vec<String>), String> {
+pub fn page_tidied(
+    front: &Page,
+    back: &Page,
+    paper: Paper,
+    tidy: Tidy,
+) -> Result<(Page, Vec<String>), String> {
     let mut notes = Vec::new();
     let (w_mils, h_mils) = paper.size_mils().unwrap_or((8268, 11693));
     let dpi = front.dpi.max(1);
@@ -41,16 +46,25 @@ pub fn page_tidied(front: &Page, back: &Page, paper: Paper, tidy: Tidy) -> Resul
 
     let mut sheet = RgbImage::from_pixel(width, height, Rgb([255, 255, 255]));
     for (side, top, name) in [(front, 0, "front"), (back, half, "back")] {
-        let mut img = decode(side).map_err(|e| format!("the {name} scan could not be read: {e}"))?;
+        let mut img =
+            decode(side).map_err(|e| format!("the {name} scan could not be read: {e}"))?;
         // The same size on paper even if the back came at another resolution.
         if side.dpi.max(1) != dpi {
             let scale = dpi as f64 / side.dpi.max(1) as f64;
             let (w, h) = (img.width() as f64 * scale, img.height() as f64 * scale);
-            img = img.resize_exact(w.round() as u32, h.round() as u32, imageops::FilterType::Triangle);
+            img = img.resize_exact(
+                w.round() as u32,
+                h.round() as u32,
+                imageops::FilterType::Triangle,
+            );
         }
-        let mut img = img.crop_imm(0, 0, img.width().min(width), img.height().min(half)).to_rgb8();
+        let mut img = img
+            .crop_imm(0, 0, img.width().min(width), img.height().min(half))
+            .to_rgb8();
         if tidy.card && !whiten_outside_card(&mut img, dpi) {
-            notes.push(format!("The card on the {name} was not found clearly, so that side is as scanned."));
+            notes.push(format!(
+                "The card on the {name} was not found clearly, so that side is as scanned."
+            ));
         }
         if tidy.background {
             whiten_background(&mut img);
@@ -59,7 +73,11 @@ pub fn page_tidied(front: &Page, back: &Page, paper: Paper, tidy: Tidy) -> Resul
     }
 
     // Colour scans as JPEG; black-and-white (text, lines) as PNG, sharp.
-    let color = if front.color == back.color { front.color } else { ColorMode::Color };
+    let color = if front.color == back.color {
+        front.color
+    } else {
+        ColorMode::Color
+    };
     let mut data = Vec::new();
     let mime = if color == ColorMode::BlackWhite {
         DynamicImage::ImageRgb8(sheet)
@@ -78,7 +96,41 @@ pub fn page_tidied(front: &Page, back: &Page, paper: Paper, tidy: Tidy) -> Resul
         .map_err(|e| e.to_string())?;
         "image/jpeg"
     };
-    Ok((Page { data, mime, dpi, color }, notes))
+    Ok((
+        Page {
+            data,
+            mime,
+            dpi,
+            color,
+        },
+        notes,
+    ))
+}
+
+/// Tidy a saved scan or photo, as an ID page's sides are tidied. A page
+/// shape (taller than wide, about A4's or Letter's proportions) is taken as
+/// an ID page: each half is one side. Anything else is one card or page.
+/// Notes say where a card was not found (that part is left as it was).
+pub fn tidy_image(img: &mut RgbImage, dpi: u32, tidy: Tidy) -> Vec<String> {
+    let mut notes = Vec::new();
+    let (w, h) = img.dimensions();
+    let ratio = h as f64 / w.max(1) as f64;
+    let parts: Vec<(u32, u32, &str)> = if (1.25..=1.5).contains(&ratio) {
+        vec![(0, h / 2, "top half"), (h / 2, h - h / 2, "bottom half")]
+    } else {
+        vec![(0, h, "picture")]
+    };
+    for (top, height, name) in parts {
+        let mut part = imageops::crop_imm(img, 0, top, w, height).to_image();
+        if tidy.card && !whiten_outside_card(&mut part, dpi) {
+            notes.push(format!("No card stood out in the {name}, so it is left as it was."));
+        }
+        if tidy.background {
+            whiten_background(&mut part);
+        }
+        imageops::replace(img, &part, 0, top as i64);
+    }
+    notes
 }
 
 fn luma(p: &Rgb<u8>) -> u8 {
@@ -121,7 +173,9 @@ fn whiten_background(img: &mut RgbImage) {
 /// it white, keeping a small margin. False, with nothing changed, when no
 /// card-sized thing stands out.
 fn whiten_outside_card(img: &mut RgbImage, dpi: u32) -> bool {
-    let Some(lid) = lid_level(img) else { return false };
+    let Some(lid) = lid_level(img) else {
+        return false;
+    };
     let (w, h) = img.dimensions();
     let not_lid = |p: &Rgb<u8>| luma(p) + 30 < lid || chroma(p) > 40;
     let mut cols = vec![0u32; w as usize];
@@ -179,12 +233,23 @@ mod tests {
             }
         }
         let mut data = Vec::new();
-        DynamicImage::ImageRgb8(img).write_to(&mut Cursor::new(&mut data), ImageFormat::Png).unwrap();
-        Page { data, mime: "image/png", dpi: 10, color: ColorMode::Color }
+        DynamicImage::ImageRgb8(img)
+            .write_to(&mut Cursor::new(&mut data), ImageFormat::Png)
+            .unwrap();
+        Page {
+            data,
+            mime: "image/png",
+            dpi: 10,
+            color: ColorMode::Color,
+        }
     }
 
     fn at(p: &Page, x: u32, y: u32) -> u8 {
-        image::load_from_memory(&p.data).unwrap().to_luma8().get_pixel(x, y).0[0]
+        image::load_from_memory(&p.data)
+            .unwrap()
+            .to_luma8()
+            .get_pixel(x, y)
+            .0[0]
     }
 
     #[test]
@@ -196,9 +261,18 @@ mod tests {
         let img = image::load_from_memory(&sheet.data).unwrap();
         assert_eq!((img.width(), img.height()), (82, 116));
         assert!(at(&sheet, 10, 10) < 60, "front card where it lay");
-        assert!(at(&sheet, 45, 58 + 15) < 60, "back card where it lay, in the lower half");
-        assert!(at(&sheet, 45, 15) > 200, "nothing of the back in the top half");
-        assert!(at(&sheet, 10, 58 + 10) > 200, "nothing of the front in the lower half");
+        assert!(
+            at(&sheet, 45, 58 + 15) < 60,
+            "back card where it lay, in the lower half"
+        );
+        assert!(
+            at(&sheet, 45, 15) > 200,
+            "nothing of the back in the top half"
+        );
+        assert!(
+            at(&sheet, 10, 58 + 10) > 200,
+            "nothing of the front in the lower half"
+        );
     }
 
     // A half-glass scan: a light grey lid with a darker "card" and a speck of dust.
@@ -225,10 +299,22 @@ mod tests {
     fn outside_the_card_becomes_white() {
         let mut img = on_lid((20, 15, 80, 50));
         assert!(whiten_outside_card(&mut img, 25)); // 25 dpi: a 2 px margin
-        assert_eq!(img.get_pixel(180, 120), &Rgb([255, 255, 255]), "the speck outside goes");
+        assert_eq!(
+            img.get_pixel(180, 120),
+            &Rgb([255, 255, 255]),
+            "the speck outside goes"
+        );
         assert_eq!(img.get_pixel(150, 100), &Rgb([255, 255, 255]));
-        assert_eq!(img.get_pixel(40, 30), &Rgb([90, 120, 160]), "the card stays");
-        assert_eq!(img.get_pixel(18, 13), &Rgb([214, 214, 210]), "within the margin stays");
+        assert_eq!(
+            img.get_pixel(40, 30),
+            &Rgb([90, 120, 160]),
+            "the card stays"
+        );
+        assert_eq!(
+            img.get_pixel(18, 13),
+            &Rgb([214, 214, 210]),
+            "within the margin stays"
+        );
     }
 
     #[test]
@@ -237,6 +323,25 @@ mod tests {
         let before = img.clone();
         assert!(!whiten_outside_card(&mut img, 25));
         assert_eq!(img, before);
+    }
+
+    #[test]
+    fn a_saved_id_page_is_tidied_half_by_half() {
+        // A4's shape, a card in each half, on a grey lid.
+        let mut img = RgbImage::from_pixel(210, 297, Rgb([214, 214, 210]));
+        for (x0, y0) in [(20u32, 20u32), (110, 170)] {
+            for y in y0..y0 + 54 {
+                for x in x0..x0 + 86 {
+                    img.put_pixel(x, y, Rgb([90, 120, 160]));
+                }
+            }
+        }
+        let notes = tidy_image(&mut img, 25, Tidy { background: true, card: true });
+        assert!(notes.is_empty(), "{notes:?}");
+        assert_eq!(img.get_pixel(50, 40), &Rgb([90, 120, 160]), "front card kept");
+        assert_eq!(img.get_pixel(150, 200), &Rgb([90, 120, 160]), "back card kept");
+        assert_eq!(img.get_pixel(180, 100), &Rgb([255, 255, 255]));
+        assert_eq!(img.get_pixel(30, 250), &Rgb([255, 255, 255]));
     }
 
     #[test]

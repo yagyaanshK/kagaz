@@ -288,67 +288,91 @@ impl EsclScanner {
             .ok_or_else(|| ScanError::Protocol("ScanJobs gave no job Location".into()))?;
         let job = job_url(&self.base, &location);
 
-        let mime = if params.format == "image/png" {
-            "image/png"
-        } else {
-            "image/jpeg"
-        };
-        let color_scanned = match params.color.as_str() {
-            "Grayscale8" | "Grayscale16" => ColorMode::Gray,
-            "BlackAndWhite1" => ColorMode::BlackWhite,
-            _ => ColorMode::Color,
-        };
-        let mut pages = Vec::new();
-        let mut waits = 0;
-        loop {
-            let (status, _, body) = self.get(&format!("{job}/NextDocument"))?;
-            match status {
-                200 => {
-                    pages.push(Page {
-                        data: body,
-                        mime,
-                        dpi: params.dpi,
-                        color: color_scanned,
-                    });
-                    on_event(Event::Page {
-                        number: pages.len(),
-                        bytes: pages.last().map(|p| p.data.len()).unwrap_or(0),
-                    });
-                    if source == Source::Glass {
-                        break;
-                    }
-                }
-                404 | 410 => {
-                    if pages.is_empty() {
+        // Cancel: delete the job, which stops the scanner; the page it is
+        // sending then ends too, and the scan says it was cancelled.
+        let done = std::sync::atomic::AtomicBool::new(false);
+        let result = std::thread::scope(|scope| {
+            scope.spawn(|| {
+                while !done.load(std::sync::atomic::Ordering::SeqCst) {
+                    if req.cancel.is_cancelled() {
                         let _ = self.delete(&job);
-                        return Err(if source == Source::Glass {
-                            ScanError::Refused("the scanner ended the job without a page".into())
-                        } else {
-                            ScanError::FeederEmpty
-                        });
+                        return;
                     }
-                    break;
+                    std::thread::sleep(Duration::from_millis(150));
                 }
-                503 => {
-                    waits += 1;
-                    if waits > 120 {
-                        let _ = self.delete(&job);
-                        return Err(ScanError::Busy(
-                            "the scanner kept saying 'not ready'".into(),
-                        ));
+            });
+            let r = (|| -> Result<Vec<Page>, ScanError> {
+                let mime = if params.format == "image/png" {
+                    "image/png"
+                } else {
+                    "image/jpeg"
+                };
+                let color_scanned = match params.color.as_str() {
+                    "Grayscale8" | "Grayscale16" => ColorMode::Gray,
+                    "BlackAndWhite1" => ColorMode::BlackWhite,
+                    _ => ColorMode::Color,
+                };
+                let mut pages = Vec::new();
+                let mut waits = 0;
+                loop {
+                    let (status, _, body) = self.get(&format!("{job}/NextDocument"))?;
+                    match status {
+                        200 => {
+                            pages.push(Page {
+                                data: body,
+                                mime,
+                                dpi: params.dpi,
+                                color: color_scanned,
+                            });
+                            on_event(Event::Page {
+                                number: pages.len(),
+                                bytes: pages.last().map(|p| p.data.len()).unwrap_or(0),
+                            });
+                            if source == Source::Glass {
+                                break;
+                            }
+                        }
+                        404 | 410 => {
+                            if pages.is_empty() {
+                                let _ = self.delete(&job);
+                                return Err(if source == Source::Glass {
+                                    ScanError::Refused(
+                                        "the scanner ended the job without a page".into(),
+                                    )
+                                } else {
+                                    ScanError::FeederEmpty
+                                });
+                            }
+                            break;
+                        }
+                        503 => {
+                            waits += 1;
+                            if waits > 120 {
+                                let _ = self.delete(&job);
+                                return Err(ScanError::Busy(
+                                    "the scanner kept saying 'not ready'".into(),
+                                ));
+                            }
+                            std::thread::sleep(Duration::from_secs(1));
+                        }
+                        other => {
+                            let _ = self.delete(&job);
+                            return Err(ScanError::Protocol(format!(
+                                "NextDocument answered HTTP {other}"
+                            )));
+                        }
                     }
-                    std::thread::sleep(Duration::from_secs(1));
                 }
-                other => {
-                    let _ = self.delete(&job);
-                    return Err(ScanError::Protocol(format!(
-                        "NextDocument answered HTTP {other}"
-                    )));
-                }
-            }
+                let _ = self.delete(&job);
+                Ok(pages)
+            })();
+            done.store(true, std::sync::atomic::Ordering::SeqCst);
+            r
+        });
+        if req.cancel.is_cancelled() {
+            return Err(ScanError::Cancelled);
         }
-        let _ = self.delete(&job);
-        Ok(pages)
+        result
     }
 
     fn get(&self, url: &str) -> Result<(u16, String, Vec<u8>), ScanError> {

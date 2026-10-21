@@ -246,7 +246,10 @@ front; turn it over in the same place and scan the back. The page has the
 front's half above the back's, each just where it lay; Scan saves it (PDF,
 JPEG or PNG), Copy prints it at real size. Two options, off unless ticked, tidy the page:
 **Clean background** turns the lid's grey around the card white, and
-**Find the card** whitens everything outside the card.
+**Find the card** whitens everything outside the card. The same two work on a file already on this
+device, no printer needed: **Tidy a saved scan or photo**, under the
+printers, makes a tidied copy of a PDF, JPEG or PNG. A scan under way can
+be stopped with **Cancel scan**: the scanner is told to stop.
 
 Each page keeps its place: leave a printer's page with a scan under way
 for the cameras, and coming back finds the scan where it was. Camera

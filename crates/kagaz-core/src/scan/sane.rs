@@ -8,7 +8,7 @@ use super::{ColorMode, Event, Page, Paper, ScanError, ScanRequest, Source};
 use crate::Device;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 /// A SANE device as `scanimage -L` lists it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -313,9 +313,28 @@ fn run(
     } else {
         cmd.arg(format!("--batch={}", work.join("page%03d.png").display()));
     }
-    let out = cmd
-        .output()
+    // Run it in the background, checking for Cancel: ending scanimage stops
+    // the driver's scan (the head goes back).
+    let mut child = cmd
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
         .map_err(|e| ScanError::Transport(format!("cannot run scanimage: {e}")))?;
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) if req.cancel.is_cancelled() => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(ScanError::Cancelled);
+            }
+            Ok(None) => std::thread::sleep(std::time::Duration::from_millis(100)),
+            Err(e) => return Err(ScanError::Transport(format!("scanimage: {e}"))),
+        }
+    }
+    let out = child
+        .wait_with_output()
+        .map_err(|e| ScanError::Transport(format!("scanimage: {e}")))?;
     let mut files: Vec<PathBuf> = std::fs::read_dir(work)
         .map(|rd| {
             rd.flatten()
