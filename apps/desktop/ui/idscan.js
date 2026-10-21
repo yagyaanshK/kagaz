@@ -41,15 +41,15 @@ const KagazId = (() => {
       <ol>
         <li data-side="0">
           <p><strong>Front.</strong> Put the card face down on the glass, in the half by the corner mark (the arrow), near that corner. Close the lid.</p>
-          <div class="id-row"><button type="button" class="accent id-scan">Scan the front</button><img class="id-thumb hidden" alt="The front, as scanned"></div>
+          <div class="id-row"><button type="button" class="accent id-scan">Scan the front</button><button type="button" class="id-thumb hidden" data-which="0" aria-label="See the front full size"><img alt=""></button></div>
         </li>
         <li data-side="1">
           <p><strong>Back.</strong> Turn the card over and put it back in the same place.</p>
-          <div class="id-row"><button type="button" class="id-scan" disabled>Scan the back</button><img class="id-thumb hidden" alt="The back, as scanned"></div>
+          <div class="id-row"><button type="button" class="id-scan" disabled>Scan the back</button><button type="button" class="id-thumb hidden" data-which="1" aria-label="See the back full size"><img alt=""></button></div>
         </li>
         <li data-side="page">
           <p><strong>The page.</strong> The front in the top half, the back below, each where it lay on the glass.</p>
-          <div class="id-row"><button type="button" class="id-finish" disabled></button><img class="id-thumb id-page hidden" alt="Both sides on one page"></div>
+          <div class="id-row"><button type="button" class="id-finish" disabled></button><button type="button" class="id-thumb id-page hidden" data-which="2" aria-label="See the page full size"><img alt=""></button></div>
         </li>
       </ol>
       <p class="id-note small" role="status"></p>`;
@@ -65,7 +65,7 @@ const KagazId = (() => {
       note.textContent = text || "";
       note.classList.toggle("working", on);
       note.classList.remove("cap-warn", "cap-ok");
-      box.querySelectorAll("button").forEach((b) => { if (on) b.disabled = true; });
+      box.querySelectorAll("button:not(.id-thumb)").forEach((b) => { if (on) b.disabled = true; });
       if (!on) refresh();
     };
     let have = [false, false, false];
@@ -84,10 +84,22 @@ const KagazId = (() => {
       note.textContent = String(e);
       note.classList.add("cap-warn");
     };
-    const show = (img, thumb) => {
-      img.src = thumb.src;
-      img.classList.remove("hidden");
+    const show = (button, thumb) => {
+      button.querySelector("img").src = thumb.src;
+      button.classList.remove("hidden");
     };
+    // A tap on a scan shows it full size (from a larger copy: the scan
+    // itself can be hundreds of megabytes).
+    const titles = ["The front", "The back", "Both sides on one page"];
+    box.querySelectorAll(".id-thumb").forEach((button) => button.addEventListener("click", async () => {
+      const which = Number(button.dataset.which);
+      try {
+        KagazHistory.picture(titles[which], await invoke("id_picture", { which }));
+      } catch (e) {
+        note.textContent = String(e);
+        note.classList.add("cap-warn");
+      }
+    }));
 
     for (const side of [0, 1]) {
       steps[side].querySelector(".id-scan").addEventListener("click", async () => {
@@ -129,8 +141,13 @@ const KagazId = (() => {
 
     // Only A4 and Letter halve into a card's place; the glass is the source.
     const paper = form.querySelector('select[name="paper"]');
+    const dpi = form.querySelector('select[name="dpi"]');
+    let wasOn = false;
     const mode = () => {
       const on = select.value === "id";
+      // An ID reads well at 300 dpi; higher only makes it slow and big.
+      if (on && !wasOn && dpi && [...dpi.options].some((o) => o.value === "300" && !o.disabled)) dpi.value = "300";
+      wasOn = on;
       form.classList.toggle("id-mode", on);
       box.classList.toggle("hidden", !on);
       if (paper) {

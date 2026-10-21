@@ -134,6 +134,13 @@ async fn scan(
     .await
 }
 
+/// The largest page a scan may be once opened, in bytes (the window greys
+/// out resolutions beyond it).
+#[tauri::command]
+fn scan_max_bytes() -> u64 {
+    kagaz_core::scan::MAX_IMAGE_BYTES
+}
+
 /// Write scanned pages as the person chose (PDF, JPEG, PNG; on a phone,
 /// then into Downloads/Kagaz).
 fn write_scan(
@@ -1397,6 +1404,9 @@ pub fn run() {
             printing::copy_print,
             printing::copy_discard,
             printing::id_scan_side,
+            printing::id_picture,
+            printing::copy_picture,
+            scan_max_bytes,
             printing::id_page,
             printing::id_save,
             printing::id_to_copy,

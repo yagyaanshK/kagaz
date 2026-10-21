@@ -451,6 +451,19 @@ function dpiLabel(dpi) {
 
 let caps = null; // what the selected device offers, per engine
 
+// The largest page a scan may be once opened (kagaz_core MAX_IMAGE_BYTES):
+// resolutions beyond it are greyed out, as the scan would refuse them.
+let scanMaxBytes = 700e6;
+invoke("scan_max_bytes").then((n) => { if (n) scanMaxBytes = n; }).catch(() => {});
+const PAPER_MILS = { A4: [8268, 11693], Letter: [8500, 11000], Legal: [8500, 14000], Max: [8500, 14000] };
+function scanBytes(dpi) {
+  const f = new FormData($("scan-form"));
+  const [w, h] = PAPER_MILS[f.get("paper")] || PAPER_MILS.A4;
+  const half = f.get("what") === "id" ? 2 : 1;
+  const px = (mils) => Math.floor((mils * dpi) / 1000);
+  return px(w) * px(Math.floor(h / half)) * (f.get("color") === "Color" ? 3 : 1);
+}
+
 function engineCaps() {
   if (!caps) return null;
   const engine = $("scan-form").querySelector('select[name="engine"]').value;
@@ -468,11 +481,15 @@ function renderResolutions() {
   const dr = caps.driver ? caps.driver.resolutions : [];
   const all = [...new Set([...dl, ...dr])].sort((a, b) => a - b);
   const current = Number(dpiSel.value) || 300;
-  const chosen = all.includes(current) ? current : all.includes(300) ? 300 : all[all.length - 1];
+  const fits = (r) => scanBytes(r) <= scanMaxBytes;
+  let chosen = all.includes(current) ? current : all.includes(300) ? 300 : all[all.length - 1];
+  // Too big for this paper and colour: the largest that fits instead.
+  if (!fits(chosen)) chosen = all.filter(fits).pop() || all[0];
   dpiSel.innerHTML = all
     .map((r) => {
       const who = dl.includes(r) && dr.includes(r) ? "" : dl.includes(r) ? " · no driver" : " · driver";
-      return `<option value="${r}" ${r === chosen ? "selected" : ""}>${dpiLabel(r)}${who}</option>`;
+      const big = fits(r) ? "" : " · too big for this page";
+      return `<option value="${r}" ${r === chosen ? "selected" : ""} ${big ? "disabled" : ""}>${dpiLabel(r)}${who}${big}</option>`;
     })
     .join("");
   for (const opt of engSel.options) {
