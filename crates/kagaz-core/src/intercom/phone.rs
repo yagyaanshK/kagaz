@@ -1767,14 +1767,16 @@ mod tests {
         let (mut conn, _) = server.accept().unwrap();
         conn.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
         let mut framer = Framer::default();
+        // One read can bring two messages: keep the second for the next call.
+        let mut queued = std::collections::VecDeque::new();
         let mut next = |conn: &mut TcpStream| -> Message {
             let mut buf = [0u8; 8192];
             loop {
-                let n = conn.read(&mut buf).unwrap();
-                let mut got = framer.feed(&buf[..n]);
-                if !got.is_empty() {
-                    return got.remove(0);
+                if let Some(m) = queued.pop_front() {
+                    return m;
                 }
+                let n = conn.read(&mut buf).unwrap();
+                queued.extend(framer.feed(&buf[..n]));
             }
         };
         let reg = next(&mut conn);
