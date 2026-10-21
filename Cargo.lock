@@ -2729,6 +2729,7 @@ dependencies = [
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",
+ "url",
  "uuid",
  "webkit2gtk",
  "windows",

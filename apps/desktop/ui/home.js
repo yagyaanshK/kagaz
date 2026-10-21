@@ -133,12 +133,14 @@ const KagazHome = (() => {
   async function camerasGroup(root) {
     const cam = await invoke("cameras_status").catch(() => null);
     if (!cam || !cam.logged_in) return false;
-    const g = group("security", "Security cameras", "Tapo", () => selectCategory("cameras"));
-    const tapo = KagazBrands.byId("security", "tapo");
+    const brandOf = (c) => KagazBrands.byId("security", c.brand || "tapo") || KagazBrands.byId("security", "tapo");
+    const names = [...new Set((cam.cameras || []).map((c) => brandOf(c).name))];
+    const g = group("security", "Security cameras", names.join(", ") || "Tapo", () => selectCategory("cameras"));
     if (cam.cameras && cam.cameras.length) {
-      for (const c of cam.cameras) g.tiles.appendChild(tile(c.name, "Tapo", "", () => selectCategory("cameras"), tapo.logo));
+      for (const c of cam.cameras) g.tiles.appendChild(tile(c.name, brandOf(c).name, "", () => selectCategory("cameras"), brandOf(c).logo));
     } else {
-      g.tiles.appendChild(tile("Tapo cameras", "Open to watch", "", () => selectCategory("cameras"), tapo.logo));
+      const tapo = KagazBrands.byId("security", "tapo");
+      g.tiles.appendChild(tile("Your cameras", "Open to watch", "", () => selectCategory("cameras"), tapo.logo));
     }
     if (cam.cameras && cam.cameras.length) g.count();
     root.appendChild(g.box);
@@ -239,6 +241,9 @@ const KagazHome = (() => {
       setTimeout(() => $("door-list").scrollIntoView({ block: "start", behavior: "smooth" }), 300);
     } else if (kind.id === "security") {
       selectCategory("cameras");
+      if (b.id === "xiaomi") {
+        invoke("xiaomi_signed_in").then((on) => { if (!on) showXiaomi(true); }).catch(() => {});
+      }
     } else if (kind.id === "print") {
       printBrand = b.id === "other" ? null : b.id;
       selectCategory("print");

@@ -64,6 +64,15 @@ impl PhoneLogin {
         crate::paths::config_dir().join("xiaomi-phone-pending.json")
     }
 
+    /// See [`super::Login::cookies`].
+    pub fn cookies(&self) -> Vec<(String, String)> {
+        self.jar.pairs()
+    }
+
+    pub fn device_id(&self) -> &str {
+        &self.device_id
+    }
+
     pub fn save(&self, path: &Path) -> Result<(), XiaomiError> {
         write_private(path, &serde_json::to_vec(self).expect("json"))
     }

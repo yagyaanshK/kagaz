@@ -350,6 +350,8 @@
               <div class="cam-settings-row">
                 <button id="cam-login" type="button" class="hidden" title="Log in to your TP-Link account">Log in</button>
                 <button id="cam-logout" type="button" class="hidden" title="Forget the saved TP-Link session">Log out</button>
+                <button id="xm-add" type="button" class="hidden" title="Sign in to a Xiaomi (Mi Home) account to see its cameras here">Add Xiaomi cameras</button>
+                <button id="xm-logout" type="button" class="hidden" title="Forget the saved Xiaomi sign-in">Sign out of Xiaomi</button>
               </div>
             </div>
           </div>
@@ -377,7 +379,7 @@
       <p id="cam-message" class="muted"></p>
       <div id="cam-signin" class="hidden">
         <h3>Brands</h3>
-        <p class="muted small">Kagaz works with Tapo cameras today; the others are coming.</p>
+        <p class="muted small">Kagaz works with Tapo and Xiaomi cameras today; the others are coming.</p>
         <div id="cam-brands" class="choice-grid brands"></div>
       </div>
       <div id="cam-login-form" class="hidden">
@@ -395,6 +397,50 @@
           <button id="cam-login-other" type="button" class="link">Use another account</button>
         </div>
         <p id="cam-login-note" class="muted" role="status"></p>
+      </div>
+      <div id="xm-login-form" class="hidden">
+        <h3>Sign in with Xiaomi</h3>
+        <p class="muted">Your Xiaomi (Mi Home) account. Kagaz talks to Xiaomi only, the way Xiaomi's own sign-in page does, and keeps Xiaomi's sign-in token in a private file, never your password.</p>
+        <nav class="tabs" role="tablist" aria-label="How to sign in">
+          <button class="tab active" type="button" role="tab" aria-selected="true" data-way="phone">Text message</button>
+          <button class="tab" type="button" role="tab" aria-selected="false" data-way="password">Password</button>
+          <button class="tab" type="button" role="tab" aria-selected="false" data-way="qr">QR code</button>
+        </nav>
+        <div class="cam-login-row" data-pane="phone">
+          <span class="cam-field"><label for="xm-phone">Phone number, with its country code</label><input type="tel" id="xm-phone" autocomplete="tel" placeholder="+91 98765 43210"></span>
+          <button id="xm-phone-go" type="button" class="accent">Send code</button>
+        </div>
+        <div class="cam-login-row hidden" data-pane="password">
+          <span class="cam-field"><label for="xm-user">Email, phone number or Xiaomi ID</label><input type="text" id="xm-user" autocomplete="username" autocapitalize="none" spellcheck="false"></span>
+          <span class="cam-field"><label for="xm-password">Password</label><input type="password" id="xm-password" autocomplete="current-password"></span>
+          <button id="xm-password-go" type="button" class="accent">Sign in</button>
+        </div>
+        <div class="xm-qr hidden" data-pane="qr">
+          <img id="xm-qr-image" alt="QR code to sign in to Xiaomi">
+          <div>
+            <p>Scan it with your phone's camera or Google Lens, or on a Xiaomi phone in Settings, then Xiaomi Account. Xiaomi's sign-in page opens on the phone; signing in there signs in Kagaz.</p>
+            <p class="muted small" id="xm-qr-tips"></p>
+            <p class="muted small">Or open this link on a phone signed in to Xiaomi (it may fail with error 70036): <a id="xm-qr-link" href="#" title="Copies the link, to paste on the phone">copy the sign-in link</a></p>
+            <button id="xm-qr-new" type="button">New code</button>
+          </div>
+        </div>
+        <div class="cam-login-row hidden" id="xm-captcha-row">
+          <img id="xm-captcha-image" alt="Characters to type">
+          <span class="cam-field"><label for="xm-captcha">The characters in the picture</label><input type="text" id="xm-captcha" autocomplete="off" autocapitalize="none" spellcheck="false"></span>
+          <button id="xm-captcha-go" type="button" class="accent">Confirm</button>
+        </div>
+        <div class="cam-login-row hidden" id="xm-code-row">
+          <span class="cam-field"><label for="xm-code" id="xm-code-label">Code</label><input type="text" id="xm-code" inputmode="numeric" autocomplete="one-time-code"></span>
+          <button id="xm-code-go" type="button" class="accent">Confirm</button>
+          <button id="xm-restart" type="button" class="link">Start again</button>
+        </div>
+        <div class="cam-login-row hidden" id="xm-page-row">
+          <button id="xm-page-go" type="button" class="accent">Continue on Xiaomi's page</button>
+        </div>
+        <p id="xm-note" class="muted" role="status"></p>
+        <div class="cam-login-row">
+          <button id="xm-cancel" type="button">Cancel</button>
+        </div>
       </div>
       <div id="cam-rearrange-bar" class="hidden">
         <span class="muted">Drag a camera onto a group. </span>

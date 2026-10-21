@@ -480,7 +480,12 @@ label small { font-size: 12px; min-height: 1.2em; }
 .cam-cell.big { grid-column: 1 / -1; }
 .cam-tile .cam-quality { position: absolute; right: 8px; bottom: 6px; font-size: 11px; padding: 1px 6px; min-height: 0; background: rgba(0,0,0,0.5); color: #fff; border: 1px solid rgba(255,255,255,0.4); border-radius: 4px; }
 .cam-tile .cam-quality:hover { background: rgba(0,0,0,0.8); }
-#cam-login-form { margin-top: 10px; padding: 10px; border: 1px solid var(--line); border-radius: 8px; }
+#cam-login-form, #xm-login-form { margin-top: 10px; padding: 10px; border: 1px solid var(--line); border-radius: 8px; }
+#xm-login-form .tabs { margin: 8px 0 4px; }
+.xm-qr { display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap; margin-top: 8px; }
+.xm-qr img { width: 220px; height: 220px; background: #fff; padding: 8px; border-radius: 8px; image-rendering: pixelated; }
+.xm-qr > div { flex: 1 1 16em; min-width: 0; }
+#xm-captcha-image { height: 48px; background: #fff; border-radius: 4px; }
 .cam-login-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-top: 6px; }
 .cam-login-row input { padding: 4px 6px; min-width: min(14em, 100%); }
 .cam-login-row > label, .cam-login-row > .ot-password-field, .cam-login-row > .cam-field { min-width: 0; max-width: 100%; }

@@ -184,6 +184,17 @@ impl Login {
         crate::paths::config_dir().join("xiaomi-login-pending.json")
     }
 
+    /// The sign-in's cookies on Xiaomi's account site, for carrying it on
+    /// in a web view when Xiaomi wants one of its own pages.
+    pub fn cookies(&self) -> Vec<(String, String)> {
+        self.jar.pairs()
+    }
+
+    /// The device ID Xiaomi knows this sign-in by.
+    pub fn device_id(&self) -> &str {
+        &self.device_id
+    }
+
     pub fn save(&self, path: &Path) -> Result<(), XiaomiError> {
         write_private(path, &serde_json::to_vec(self).expect("json"))
     }
@@ -495,9 +506,15 @@ impl QrLogin {
     }
 
     /// Wait until the code is scanned and confirmed, or it expires.
-    pub fn wait(mut self) -> Result<Session, XiaomiError> {
+    pub fn wait(self) -> Result<Session, XiaomiError> {
+        self.wait_while(|| true)
+    }
+
+    /// The same, giving up when `keep_going` says so (checked between
+    /// Xiaomi's long polls, so within about 40 seconds).
+    pub fn wait_while(mut self, keep_going: impl Fn() -> bool) -> Result<Session, XiaomiError> {
         let url = self.poll_url.clone();
-        while Instant::now() < self.deadline {
+        while Instant::now() < self.deadline && keep_going() {
             let r = match self.client.get("qr-wait", &url) {
                 Ok(r) => r,
                 // A long poll that ran out: ask again.
@@ -537,6 +554,9 @@ impl Jar {
     }
     pub(super) fn get(&self, k: &str) -> Option<String> {
         self.0.get(k).cloned()
+    }
+    pub(super) fn pairs(&self) -> Vec<(String, String)> {
+        self.0.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
     }
     fn header(&self) -> String {
         self.0

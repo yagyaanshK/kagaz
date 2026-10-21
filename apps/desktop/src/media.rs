@@ -119,6 +119,12 @@ pub async fn camera_watch(
     channel: Channel<InvokeResponseBody>,
 ) -> Result<u64, String> {
     let e = super::running(&app.state::<super::CameraState>())?;
+    // A Xiaomi camera: the video engine reaches it, the server splits its stream.
+    if let Some(x) = e.xiaomi.iter().find(|x| x.id() == device_id).cloned() {
+        let key = format!("{device_id}:{}", if hd { "HD" } else { "VGA" });
+        let watcher = super::blocking(move || e._server.watch_engine(&key, &x.stream(hd))).await?;
+        return Ok(forward(app, watcher.rx, channel));
+    }
     let watcher = super::blocking(move || e._server.watch_live(&device_id, hd)).await?;
     Ok(forward(app, watcher.rx, channel))
 }
