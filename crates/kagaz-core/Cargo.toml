@@ -3,7 +3,7 @@ name = "kagaz-core"
 description = "Core library of Kagaz: device discovery, protocols, driver database"
 version.workspace = true
 edition.workspace = true
-license.workspace = true
+license-file.workspace = true
 repository.workspace = true
 authors.workspace = true
 

@@ -488,7 +488,7 @@ const KagazSettings = (() => {
 
   function drawAbout(body) {
     const box = section("About Kagaz");
-    box.appendChild(el("p", "muted small", "Free and open-source (GPL-3.0). Brand names and logos belong to their owners and are shown only to say which devices Kagaz works with."));
+    box.appendChild(el("p", "muted small", "Free to use, source-available under the Kagaz License. Brand names and logos belong to their owners and are shown only to say which devices Kagaz works with."));
     body.appendChild(box);
   }
 
