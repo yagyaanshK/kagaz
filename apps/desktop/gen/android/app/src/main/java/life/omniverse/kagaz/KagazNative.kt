@@ -13,6 +13,7 @@ object KagazNative {
     const val OPEN = 0
     const val ANSWER = 1
     const val DECLINE = 2
+    const val HANGUP = 3
 
     private var app: Context? = null
     private val main = Handler(Looper.getMainLooper())
@@ -35,6 +36,16 @@ object KagazNative {
 
     @JvmStatic external fun ring(action: Int)
 
+    /** The call is in (or out of) a picture-in-picture window. */
+    @JvmStatic external fun pip(on: Boolean)
+
+    fun sendPip(on: Boolean) {
+        try {
+            pip(on)
+        } catch (e: Throwable) {
+        }
+    }
+
     /** False when the Rust side is not running (Android restarted only the
      *  service): there is no line, so no call to act on. */
     fun send(action: Int): Boolean = try {
@@ -53,7 +64,9 @@ object KagazNative {
         val context = app ?: return
         main.post {
             KagazCallService.ring(context, if (phase == "ringing") peer else null, tone, silent, vibrate)
-            KagazCallService.microphone(phase != "idle" && phase != "ringing")
+            val talking = phase != "idle" && phase != "ringing"
+            KagazCallService.microphone(talking)
+            MainActivity.inCall(talking)
             if (phase == "idle") MainActivity.callOver()
         }
     }
@@ -70,11 +83,17 @@ object KagazNative {
 class KagazRingReceiver : BroadcastReceiver() {
     companion object {
         const val ACTION_DECLINE = "life.omniverse.kagaz.DECLINE"
+        /** Hang up, from the call's picture-in-picture window. */
+        const val ACTION_HANGUP = "life.omniverse.kagaz.HANGUP"
     }
 
     override fun onReceive(context: Context, intent: Intent) {
-        if (intent.action != ACTION_DECLINE) return
-        KagazCallService.ring(context, null)
-        KagazNative.send(KagazNative.DECLINE)
+        when (intent.action) {
+            ACTION_DECLINE -> {
+                KagazCallService.ring(context, null)
+                KagazNative.send(KagazNative.DECLINE)
+            }
+            ACTION_HANGUP -> KagazNative.send(KagazNative.HANGUP)
+        }
     }
 }

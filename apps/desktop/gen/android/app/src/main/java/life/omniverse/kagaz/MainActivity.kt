@@ -1,10 +1,17 @@
 package life.omniverse.kagaz
 
+import android.app.PendingIntent
+import android.app.PictureInPictureParams
+import android.app.RemoteAction
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.res.Configuration
+import android.graphics.drawable.Icon
 import android.os.Build
 import android.os.Bundle
+import android.util.Rational
 import android.view.View
+import androidx.annotation.RequiresApi
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -13,14 +20,26 @@ import java.lang.ref.WeakReference
 class MainActivity : TauriActivity() {
   companion object {
     private var shown: WeakReference<MainActivity>? = null
+    private var calling = false
+
+    /** A call began or ended: during one, Home (or Back at Kagaz's top)
+     *  shrinks it into a picture-in-picture window, as WhatsApp's calls do. */
+    fun inCall(on: Boolean) {
+      calling = on
+      shown?.get()?.pipReady()
+    }
 
     /** The call is over: back behind the lock screen (a ring brought the
-     *  app over it; it must not stay usable there, open door and all). */
+     *  app over it; it must not stay usable there, open door and all), and
+     *  its picture-in-picture window goes. */
     fun callOver() {
       val activity = shown?.get() ?: return
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
         activity.setShowWhenLocked(false)
         activity.setTurnScreenOn(false)
+      }
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && activity.isInPictureInPictureMode) {
+        activity.moveTaskToBack(true)
       }
     }
   }
@@ -42,6 +61,7 @@ class MainActivity : TauriActivity() {
       showOverLockScreen(intent)
       fromRing(intent)
     }
+    pipReady()
     // Android 15 and later draw apps under the status and navigation bars;
     // keep the page clear of them (and of the keyboard when it is up).
     val content = findViewById<View>(android.R.id.content)
@@ -69,6 +89,66 @@ class MainActivity : TauriActivity() {
   override fun onConfigurationChanged(newConfig: Configuration) {
     super.onConfigurationChanged(newConfig)
     barIcons(newConfig)
+  }
+
+  // ---- Picture-in-picture during a call
+
+  private fun canPip() = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+    packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)
+
+  /** The call's small window: the door's picture shape, and Hang up. */
+  @RequiresApi(Build.VERSION_CODES.O)
+  private fun pipParams(): PictureInPictureParams {
+    val hangUp = PendingIntent.getBroadcast(
+      this, 4,
+      Intent(this, KagazRingReceiver::class.java).setAction(KagazRingReceiver.ACTION_HANGUP),
+      PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+    )
+    val action = RemoteAction(Icon.createWithResource(this, R.drawable.ic_call_end), "Hang up", "Hang up", hangUp)
+    val builder = PictureInPictureParams.Builder()
+      .setAspectRatio(Rational(4, 3))
+      .setActions(listOf(action))
+    // Android 12 and later go small by themselves on Home, while a call is on.
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) builder.setAutoEnterEnabled(calling)
+    return builder.build()
+  }
+
+  private fun pipReady() {
+    if (!canPip()) return
+    try {
+      setPictureInPictureParams(pipParams())
+    } catch (e: Exception) {
+    }
+  }
+
+  private fun enterPip(): Boolean {
+    if (!calling || !canPip()) return false
+    return try {
+      enterPictureInPictureMode(pipParams())
+    } catch (e: Exception) {
+      false
+    }
+  }
+
+  /** Home during a call (before Android 12, which does this itself). */
+  override fun onUserLeaveHint() {
+    super.onUserLeaveHint()
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) enterPip()
+  }
+
+  /** Back with nowhere left to go in Kagaz (Tauri hands it here): during a
+   *  call the call goes small instead of Kagaz leaving. */
+  @Deprecated("Tauri's Back handler calls this")
+  @Suppress("DEPRECATION")
+  override fun onBackPressed() {
+    if (enterPip()) return
+    super.onBackPressed()
+  }
+
+  /** The page shows only the call while it is in the small window. */
+  override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: Configuration) {
+    super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+    KagazNative.sendPip(isInPictureInPictureMode)
   }
 
   override fun onNewIntent(intent: Intent) {

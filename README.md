@@ -267,7 +267,9 @@ key quiets the ring. The doorbell's settings choose, for each device, what
 a ring does: **Notification and ring sound** (the default), or **Silent
 notification** (on a computer: a notification that opens the call when
 clicked, no chime, no window jumping forward); on a phone, **Vibrate**
-goes with either.
+goes with either. During a call on a phone, Home (or Back with nowhere
+left to go in Kagaz) shrinks the call into a small floating window, as
+WhatsApp's calls do, with Hang up on it; tap it to come back to the call.
 
 ## OneTouch doorbell accounts
 

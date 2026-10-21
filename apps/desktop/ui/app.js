@@ -2981,6 +2981,27 @@ listen("doorbell-state", (e) => {
   renderDoorbell();
 });
 
+// ---------- picture-in-picture (phone) ----------
+// During a call, Home (or Back with nowhere left to go) shrinks Kagaz into
+// Android's small floating window, as WhatsApp's calls do (MainActivity).
+// There the page shows only the call: its picture, who, and the clock.
+listen("picture-in-picture", (e) => {
+  const on = !!e.payload;
+  document.querySelectorAll(".pip-target").forEach((el) => el.classList.remove("pip-target"));
+  if (on) {
+    const call = typeof KagazCalls !== "undefined" ? KagazCalls.status() : null;
+    const target = call && ["calling", "talking"].includes(call.phase)
+      ? $("call-card")
+      : doorStatus && doorStatus.phase === "in_call" ? $("door-call") : null;
+    if (target) {
+      // The call's page, so coming back from the small window lands on it.
+      if (currentView !== "doorbell") selectCategory("doorbell");
+      target.classList.add("pip-target");
+    }
+  }
+  document.body.classList.toggle("pip", on);
+});
+
 // ---------- out of sight ----------
 // Live pictures and recordings play only while someone can be watching,
 // as video apps do, and come back where they were:
