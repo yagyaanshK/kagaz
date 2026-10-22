@@ -96,11 +96,6 @@ with the commit that closes them.
       control than 1 to 5 + Boost, or a smooth white-to-yellow light, and
       how the app itself connects (one connection kept, or one per
       command). Then confirm on the fan with the console.
-- [ ] **Read the Atomberg phone app** (later, as asked 2026-10-21): every
-      command it can send, to learn whether the firmware has a finer speed
-      control than 1 to 5 + Boost, or a smooth white-to-yellow light, and
-      how the app itself connects (one connection kept, or one per
-      command). Then confirm on the fan with the console.
 - [x] **Light read from the real fan** (2026-10-21): on/off, three colours
       (warm, white, natural white) and brightness 10 to 100 decoded from an
       Aris set with its remote; the card shows colour and brightness.
@@ -121,10 +116,14 @@ with the commit that closes them.
       listener (UDP 5625) and the command path (UDP 5600) are written from
       the community's notes; put a fan on Wi-Fi with the Atomberg app and
       run `kagaz fans` to verify, then record a datagram as a fixture.
-- [ ] **Bluetooth on the phone.** The core's Bluetooth is `btleplug`,
-      desktop only; Android needs the Kotlin side (`KagazPlugin`) to scan
-      and talk GATT, with the Bluetooth permissions in the manifest. Until
-      then the phone finds fans on Wi-Fi only.
+- [ ] **Bluetooth on the phone** (written 2026-10-22, not yet tried on a
+      phone): `KagazBle.kt` scans and keeps one GATT connection per fan,
+      reached from Rust through `KagazNative` (`fans/phone.rs` stands in
+      for `ble.rs` on Android). It asks for Nearby devices (location before
+      Android 12) and to turn Bluetooth on when needed. Check on a phone:
+      the permission question, finding the fans, every control, and that
+      a write as long as `{"light_mode":"daylight"}` goes through (the
+      connection asks for a larger MTU first).
 - [ ] **Connection takes a few seconds.** BlueZ refuses the first connect
       now and then ("abort-by-local"); Kagaz rescans and tries again, so a
       command takes 3 to 10 s. Keeping a connection open while the page

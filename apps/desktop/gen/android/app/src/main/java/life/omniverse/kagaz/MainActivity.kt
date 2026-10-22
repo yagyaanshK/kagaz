@@ -22,6 +22,9 @@ class MainActivity : TauriActivity() {
     private var shown: WeakReference<MainActivity>? = null
     private var calling = false
 
+    /** The window, when there is one, to ask the person something on. */
+    fun onScreen(): MainActivity? = shown?.get()
+
     /** A call began or ended: during one, Home (or Back at Kagaz's top)
      *  shrinks it into a picture-in-picture window, as WhatsApp's calls do. */
     fun inCall(on: Boolean) {
@@ -149,6 +152,20 @@ class MainActivity : TauriActivity() {
   override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: Configuration) {
     super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
     KagazNative.sendPip(isInPictureInPictureMode)
+  }
+
+  // ---- Answers to what the fans' Bluetooth asked (KagazBle)
+
+  override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+    super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+    KagazBle.answered(requestCode)
+  }
+
+  @Deprecated("KagazBle asks with startActivityForResult")
+  @Suppress("DEPRECATION")
+  override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+    super.onActivityResult(requestCode, resultCode, data)
+    KagazBle.answered(requestCode)
   }
 
   override fun onNewIntent(intent: Intent) {

@@ -303,7 +303,10 @@ as out of reach rather than vanishing. **Found nearby** lists the fans
 within reach that are not added yet; **Add** asks for a name and a room.
 **Rearrange** makes, renames and removes rooms, and moves fans between
 them; the fan's own menu does the same for one fan. Rooms and names live
-in `~/.config/kagaz/fans.toml`, shared with the command line.
+in `~/.config/kagaz/fans.toml`, shared with the command line. On a phone
+the page uses the phone's own Bluetooth: the first look asks for Nearby
+devices (location before Android 12), and to turn Bluetooth on if it is
+off.
 
 Each page keeps its place: leave a printer's page with a scan under way
 for the cameras, and coming back finds the scan where it was. Camera

@@ -127,6 +127,61 @@ mod jvm {
             Ok(())
         })
     }
+
+    /// A static `(…)String` method's answer.
+    fn text(env: &mut JNIEnv, value: jni::objects::JValueOwned) -> jni::errors::Result<String> {
+        let value = value.l()?;
+        if value.is_null() {
+            return Ok(String::new());
+        }
+        Ok(env.get_string(&JString::from(value))?.into())
+    }
+
+    /// KagazBle.scan: "ok:" and a JSON list of the named devices heard, or
+    /// "err:<code>:<detail>".
+    pub fn ble_scan(millis: i32) -> Result<String, String> {
+        call(|env, class| {
+            let out = env.call_static_method(class, "bleScan", "(I)Ljava/lang/String;", &[JValue::Int(millis)])?;
+            text(env, out)
+        })
+    }
+
+    /// KagazBle.exchange, on the kept connection to `address`: "ok:" and
+    /// the state characteristic's text, or "err:<code>:<detail>".
+    pub fn ble_exchange(address: &str, uuids: [String; 3], command: Option<&str>) -> Result<String, String> {
+        call(|env, class| {
+            let address = JObject::from(env.new_string(address)?);
+            let [service, write, read] = uuids;
+            let service = JObject::from(env.new_string(service)?);
+            let write = JObject::from(env.new_string(write)?);
+            let read = JObject::from(env.new_string(read)?);
+            let command = match command {
+                Some(c) => JObject::from(env.new_string(c)?),
+                None => JObject::null(),
+            };
+            let out = env.call_static_method(
+                class,
+                "bleExchange",
+                "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
+                &[
+                    JValue::Object(&address),
+                    JValue::Object(&service),
+                    JValue::Object(&write),
+                    JValue::Object(&read),
+                    JValue::Object(&command),
+                ],
+            )?;
+            text(env, out)
+        })
+    }
+
+    pub fn ble_close(address: &str) {
+        let _ = call(|env, class| {
+            let address = JObject::from(env.new_string(address)?);
+            env.call_static_method(class, "bleClose", "(Ljava/lang/String;)V", &[JValue::Object(&address)])?;
+            Ok(())
+        });
+    }
 }
 
 /// A remembered secret, from the Android Keystore-sealed store.
@@ -157,6 +212,74 @@ pub fn secret_delete(name: &str) -> Result<(), String> {
     {
         let _ = name;
         Err("this phone's secure storage is not available".into())
+    }
+}
+
+/// The phone's Bluetooth for the fans (kagaz-core `fans::ble` on Android),
+/// through KagazBle.kt.
+#[cfg(target_os = "android")]
+pub fn fan_radio() -> Box<dyn kagaz_core::fans::ble::Radio> {
+    Box::new(FanRadio)
+}
+
+#[cfg(target_os = "android")]
+struct FanRadio;
+
+/// Kotlin's answer: "ok:<text>", or "err:<code>:<detail>" with the codes
+/// KagazBle.kt gives.
+#[cfg(target_os = "android")]
+fn fan_answer(out: Result<String, String>) -> Result<String, kagaz_core::fans::FanError> {
+    use kagaz_core::fans::FanError;
+    let out = out.map_err(FanError::Bluetooth)?;
+    if let Some(text) = out.strip_prefix("ok:") {
+        return Ok(text.to_string());
+    }
+    let rest = out.strip_prefix("err:").unwrap_or(&out);
+    let (code, detail) = rest.split_once(':').unwrap_or((rest, ""));
+    Err(match code {
+        "none" => FanError::NoBluetooth,
+        "off" => FanError::BluetoothOff,
+        "denied" => FanError::Bluetooth(
+            "Kagaz is not allowed to use Bluetooth; allow Nearby devices for Kagaz in the phone's Settings, then try again"
+                .into(),
+        ),
+        "reach" => FanError::OutOfReach,
+        "busy" => FanError::Busy,
+        "refuses" => FanError::Refuses,
+        _ => FanError::Bluetooth(detail.to_string()),
+    })
+}
+
+#[cfg(target_os = "android")]
+impl kagaz_core::fans::ble::Radio for FanRadio {
+    fn scan(&self, seconds: f32) -> Result<Vec<kagaz_core::fans::ble::Heard>, kagaz_core::fans::FanError> {
+        #[derive(Deserialize)]
+        struct One {
+            address: String,
+            name: String,
+            rssi: Option<i16>,
+        }
+        let text = fan_answer(jvm::ble_scan((seconds * 1000.0) as i32))?;
+        let heard: Vec<One> =
+            serde_json::from_str(&text).map_err(|e| kagaz_core::fans::FanError::Bluetooth(e.to_string()))?;
+        Ok(heard
+            .into_iter()
+            .map(|h| kagaz_core::fans::ble::Heard {
+                address: h.address,
+                name: h.name,
+                rssi: h.rssi,
+            })
+            .collect())
+    }
+
+    fn exchange(&self, address: &str, command: Option<&str>) -> Result<String, kagaz_core::fans::FanError> {
+        use kagaz_core::fans::atomberg::{BLE_COMMAND, BLE_SERVICE, BLE_STATE};
+        let uuids = [BLE_SERVICE.to_string(), BLE_COMMAND.to_string(), BLE_STATE.to_string()];
+        fan_answer(jvm::ble_exchange(address, uuids, command))
+    }
+
+    fn close(&self, address: &str) {
+        jvm::ble_close(address);
     }
 }
 

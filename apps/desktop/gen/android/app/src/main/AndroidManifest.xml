@@ -29,6 +29,16 @@
     <!-- The ring vibrates when the person wants it to (doorbell settings). -->
     <uses-permission android:name="android.permission.VIBRATE" />
 
+    <!-- Ceiling fans over Bluetooth LE (KagazBle.kt). Android 12 and later
+         ask for "Nearby devices", which Kagaz never uses to place the
+         phone; before that, finding Bluetooth devices needs location. -->
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" android:usesPermissionFlags="neverForLocation" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" android:maxSdkVersion="30" />
+    <uses-feature android:name="android.hardware.bluetooth_le" android:required="false" />
+
     <!-- AndroidTV support -->
     <uses-feature android:name="android.software.leanback" android:required="false" />
 

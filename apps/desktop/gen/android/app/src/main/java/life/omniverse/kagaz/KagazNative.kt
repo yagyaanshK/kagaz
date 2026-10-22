@@ -76,6 +76,22 @@ object KagazNative {
     @JvmStatic fun secretSet(name: String, value: String) = KagazSecrets.set(app!!, name, value)
 
     @JvmStatic fun secretDelete(name: String) = KagazSecrets.delete(app!!, name)
+
+    // ---- The fans' Bluetooth (KagazBle), from Rust's own threads.
+
+    @JvmStatic
+    fun bleScan(millis: Int): String {
+        val context = app ?: return "err:other:Android is not ready"
+        return KagazBle.scan(context, millis)
+    }
+
+    @JvmStatic
+    fun bleExchange(address: String, service: String, write: String, read: String, command: String?): String {
+        val context = app ?: return "err:other:Android is not ready"
+        return KagazBle.exchange(context, address, service, write, read, command)
+    }
+
+    @JvmStatic fun bleClose(address: String) = KagazBle.close(address)
 }
 
 /** Decline on the ring notification: this phone stops ringing (the other
