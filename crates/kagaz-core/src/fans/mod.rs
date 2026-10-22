@@ -7,6 +7,10 @@
 pub mod atomberg;
 #[cfg(not(target_os = "android"))]
 pub mod ble;
+/// The phone's Bluetooth, through Kotlin, with the same calls as `ble`.
+#[cfg(target_os = "android")]
+#[path = "phone.rs"]
+pub mod ble;
 pub mod store;
 pub mod udp;
 
@@ -96,10 +100,7 @@ impl Reach {
 /// gets its list.
 pub fn scan(seconds: f32) -> (Vec<Found>, Option<FanError>) {
     let wifi = std::thread::spawn(move || udp::listen(seconds));
-    #[cfg(not(target_os = "android"))]
     let ble = ble::scan(seconds);
-    #[cfg(target_os = "android")]
-    let ble: Result<Vec<ble_stub::Sighting>, FanError> = Ok(Vec::new());
     let mut found: Vec<Found> = Vec::new();
     let mut trouble = None;
     match ble {
@@ -143,16 +144,6 @@ pub fn scan(seconds: f32) -> (Vec<Found>, Option<FanError>) {
     (found, trouble)
 }
 
-#[cfg(target_os = "android")]
-mod ble_stub {
-    pub struct Sighting {
-        pub id: String,
-        pub series: String,
-        pub address: String,
-        pub rssi: Option<i16>,
-    }
-}
-
 /// Send `command` to a remembered fan (or just ask, with [`Command::Read`])
 /// and return its state: over Wi-Fi when the fan has an address there and
 /// answers, else over Bluetooth.
@@ -177,7 +168,6 @@ pub fn send_raw(fan: &Fan, command: &Command) -> Result<(String, Reach), FanErro
             Err(e) => last = Some(e),
         }
     }
-    #[cfg(not(target_os = "android"))]
     if let Some(address) = fan.ble_address.as_deref() {
         // Over Bluetooth a read only reads the state: nothing is written.
         let write = command.changes().then_some(json.as_str());
