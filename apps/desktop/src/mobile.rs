@@ -440,6 +440,23 @@ pub fn loudspeaker(app: &AppHandle, on: bool) -> Result<(), String> {
     phone(app)?.run_mobile_plugin::<()>("loudspeaker", SpeakerArgs { on }).map_err(|e| e.to_string())
 }
 
+#[derive(Deserialize)]
+struct On {
+    on: bool,
+}
+
+/// Whether doorbell calls ring in Do Not Disturb (the person's switch in
+/// Android's settings).
+pub fn ring_in_dnd(app: &AppHandle) -> Result<bool, String> {
+    let r: On = phone(app)?.run_mobile_plugin("ringInDnd", Nothing {}).map_err(|e| e.to_string())?;
+    Ok(r.on)
+}
+
+/// Android's page for that switch.
+pub fn ring_settings(app: &AppHandle) -> Result<(), String> {
+    phone(app)?.run_mobile_plugin::<()>("ringSettings", Nothing {}).map_err(|e| e.to_string())
+}
+
 /// Where a file the person will save goes first: the cache, then
 /// [`publish`] moves it to Downloads.
 pub fn save_path(name: &str) -> Result<String, String> {

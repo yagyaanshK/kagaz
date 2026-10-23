@@ -131,18 +131,22 @@ class KagazCallService : Service() {
         private fun allowed(context: Context): Pair<Boolean, Boolean> {
             val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
-                nm.currentInterruptionFilter > NotificationManager.INTERRUPTION_FILTER_ALL
-            ) {
-                val overrides = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
-                    nm.getNotificationChannel(RING_CHANNEL)?.canBypassDnd() == true
-                if (!overrides) return Pair(false, false)
-            }
+                nm.currentInterruptionFilter > NotificationManager.INTERRUPTION_FILTER_ALL &&
+                !ringsInDnd(context)
+            ) return Pair(false, false)
             val audio = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
             return when (audio.ringerMode) {
                 AudioManager.RINGER_MODE_NORMAL -> Pair(true, true)
                 AudioManager.RINGER_MODE_VIBRATE -> Pair(false, true)
                 else -> Pair(false, false)
             }
+        }
+
+        /** The person let "Doorbell calls" override Do Not Disturb. */
+        fun ringsInDnd(context: Context): Boolean {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return false
+            val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            return nm.getNotificationChannel(RING_CHANNEL)?.canBypassDnd() == true
         }
 
         /** Vibrate as a phone call does, until stopped. */
