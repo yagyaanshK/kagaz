@@ -278,7 +278,7 @@ const KagazDoorbellSettings = (() => {
     style.setAttribute("aria-label", "When someone rings");
     const note = () => (style.value === "silent"
       ? "On this device. The notification only; tap it to open the call. The tones below play again if you switch back."
-      : phone ? "On this device. A volume key quiets a ring." : "On this device.");
+      : phone ? "On this device. Follows the phone's silent, vibrate and Do Not Disturb modes; a volume key quiets a ring." : "On this device.");
     const styleRow = row("When someone rings", note(), style);
     box.appendChild(styleRow);
     const vibrate = document.createElement("input");
