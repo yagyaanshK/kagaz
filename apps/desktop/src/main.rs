@@ -25,6 +25,7 @@ mod printing;
 #[cfg(desktop)]
 mod ring_notice;
 mod ringtones;
+mod saving;
 mod xiaomi;
 
 /// Run a blocking core call off the UI thread.
@@ -111,6 +112,7 @@ async fn choose_save_path(
             .dialog()
             .file()
             .set_file_name(&suggested_name)
+            .set_directory(saving::dir())
             .add_filter(label, &[extension.as_str()])
             .blocking_save_file();
         Ok(picked.map(|p| p.to_string()))
@@ -287,6 +289,24 @@ fn reveal(path: &std::path::Path) -> Result<(), String> {
     {
         open(Command::new("open").arg("-R").arg(path))
     }
+}
+
+/// Open a folder in the file manager.
+#[cfg(desktop)]
+fn open_folder(dir: &std::path::Path) -> Result<(), String> {
+    use std::process::Command;
+    let program = if cfg!(target_os = "windows") {
+        "explorer"
+    } else if cfg!(target_os = "macos") {
+        "open"
+    } else {
+        "xdg-open"
+    };
+    Command::new(program)
+        .arg(dir)
+        .spawn()
+        .map(|mut child| drop(std::thread::spawn(move || child.wait())))
+        .map_err(|e| e.to_string())
 }
 
 /// A file's address (file:///...), every byte but plain ones escaped.
@@ -1832,6 +1852,13 @@ pub fn run() {
             ring_in_dnd,
             ring_dnd_settings,
             camera_talk_stop,
+            media::camera_record_start,
+            media::camera_record_stop,
+            saving::save_folder,
+            saving::save_folder_choose,
+            saving::save_folder_reset,
+            saving::save_folder_open,
+            saving::save_picture,
             xiaomi::xiaomi_signed_in,
             xiaomi::xiaomi_login_password,
             xiaomi::xiaomi_login_phone,

@@ -35,7 +35,9 @@ import android.print.PrintAttributes
 import android.print.PrintDocumentAdapter
 import android.print.PrintDocumentInfo
 import android.print.PrintManager
+import android.provider.DocumentsContract
 import android.provider.MediaStore
+import androidx.activity.result.ActivityResult
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
@@ -45,6 +47,7 @@ import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 import android.webkit.WebView
+import app.tauri.annotation.ActivityCallback
 import app.tauri.annotation.Command
 import app.tauri.annotation.InvokeArg
 import app.tauri.annotation.TauriPlugin
@@ -67,6 +70,14 @@ class SaveArgs {
     lateinit var path: String
     lateinit var name: String
     var mime: String = "application/octet-stream"
+    /** A folder the person chose (its tree URI) instead of Downloads/Kagaz. */
+    var folder: String? = null
+    var label: String? = null
+}
+
+@InvokeArg
+class FolderArgs {
+    var folder: String? = null
 }
 
 @InvokeArg
@@ -238,7 +249,10 @@ class KagazPlugin(private val first: Activity) : Plugin(first) {
         val args = invoke.parseArgs(SaveArgs::class.java)
         try {
             val source = File(args.path)
-            val location = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val chosen = args.folder?.let { saveInto(Uri.parse(it), source, args.name, args.mime) }
+            val location = if (chosen != null) {
+                (args.label ?: "Your folder") + "/" + chosen
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 val values = ContentValues().apply {
                     put(MediaStore.Downloads.DISPLAY_NAME, args.name)
                     put(MediaStore.Downloads.MIME_TYPE, args.mime)
@@ -266,6 +280,73 @@ class KagazPlugin(private val first: Activity) : Plugin(first) {
         } catch (e: Exception) {
             invoke.reject(e.message ?: "could not save into Downloads")
         }
+    }
+
+    /** Copy into the chosen folder; its name there (Android may change
+     *  it to keep names apart), or null when the folder can no longer be
+     *  written (removed, or its permission taken back): Downloads instead. */
+    private fun saveInto(tree: Uri, source: File, name: String, mime: String): String? = try {
+        val resolver = activity.contentResolver
+        val parent = DocumentsContract.buildDocumentUriUsingTree(tree, DocumentsContract.getTreeDocumentId(tree))
+        val doc = DocumentsContract.createDocument(resolver, parent, mime, name)!!
+        resolver.openOutputStream(doc)!!.use { o -> FileInputStream(source).use { it.copyTo(o) } }
+        resolver.query(doc, arrayOf(DocumentsContract.Document.COLUMN_DISPLAY_NAME), null, null, null)?.use {
+            if (it.moveToFirst()) it.getString(0) else null
+        } ?: name
+    } catch (e: Exception) {
+        null
+    }
+
+    // The folder for saved files, chosen with Android's own folder picker;
+    // Kagaz keeps the right to write there after a restart.
+    @Command
+    fun pickFolder(invoke: Invoke) {
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).addFlags(
+            Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
+                Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION
+        )
+        startActivityForResult(invoke, intent, "folderPicked")
+    }
+
+    @ActivityCallback
+    fun folderPicked(invoke: Invoke, result: ActivityResult) {
+        val ret = JSObject()
+        val uri = result.data?.data
+        if (result.resultCode != Activity.RESULT_OK || uri == null) {
+            invoke.resolve(ret)
+            return
+        }
+        try {
+            activity.contentResolver.takePersistableUriPermission(
+                uri, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+            )
+        } catch (e: Exception) {
+            invoke.reject("Android would not let Kagaz keep writing to that folder")
+            return
+        }
+        // "primary:Movies/Kagaz" is Movies/Kagaz on the phone; another
+        // volume (an SD card) is named by its own id.
+        val id = DocumentsContract.getTreeDocumentId(uri)
+        val (volume, path) = id.split(":", limit = 2).let { it[0] to it.getOrElse(1) { "" } }
+        val label = if (volume == "primary") path.ifEmpty { "Phone storage" } else "SD card" + (if (path.isEmpty()) "" else "/$path")
+        ret.put("uri", uri.toString())
+        ret.put("label", label)
+        invoke.resolve(ret)
+    }
+
+    /** Let go of a folder chosen before. */
+    @Command
+    fun forgetFolder(invoke: Invoke) {
+        val args = invoke.parseArgs(FolderArgs::class.java)
+        try {
+            args.folder?.let {
+                activity.contentResolver.releasePersistableUriPermission(
+                    Uri.parse(it), Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                )
+            }
+        } catch (e: Exception) {
+        }
+        invoke.resolve()
     }
 
     // Call sound on the loudspeaker (a door station or a camera is a video
@@ -341,10 +422,17 @@ class KagazPlugin(private val first: Activity) : Plugin(first) {
         invoke.reject("this phone has no page for Kagaz's notifications")
     }
 
-    /** Saved files' folder (Downloads/Kagaz) in the Files app; else Downloads. */
+    /** Saved files' folder (the one chosen, else Downloads/Kagaz) in the Files app; else Downloads. */
     @Command
     fun showDownloads(invoke: Invoke) {
-        val folder = Uri.parse("content://com.android.externalstorage.documents/document/primary%3ADownload%2FKagaz")
+        val args = invoke.parseArgs(FolderArgs::class.java)
+        val folder = args.folder?.let { tree ->
+            try {
+                DocumentsContract.buildDocumentUriUsingTree(Uri.parse(tree), DocumentsContract.getTreeDocumentId(Uri.parse(tree)))
+            } catch (e: Exception) {
+                null
+            }
+        } ?: Uri.parse("content://com.android.externalstorage.documents/document/primary%3ADownload%2FKagaz")
         val tries = listOf(
             Intent(Intent.ACTION_VIEW).setDataAndType(folder, "vnd.android.document/directory"),
             Intent(DownloadManager.ACTION_VIEW_DOWNLOADS),

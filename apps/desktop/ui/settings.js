@@ -524,6 +524,40 @@ const KagazSettings = (() => {
     body.appendChild(box);
   }
 
+  // Where screenshots, recordings and (on a phone) scans and downloads go.
+  async function drawSaving(body) {
+    let folder;
+    try {
+      folder = await invoke("save_folder");
+    } catch (_) {
+      return;
+    }
+    const box = section("Saving");
+    const label = el("span", "muted small save-folder");
+    const change = el("button", "", "Change…");
+    change.type = "button";
+    const open = el("button", "", "Open");
+    open.type = "button";
+    const reset = el("button", "link", "Use Downloads/Kagaz");
+    reset.type = "button";
+    const r = row("Save pictures and videos in", "", change, open);
+    r.querySelector(".set-label").appendChild(label);
+    const show = (f) => {
+      label.textContent = f.label;
+      reset.classList.toggle("hidden", !f.custom);
+    };
+    show(folder);
+    change.addEventListener("click", () => KagazSet.attempt(r, async () => show(await invoke("save_folder_choose"))));
+    open.addEventListener("click", () => KagazSet.attempt(r, () => invoke("save_folder_open")));
+    reset.addEventListener("click", () => KagazSet.attempt(r, async () => show(await invoke("save_folder_reset"))));
+    box.appendChild(r);
+    const note = el("p", "muted small", "Screenshots and recordings from the cameras go here" + (/Android|iPhone|iPad/i.test(navigator.userAgent) ? ", and scans and saved footage too." : "; save dialogs start here."));
+    note.appendChild(document.createTextNode(" "));
+    note.appendChild(reset);
+    box.appendChild(note);
+    body.appendChild(box);
+  }
+
   function drawAbout(body) {
     const box = section("About Kagaz");
     box.appendChild(el("p", "muted small", "Free to use, source-available under the Kagaz License. Brand names and logos belong to their owners and are shown only to say which devices Kagaz works with."));
@@ -535,6 +569,7 @@ const KagazSettings = (() => {
     body.innerHTML = "";
     await drawAccounts(body);
     await drawRinging(body);
+    await drawSaving(body);
     drawDevices(body);
     drawAbout(body);
   }

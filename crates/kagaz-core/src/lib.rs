@@ -13,6 +13,7 @@ pub mod intercom;
 pub mod ipp;
 pub mod localtime;
 pub mod media;
+pub mod mp4;
 pub mod output;
 pub mod paths;
 pub mod print;

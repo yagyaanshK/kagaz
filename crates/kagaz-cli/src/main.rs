@@ -396,7 +396,7 @@ enum XiaomiCommand {
         /// auto, low or high
         #[arg(long, default_value = "high")]
         quality: String,
-        /// Also write the pictures to this file (raw H.264)
+        /// Also save what comes to this file: an MP4 with sound when it ends in .mp4, else raw H.264 pictures
         #[arg(short, long)]
         output: Option<PathBuf>,
         /// Play the SD card from this unix time instead of the live view
@@ -2874,15 +2874,23 @@ fn xiaomi_command(cmd: XiaomiCommand) -> Result<()> {
                     None => println!("No answer to the playback request within 3 s."),
                 }
             }
+            let mp4 = output.as_ref().is_some_and(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("mp4")));
+            let mut recorder = match &output {
+                Some(p) if mp4 => Some(kagaz_core::mp4::Recorder::create(p)?),
+                _ => None,
+            };
             let mut file = match &output {
-                Some(p) => Some(std::fs::File::create(p)?),
-                None => None,
+                Some(p) if !mp4 => Some(std::fs::File::create(p)?),
+                _ => None,
             };
             let (mut pictures, mut keys, mut bytes, mut sound) = (0u32, 0u32, 0usize, 0usize);
             let mut first_key = None;
             let until = std::time::Instant::now() + std::time::Duration::from_secs(seconds);
             while std::time::Instant::now() < until {
                 for m in view.next().map_err(|e| anyhow::anyhow!(e))? {
+                    if let Some(r) = recorder.as_mut() {
+                        r.push(&m)?;
+                    }
                     match m {
                         Media::Video { data, key, .. } => {
                             pictures += 1;
@@ -2906,6 +2914,10 @@ fn xiaomi_command(cmd: XiaomiCommand) -> Result<()> {
                 bytes / 1000,
                 sound as f32 / 8000.0
             );
+            if let Some(r) = recorder {
+                let saved = r.finish()?;
+                println!("Saved {:.1} s, {} KB, to {}.", saved.seconds, saved.bytes / 1000, saved.path.display());
+            }
             Ok(())
         }
         XiaomiCommand::Footage { camera, from, to, step } => {

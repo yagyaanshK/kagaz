@@ -296,6 +296,21 @@ with the commit that closes them.
       ten minutes, so a shorter gap may not show. Viewing with no internet
       would need replacement firmware (thingino: the case opened and the
       flash chip reprogrammed) and is not planned.
+- [x] **A camera's own screen** (2026-10-24, after the Xiaomi Home app):
+      the list is cards (picture, name, ⋮); a tap opens the camera with
+      sound, quality and full screen over the picture, Talk, Screenshot,
+      Record and Recordings under it, and its day on a ruler under a fixed
+      line (pinch to zoom, day by day). Sideways on a phone fills the
+      screen. Recording copies the camera's H.264 into an MP4 with its
+      sound ('sowt' PCM), checked with ffmpeg on a real Xiaomi recording.
+      Files go to a folder chosen in Settings (Android's folder picker on a
+      phone), else Downloads/Kagaz. The list's "Playback" for every camera
+      stays.
+- [ ] **Camera screen, still open**: the desktop layout is the phone's
+      widened (to be designed next); not yet tried on a phone; recording
+      works only in Kagaz's own player (not the helper modes); an MP4's
+      'sowt' sound plays in VLC, QuickTime and Android's players but not in
+      a web browser; the timeline has no thumbnails.
 - [ ] **Camera engine restart** (`cameras_restart`, after an account is
       added or removed) leaves the old local server's listening threads
       idle; harmless, but a restart per sign-in adds a few.
