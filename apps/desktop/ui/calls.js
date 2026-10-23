@@ -43,6 +43,7 @@
             <button id="call-decline" type="button" class="big">Decline</button>
             <button id="call-open" type="button" class="big accent">Open door</button>
             <button id="call-mute" type="button" class="big">Mute</button>
+            <button id="call-speaker" type="button" class="big hidden" aria-pressed="true">Earpiece</button>
             <button id="call-camera" type="button" class="big" aria-pressed="false">Camera on</button>
             <button id="call-hangup" type="button" class="big danger">Hang up</button>
           </div>
@@ -162,6 +163,7 @@
     show("call-decline", phase === "ringing");
     show("call-open", phase === "talking" && !!s.door_dtmf);
     show("call-mute", phase === "talking");
+    show("call-speaker", phase === "talking" && ON_PHONE);
     show("call-camera", phase === "talking" && !!s.send_video);
     show("call-hangup", phase === "talking" || phase === "calling");
     $("call-clock").classList.toggle("hidden", phase !== "talking");
@@ -420,6 +422,16 @@
   // ---------- the microphone ----------
 
   let mic = null; // { stream, node, source, sink }
+  // On a phone the call plays on the loudspeaker, as a video call does;
+  // the person can switch to the earpiece for privacy.
+  let loud = true;
+  function applySpeaker() {
+    if (!ON_PHONE) return;
+    invoke("phone_speaker", { on: loud }).catch(() => {});
+    $("call-speaker").textContent = loud ? "Earpiece" : "Speaker";
+    $("call-speaker").setAttribute("aria-pressed", String(loud));
+    $("call-speaker").title = loud ? "Hear the call on the phone's earpiece" : "Hear the call on the loudspeaker";
+  }
   let muted = false;
   let micStarting = false;
 
@@ -457,6 +469,8 @@
       node.connect(sink);
       sink.connect(actx.destination);
       mic = { stream, node, source, sink };
+      // The microphone put the phone in call mode, which picks the earpiece.
+      applySpeaker();
       note("");
     } catch (e) {
       if (e && e.name === "NotAllowedError") {
@@ -481,7 +495,9 @@
         mic.sink.disconnect();
       } catch (e) {}
       mic = null;
+      if (ON_PHONE) invoke("phone_speaker", { on: false }).catch(() => {});
     }
+    loud = true;
     muted = false;
     $("call-mute").textContent = "Mute";
   }
@@ -596,6 +612,10 @@
     try {
       localStorage.setItem("kagaz-call-volume", String(userVolume));
     } catch (err) {}
+  });
+  $("call-speaker").addEventListener("click", () => {
+    loud = !loud;
+    applySpeaker();
   });
   $("call-mute").addEventListener("click", () => {
     muted = !muted;

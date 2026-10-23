@@ -18,6 +18,8 @@ import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.media.AudioDeviceInfo
+import android.media.AudioManager
 import android.net.Uri
 import android.os.PowerManager
 import android.provider.Settings
@@ -70,6 +72,11 @@ class SaveArgs {
 @InvokeArg
 class ListenArgs {
     var on: Boolean = false
+}
+
+@InvokeArg
+class SpeakerArgs {
+    var on: Boolean = true
 }
 
 @InvokeArg
@@ -259,6 +266,44 @@ class KagazPlugin(private val first: Activity) : Plugin(first) {
         } catch (e: Exception) {
             invoke.reject(e.message ?: "could not save into Downloads")
         }
+    }
+
+    // Call sound on the loudspeaker (a door station or a camera is a video
+    // call, which phones play out loud), unless a headset or Bluetooth
+    // device is connected; off gives the phone back its own choice. Using
+    // the microphone puts the phone in call mode, which picks the earpiece.
+    @Command
+    fun loudspeaker(invoke: Invoke) {
+        val args = invoke.parseArgs(SpeakerArgs::class.java)
+        val audio = activity.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        val personal = setOf(
+            AudioDeviceInfo.TYPE_WIRED_HEADSET,
+            AudioDeviceInfo.TYPE_WIRED_HEADPHONES,
+            AudioDeviceInfo.TYPE_BLUETOOTH_SCO,
+            AudioDeviceInfo.TYPE_BLUETOOTH_A2DP,
+            AudioDeviceInfo.TYPE_USB_HEADSET,
+        )
+        if (Build.VERSION.SDK_INT >= 31) {
+            if (args.on) {
+                val devices = audio.availableCommunicationDevices
+                val headset = devices.any { it.type in personal || it.type == AudioDeviceInfo.TYPE_BLE_HEADSET }
+                val speaker = devices.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
+                if (!headset && speaker != null) audio.setCommunicationDevice(speaker)
+            } else {
+                audio.clearCommunicationDevice()
+            }
+        } else {
+            @Suppress("DEPRECATION")
+            if (args.on) {
+                val headset = audio.getDevices(AudioManager.GET_DEVICES_OUTPUTS).any { it.type in personal }
+                audio.mode = AudioManager.MODE_IN_COMMUNICATION
+                audio.isSpeakerphoneOn = !headset
+            } else {
+                audio.isSpeakerphoneOn = false
+                audio.mode = AudioManager.MODE_NORMAL
+            }
+        }
+        invoke.resolve()
     }
 
     /** Saved files' folder (Downloads/Kagaz) in the Files app; else Downloads. */

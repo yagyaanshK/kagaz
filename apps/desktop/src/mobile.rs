@@ -429,6 +429,17 @@ pub fn show_downloads(app: &AppHandle) -> Result<(), String> {
     phone(app)?.run_mobile_plugin::<()>("showDownloads", Nothing {}).map_err(|e| e.to_string())
 }
 
+#[derive(Serialize)]
+struct SpeakerArgs {
+    on: bool,
+}
+
+/// Call sound on the loudspeaker (unless a headset is connected), or back
+/// to the phone's own choice.
+pub fn loudspeaker(app: &AppHandle, on: bool) -> Result<(), String> {
+    phone(app)?.run_mobile_plugin::<()>("loudspeaker", SpeakerArgs { on }).map_err(|e| e.to_string())
+}
+
 /// Where a file the person will save goes first: the cache, then
 /// [`publish`] moves it to Downloads.
 pub fn save_path(name: &str) -> Result<String, String> {

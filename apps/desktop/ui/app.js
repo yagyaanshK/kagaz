@@ -1159,6 +1159,8 @@ async function startTalk(tile, cam) {
     node.connect(sink);
     sink.connect(ctx.destination);
     Object.assign(mine, { stream, ctx });
+    // The microphone puts a phone in call mode (earpiece); the camera's sound belongs on the loudspeaker.
+    if (ON_PHONE) invoke("phone_speaker", { on: true }).catch(() => {});
   } catch (e) {
     const where = /Android/i.test(navigator.userAgent) ? "Settings › Apps › Kagaz › Permissions" : "the system's privacy settings";
     setNote(tile, e && e.name === "NotAllowedError"
@@ -1175,6 +1177,7 @@ function stopTalk() {
   if (t.stream) t.stream.getTracks().forEach((x) => x.stop());
   if (t.ctx) t.ctx.close().catch(() => {});
   invoke("camera_talk_stop", { deviceId: t.cam.device_id }).catch(() => {});
+  if (ON_PHONE && t.stream) invoke("phone_speaker", { on: false }).catch(() => {});
   const b = t.tile.querySelector(".cam-talk");
   if (b) { b.classList.remove("on"); b.setAttribute("aria-pressed", "false"); }
 }
