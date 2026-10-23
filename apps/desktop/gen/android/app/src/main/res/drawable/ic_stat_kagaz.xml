@@ -1,0 +1,18 @@
+<!-- The notification's icon in the status bar: Android draws only its shape,
+     in white, so this is the logo's "k" alone (assets/logo.svg), without the
+     rounded square, which would show as a plain blob. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="100"
+    android:viewportHeight="100">
+    <group
+        android:translateX="18.9"
+        android:translateY="88.8"
+        android:scaleX="0.1"
+        android:scaleY="-0.1">
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:pathData="M73.5 0V754.75L204 776V324.5Q226.5 348.5 251.25 375.5Q276 402.5 300.625 429.625Q325.25 456.75 346.625 481.25Q368 505.75 383.25 524H538.25Q504.5 486 468.875 447.0Q433.25 408 396.25 369.25Q359.25 330.5 320.5 292Q351 266.25 383.625 230.125Q416.25 194 447.25 153.5Q478.25 113 504.375 73.375Q530.5 33.75 548.5 0H398.5Q375.25 39 343.0 83.625Q310.75 128.25 275.0 169.25Q239.25 210.25 204 236.75V0Z" />
+    </group>
+</vector>
