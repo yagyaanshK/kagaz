@@ -210,7 +210,7 @@ class KagazCallService : Service() {
 
         fun lineNotification(context: Context, text: String): Notification =
             NotificationCompat.Builder(context, LINE_CHANNEL)
-                .setSmallIcon(R.mipmap.ic_launcher_foreground)
+                .setSmallIcon(R.drawable.ic_stat_kagaz)
                 .setContentTitle("Kagaz")
                 .setContentText(text)
                 .setOngoing(true)
@@ -257,7 +257,7 @@ class KagazCallService : Service() {
             // A call's card refuses a caller without a name.
             val caller = Person.Builder().setName(peer.ifBlank { "Doorbell" }).setImportant(true).build()
             val n = NotificationCompat.Builder(context, RING_CHANNEL)
-                .setSmallIcon(R.mipmap.ic_launcher_foreground)
+                .setSmallIcon(R.drawable.ic_stat_kagaz)
                 .setStyle(NotificationCompat.CallStyle.forIncomingCall(caller, decline, answer))
                 .setContentText("Doorbell")
                 .setCategory(NotificationCompat.CATEGORY_CALL)
@@ -298,7 +298,7 @@ class KagazCallService : Service() {
             nm.notify(
                 STOPPED_ID,
                 NotificationCompat.Builder(this, LINE_CHANNEL)
-                    .setSmallIcon(R.mipmap.ic_launcher_foreground)
+                    .setSmallIcon(R.drawable.ic_stat_kagaz)
                     .setContentTitle("Kagaz stopped listening")
                     .setContentText("Android closed Kagaz. Tap to listen for doorbell calls again.")
                     .setAutoCancel(true)
