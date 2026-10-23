@@ -226,6 +226,35 @@ fn phone_speaker(app: AppHandle, on: bool) -> Result<(), String> {
     }
 }
 
+/// On a phone: whether doorbell calls ring in Do Not Disturb; none on a
+/// computer, which has no such switch for Kagaz.
+#[tauri::command]
+fn ring_in_dnd(app: AppHandle) -> Result<Option<bool>, String> {
+    #[cfg(mobile)]
+    {
+        mobile::ring_in_dnd(&app).map(Some)
+    }
+    #[cfg(not(mobile))]
+    {
+        let _ = app;
+        Ok(None)
+    }
+}
+
+/// On a phone: open the system page where that switch is.
+#[tauri::command]
+fn ring_dnd_settings(app: AppHandle) -> Result<(), String> {
+    #[cfg(mobile)]
+    {
+        mobile::ring_settings(&app)
+    }
+    #[cfg(not(mobile))]
+    {
+        let _ = app;
+        Err("only on a phone".into())
+    }
+}
+
 #[cfg(desktop)]
 fn reveal(path: &std::path::Path) -> Result<(), String> {
     use std::process::Command;
@@ -1800,6 +1829,8 @@ pub fn run() {
             cameras_restart,
             camera_talk,
             phone_speaker,
+            ring_in_dnd,
+            ring_dnd_settings,
             camera_talk_stop,
             xiaomi::xiaomi_signed_in,
             xiaomi::xiaomi_login_password,

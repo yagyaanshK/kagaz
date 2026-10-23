@@ -486,6 +486,44 @@ const KagazSettings = (() => {
     body.appendChild(box);
   }
 
+  // On a phone: doorbell calls ring in Do Not Disturb, or show only their
+  // card. Android keeps that switch itself, on the "Doorbell calls"
+  // notifications' page; the toggle opens that page and shows what was
+  // chosen there once Kagaz is back on screen.
+  let dndToggle = null;
+  async function readDnd() {
+    if (!dndToggle) return;
+    try {
+      dndToggle.checked = (await invoke("ring_in_dnd")) === true;
+    } catch (_) {}
+  }
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") readDnd();
+  });
+
+  async function drawRinging(body) {
+    let on;
+    try {
+      on = await invoke("ring_in_dnd");
+    } catch (_) {
+      return;
+    }
+    if (on === null || on === undefined) return; // a computer
+    const box = section("Ringing");
+    const t = el("input", "toggle");
+    t.type = "checkbox";
+    t.checked = on;
+    t.setAttribute("aria-label", "Ring during Do Not Disturb");
+    const r = row("Ring during Do Not Disturb", "Doorbell calls ring and vibrate even in Do Not Disturb, Bedtime and Sleep modes. Android keeps this switch: Kagaz opens its page, where you turn Override Do Not Disturb on or off.", t);
+    t.addEventListener("change", () => {
+      t.checked = !t.checked; // only Android's page changes it
+      KagazSet.attempt(r, () => invoke("ring_dnd_settings"));
+    });
+    dndToggle = t;
+    box.appendChild(r);
+    body.appendChild(box);
+  }
+
   function drawAbout(body) {
     const box = section("About Kagaz");
     box.appendChild(el("p", "muted small", "Free to use, source-available under the Kagaz License. Brand names and logos belong to their owners and are shown only to say which devices Kagaz works with."));
@@ -496,6 +534,7 @@ const KagazSettings = (() => {
     const body = $("settings-body");
     body.innerHTML = "";
     await drawAccounts(body);
+    await drawRinging(body);
     drawDevices(body);
     drawAbout(body);
   }

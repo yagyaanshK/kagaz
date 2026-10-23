@@ -306,6 +306,41 @@ class KagazPlugin(private val first: Activity) : Plugin(first) {
         invoke.resolve()
     }
 
+    // Whether doorbell calls ring in Do Not Disturb: Android keeps that
+    // switch on the "Doorbell calls" notifications' own page, where only
+    // the person can change it (see KagazCallService.allowed).
+    @Command
+    fun ringInDnd(invoke: Invoke) {
+        KagazCallService.channels(activity)
+        val ret = JSObject()
+        ret.put("on", KagazCallService.ringsInDnd(activity))
+        invoke.resolve(ret)
+    }
+
+    /** That page, opened for the person; else Kagaz's notifications. */
+    @Command
+    fun ringSettings(invoke: Invoke) {
+        KagazCallService.channels(activity)
+        val tries = mutableListOf<Intent>()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            tries += Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS)
+                .putExtra(Settings.EXTRA_APP_PACKAGE, activity.packageName)
+                .putExtra(Settings.EXTRA_CHANNEL_ID, KagazCallService.RING_CHANNEL)
+            tries += Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                .putExtra(Settings.EXTRA_APP_PACKAGE, activity.packageName)
+        }
+        tries += Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${activity.packageName}"))
+        for (intent in tries) {
+            try {
+                activity.startActivity(intent)
+                invoke.resolve()
+                return
+            } catch (e: Exception) {
+            }
+        }
+        invoke.reject("this phone has no page for Kagaz's notifications")
+    }
+
     /** Saved files' folder (Downloads/Kagaz) in the Files app; else Downloads. */
     @Command
     fun showDownloads(invoke: Invoke) {
