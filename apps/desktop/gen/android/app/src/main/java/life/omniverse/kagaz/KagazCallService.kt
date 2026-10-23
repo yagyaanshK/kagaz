@@ -86,7 +86,7 @@ class KagazCallService : Service() {
             nm.deleteNotificationChannel("kagaz-ring-tone")
             nm.createNotificationChannel(
                 NotificationChannel(RING_CHANNEL, "Doorbell calls", NotificationManager.IMPORTANCE_HIGH).apply {
-                    description = "Shows who is calling from a door station, a monitor or your family. The ring sound and vibration are set in Kagaz's doorbell settings."
+                    description = "Shows who is calling from a door station, a monitor or your family. The ring sound and vibration are set in Kagaz's doorbell settings; they follow silent mode and Do Not Disturb unless this is allowed to override Do Not Disturb."
                     setSound(null, null)
                     enableVibration(false)
                     lockscreenVisibility = Notification.VISIBILITY_PUBLIC
@@ -123,11 +123,30 @@ class KagazCallService : Service() {
             player = null
         }
 
-        /** Vibrate as a phone call does, until stopped; not when the phone
-         *  itself is set to silent. */
-        private fun startVibration(context: Context) {
+        /** What the phone's own settings let a ring do now, as (sound,
+         *  vibration): silent mode neither, vibrate mode vibration only, and
+         *  Do Not Disturb (Bedtime and Sleep modes are one) neither, unless
+         *  the person let "Doorbell calls" override it in Android's settings.
+         *  The card shows in every case. */
+        private fun allowed(context: Context): Pair<Boolean, Boolean> {
+            val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
+                nm.currentInterruptionFilter > NotificationManager.INTERRUPTION_FILTER_ALL
+            ) {
+                val overrides = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+                    nm.getNotificationChannel(RING_CHANNEL)?.canBypassDnd() == true
+                if (!overrides) return Pair(false, false)
+            }
             val audio = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-            if (audio.ringerMode == AudioManager.RINGER_MODE_SILENT) return
+            return when (audio.ringerMode) {
+                AudioManager.RINGER_MODE_NORMAL -> Pair(true, true)
+                AudioManager.RINGER_MODE_VIBRATE -> Pair(false, true)
+                else -> Pair(false, false)
+            }
+        }
+
+        /** Vibrate as a phone call does, until stopped. */
+        private fun startVibration(context: Context) {
             val v = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 (context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager).defaultVibrator
             } else {
@@ -221,7 +240,8 @@ class KagazCallService : Service() {
         /** Ring for `peer`, or (peer null) stop ringing. The card is a
          *  call's, as in WhatsApp: tapping it opens the ring in Kagaz without
          *  answering; Decline and Answer act at once. `silent`: the card
-         *  only, no `tone` (empty: the phone's ringtone); `vibrate` either way. */
+         *  only, no `tone` (empty: the phone's ringtone); `vibrate` either way.
+         *  The phone's silent, vibrate and Do Not Disturb modes come first. */
         fun ring(context: Context, peer: String?, tone: String = "", silent: Boolean = false, vibrate: Boolean = true) {
             channels(context)
             val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
@@ -235,9 +255,12 @@ class KagazCallService : Service() {
             if (!ringing) {
                 // A new ring (the card is redrawn while it rings: only once).
                 ringing = true
-                if (!silent) startTone(app, tone)
-                if (vibrate) startVibration(app)
-                if (!silent || vibrate) Silencer.start(app)
+                val (sound, buzz) = allowed(app)
+                val toned = !silent && sound
+                val buzzed = vibrate && buzz
+                if (toned) startTone(app, tone)
+                if (buzzed) startVibration(app)
+                if (toned || buzzed) Silencer.start(app)
             }
             val open = openApp(context, true)
             val answer = PendingIntent.getActivity(
