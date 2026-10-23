@@ -211,6 +211,21 @@ async fn show_in_folder(app: AppHandle, path: String) -> Result<(), String> {
     }
 }
 
+/// On a phone: call sound on the loudspeaker (`on`) or the earpiece. A
+/// computer has only one way to play it.
+#[tauri::command]
+fn phone_speaker(app: AppHandle, on: bool) -> Result<(), String> {
+    #[cfg(mobile)]
+    {
+        mobile::loudspeaker(&app, on)
+    }
+    #[cfg(not(mobile))]
+    {
+        let _ = (app, on);
+        Ok(())
+    }
+}
+
 #[cfg(desktop)]
 fn reveal(path: &std::path::Path) -> Result<(), String> {
     use std::process::Command;
@@ -1784,6 +1799,7 @@ pub fn run() {
             cameras_start,
             cameras_restart,
             camera_talk,
+            phone_speaker,
             camera_talk_stop,
             xiaomi::xiaomi_signed_in,
             xiaomi::xiaomi_login_password,
