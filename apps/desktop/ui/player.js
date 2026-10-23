@@ -285,7 +285,9 @@ const KagazPlayer = (() => {
         }
       }
       this.pump();
-      if (this.queue.length || this.pendingChunks.length || !this.ended) this.raf = requestAnimationFrame(() => this.tick());
+      // One frame request at a time (pump may have made it already): two
+      // would each make two more, doubling every frame.
+      if (!this.raf && (this.queue.length || this.pendingChunks.length || !this.ended)) this.raf = requestAnimationFrame(() => this.tick());
     }
 
     // Turn or mirror what is shown from now on.

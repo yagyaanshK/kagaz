@@ -302,6 +302,8 @@ struct SaveArgs<'a> {
     path: &'a str,
     name: &'a str,
     mime: &'a str,
+    folder: Option<String>,
+    label: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -394,7 +396,8 @@ pub fn print_scans(
     open_dialog(app, &pdf, req.job_name.as_deref().unwrap_or("Kagaz copy"))
 }
 
-/// Copy a finished file into Downloads/Kagaz; returns where it went.
+/// Copy a finished file into the chosen folder, else Downloads/Kagaz;
+/// returns where it went.
 pub fn publish(app: &AppHandle, path: &Path) -> Result<String, String> {
     let name = path
         .file_name()
@@ -407,6 +410,7 @@ pub fn publish(app: &AppHandle, path: &Path) -> Result<String, String> {
         Some("mp4") => "video/mp4",
         _ => "application/octet-stream",
     };
+    let folder = super::saving::phone_folder();
     let saved: Saved = phone(app)?
         .run_mobile_plugin(
             "saveToDownloads",
@@ -414,6 +418,8 @@ pub fn publish(app: &AppHandle, path: &Path) -> Result<String, String> {
                 path: path.to_str().ok_or("unusable file name")?,
                 name,
                 mime,
+                folder: folder.clone().map(|f| f.0),
+                label: folder.map(|f| f.1),
             },
         )
         .map_err(|e| e.to_string())?;
@@ -424,9 +430,36 @@ pub fn publish(app: &AppHandle, path: &Path) -> Result<String, String> {
 #[derive(Serialize)]
 struct Nothing {}
 
-/// The phone's Downloads, where saved files go (Kagaz's folder in it).
+#[derive(Serialize)]
+struct FolderArgs {
+    folder: Option<String>,
+}
+
+/// Where saved files go (the chosen folder, else Kagaz's in Downloads),
+/// in the Files app.
 pub fn show_downloads(app: &AppHandle) -> Result<(), String> {
-    phone(app)?.run_mobile_plugin::<()>("showDownloads", Nothing {}).map_err(|e| e.to_string())
+    let folder = super::saving::phone_folder().map(|f| f.0);
+    phone(app)?.run_mobile_plugin::<()>("showDownloads", FolderArgs { folder }).map_err(|e| e.to_string())
+}
+
+#[derive(Deserialize)]
+struct Picked {
+    uri: Option<String>,
+    label: Option<String>,
+}
+
+/// Android's folder picker: the folder's handle and name, or none when
+/// the person backs out.
+pub fn pick_folder(app: &AppHandle) -> Result<Option<(String, String)>, String> {
+    let p: Picked = phone(app)?.run_mobile_plugin("pickFolder", Nothing {}).map_err(|e| e.to_string())?;
+    Ok(p.uri.map(|u| (u, p.label.unwrap_or_else(|| "Your folder".into()))))
+}
+
+/// Give back the right to write to a folder no longer used.
+pub fn forget_folder(app: &AppHandle, uri: &str) {
+    if let Ok(p) = phone(app) {
+        let _ = p.run_mobile_plugin::<()>("forgetFolder", FolderArgs { folder: Some(uri.to_string()) });
+    }
 }
 
 #[derive(Serialize)]

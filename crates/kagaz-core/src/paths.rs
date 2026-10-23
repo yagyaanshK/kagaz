@@ -112,6 +112,35 @@ pub fn recordings_dir() -> PathBuf {
         .unwrap_or_else(|| cache_dir().join("recordings"))
 }
 
+/// Where pictures and videos the person saves go on a computer:
+/// `save_dir` in `<config>/settings.toml`, else Downloads/Kagaz.
+pub fn saves_dir() -> PathBuf {
+    setting("save_dir").map(PathBuf::from).unwrap_or_else(|| {
+        home()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join("Downloads")
+            .join("Kagaz")
+    })
+}
+
+/// Set (or with `None` remove) one string value in `<config>/settings.toml`,
+/// keeping the others.
+pub fn set_setting(key: &str, value: Option<&str>) -> std::io::Result<()> {
+    let path = config_dir().join("settings.toml");
+    let mut table: toml::Table = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|t| toml::from_str(&t).ok())
+        .unwrap_or_default();
+    match value {
+        Some(v) => table.insert(key.to_string(), toml::Value::String(v.to_string())),
+        None => table.remove(key),
+    };
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    std::fs::write(&path, table.to_string())
+}
+
 /// One string value from `<config>/settings.toml`, if set.
 pub fn setting(key: &str) -> Option<String> {
     let text = std::fs::read_to_string(config_dir().join("settings.toml")).ok()?;

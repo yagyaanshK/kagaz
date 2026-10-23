@@ -8,13 +8,14 @@
 //! 16-bit little-endian samples, Annex-B video, or a UTF-8 reason.
 
 use kagaz_core::media::Media;
+use kagaz_core::mp4::Recorder;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{mpsc, Arc, LazyLock, Mutex};
 use std::time::Duration;
 use tauri::ipc::{Channel, InvokeResponseBody};
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 
 /// One stream being watched: a flag that ends a forwarding thread, or the
 /// doorbell's live session, which ends when dropped.
@@ -47,6 +48,94 @@ impl Watches {
     pub fn remove(&self, id: u64) {
         self.list.lock().unwrap().remove(&id);
     }
+    fn has(&self, id: u64) -> bool {
+        self.list.lock().unwrap().contains_key(&id)
+    }
+}
+
+// ---- recording what a watch shows, as an MP4 file ----
+
+/// Recordings under way, by the watch they record.
+static RECORDINGS: LazyLock<Mutex<HashMap<u64, Recorder>>> = LazyLock::new(Default::default);
+
+#[derive(Debug, Clone, Serialize)]
+pub struct Recorded {
+    watch: u64,
+    /// The file on a computer; on a phone, where it was copied to.
+    path: String,
+    location: String,
+    seconds: f64,
+    bytes: u64,
+}
+
+/// A piece of a watched stream: into its recording, if it has one. A
+/// recording that cannot be written (a full disk) ends there.
+fn record(app: &AppHandle, id: u64, m: &Media) {
+    let failed = {
+        let mut all = RECORDINGS.lock().unwrap();
+        match all.get_mut(&id) {
+            Some(r) => r.push(m).is_err(),
+            None => return,
+        }
+    };
+    if failed {
+        finish_recording(app, id);
+    }
+}
+
+/// The watch is over (or could not be written): keep what was recorded
+/// and tell the page.
+fn finish_recording(app: &AppHandle, id: u64) {
+    let Some(rec) = RECORDINGS.lock().unwrap().remove(&id) else {
+        return;
+    };
+    match keep(app, id, rec) {
+        Ok(saved) => {
+            let _ = app.emit("recording-saved", &saved);
+        }
+        Err(e) => {
+            let _ = app.emit("recording-failed", (id, e));
+        }
+    }
+}
+
+fn keep(app: &AppHandle, watch: u64, rec: Recorder) -> Result<Recorded, String> {
+    let saved = rec.finish().map_err(|e| e.to_string())?;
+    let location = super::saving::keep(app, &saved.path)?;
+    Ok(Recorded {
+        watch,
+        path: if cfg!(mobile) { location.clone() } else { saved.path.display().to_string() },
+        location,
+        seconds: saved.seconds,
+        bytes: saved.bytes,
+    })
+}
+
+/// Start recording what watch `watch` shows into `<name>.mp4`, from its
+/// next full picture.
+#[tauri::command]
+pub async fn camera_record_start(app: AppHandle, watch: u64, name: String) -> Result<(), String> {
+    if !app.state::<Watches>().has(watch) {
+        return Err("this picture is not playing any more".into());
+    }
+    let rec = super::blocking(move || {
+        let path = super::saving::new_file(&format!("{name}.mp4"))?;
+        Recorder::create(&path).map_err(|e| format!("could not make {}: {e}", path.display()))
+    })
+    .await?;
+    RECORDINGS.lock().unwrap().insert(watch, rec);
+    Ok(())
+}
+
+/// Stop recording and keep the file.
+#[tauri::command]
+pub async fn camera_record_stop(app: AppHandle, watch: u64) -> Result<Recorded, String> {
+    let rec = RECORDINGS
+        .lock()
+        .unwrap()
+        .remove(&watch)
+        .ok_or("this picture is not being recorded")?;
+    super::blocking(move || keep(&app, watch, rec)).await
 }
 
 pub fn packet(m: &Media) -> Vec<u8> {
@@ -94,6 +183,7 @@ pub fn forward(app: AppHandle, rx: mpsc::Receiver<Media>, channel: Channel<Invok
             match rx.recv_timeout(Duration::from_millis(500)) {
                 Ok(m) => {
                     let end = matches!(m, Media::Ended(_));
+                    record(&app, id, &m);
                     if !send(&channel, &m) || end {
                         break;
                     }
@@ -106,6 +196,7 @@ pub fn forward(app: AppHandle, rx: mpsc::Receiver<Media>, channel: Channel<Invok
             }
         }
         app.state::<Watches>().remove(id);
+        finish_recording(&app, id);
     });
     id
 }

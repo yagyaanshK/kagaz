@@ -1129,12 +1129,10 @@ let camTalk = null; // { tile, cam, stream, ctx }
 
 async function startTalk(tile, cam) {
   stopTalk();
-  const button = tile.querySelector(".cam-talk");
   if (isPlayback()) { setNote(tile, "Talking works in the live view."); return; }
   const mine = { tile, cam, stream: null, ctx: null };
   camTalk = mine;
-  button.classList.add("on");
-  button.setAttribute("aria-pressed", "true");
+  cpRefresh();
   try {
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw new Error("this window cannot use the microphone");
     const stream = await navigator.mediaDevices.getUserMedia({
@@ -1178,8 +1176,7 @@ function stopTalk() {
   if (t.ctx) t.ctx.close().catch(() => {});
   invoke("camera_talk_stop", { deviceId: t.cam.device_id }).catch(() => {});
   if (ON_PHONE && t.stream) invoke("phone_speaker", { on: false }).catch(() => {});
-  const b = t.tile.querySelector(".cam-talk");
-  if (b) { b.classList.remove("on"); b.setAttribute("aria-pressed", "false"); }
+  cpRefresh();
 }
 
 // A short line over a tile, gone after a while.
@@ -1606,9 +1603,14 @@ function stopAudio(tile) {
     a.remove();
   }
   const b = tile.querySelector(".cam-speaker");
-  if (b) { b.textContent = "\u{1F507}"; b.classList.remove("on"); }
+  if (b) { b.innerHTML = SOUND_ICON.off; b.classList.remove("on"); b.setAttribute("aria-pressed", "false"); }
   tile.classList.remove("sound-on");
 }
+
+const SOUND_ICON = {
+  on: '<svg viewBox="0 0 24 24"><path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z"/><path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11"/></svg>',
+  off: '<svg viewBox="0 0 24 24"><path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z"/><path d="M16 9.5l5 5M21 9.5l-5 5"/></svg>',
+};
 
 function volumeOf(cam) {
   const v = layout.volume && layout.volume[cam.device_id];
@@ -1653,7 +1655,7 @@ function startAudio(tile, cam) {
     tile._player.volume = volumeOf(cam) / 100;
     tile._player.sound = true;
     const b = tile.querySelector(".cam-speaker");
-    if (b) { b.textContent = "\u{1F50A}"; b.classList.add("on"); }
+    if (b) { b.innerHTML = SOUND_ICON.on; b.classList.add("on"); b.setAttribute("aria-pressed", "true"); }
     tile.classList.add("sound-on");
     return true;
   }
@@ -1664,7 +1666,7 @@ function startAudio(tile, cam) {
     fv.volume = volumeOf(cam) / 100;
     tile._fileSound = true;
     const b = tile.querySelector(".cam-speaker");
-    if (b) { b.textContent = "\u{1F50A}"; b.classList.add("on"); }
+    if (b) { b.innerHTML = SOUND_ICON.on; b.classList.add("on"); b.setAttribute("aria-pressed", "true"); }
     tile.classList.add("sound-on");
     return true;
   }
@@ -1679,7 +1681,7 @@ function startAudio(tile, cam) {
   a.addEventListener("error", () => stopAudio(tile));
   tile.appendChild(a);
   const b = tile.querySelector(".cam-speaker");
-  if (b) { b.textContent = "\u{1F50A}"; b.classList.add("on"); }
+  if (b) { b.innerHTML = SOUND_ICON.on; b.classList.add("on"); b.setAttribute("aria-pressed", "true"); }
   tile.classList.add("sound-on");
   return true;
 }
@@ -1757,7 +1759,6 @@ function buildTile(cam) {
     if (!isPlayback()) mountTile(tile, cam, tile.classList.contains("big"));
     else showQuality(tile, cam);
   });
-  tile.appendChild(quality);
   // Each camera's own settings: name, group, how its picture is turned, details.
   const more = document.createElement("button");
   more.type = "button";
@@ -1767,31 +1768,22 @@ function buildTile(cam) {
   more.setAttribute("aria-label", `Settings for ${camName(cam)}`);
   more.addEventListener("click", (ev) => { ev.stopPropagation(); cameraSettings(cam); });
   tile.appendChild(more);
-  // Talk through the camera's speaker (Xiaomi cameras), as their app does.
-  if (cam.brand === "xiaomi") {
-    const talk = document.createElement("button");
-    talk.type = "button";
-    talk.className = "cam-talk";
-    talk.textContent = "\u{1F3A4}";
-    talk.title = `Talk through ${camName(cam)}'s speaker`;
-    talk.setAttribute("aria-label", talk.title);
-    talk.setAttribute("aria-pressed", "false");
-    talk.addEventListener("click", (ev) => {
-      ev.stopPropagation();
-      if (camTalk && camTalk.tile === tile) stopTalk(); else startTalk(tile, cam);
-    });
-    tile.appendChild(talk);
-  }
+  // Over the picture on the camera's own screen (campage.js): sound,
+  // volume, quality and full screen in one bar.
+  const ctrl = document.createElement("div");
+  ctrl.className = "cam-ctrl";
   const speaker = document.createElement("button");
   speaker.type = "button";
   speaker.className = "cam-speaker";
   speaker.title = "Hear this camera (one at a time)";
-  speaker.textContent = "\u{1F507}";
+  speaker.innerHTML = SOUND_ICON.off;
+  speaker.setAttribute("aria-label", `Sound from ${camName(cam)}`);
+  speaker.setAttribute("aria-pressed", "false");
   speaker.addEventListener("click", (ev) => {
     ev.stopPropagation();
     toggleAudio(tile, cam);
   });
-  tile.appendChild(speaker);
+  ctrl.appendChild(speaker);
   const volume = document.createElement("input");
   volume.type = "range";
   volume.className = "cam-volume";
@@ -1814,7 +1806,10 @@ function buildTile(cam) {
   });
   volume.addEventListener("click", (ev) => ev.stopPropagation());
   volume.addEventListener("mousedown", (ev) => ev.stopPropagation());
-  tile.appendChild(volume);
+  ctrl.appendChild(volume);
+  const gap = document.createElement("span");
+  gap.className = "cam-ctrl-gap";
+  ctrl.append(gap, quality);
   const overlay = document.createElement("div");
   overlay.className = "cam-overlay hidden";
   overlay.innerHTML = '<div class="spinner"></div><button type="button" class="cam-reload" title="Reload this camera">&#x21bb;</button><div class="cam-overlay-text"></div>';
@@ -1829,13 +1824,6 @@ function buildTile(cam) {
     remount(tile, cam);
   });
   tile.appendChild(overlay);
-  const size = document.createElement("button");
-  size.type = "button";
-  size.className = "cam-size";
-  size.title = "Enlarge";
-  size.innerHTML = "&#x2922;";
-  size.addEventListener("click", (ev) => { ev.stopPropagation(); setBig(tile, cam, !tile.classList.contains("big")); });
-  tile.appendChild(size);
   // Full screen, in HD; a wide picture turns on its side on an upright phone.
   const full = document.createElement("button");
   full.type = "button";
@@ -1852,11 +1840,15 @@ function buildTile(cam) {
     full.innerHTML = on ? KagazPlayer.ICON.unfull : KagazPlayer.ICON.full;
     full.title = on ? "Leave full screen (Esc)" : "Full screen";
   };
-  tile.appendChild(full);
+  ctrl.appendChild(full);
+  tile.appendChild(ctrl);
+  // In the list a tap opens the camera's own screen; there, it shows or
+  // hides the controls (a pinch or a drag is not a tap).
   tile.addEventListener("click", (ev) => {
     if (ev.target.closest(".cam-reload")) return;
-    if (tile.classList.contains("kz-full")) return;
-    setBig(tile, cam, !tile.classList.contains("big"));
+    if (tile._noClick) { tile._noClick = false; return; }
+    if (camFocus) tilePeek(tile);
+    else openCamera(cam);
   });
   return tile;
 }
@@ -1867,7 +1859,8 @@ function showQuality(tile, cam) {
   if (!q) return;
   q.value = qualityOf(cam);
   const auto = q.querySelector('option[value="auto"]');
-  const now = { high: cam.brand === "xiaomi" ? "1080p" : "HD", low: "360p", auto: "camera's choice" }[tile._quality] || "";
+  // Xiaomi's Auto is the camera's own choice: nothing more to say.
+  const now = { high: cam.brand === "xiaomi" ? "1080p" : "HD", low: "360p" }[tile._quality] || "";
   if (auto) auto.textContent = qualityOf(cam) === "auto" && now ? `Auto (${now})` : "Auto";
   q.title = qualityOf(cam) === "auto"
     ? "Auto: 360p in a small tile; the best the network carries when enlarged or full screen"
@@ -2021,13 +2014,11 @@ function setBig(tile, cam, big) {
   if (big) cell.scrollIntoView({ block: "nearest", behavior: "smooth" });
 }
 
-// Esc shrinks every enlarged tile.
+// Esc leaves a camera's own screen (full screen, a menu or a question first).
 document.addEventListener("keydown", (ev) => {
-  if (ev.key !== "Escape") return;
-  document.querySelectorAll(".cam-tile.big").forEach((tile) => {
-    const cam = cameraById(tile.closest(".cam-cell")?.dataset.id);
-    if (cam) setBig(tile, cam, false);
-  });
+  if (ev.key !== "Escape" || !camFocus || currentView !== "cameras") return;
+  if (document.querySelector("dialog[open], .cp-menu, .kz-full") || !$("cam-settings").classList.contains("hidden")) return;
+  closeCamera();
 });
 
 function remount(tile, cam) {
@@ -2327,9 +2318,14 @@ async function renderCameraGrid() {
   }
   grid.querySelectorAll(".cam-tile").forEach(teardownTile);
   grid.innerHTML = "";
+  const focus = camFocus && !rearranging ? cameraById(camFocus.id) : null;
+  if (camFocus && !focus) { camFocus = null; KagazNav.pop("cam-page"); }
+  $("cameras").classList.toggle("cam-page-open", !!focus);
+  grid.classList.toggle("cam-focus", !!focus);
+  grid.classList.toggle("cam-past", isPlayback());
   $("cam-rearrange-bar").classList.toggle("hidden", !rearranging);
-  $("cam-viewing").classList.toggle("hidden", viewGroup === null);
-  $("pb-controls").classList.toggle("hidden", !isPlayback());
+  $("cam-viewing").classList.toggle("hidden", viewGroup === null || !!focus);
+  $("pb-controls").classList.toggle("hidden", !isPlayback() || !!focus);
   if (!isPlayback()) { pbMaster = null; updateSeekBar(); allTiles().forEach((t) => { t._sync = null; }); }
   camToolsShown();
   if (!camStatus.cameras.length && !rearranging) {
@@ -2344,14 +2340,16 @@ async function renderCameraGrid() {
     grid.appendChild(empty);
     return;
   }
-  for (const g of visibleGroups()) grid.appendChild(buildGroup(g));
+  if (focus) grid.appendChild(buildCameraPage(focus));
+  else for (const g of visibleGroups()) grid.appendChild(buildGroup(g));
   if (!rearranging) {
     if (isPlayback()) {
       await preparePlayback();
+      if (focus && camFocus && camFocus.id === focus.device_id && cpRoot()) cpStartPlayback();
     } else {
       grid.querySelectorAll(".cam-cell").forEach((cell) => {
         const tile = cell.querySelector(".cam-tile");
-        mountTile(tile, cameraById(cell.dataset.id), false);
+        mountTile(tile, cameraById(cell.dataset.id), !!focus);
       });
     }
   }
