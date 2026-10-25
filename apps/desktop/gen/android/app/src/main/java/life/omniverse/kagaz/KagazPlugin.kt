@@ -26,6 +26,8 @@ import android.provider.Settings
 import androidx.core.content.ContextCompat
 import android.net.wifi.WifiManager
 import android.os.Build
+import android.os.Looper
+import android.os.Handler
 import android.os.Bundle
 import android.os.CancellationSignal
 import android.os.Environment
@@ -351,39 +353,11 @@ class KagazPlugin(private val first: Activity) : Plugin(first) {
 
     // Call sound on the loudspeaker (a door station or a camera is a video
     // call, which phones play out loud), unless a headset or Bluetooth
-    // device is connected; off gives the phone back its own choice. Using
-    // the microphone puts the phone in call mode, which picks the earpiece.
+    // device is connected; off gives the phone back its own choice.
     @Command
     fun loudspeaker(invoke: Invoke) {
         val args = invoke.parseArgs(SpeakerArgs::class.java)
-        val audio = activity.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-        val personal = setOf(
-            AudioDeviceInfo.TYPE_WIRED_HEADSET,
-            AudioDeviceInfo.TYPE_WIRED_HEADPHONES,
-            AudioDeviceInfo.TYPE_BLUETOOTH_SCO,
-            AudioDeviceInfo.TYPE_BLUETOOTH_A2DP,
-            AudioDeviceInfo.TYPE_USB_HEADSET,
-        )
-        if (Build.VERSION.SDK_INT >= 31) {
-            if (args.on) {
-                val devices = audio.availableCommunicationDevices
-                val headset = devices.any { it.type in personal || it.type == AudioDeviceInfo.TYPE_BLE_HEADSET }
-                val speaker = devices.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
-                if (!headset && speaker != null) audio.setCommunicationDevice(speaker)
-            } else {
-                audio.clearCommunicationDevice()
-            }
-        } else {
-            @Suppress("DEPRECATION")
-            if (args.on) {
-                val headset = audio.getDevices(AudioManager.GET_DEVICES_OUTPUTS).any { it.type in personal }
-                audio.mode = AudioManager.MODE_IN_COMMUNICATION
-                audio.isSpeakerphoneOn = !headset
-            } else {
-                audio.isSpeakerphoneOn = false
-                audio.mode = AudioManager.MODE_NORMAL
-            }
-        }
+        Loudspeaker.set(activity, args.on)
         invoke.resolve()
     }
 
@@ -481,6 +455,91 @@ private class PdfAdapter(private val file: File, private val name: String) : Pri
             callback.onWriteFinished(arrayOf(PageRange.ALL_PAGES))
         } catch (e: Exception) {
             callback.onWriteFailed(e.message)
+        }
+    }
+}
+
+/** Holds a call's sound on the loudspeaker for as long as the call lasts.
+ *  Asking once is not enough: the web view moves the sound to the earpiece
+ *  itself when it starts the microphone (call mode), sometimes a moment
+ *  after Kagaz asked. So every change of the call's device is put back,
+ *  and a look once a second catches what no listener reports. A headset
+ *  or Bluetooth device keeps the sound. */
+object Loudspeaker {
+    private var on = false
+    private var audio: AudioManager? = null
+    private val main = Handler(Looper.getMainLooper())
+    private var listener: Any? = null
+    private val personal = setOf(
+        AudioDeviceInfo.TYPE_WIRED_HEADSET,
+        AudioDeviceInfo.TYPE_WIRED_HEADPHONES,
+        AudioDeviceInfo.TYPE_BLUETOOTH_SCO,
+        AudioDeviceInfo.TYPE_BLUETOOTH_A2DP,
+        AudioDeviceInfo.TYPE_USB_HEADSET,
+    )
+
+    private fun headset(a: AudioManager): Boolean = a.getDevices(AudioManager.GET_DEVICES_OUTPUTS).any {
+        it.type in personal || (Build.VERSION.SDK_INT >= 31 && it.type == AudioDeviceInfo.TYPE_BLE_HEADSET)
+    }
+
+    private fun hold() {
+        val a = audio ?: return
+        if (!on || headset(a)) return
+        try {
+            if (Build.VERSION.SDK_INT >= 31) {
+                if (a.communicationDevice?.type != AudioDeviceInfo.TYPE_BUILTIN_SPEAKER) {
+                    a.availableCommunicationDevices.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
+                        ?.let { a.setCommunicationDevice(it) }
+                }
+            } else {
+                @Suppress("DEPRECATION")
+                if (!a.isSpeakerphoneOn) a.isSpeakerphoneOn = true
+            }
+        } catch (e: Exception) {
+        }
+    }
+
+    private val look = object : Runnable {
+        override fun run() {
+            if (!on) return
+            hold()
+            main.postDelayed(this, 1000)
+        }
+    }
+
+    fun set(context: Context, want: Boolean) {
+        val a = context.applicationContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        audio = a
+        main.removeCallbacks(look)
+        if (Build.VERSION.SDK_INT >= 31) {
+            (listener as? AudioManager.OnCommunicationDeviceChangedListener)?.let { a.removeOnCommunicationDeviceChangedListener(it) }
+        }
+        listener = null
+        val was = on
+        on = want
+        if (want) {
+            if (Build.VERSION.SDK_INT < 31) {
+                @Suppress("DEPRECATION")
+                a.mode = AudioManager.MODE_IN_COMMUNICATION
+            }
+            hold()
+            if (Build.VERSION.SDK_INT >= 31) {
+                val l = AudioManager.OnCommunicationDeviceChangedListener { main.post { hold() } }
+                a.addOnCommunicationDeviceChangedListener(context.mainExecutor, l)
+                listener = l
+            }
+            main.postDelayed(look, 1000)
+        } else if (was) {
+            try {
+                if (Build.VERSION.SDK_INT >= 31) {
+                    a.clearCommunicationDevice()
+                } else {
+                    @Suppress("DEPRECATION")
+                    a.isSpeakerphoneOn = false
+                    a.mode = AudioManager.MODE_NORMAL
+                }
+            } catch (e: Exception) {
+            }
         }
     }
 }

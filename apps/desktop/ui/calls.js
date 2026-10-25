@@ -425,8 +425,10 @@
   // On a phone the call plays on the loudspeaker, as a video call does;
   // the person can switch to the earpiece for privacy.
   let loud = true;
+  let speakerSet = false; // this call asked for the loudspeaker or earpiece
   function applySpeaker() {
     if (!ON_PHONE) return;
+    speakerSet = true;
     invoke("phone_speaker", { on: loud }).catch(() => {});
     $("call-speaker").textContent = loud ? "Earpiece" : "Speaker";
     $("call-speaker").setAttribute("aria-pressed", String(loud));
@@ -445,6 +447,9 @@
     const actx = KagazPlayer.audioContext();
     if (mic || micStarting) return;
     micStarting = true;
+    // The loudspeaker from the moment the call is answered; Android holds
+    // it there through the microphone's start (KagazPlugin's Loudspeaker).
+    applySpeaker();
     try {
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw new Error("this window cannot use the microphone");
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -495,8 +500,10 @@
         mic.sink.disconnect();
       } catch (e) {}
       mic = null;
-      if (ON_PHONE) invoke("phone_speaker", { on: false }).catch(() => {});
     }
+    // The phone's own choice of where sound plays again.
+    if (speakerSet) invoke("phone_speaker", { on: false }).catch(() => {});
+    speakerSet = false;
     loud = true;
     muted = false;
     $("call-mute").textContent = "Mute";
