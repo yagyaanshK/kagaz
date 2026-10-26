@@ -460,16 +460,20 @@ private class PdfAdapter(private val file: File, private val name: String) : Pri
 }
 
 /** Holds a call's sound on the loudspeaker for as long as the call lasts.
- *  Asking once is not enough: the web view moves the sound to the earpiece
- *  itself when it starts the microphone (call mode), sometimes a moment
- *  after Kagaz asked. So every change of the call's device is put back,
- *  and a look once a second catches what no listener reports. A headset
- *  or Bluetooth device keeps the sound. */
+ *  Asking once is not enough: when the microphone starts, the phone goes
+ *  into call mode and puts the sound on the earpiece, sometimes after
+ *  Kagaz asked, while still reporting the loudspeaker as chosen (seen on a
+ *  phone: the button worked, the start of the call did not). So the
+ *  loudspeaker is chosen afresh whenever the mode changes and a few times
+ *  over the call's first seconds, every other change of device is put
+ *  back, and a look once a second catches the rest. A headset or
+ *  Bluetooth device keeps the sound. */
 object Loudspeaker {
     private var on = false
     private var audio: AudioManager? = null
     private val main = Handler(Looper.getMainLooper())
-    private var listener: Any? = null
+    private var deviceListener: Any? = null
+    private var modeListener: Any? = null
     private val personal = setOf(
         AudioDeviceInfo.TYPE_WIRED_HEADSET,
         AudioDeviceInfo.TYPE_WIRED_HEADPHONES,
@@ -482,18 +486,24 @@ object Loudspeaker {
         it.type in personal || (Build.VERSION.SDK_INT >= 31 && it.type == AudioDeviceInfo.TYPE_BLE_HEADSET)
     }
 
-    private fun hold() {
+    /** `fresh`: choose it again even when the phone says it is chosen. */
+    private fun hold(fresh: Boolean) {
         val a = audio ?: return
         if (!on || headset(a)) return
         try {
             if (Build.VERSION.SDK_INT >= 31) {
-                if (a.communicationDevice?.type != AudioDeviceInfo.TYPE_BUILTIN_SPEAKER) {
-                    a.availableCommunicationDevices.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
-                        ?.let { a.setCommunicationDevice(it) }
+                val speaker = a.availableCommunicationDevices.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER } ?: return
+                if (fresh || a.communicationDevice?.type != AudioDeviceInfo.TYPE_BUILTIN_SPEAKER) {
+                    if (fresh) a.clearCommunicationDevice()
+                    a.setCommunicationDevice(speaker)
                 }
             } else {
                 @Suppress("DEPRECATION")
-                if (!a.isSpeakerphoneOn) a.isSpeakerphoneOn = true
+                if (fresh || !a.isSpeakerphoneOn) {
+                    if (a.mode != AudioManager.MODE_IN_COMMUNICATION) a.mode = AudioManager.MODE_IN_COMMUNICATION
+                    if (fresh) a.isSpeakerphoneOn = false
+                    a.isSpeakerphoneOn = true
+                }
             }
         } catch (e: Exception) {
         }
@@ -502,32 +512,38 @@ object Loudspeaker {
     private val look = object : Runnable {
         override fun run() {
             if (!on) return
-            hold()
+            hold(false)
             main.postDelayed(this, 1000)
         }
     }
+    private val again = Runnable { hold(true) }
 
     fun set(context: Context, want: Boolean) {
         val a = context.applicationContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
         audio = a
-        main.removeCallbacks(look)
+        main.removeCallbacksAndMessages(null)
         if (Build.VERSION.SDK_INT >= 31) {
-            (listener as? AudioManager.OnCommunicationDeviceChangedListener)?.let { a.removeOnCommunicationDeviceChangedListener(it) }
+            (deviceListener as? AudioManager.OnCommunicationDeviceChangedListener)?.let { a.removeOnCommunicationDeviceChangedListener(it) }
         }
-        listener = null
+        if (Build.VERSION.SDK_INT >= 31) {
+            (modeListener as? AudioManager.OnModeChangedListener)?.let { a.removeOnModeChangedListener(it) }
+        }
+        deviceListener = null
+        modeListener = null
         val was = on
         on = want
         if (want) {
-            if (Build.VERSION.SDK_INT < 31) {
-                @Suppress("DEPRECATION")
-                a.mode = AudioManager.MODE_IN_COMMUNICATION
-            }
-            hold()
+            hold(true)
             if (Build.VERSION.SDK_INT >= 31) {
-                val l = AudioManager.OnCommunicationDeviceChangedListener { main.post { hold() } }
-                a.addOnCommunicationDeviceChangedListener(context.mainExecutor, l)
-                listener = l
+                val d = AudioManager.OnCommunicationDeviceChangedListener { main.post { hold(false) } }
+                a.addOnCommunicationDeviceChangedListener(context.mainExecutor, d)
+                deviceListener = d
+                val m = AudioManager.OnModeChangedListener { main.postDelayed({ hold(true) }, 150) }
+                a.addOnModeChangedListener(context.mainExecutor, m)
+                modeListener = m
             }
+            // The microphone and call mode settle over the first seconds.
+            for (ms in longArrayOf(300, 800, 1500, 2500, 4000, 6000)) main.postDelayed(again, ms)
             main.postDelayed(look, 1000)
         } else if (was) {
             try {
