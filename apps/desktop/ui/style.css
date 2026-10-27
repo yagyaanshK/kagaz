@@ -1142,3 +1142,32 @@ dialog.ask label.ask-title select, dialog.ask label.ask-title input[type="text"]
 @media (pointer: coarse) { #main .cam-tile .cam-ctrl button { width: 44px; height: 44px; min-width: 0; min-height: 0; } }
 .cam-past .cam-ctrl .cam-quality { display: none; }
 .cp-actions { max-width: 560px; margin: 0 auto; }
+
+/* ---- A call's buttons: a symbol with its word; on a phone the symbol alone ---- */
+.cbtn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
+.cbtn .ci { display: inline-flex; }
+.cbtn svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.cbtn .ci-down svg { transform: rotate(135deg); }
+.cbtn.on:not(.danger):not(.ok) { background: var(--text); color: var(--bg); border-color: var(--text); }
+
+/* On a phone a call fills the screen, as a phone call does: the caller's
+   picture across the top, who and how long under it, then one row of
+   round buttons. */
+@media (max-width: 599px), (pointer: coarse) and (max-height: 500px) {
+  #call-card:not(.hidden) { position: fixed; inset: 0; z-index: 90; display: flex; flex-direction: column; gap: 0; margin: 0; padding: 0 0 env(safe-area-inset-bottom); border: none; border-radius: 0; background: var(--bg); overflow-y: auto; animation: none; }
+  #call-card .call-video { flex: none; width: 100%; border-radius: 0; padding-top: env(safe-area-inset-top); background: #000; }
+  #call-card .call-video:not(.has-stage) { aspect-ratio: 16 / 9; }
+  #call-card .kz-stage { border-radius: 0; max-height: 62vh; }
+  #call-card .call-body { padding: 12px var(--edge) 16px; }
+  #call-card .call-who { flex-direction: row; flex-wrap: wrap; align-items: baseline; justify-content: center; gap: 4px 8px; text-align: center; }
+  #call-card .call-who #call-peer { font-size: 18px; }
+  #call-card .call-actions { flex-wrap: nowrap; justify-content: space-evenly; gap: 6px; margin-top: 16px; }
+  #main #call-card .call-actions button.cbtn { flex: 0 0 auto; width: 56px; height: 56px; min-width: 0; min-height: 0; padding: 0; border-radius: 50%; }
+  #call-card .cbtn .cl { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  #call-card .cbtn svg { width: 24px; height: 24px; }
+  /* Ringing: Decline and Answer, big and apart, as on a phone. */
+  #call-card.ringing .call-actions { justify-content: space-around; margin-top: 28px; }
+  #main #call-card.ringing .call-actions button.cbtn { width: 68px; height: 68px; }
+  #call-card.ringing .cbtn svg { width: 30px; height: 30px; }
+  #call-card .call-volume { display: none; }
+}

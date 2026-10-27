@@ -12,6 +12,34 @@
 // selectCategory, startChime, stopChime.
 
 (() => {
+  // The call's buttons: a symbol, with its word beside it where there is
+  // room (on a phone the symbol alone; the word stays its name for
+  // screen readers).
+  const ICON = {
+    phone: '<path d="M6.5 3.5h3l1.5 4.5-2 1.3a11 11 0 0 0 5.7 5.7l1.3-2 4.5 1.5v3a2 2 0 0 1-2 2A16.5 16.5 0 0 1 4.5 5.5a2 2 0 0 1 2-2z"/>',
+    mic: '<path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3zM5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/>',
+    micOff: '<path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3zM5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M4 4l16 16"/>',
+    speaker: '<path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z"/><path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11"/>',
+    camera: '<rect x="3" y="7" width="12.5" height="10" rx="2"/><path d="M15.5 10.5 21 7.5v9l-5.5-3"/>',
+    cameraOff: '<rect x="3" y="7" width="12.5" height="10" rx="2"/><path d="M15.5 10.5 21 7.5v9l-5.5-3M3 4l18 16"/>',
+    unlock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7.5a4 4 0 0 1 7.7-1.5M12 15v2"/>',
+  };
+  const svg = (name) => `<svg viewBox="0 0 24 24" aria-hidden="true">${ICON[name]}</svg>`;
+  function btn(id, cls, icon, label, extra = "") {
+    const down = icon === "phone down";
+    return `<button id="${id}" type="button" class="${cls}" aria-label="${label}" title="${label}" ${extra}>`
+      + `<span class="ci${down ? " ci-down" : ""}">${svg(down ? "phone" : icon)}</span><span class="cl">${label}</span></button>`;
+  }
+  // A toggle's symbol, word and state.
+  function setToggle(id, on, icon, label, title) {
+    const b = $(id);
+    b.classList.toggle("on", on);
+    b.setAttribute("aria-pressed", String(on));
+    b.querySelector(".ci").innerHTML = svg(icon);
+    b.querySelector(".cl").textContent = label;
+    b.title = title;
+  }
+
   const PANEL = `
       <div id="calls-panel" class="calls-panel">
         <div class="calls-head">
@@ -39,13 +67,13 @@
             <span id="call-state" class="muted"></span>
           </div>
           <div class="call-actions">
-            <button id="call-answer" type="button" class="big ok">Answer</button>
-            <button id="call-decline" type="button" class="big">Decline</button>
-            <button id="call-open" type="button" class="big accent">Open door</button>
-            <button id="call-mute" type="button" class="big">Mute</button>
-            <button id="call-speaker" type="button" class="big hidden" aria-pressed="true">Earpiece</button>
-            <button id="call-camera" type="button" class="big" aria-pressed="false">Camera on</button>
-            <button id="call-hangup" type="button" class="big danger">Hang up</button>
+            ${btn("call-decline", "big cbtn danger", "phone down", "Decline")}
+            ${btn("call-answer", "big cbtn ok", "phone", "Answer")}
+            ${btn("call-mute", "big cbtn", "mic", "Mute", 'aria-pressed="false"')}
+            ${btn("call-speaker", "big cbtn hidden on", "speaker", "Speaker", 'aria-pressed="true"')}
+            ${btn("call-camera", "big cbtn", "cameraOff", "Camera", 'aria-pressed="false"')}
+            ${btn("call-open", "big cbtn accent", "unlock", "Open door")}
+            ${btn("call-hangup", "big cbtn danger", "phone down", "Hang up")}
           </div>
           <label class="call-volume" title="How loud their voice plays here">Volume
             <input id="call-volume" type="range" min="0.5" max="3" step="0.1" value="1">
@@ -430,9 +458,7 @@
     if (!ON_PHONE) return;
     speakerSet = true;
     invoke("phone_speaker", { on: loud }).catch(() => {});
-    $("call-speaker").textContent = loud ? "Earpiece" : "Speaker";
-    $("call-speaker").setAttribute("aria-pressed", String(loud));
-    $("call-speaker").title = loud ? "Hear the call on the phone's earpiece" : "Hear the call on the loudspeaker";
+    setToggle("call-speaker", loud, "speaker", "Speaker", loud ? "On the loudspeaker; tap for the earpiece" : "On the earpiece; tap for the loudspeaker");
   }
   let muted = false;
   let micStarting = false;
@@ -506,7 +532,7 @@
     speakerSet = false;
     loud = true;
     muted = false;
-    $("call-mute").textContent = "Mute";
+    setToggle("call-mute", false, "mic", "Mute", "Mute your microphone");
   }
 
   // ---------- our camera ----------
@@ -528,8 +554,7 @@
 
   function renderCamera() {
     const on = !!cam || camStarting;
-    $("call-camera").textContent = on ? "Camera off" : "Camera on";
-    $("call-camera").setAttribute("aria-pressed", String(on));
+    setToggle("call-camera", on, on ? "camera" : "cameraOff", "Camera", on ? "Your camera is on; tap to turn it off" : "Your camera is off; tap to turn it on");
     $("call-self").classList.toggle("hidden", !cam);
   }
 
@@ -626,7 +651,7 @@
   });
   $("call-mute").addEventListener("click", () => {
     muted = !muted;
-    $("call-mute").textContent = muted ? "Unmute" : "Mute";
+    setToggle("call-mute", muted, muted ? "micOff" : "mic", muted ? "Unmute" : "Mute", muted ? "Your microphone is off; tap to turn it on" : "Mute your microphone");
   });
 
   listen("call-event", (e) => render(e.payload));
