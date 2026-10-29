@@ -40,8 +40,11 @@ x25519-dalek = { version = "2", features = ["static_secrets"] }
 chacha20 = "0.9"
 salsa20 = "0.10"
 
-[target.'cfg(not(target_os = "android"))'.dependencies]
+# USB printers and scanners: computers only (a phone has no such port use).
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 nusb = "0.2"
+
+[target.'cfg(not(target_os = "android"))'.dependencies]
 # Atomberg fans over this computer's Bluetooth LE adapter (Linux through
 # BlueZ, Windows WinRT, macOS CoreBluetooth). Async by nature, so a small
 # tokio runtime runs each short exchange; the phone's Bluetooth is Kotlin's.
