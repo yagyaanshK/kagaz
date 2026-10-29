@@ -87,7 +87,7 @@ pub fn available() -> bool {
     platform::AVAILABLE
 }
 
-#[cfg(all(unix, not(target_os = "android")))]
+#[cfg(all(unix, not(any(target_os = "android", target_os = "ios"))))]
 mod platform {
     //! CUPS. `lpstat` answers in the user's language unless told otherwise,
     //! so every call runs with LC_ALL=C.
@@ -591,7 +591,7 @@ mod platform {
     }
 }
 
-#[cfg(not(any(windows, all(unix, not(target_os = "android")))))]
+#[cfg(not(any(windows, all(unix, not(any(target_os = "android", target_os = "ios"))))))]
 mod platform {
     use super::*;
 
