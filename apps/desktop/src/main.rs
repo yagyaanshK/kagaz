@@ -228,6 +228,21 @@ fn phone_speaker(app: AppHandle, on: bool) -> Result<(), String> {
     }
 }
 
+/// On a phone: a doorbell call takes the phone's call audio (`on`) or
+/// gives it back. A computer shares its microphone freely.
+#[tauri::command]
+fn phone_call_audio(app: AppHandle, on: bool) -> Result<(), String> {
+    #[cfg(mobile)]
+    {
+        mobile::call_audio(&app, on)
+    }
+    #[cfg(not(mobile))]
+    {
+        let _ = (app, on);
+        Ok(())
+    }
+}
+
 /// On a phone: whether doorbell calls ring in Do Not Disturb; none on a
 /// computer, which has no such switch for Kagaz.
 #[tauri::command]
@@ -1849,6 +1864,7 @@ pub fn run() {
             cameras_restart,
             camera_talk,
             phone_speaker,
+            phone_call_audio,
             ring_in_dnd,
             ring_dnd_settings,
             camera_talk_stop,

@@ -509,6 +509,88 @@ const KagazPlayer = (() => {
     close: '<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>',
   };
 
+  // Zoom a picture inside its frame, as a phone's photo viewer does: two
+  // fingers pinch (or ctrl + the wheel, a trackpad's pinch), one finger
+  // moves a zoomed picture about, and a double tap goes to twice the size
+  // there or back to the whole picture. While it is not zoomed one finger
+  // still scrolls the page. `target()` is what is moved (it may be
+  // replaced, as a player is on a reconnect).
+  function zoomable(frame, target, label) {
+    const z = { s: 1, x: 0, y: 0 };
+    let pinch = null; // { span, s }
+    let pan = null; // { x, y, zx, zy }
+    let tap = { t: 0, x: 0, y: 0 };
+    const apply = () => {
+      const r = frame.getBoundingClientRect();
+      z.s = Math.min(6, Math.max(1, z.s));
+      const mx = (r.width * (z.s - 1)) / 2, my = (r.height * (z.s - 1)) / 2;
+      z.x = Math.min(mx, Math.max(-mx, z.x));
+      z.y = Math.min(my, Math.max(-my, z.y));
+      const t = target();
+      if (t) t.style.transform = z.s > 1.01 ? `translate(${z.x}px, ${z.y}px) scale(${z.s})` : "";
+      frame.classList.toggle("kz-zoomed", z.s > 1.01);
+      if (label) {
+        label.textContent = `${z.s.toFixed(1)}\u00D7`;
+        label.classList.toggle("hidden", z.s <= 1.01);
+      }
+    };
+    // Zoom to `s`, keeping the point (cx, cy) of the frame where it is.
+    const zoomAt = (s, cx, cy) => {
+      const r = frame.getBoundingClientRect();
+      const px = cx - r.left - r.width / 2, py = cy - r.top - r.height / 2;
+      const k = Math.min(6, Math.max(1, s)) / z.s;
+      z.x = px - (px - z.x) * k;
+      z.y = py - (py - z.y) * k;
+      z.s *= k;
+      apply();
+    };
+    const onControl = (ev) => ev.target.closest && ev.target.closest("button, input, select, a");
+    const spanOf = (t) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY) || 1;
+    frame.addEventListener("touchstart", (ev) => {
+      if (onControl(ev)) return;
+      if (ev.touches.length === 2) {
+        pinch = { span: spanOf(ev.touches), s: z.s };
+        pan = null;
+      } else if (ev.touches.length === 1 && z.s > 1.01) {
+        const t = ev.touches[0];
+        pan = { x: t.clientX, y: t.clientY, zx: z.x, zy: z.y };
+      }
+    }, { passive: true });
+    frame.addEventListener("touchmove", (ev) => {
+      if (pinch && ev.touches.length === 2) {
+        ev.preventDefault();
+        const t = ev.touches;
+        zoomAt((pinch.s * spanOf(t)) / pinch.span, (t[0].clientX + t[1].clientX) / 2, (t[0].clientY + t[1].clientY) / 2);
+      } else if (pan && ev.touches.length === 1) {
+        ev.preventDefault();
+        const t = ev.touches[0];
+        z.x = pan.zx + t.clientX - pan.x;
+        z.y = pan.zy + t.clientY - pan.y;
+        apply();
+      }
+    }, { passive: false });
+    frame.addEventListener("touchend", (ev) => {
+      if (ev.touches.length < 2) pinch = null;
+      if (!ev.touches.length) pan = null;
+      if (ev.touches.length || ev.changedTouches.length !== 1 || onControl(ev)) return;
+      const t = ev.changedTouches[0], now = Date.now();
+      if (now - tap.t < 320 && Math.hypot(t.clientX - tap.x, t.clientY - tap.y) < 30) {
+        if (z.s > 1.01) { z.s = 1; z.x = 0; z.y = 0; apply(); } else zoomAt(2, t.clientX, t.clientY);
+        tap = { t: 0, x: 0, y: 0 };
+      } else tap = { t: now, x: t.clientX, y: t.clientY };
+    });
+    frame.addEventListener("wheel", (ev) => {
+      if (!ev.ctrlKey) return;
+      ev.preventDefault();
+      zoomAt(z.s * (ev.deltaY > 0 ? 0.85 : 1.18), ev.clientX, ev.clientY);
+    }, { passive: false });
+    frame.addEventListener("dblclick", (ev) => {
+      if (onControl(ev)) return;
+      if (z.s > 1.01) { z.s = 1; z.x = 0; z.y = 0; apply(); } else zoomAt(2, ev.clientX, ev.clientY);
+    });
+    return { reset() { z.s = 1; z.x = 0; z.y = 0; apply(); } };
+  }
+
   // A stage: one picture with its controls over it, laid out by the
   // picture's shape, as the big video apps do.
   // - Wide (16:9 and so on), as YouTube: the full width of its place
@@ -545,7 +627,10 @@ const KagazPlayer = (() => {
       this.tools.className = "kz-tools";
       this.bar.appendChild(this.tools);
       this.fullButton = this.button(ICON.full, "Full screen", () => this.fullscreen(), "kz-full-button");
-      this.el.append(this.note, this.top, this.bar);
+      this.zoomLabel = document.createElement("span");
+      this.zoomLabel.className = "kz-zoom-label hidden";
+      this.el.append(this.note, this.top, this.bar, this.zoomLabel);
+      this.zoom = zoomable(this.el, () => this.player.box, this.zoomLabel);
       this.player.onsize = (w, h) => {
         this.el.style.setProperty("--ar", `${w} / ${h}`);
         this.el.dataset.shape = shapeOf(w, h);
@@ -653,5 +738,5 @@ const KagazPlayer = (() => {
     };
   }
 
-  return { Player, Stage, watch, audioContext, fullscreen, shapeOf, ICON };
+  return { Player, Stage, watch, audioContext, fullscreen, shapeOf, zoomable, ICON };
 })();

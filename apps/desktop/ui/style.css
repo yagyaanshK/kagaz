@@ -313,7 +313,7 @@ body.kz-has-full { overflow: hidden; }
 .call-video-note { position: absolute; inset: 0; z-index: 1; display: flex; align-items: center; justify-content: center; color: #ddd; font-size: 13px; padding: 0 12px; text-align: center; pointer-events: none; }
 .call-video-note:empty { display: none; }
 /* Your own camera, small in the picture's corner, mirrored as in a mirror. */
-.call-self { position: absolute; right: 10px; bottom: 10px; z-index: 3; width: 26%; max-width: 180px; min-width: 88px; aspect-ratio: 4 / 3; object-fit: cover; transform: scaleX(-1); border-radius: 8px; border: 2px solid rgba(255, 255, 255, 0.85); background: #000; box-shadow: 0 1px 6px rgba(0, 0, 0, 0.5); }
+.call-self { position: absolute; right: 10px; bottom: 10px; z-index: 3; width: 26%; max-width: 180px; min-width: 88px; height: auto; max-height: 45%; object-fit: contain; transform: scaleX(-1); border-radius: 8px; border: 2px solid rgba(255, 255, 255, 0.85); background: #000; box-shadow: 0 1px 6px rgba(0, 0, 0, 0.5); }
 .call-ask { margin: 10px 0 0; padding: 10px 12px; border: 1px solid var(--accent); border-radius: 10px; }
 .call-ask .actions { margin-top: 8px; }
 /* While the caller's live view shows, the call's own (still black) picture waits behind it. */
@@ -1154,7 +1154,7 @@ dialog.ask label.ask-title select, dialog.ask label.ask-title input[type="text"]
    picture across the top, who and how long under it, then one row of
    round buttons. */
 @media (max-width: 599px), (pointer: coarse) and (max-height: 500px) {
-  #call-card:not(.hidden) { position: fixed; inset: 0; z-index: 90; display: flex; flex-direction: column; gap: 0; margin: 0; padding: 0 0 env(safe-area-inset-bottom); border: none; border-radius: 0; background: var(--bg); overflow-y: auto; animation: none; }
+  #call-card:not(.hidden) { position: fixed; inset: 0; z-index: 1000; display: flex; flex-direction: column; gap: 0; margin: 0; padding: 0 0 env(safe-area-inset-bottom); border: none; border-radius: 0; background: var(--bg); overflow-y: auto; animation: none; }
   #call-card .call-video { flex: none; width: 100%; border-radius: 0; padding-top: env(safe-area-inset-top); background: #000; }
   #call-card .call-video:not(.has-stage) { aspect-ratio: 16 / 9; }
   #call-card .kz-stage { border-radius: 0; max-height: 62vh; }
@@ -1162,12 +1162,16 @@ dialog.ask label.ask-title select, dialog.ask label.ask-title input[type="text"]
   #call-card .call-who { flex-direction: row; flex-wrap: wrap; align-items: baseline; justify-content: center; gap: 4px 8px; text-align: center; }
   #call-card .call-who #call-peer { font-size: 18px; }
   #call-card .call-actions { flex-wrap: nowrap; justify-content: space-evenly; gap: 6px; margin-top: 16px; }
-  #main #call-card .call-actions button.cbtn { flex: 0 0 auto; width: 56px; height: 56px; min-width: 0; min-height: 0; padding: 0; border-radius: 50%; }
+  body > #call-card .call-actions button.cbtn { flex: 0 0 auto; width: 56px; height: 56px; min-width: 0; min-height: 0; padding: 0; border-radius: 50%; }
   #call-card .cbtn .cl { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   #call-card .cbtn svg { width: 24px; height: 24px; }
   /* Ringing: Decline and Answer, big and apart, as on a phone. */
   #call-card.ringing .call-actions { justify-content: space-around; margin-top: 28px; }
-  #main #call-card.ringing .call-actions button.cbtn { width: 68px; height: 68px; }
+  body > #call-card.ringing .call-actions button.cbtn { width: 68px; height: 68px; }
   #call-card.ringing .cbtn svg { width: 30px; height: 30px; }
   #call-card .call-volume { display: none; }
 }
+.fan-switch { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; }
+/* A zoomed picture: how far, and kept inside its frame. */
+.kz-stage .kz-player { transform-origin: center; }
+.kz-zoom-label { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); z-index: 3; padding: 2px 8px; border-radius: 4px; background: rgba(0, 0, 0, 0.55); color: #fff; font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; pointer-events: none; }
