@@ -84,10 +84,15 @@ const KagazCallCamera = (() => {
     await preview.play().catch(() => {});
     // Wait for the camera's size.
     for (let i = 0; i < 50 && !preview.videoWidth; i++) await new Promise((r) => setTimeout(r, 50));
-    const scale = Math.min(1, 640 / (preview.videoWidth || 640));
+    // The picture keeps the camera's own shape (upright on an upright
+    // phone), its longer side at most 640.
     const even = (n) => Math.max(2, Math.round(n / 2) * 2);
-    const width = even((preview.videoWidth || 640) * scale);
-    const height = even((preview.videoHeight || 480) * scale);
+    const sizeOf = () => {
+      const w = preview.videoWidth || 640, h = preview.videoHeight || 480;
+      const scale = Math.min(1, 640 / Math.max(w, h));
+      return [even(w * scale), even(h * scale)];
+    };
+    let [width, height] = sizeOf();
     const codec = await pickCodec(width, height);
     if (!codec) {
       stream.getTracks().forEach((t) => t.stop());
@@ -125,6 +130,23 @@ const KagazCallCamera = (() => {
       if (stopped || preview.readyState < 2) return;
       // Drop a picture rather than queue them when the encoder falls behind.
       if (encoder.encodeQueueSize > 2) return;
+      // The phone turned (the camera's picture changed shape): the encoder
+      // takes the new shape, from a full picture, rather than stretch it.
+      const [w, h] = sizeOf();
+      if (w !== width || h !== height) {
+        width = w;
+        height = h;
+        canvas.width = width;
+        canvas.height = height;
+        try {
+          encoder.configure(config(codec, width, height));
+        } catch (e) {
+          if (onError) onError(e);
+          stop();
+          return;
+        }
+        wantKey = true;
+      }
       ctx.drawImage(preview, 0, 0, width, height);
       const frame = new VideoFrame(canvas, { timestamp: Math.round((performance.now() - started) * 1000) });
       const key = wantKey || count % KEY_EVERY === 0;

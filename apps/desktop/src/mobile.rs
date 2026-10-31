@@ -473,6 +473,12 @@ pub fn loudspeaker(app: &AppHandle, on: bool) -> Result<(), String> {
     phone(app)?.run_mobile_plugin::<()>("loudspeaker", SpeakerArgs { on }).map_err(|e| e.to_string())
 }
 
+/// A doorbell call takes the phone's call audio (call mode and the sound,
+/// also from another app's call), or gives it back.
+pub fn call_audio(app: &AppHandle, on: bool) -> Result<(), String> {
+    phone(app)?.run_mobile_plugin::<()>("callAudio", SpeakerArgs { on }).map_err(|e| e.to_string())
+}
+
 #[derive(Deserialize)]
 struct On {
     on: bool,

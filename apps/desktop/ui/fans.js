@@ -32,6 +32,19 @@ const KagazFans = (() => {
     return b;
   }
 
+  // An on/off switch with its name: it shows how the fan is and flips it.
+  function toggle(text, on, label, onChange) {
+    const wrap = el("label", "fan-switch", text + " ");
+    const input = el("input", "toggle");
+    input.type = "checkbox";
+    input.setAttribute("role", "switch");
+    input.checked = on;
+    input.setAttribute("aria-label", label);
+    input.addEventListener("change", () => onChange(input.checked));
+    wrap.appendChild(input);
+    return wrap;
+  }
+
   function profile(f) {
     const s = (f.series || "").toUpperCase();
     return {
@@ -229,12 +242,7 @@ const KagazFans = (() => {
     controls.appendChild(speeds);
     const extras = el("div", "fan-extras");
     const p = profile(f);
-    if (p.light) {
-      const led = !!(s && s.led);
-      const b = button("chip" + (led ? " active" : ""), led ? "Light on" : "Light off", () => send(f, { kind: "led", value: !led }, c), `Light of ${f.name}: turn ${led ? "off" : "on"}`);
-      b.setAttribute("aria-pressed", String(led));
-      extras.appendChild(b);
-    }
+    if (p.light) extras.appendChild(toggle("Light", !!(s && s.led), `Light of ${f.name}`, (v) => send(f, { kind: "led", value: v }, c)));
     // The light's colour and brightness, on fans that have them: read and
     // set as checked on an Aris.
     if (p.light && p.color) {
@@ -267,10 +275,8 @@ const KagazFans = (() => {
       dim.append(range, shown);
       extras.appendChild(dim);
     }
-    const sleep = !!(s && s.sleep);
-    const sb = button("chip" + (sleep ? " active" : ""), "Sleep", () => send(f, { kind: "sleep", value: !sleep }, c), `Sleep mode of ${f.name}: turn ${sleep ? "off" : "on"}`);
+    const sb = toggle("Sleep", !!(s && s.sleep), `Sleep mode of ${f.name}`, (v) => send(f, { kind: "sleep", value: v }, c));
     sb.title = "Sleep mode: the fan's own feature (on some remotes, such as the Efficio's; the Aris's remote has no button for it); what it does through the night is not yet known";
-    sb.setAttribute("aria-pressed", String(sleep));
     extras.appendChild(sb);
     const timer = el("label", "fan-timer", "Turn off after ");
     const sel = el("select");

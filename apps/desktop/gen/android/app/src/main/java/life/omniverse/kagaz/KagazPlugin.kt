@@ -20,6 +20,8 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
+import android.media.AudioFocusRequest
+import android.media.AudioAttributes
 import android.net.Uri
 import android.os.PowerManager
 import android.provider.Settings
@@ -361,6 +363,15 @@ class KagazPlugin(private val first: Activity) : Plugin(first) {
         invoke.resolve()
     }
 
+    // A doorbell call takes the phone's call audio for as long as it lasts
+    // (see CallAudio); off gives it back.
+    @Command
+    fun callAudio(invoke: Invoke) {
+        val args = invoke.parseArgs(SpeakerArgs::class.java)
+        CallAudio.set(activity, args.on)
+        invoke.resolve()
+    }
+
     // Whether doorbell calls ring in Do Not Disturb: Android keeps that
     // switch on the "Doorbell calls" notifications' own page, where only
     // the person can change it (see KagazCallService.allowed).
@@ -556,6 +567,53 @@ object Loudspeaker {
                 }
             } catch (e: Exception) {
             }
+        }
+    }
+}
+
+/** A doorbell call takes the phone's call audio, as a phone call does,
+ *  also from a WhatsApp or Signal call under way: Kagaz becomes the owner
+ *  of call mode (Android gives the microphone to that app; another app
+ *  recording at the same time gets silence) and takes the sound for itself
+ *  (the other app is told to pause). Both go back when the call ends. */
+object CallAudio {
+    private var held = false
+    private var request: AudioFocusRequest? = null
+
+    fun set(context: Context, on: Boolean) {
+        val a = context.applicationContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        try {
+            if (on) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    val r = request ?: AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE)
+                        .setAudioAttributes(
+                            AudioAttributes.Builder()
+                                .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
+                                .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                                .build()
+                        )
+                        .setOnAudioFocusChangeListener { }
+                        .build()
+                    request = r
+                    a.requestAudioFocus(r)
+                } else {
+                    @Suppress("DEPRECATION")
+                    a.requestAudioFocus(null, AudioManager.STREAM_VOICE_CALL, AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE)
+                }
+                a.mode = AudioManager.MODE_IN_COMMUNICATION
+                held = true
+            } else if (held) {
+                held = false
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    request?.let { a.abandonAudioFocusRequest(it) }
+                } else {
+                    @Suppress("DEPRECATION")
+                    a.abandonAudioFocus(null)
+                }
+                request = null
+                a.mode = AudioManager.MODE_NORMAL
+            }
+        } catch (e: Exception) {
         }
     }
 }

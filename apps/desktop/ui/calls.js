@@ -150,9 +150,20 @@
 
   // A ring shows at the top of the pane; a call made or answered plays in
   // its device's card when there is one.
+  // On a phone a call covers the screen (style.css): it hangs from the
+  // page itself, so no card it was made from can show through or clip it.
+  const PHONE_LAYOUT = window.matchMedia("(max-width: 599px), (pointer: coarse) and (max-height: 500px)");
+  PHONE_LAYOUT.addEventListener("change", () => place());
+
   function place() {
     const card = $("call-card");
     const phase = (status && status.phase) || "idle";
+    const shown = phase !== "idle" || !!card.dataset.ended;
+    document.body.classList.toggle("in-call", shown && PHONE_LAYOUT.matches);
+    if (shown && PHONE_LAYOUT.matches) {
+      if (card.parentElement !== document.body) document.body.appendChild(card);
+      return;
+    }
     let slot = null;
     if (phase === "calling" || phase === "talking" || card.dataset.ended) {
       // Only into a card that is open (full width): a closed one is a small
@@ -469,40 +480,120 @@
     return btoa(s);
   }
 
+  // The microphone, asked again when it is busy (another app letting go
+  // of it takes a moment).
+  async function openMic() {
+    let last = null;
+    for (let attempt = 0; attempt < 4; attempt++) {
+      try {
+        return await navigator.mediaDevices.getUserMedia({
+          audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 },
+        });
+      } catch (e) {
+        last = e;
+        if (e && e.name === "NotAllowedError") throw e;
+        await new Promise((r) => setTimeout(r, 700));
+      }
+    }
+    throw last;
+  }
+
+  // Whether the microphone really sends: when its sound stops coming, or
+  // comes as exact silence (what Android hands an app while another one,
+  // a WhatsApp call say, has the microphone; a real microphone always
+  // hears a little), it is opened again, after Kagaz takes the call audio
+  // back. Said on the call while it happens.
+  let micHeard = 0;
+  let micSilentSince = 0;
+  let micWatch = null;
+  let micRestarts = 0;
+  let micRestarting = false;
+
+  function watchMic() {
+    clearInterval(micWatch);
+    micHeard = Date.now();
+    micSilentSince = 0;
+    micWatch = setInterval(() => {
+      if (!mic || !status || status.phase !== "talking") return;
+      const now = Date.now();
+      const track = mic.stream.getAudioTracks()[0];
+      const why = !track || track.readyState === "ended" ? "it stopped"
+        : now - micHeard > 3000 ? "no sound came from it"
+        : micSilentSince && now - micSilentSince > 3000 ? "Android gave it only silence"
+        : "";
+      if (why) restartMic(why);
+      else if (micRestarts && !micSilentSince) {
+        micRestarts = 0;
+        note("");
+      }
+    }, 1000);
+  }
+
+  async function restartMic(why) {
+    if (micRestarting) return;
+    micRestarting = true;
+    micRestarts++;
+    invoke("page_log", { line: `call microphone: ${why}; opening it again (${micRestarts})` }).catch(() => {});
+    note(micRestarts > 2
+      ? "They may not hear you: another app may be using the microphone, or it is switched off in the phone's quick settings. Kagaz keeps trying."
+      : "Reconnecting the microphone\u2026");
+    releaseMic();
+    // Not too often: a microphone that stays silent is tried every few seconds.
+    await new Promise((r) => setTimeout(r, micRestarts > 2 ? 4000 : 300));
+    micRestarting = false;
+    if (status && status.phase === "talking") startAudio();
+  }
+
+  function releaseMic() {
+    if (!mic) return;
+    mic.stream.getTracks().forEach((t) => t.stop());
+    try {
+      mic.source.disconnect();
+      mic.node.disconnect();
+      mic.sink.disconnect();
+    } catch (e) {}
+    mic = null;
+  }
+
   async function startAudio() {
     const actx = KagazPlayer.audioContext();
     if (mic || micStarting) return;
     micStarting = true;
-    // The loudspeaker from the moment the call is answered; Android holds
-    // it there through the microphone's start (KagazPlugin's Loudspeaker).
+    // The phone's call audio is Kagaz's for the call, also over another
+    // app's call (KagazPlugin's CallAudio); the loudspeaker from the moment
+    // the call is answered (its Loudspeaker holds it there).
+    if (ON_PHONE) invoke("phone_call_audio", { on: true }).catch(() => {});
     applySpeaker();
     try {
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw new Error("this window cannot use the microphone");
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 },
-      });
+      const stream = await openMic();
       if (!status || status.phase !== "talking") {
         stream.getTracks().forEach((t) => t.stop());
         return;
       }
       await actx.audioWorklet.addModule("call-mic.js");
+      await actx.resume().catch(() => {});
       const source = actx.createMediaStreamSource(stream);
       const node = new AudioWorkletNode(actx, "kagaz-mic");
       // Worklets only run while connected to the output; this one is silent.
       const sink = actx.createGain();
       sink.gain.value = 0;
       node.port.onmessage = (e) => {
-        if (muted) return;
         const pcm = e.data;
+        micHeard = Date.now();
+        if (pcm.some((v) => v !== 0)) micSilentSince = 0;
+        else if (!micSilentSince) micSilentSince = micHeard;
+        if (muted) return;
         invoke("calls_audio", { data: bytesToBase64(new Uint8Array(pcm.buffer)) }).catch(() => {});
       };
       source.connect(node);
       node.connect(sink);
       sink.connect(actx.destination);
       mic = { stream, node, source, sink };
+      watchMic();
       // The microphone put the phone in call mode, which picks the earpiece.
       applySpeaker();
-      note("");
+      if (!micRestarts) note("");
     } catch (e) {
       if (e && e.name === "NotAllowedError") {
         const where = /Android/i.test(navigator.userAgent)
@@ -518,15 +609,11 @@
   }
 
   function stopAudio() {
-    if (mic) {
-      mic.stream.getTracks().forEach((t) => t.stop());
-      try {
-        mic.source.disconnect();
-        mic.node.disconnect();
-        mic.sink.disconnect();
-      } catch (e) {}
-      mic = null;
-    }
+    clearInterval(micWatch);
+    micWatch = null;
+    micRestarts = 0;
+    releaseMic();
+    if (ON_PHONE) invoke("phone_call_audio", { on: false }).catch(() => {});
     // The phone's own choice of where sound plays again.
     if (speakerSet) invoke("phone_speaker", { on: false }).catch(() => {});
     speakerSet = false;
