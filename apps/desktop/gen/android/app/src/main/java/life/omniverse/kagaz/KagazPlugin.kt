@@ -22,6 +22,8 @@ import android.media.AudioDeviceInfo
 import android.media.AudioManager
 import android.media.AudioFocusRequest
 import android.media.AudioAttributes
+import android.media.AudioFormat
+import android.media.AudioTrack
 import android.net.Uri
 import android.os.PowerManager
 import android.provider.Settings
@@ -470,15 +472,14 @@ private class PdfAdapter(private val file: File, private val name: String) : Pri
     }
 }
 
-/** Holds a call's sound on the loudspeaker for as long as the call lasts.
- *  Asking once is not enough: when the microphone starts, the phone goes
- *  into call mode and puts the sound on the earpiece, sometimes after
- *  Kagaz asked, while still reporting the loudspeaker as chosen (seen on a
- *  phone: the button worked, the start of the call did not). So the
- *  loudspeaker is chosen afresh whenever the mode changes and a few times
- *  over the call's first seconds, every other change of device is put
- *  back, and a look once a second catches the rest. A headset or
- *  Bluetooth device keeps the sound. */
+/** Door calls play on the loudspeaker (a video call, as phones play
+ *  one), unless a headset or Bluetooth device is connected. The choice is
+ *  made before the call's microphone opens and then left alone: on Android
+ *  12 and later a change of where sound plays also changes which
+ *  microphone the phone uses, and that ends the web view's microphone
+ *  stream (the page opens it again, but anyone listening loses a moment).
+ *  The phone is only told again when it, or the web view, picked
+ *  something else. */
 object Loudspeaker {
     private var on = false
     private var audio: AudioManager? = null
@@ -497,73 +498,90 @@ object Loudspeaker {
         it.type in personal || (Build.VERSION.SDK_INT >= 31 && it.type == AudioDeviceInfo.TYPE_BLE_HEADSET)
     }
 
-    /** `fresh`: choose it again even when the phone says it is chosen. */
-    private fun hold(fresh: Boolean) {
+    /** The loudspeaker, when the phone has something else chosen. */
+    private fun choose() {
         val a = audio ?: return
         if (!on || headset(a)) return
         try {
             if (Build.VERSION.SDK_INT >= 31) {
+                if (a.communicationDevice?.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER) return
                 val speaker = a.availableCommunicationDevices.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER } ?: return
-                if (fresh || a.communicationDevice?.type != AudioDeviceInfo.TYPE_BUILTIN_SPEAKER) {
-                    if (fresh) a.clearCommunicationDevice()
-                    a.setCommunicationDevice(speaker)
-                }
+                a.setCommunicationDevice(speaker)
             } else {
                 @Suppress("DEPRECATION")
-                if (fresh || !a.isSpeakerphoneOn) {
-                    if (a.mode != AudioManager.MODE_IN_COMMUNICATION) a.mode = AudioManager.MODE_IN_COMMUNICATION
-                    if (fresh) a.isSpeakerphoneOn = false
-                    a.isSpeakerphoneOn = true
-                }
+                if (!a.isSpeakerphoneOn) a.isSpeakerphoneOn = true
             }
         } catch (e: Exception) {
         }
     }
 
-    private val look = object : Runnable {
-        override fun run() {
-            if (!on) return
-            hold(false)
-            main.postDelayed(this, 1000)
+    /** Call mode has just begun (CallAudio), before the microphone opens:
+     *  the loudspeaker chosen afresh, as a tap of the button does it. A
+     *  phone was seen to report the loudspeaker as chosen at a call's
+     *  start while playing on the earpiece, until it was chosen again. */
+    fun fresh() {
+        val a = audio ?: return
+        if (!on || headset(a)) return
+        try {
+            if (Build.VERSION.SDK_INT >= 31) {
+                val speaker = a.availableCommunicationDevices.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER } ?: return
+                a.clearCommunicationDevice()
+                a.setCommunicationDevice(speaker)
+            } else {
+                @Suppress("DEPRECATION")
+                a.isSpeakerphoneOn = false
+                @Suppress("DEPRECATION")
+                a.isSpeakerphoneOn = true
+            }
+        } catch (e: Exception) {
         }
     }
-    private val again = Runnable { hold(true) }
+
+    private val soon = Runnable { choose() }
+
+    /** A moment later, once the phone has finished its own change. */
+    private fun chooseSoon() {
+        main.removeCallbacks(soon)
+        main.postDelayed(soon, 200)
+    }
 
     fun set(context: Context, want: Boolean) {
         val a = context.applicationContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
         audio = a
-        main.removeCallbacksAndMessages(null)
+        if (want == on) {
+            if (want) choose()
+            return
+        }
+        on = want
+        main.removeCallbacks(soon)
         if (Build.VERSION.SDK_INT >= 31) {
             (deviceListener as? AudioManager.OnCommunicationDeviceChangedListener)?.let { a.removeOnCommunicationDeviceChangedListener(it) }
-        }
-        if (Build.VERSION.SDK_INT >= 31) {
             (modeListener as? AudioManager.OnModeChangedListener)?.let { a.removeOnModeChangedListener(it) }
+            deviceListener = null
+            modeListener = null
         }
-        deviceListener = null
-        modeListener = null
-        val was = on
-        on = want
         if (want) {
-            hold(true)
+            choose()
             if (Build.VERSION.SDK_INT >= 31) {
-                val d = AudioManager.OnCommunicationDeviceChangedListener { main.post { hold(false) } }
+                // Call mode beginning, or a choice by the phone or the web
+                // view: the loudspeaker again (nothing happens when it
+                // already is the loudspeaker).
+                val d = AudioManager.OnCommunicationDeviceChangedListener { chooseSoon() }
                 a.addOnCommunicationDeviceChangedListener(context.mainExecutor, d)
                 deviceListener = d
-                val m = AudioManager.OnModeChangedListener { main.postDelayed({ hold(true) }, 150) }
+                val m = AudioManager.OnModeChangedListener { mode ->
+                    if (mode == AudioManager.MODE_IN_COMMUNICATION) chooseSoon()
+                }
                 a.addOnModeChangedListener(context.mainExecutor, m)
                 modeListener = m
             }
-            // The microphone and call mode settle over the first seconds.
-            for (ms in longArrayOf(300, 800, 1500, 2500, 4000, 6000)) main.postDelayed(again, ms)
-            main.postDelayed(look, 1000)
-        } else if (was) {
+        } else {
             try {
                 if (Build.VERSION.SDK_INT >= 31) {
                     a.clearCommunicationDevice()
                 } else {
                     @Suppress("DEPRECATION")
                     a.isSpeakerphoneOn = false
-                    a.mode = AudioManager.MODE_NORMAL
                 }
             } catch (e: Exception) {
             }
@@ -575,23 +593,26 @@ object Loudspeaker {
  *  also from a WhatsApp or Signal call under way: Kagaz becomes the owner
  *  of call mode (Android gives the microphone to that app; another app
  *  recording at the same time gets silence) and takes the sound for itself
- *  (the other app is told to pause). Both go back when the call ends. */
+ *  (the other app is told to pause). A silent voice track plays for the
+ *  call: on Android 12 and later an app's call mode counts only while it
+ *  plays or records voice, so without one call mode would begin with the
+ *  microphone, and the loudspeaker choice would land on the microphone's
+ *  stream as it starts (which ends it; see Loudspeaker). Everything goes
+ *  back when the call ends. */
 object CallAudio {
     private var held = false
     private var request: AudioFocusRequest? = null
+    private var silence: AudioTrack? = null
 
     fun set(context: Context, on: Boolean) {
         val a = context.applicationContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
         try {
             if (on) {
+                if (held) return
+                held = true
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    val r = request ?: AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE)
-                        .setAudioAttributes(
-                            AudioAttributes.Builder()
-                                .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
-                                .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
-                                .build()
-                        )
+                    val r = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE)
+                        .setAudioAttributes(voice())
                         .setOnAudioFocusChangeListener { }
                         .build()
                     request = r
@@ -601,9 +622,18 @@ object CallAudio {
                     a.requestAudioFocus(null, AudioManager.STREAM_VOICE_CALL, AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE)
                 }
                 a.mode = AudioManager.MODE_IN_COMMUNICATION
-                held = true
+                silence = silentVoice()
+                Loudspeaker.fresh()
             } else if (held) {
                 held = false
+                silence?.let {
+                    try {
+                        it.stop()
+                        it.release()
+                    } catch (e: Exception) {
+                    }
+                }
+                silence = null
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                     request?.let { a.abandonAudioFocusRequest(it) }
                 } else {
@@ -615,5 +645,34 @@ object CallAudio {
             }
         } catch (e: Exception) {
         }
+    }
+
+    private fun voice(): AudioAttributes = AudioAttributes.Builder()
+        .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
+        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+        .build()
+
+    /** One second of silence as voice, played round and round. */
+    private fun silentVoice(): AudioTrack? = try {
+        val rate = 8000
+        val frames = rate
+        val t = AudioTrack.Builder()
+            .setAudioAttributes(voice())
+            .setAudioFormat(
+                AudioFormat.Builder()
+                    .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                    .setSampleRate(rate)
+                    .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                    .build()
+            )
+            .setTransferMode(AudioTrack.MODE_STATIC)
+            .setBufferSizeInBytes(frames * 2)
+            .build()
+        t.write(ShortArray(frames), 0, frames)
+        t.setLoopPoints(0, frames, -1)
+        t.play()
+        t
+    } catch (e: Exception) {
+        null
     }
 }
