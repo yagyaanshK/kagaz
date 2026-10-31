@@ -464,12 +464,24 @@
   // On a phone the call plays on the loudspeaker, as a video call does;
   // the person can switch to the earpiece for privacy.
   let loud = true;
-  let speakerSet = false; // this call asked for the loudspeaker or earpiece
+  let callAudio = false; // the phone's call audio is this call's (see takeCallAudio)
   function applySpeaker() {
-    if (!ON_PHONE) return;
-    speakerSet = true;
-    invoke("phone_speaker", { on: loud }).catch(() => {});
+    if (!ON_PHONE) return Promise.resolve();
     setToggle("call-speaker", loud, "speaker", "Speaker", loud ? "On the loudspeaker; tap for the earpiece" : "On the earpiece; tap for the loudspeaker");
+    return invoke("phone_speaker", { on: loud }).catch(() => {});
+  }
+
+  // The phone's call audio, once per call and before the microphone
+  // opens: first where sound plays, then call mode itself (KagazPlugin's
+  // Loudspeaker and CallAudio). On Android a change of where sound plays
+  // ends the microphone's stream, so the choice is settled first and then
+  // left alone; the person's own switch is the one exception, and the
+  // microphone is opened again after it (watchMic).
+  async function takeCallAudio() {
+    if (!ON_PHONE || callAudio) return;
+    callAudio = true;
+    await applySpeaker();
+    await invoke("phone_call_audio", { on: true }).catch(() => {});
   }
   let muted = false;
   let micStarting = false;
@@ -498,11 +510,12 @@
     throw last;
   }
 
-  // Whether the microphone really sends: when its sound stops coming, or
-  // comes as exact silence (what Android hands an app while another one,
-  // a WhatsApp call say, has the microphone; a real microphone always
-  // hears a little), it is opened again, after Kagaz takes the call audio
-  // back. Said on the call while it happens.
+  // Whether the microphone really sends: when its stream ends (Android
+  // ends it when where sound plays changes), when its sound stops coming,
+  // or comes as exact silence for a while (what Android hands an app
+  // while another one, a WhatsApp call say, has the microphone; a real
+  // microphone always hears a little), it is opened again. The first time
+  // quietly; said on the call when it goes on.
   let micHeard = 0;
   let micSilentSince = 0;
   let micWatch = null;
@@ -519,14 +532,14 @@
       const track = mic.stream.getAudioTracks()[0];
       const why = !track || track.readyState === "ended" ? "it stopped"
         : now - micHeard > 3000 ? "no sound came from it"
-        : micSilentSince && now - micSilentSince > 3000 ? "Android gave it only silence"
+        : micSilentSince && now - micSilentSince > 4000 ? "Android gave it only silence"
         : "";
       if (why) restartMic(why);
-      else if (micRestarts && !micSilentSince) {
+      else if (micRestarts && !micSilentSince && now - micHeard < 1000) {
         micRestarts = 0;
         note("");
       }
-    }, 1000);
+    }, 500);
   }
 
   async function restartMic(why) {
@@ -534,12 +547,11 @@
     micRestarting = true;
     micRestarts++;
     invoke("page_log", { line: `call microphone: ${why}; opening it again (${micRestarts})` }).catch(() => {});
-    note(micRestarts > 2
-      ? "They may not hear you: another app may be using the microphone, or it is switched off in the phone's quick settings. Kagaz keeps trying."
-      : "Reconnecting the microphone\u2026");
+    if (micRestarts > 2) note("They may not hear you: another app may be using the microphone, or it is switched off in the phone's quick settings. Kagaz keeps trying.");
+    else if (micRestarts === 2) note("Reconnecting the microphone\u2026");
     releaseMic();
     // Not too often: a microphone that stays silent is tried every few seconds.
-    await new Promise((r) => setTimeout(r, micRestarts > 2 ? 4000 : 300));
+    await new Promise((r) => setTimeout(r, micRestarts === 1 ? 300 : micRestarts === 2 ? 1500 : 5000));
     micRestarting = false;
     if (status && status.phase === "talking") startAudio();
   }
@@ -559,12 +571,9 @@
     const actx = KagazPlayer.audioContext();
     if (mic || micStarting) return;
     micStarting = true;
-    // The phone's call audio is Kagaz's for the call, also over another
-    // app's call (KagazPlugin's CallAudio); the loudspeaker from the moment
-    // the call is answered (its Loudspeaker holds it there).
-    if (ON_PHONE) invoke("phone_call_audio", { on: true }).catch(() => {});
-    applySpeaker();
     try {
+      await takeCallAudio();
+      if (!status || status.phase !== "talking") return;
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw new Error("this window cannot use the microphone");
       const stream = await openMic();
       if (!status || status.phase !== "talking") {
@@ -591,8 +600,6 @@
       sink.connect(actx.destination);
       mic = { stream, node, source, sink };
       watchMic();
-      // The microphone put the phone in call mode, which picks the earpiece.
-      applySpeaker();
       if (!micRestarts) note("");
     } catch (e) {
       if (e && e.name === "NotAllowedError") {
@@ -613,10 +620,14 @@
     micWatch = null;
     micRestarts = 0;
     releaseMic();
-    if (ON_PHONE) invoke("phone_call_audio", { on: false }).catch(() => {});
-    // The phone's own choice of where sound plays again.
-    if (speakerSet) invoke("phone_speaker", { on: false }).catch(() => {});
-    speakerSet = false;
+    if (callAudio) {
+      // The phone's own choice of where sound plays again, then its call
+      // audio back.
+      invoke("phone_speaker", { on: false })
+        .catch(() => {})
+        .then(() => invoke("phone_call_audio", { on: false }).catch(() => {}));
+    }
+    callAudio = false;
     loud = true;
     muted = false;
     setToggle("call-mute", false, "mic", "Mute", "Mute your microphone");
