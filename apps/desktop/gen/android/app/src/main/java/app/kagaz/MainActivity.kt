@@ -1,4 +1,4 @@
-package life.omniverse.kagaz
+package app.kagaz
 
 import android.app.PendingIntent
 import android.app.PictureInPictureParams

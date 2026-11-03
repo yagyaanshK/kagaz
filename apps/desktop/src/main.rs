@@ -1695,7 +1695,7 @@ mod reopen {
 
     /// Called by MainActivity.onCreate (after the activity is registered).
     #[no_mangle]
-    pub extern "system" fn Java_life_omniverse_kagaz_MainActivity_kagazShown(
+    pub extern "system" fn Java_app_kagaz_MainActivity_kagazShown(
         _env: *mut std::ffi::c_void,
         _this: *mut std::ffi::c_void,
     ) {
@@ -1723,7 +1723,7 @@ mod reopen {
     /// The call went into (or out of) Android's picture-in-picture window:
     /// the page shows only the call while it is in one (KagazNative.kt).
     #[no_mangle]
-    pub extern "system" fn Java_life_omniverse_kagaz_KagazNative_pip(
+    pub extern "system" fn Java_app_kagaz_KagazNative_pip(
         _env: *mut std::ffi::c_void,
         _class: *mut std::ffi::c_void,
         on: u8,
@@ -1737,7 +1737,7 @@ mod reopen {
     /// The ring notification (KagazNative.kt): 0 its card was tapped (show
     /// the ring), 1 Answer, 2 Decline; 3 Hang up (picture-in-picture).
     #[no_mangle]
-    pub extern "system" fn Java_life_omniverse_kagaz_KagazNative_ring(
+    pub extern "system" fn Java_app_kagaz_KagazNative_ring(
         _env: *mut std::ffi::c_void,
         _class: *mut std::ffi::c_void,
         action: i32,

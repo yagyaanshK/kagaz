@@ -30,7 +30,7 @@ const UNAVAILABLE: &str = "Could not access your system's password store. Unlock
 
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 fn entry() -> Result<keyring::Entry, String> {
-    keyring::Entry::new("life.omniverse.kagaz.onetouch", "remembered-account")
+    keyring::Entry::new("app.kagaz.onetouch", "remembered-account")
         .map_err(|_| UNAVAILABLE.to_string())
 }
 
@@ -145,7 +145,7 @@ mod tests {
                 .unwrap()
                 .as_nanos()
         );
-        let entry = keyring::Entry::new("life.omniverse.kagaz.onetouch.test", &name).unwrap();
+        let entry = keyring::Entry::new("app.kagaz.onetouch.test", &name).unwrap();
         struct Cleanup(keyring::Entry);
         impl Drop for Cleanup {
             fn drop(&mut self) {

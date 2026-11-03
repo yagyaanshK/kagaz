@@ -8,7 +8,7 @@
 //!   where the Files app and other apps see it.
 //!
 //! The Kotlin half is `KagazPlugin` in the Android project
-//! (gen/android/app/src/main/java/life/omniverse/kagaz/KagazPlugin.kt); it
+//! (gen/android/app/src/main/java/app/kagaz/KagazPlugin.kt); it
 //! also holds Wi-Fi's multicast lock so discovery hears mDNS and WSD.
 
 use kagaz_core::output::{self, Format, OutputOptions};
@@ -27,7 +27,7 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
         .setup(|app, api| {
             #[cfg(target_os = "android")]
             {
-                let handle = api.register_android_plugin("life.omniverse.kagaz", "KagazPlugin")?;
+                let handle = api.register_android_plugin("app.kagaz", "KagazPlugin")?;
                 app.manage(Phone(handle));
             }
             #[cfg(not(target_os = "android"))]
@@ -50,7 +50,7 @@ mod jvm {
 
     /// KagazNative.attach, from MainActivity before the app starts.
     #[no_mangle]
-    pub extern "system" fn Java_life_omniverse_kagaz_KagazNative_hello(env: JNIEnv, class: JClass) {
+    pub extern "system" fn Java_app_kagaz_KagazNative_hello(env: JNIEnv, class: JClass) {
         if KAGAZ.get().is_some() {
             return;
         }

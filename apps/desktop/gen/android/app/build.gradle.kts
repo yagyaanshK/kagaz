@@ -34,10 +34,10 @@ val commitCount = runCatching {
 
 android {
     compileSdk = 37
-    namespace = "life.omniverse.kagaz"
+    namespace = "app.kagaz"
     defaultConfig {
         manifestPlaceholders["usesCleartextTraffic"] = "false"
-        applicationId = "life.omniverse.kagaz"
+        applicationId = "app.kagaz"
         minSdk = 24
         targetSdk = 37
         versionCode = tauriProperties.getProperty("tauri.android.versionCode", "1").toInt() + commitCount
