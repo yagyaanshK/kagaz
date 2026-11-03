@@ -1,4 +1,4 @@
-package life.omniverse.kagaz
+package app.kagaz
 
 // Keeps the doorbell's call line alive while Kagaz is in the background or
 // closed, and rings when a call comes in. The line itself (signalling and

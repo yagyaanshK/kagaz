@@ -1,4 +1,4 @@
-package life.omniverse.kagaz
+package app.kagaz
 
 // The phone's Bluetooth LE for the ceiling fans (the Rust half is
 // kagaz-core's fans/phone.rs, reached through KagazNative): listen for

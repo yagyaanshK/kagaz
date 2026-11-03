@@ -1,4 +1,4 @@
-package life.omniverse.kagaz
+package app.kagaz
 
 // The Android half of Kagaz's phone layer (the Rust half is
 // apps/desktop/src/mobile.rs):

@@ -1,4 +1,4 @@
-package life.omniverse.kagaz
+package app.kagaz
 
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -98,9 +98,9 @@ object KagazNative {
  *  devices ring on) without opening Kagaz. */
 class KagazRingReceiver : BroadcastReceiver() {
     companion object {
-        const val ACTION_DECLINE = "life.omniverse.kagaz.DECLINE"
+        const val ACTION_DECLINE = "app.kagaz.DECLINE"
         /** Hang up, from the call's picture-in-picture window. */
-        const val ACTION_HANGUP = "life.omniverse.kagaz.HANGUP"
+        const val ACTION_HANGUP = "app.kagaz.HANGUP"
     }
 
     override fun onReceive(context: Context, intent: Intent) {

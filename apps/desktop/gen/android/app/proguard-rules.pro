@@ -24,6 +24,6 @@
 # Nothing in Kotlin calls them, so without this the shrinker drops them
 # (it dropped bleScan and the rest on 2026-10-22). Every public static
 # method, so a new one cannot be forgotten here.
--keep class life.omniverse.kagaz.KagazNative {
+-keep class app.kagaz.KagazNative {
   public static *;
 }
