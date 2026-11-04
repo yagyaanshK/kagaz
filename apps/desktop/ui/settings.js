@@ -551,7 +551,7 @@ const KagazSettings = (() => {
     open.addEventListener("click", () => KagazSet.attempt(r, () => invoke("save_folder_open")));
     reset.addEventListener("click", () => KagazSet.attempt(r, async () => show(await invoke("save_folder_reset"))));
     box.appendChild(r);
-    const note = el("p", "muted small", "Screenshots and recordings from the cameras go here" + (/Android|iPhone|iPad/i.test(navigator.userAgent) ? ", and scans and saved footage too." : "; save dialogs start here."));
+    const note = el("p", "muted small", "Screenshots and recordings from the cameras go here" + (/Android|iPhone|iPad/i.test(navigator.userAgent) ? ", and scans and saved footage too." : "; save dialogs start here until you save somewhere else, then there."));
     note.appendChild(document.createTextNode(" "));
     note.appendChild(reset);
     box.appendChild(note);
