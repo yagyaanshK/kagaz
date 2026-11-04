@@ -108,13 +108,23 @@ async fn choose_save_path(
             "mp4" => "MP4 video",
             _ => "File",
         };
+        // The dialog opens where the last file of this kind was saved
+        // (videos apart from scans and pictures), else in the saving folder.
+        let remember = if extension == "mp4" { "last_save_dir_video" } else { "last_save_dir" };
+        let start = kagaz_core::paths::setting(remember)
+            .map(std::path::PathBuf::from)
+            .filter(|d| d.is_dir())
+            .unwrap_or_else(saving::dir);
         let picked = app
             .dialog()
             .file()
             .set_file_name(&suggested_name)
-            .set_directory(saving::dir())
+            .set_directory(start)
             .add_filter(label, &[extension.as_str()])
             .blocking_save_file();
+        if let Some(dir) = picked.as_ref().and_then(|p| p.as_path()).and_then(|p| p.parent()) {
+            let _ = kagaz_core::paths::set_setting(remember, Some(&dir.display().to_string()));
+        }
         Ok(picked.map(|p| p.to_string()))
     })
     .await
