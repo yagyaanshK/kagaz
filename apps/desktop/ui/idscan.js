@@ -148,9 +148,21 @@ const KagazId = (() => {
     // Only A4 and Letter halve into a card's place; the glass is the source.
     const paper = form.querySelector('select[name="paper"]');
     const dpi = form.querySelector('select[name="dpi"]');
+    // An ID lies on the glass: the paper-source field says so while ID is
+    // chosen (greyed, in its place, so the form keeps its shape) and gets
+    // its own choice back after.
+    const source = form.querySelector('.no-id select');
+    let sourceWas = source ? source.value : "";
     let wasOn = false;
     const mode = () => {
       const on = select.value === "id";
+      if (source) {
+        if (on && !wasOn) sourceWas = source.value;
+        if (on) source.value = [...source.options].some((o) => o.value === "Glass") ? "Glass" : source.value;
+        else if (wasOn) source.value = sourceWas;
+        source.tabIndex = on ? -1 : 0;
+        source.setAttribute("aria-disabled", String(on));
+      }
       // An ID reads well at 300 dpi; higher only makes it slow and big.
       if (on && !wasOn && dpi && [...dpi.options].some((o) => o.value === "300" && !o.disabled)) dpi.value = "300";
       wasOn = on;
