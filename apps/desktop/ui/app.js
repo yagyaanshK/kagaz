@@ -176,7 +176,9 @@ function capLine(d) {
 // The brand chosen (Add a device, or the chips above the list); null for all.
 let printBrand = null;
 
-function brandOf(d) {
+// The brand a found printer belongs to, from what it says of itself;
+// null when none of the known brands' words appear.
+function printerBrand(d) {
   return typeof KagazBrands === "undefined" ? null : KagazBrands.match("print", [d.manufacturer, d.model, title(d)].join(" "));
 }
 
@@ -185,7 +187,7 @@ function renderBrandChips() {
   if (!box) return;
   box.innerHTML = "";
   const seen = new Map();
-  for (const d of devices) { const b = brandOf(d); if (b) seen.set(b.id, b); }
+  for (const d of devices) { const b = printerBrand(d); if (b) seen.set(b.id, b); }
   if (printBrand && typeof KagazBrands !== "undefined") { const b = KagazBrands.byId("print", printBrand); if (b) seen.set(b.id, b); }
   if (seen.size < 1) return;
   const chip = (label, id) => {
@@ -218,7 +220,7 @@ function renderList() {
   let mineShown = 0;
   let foundShown = 0;
   devices.forEach((d, i) => {
-    if (printBrand && (brandOf(d) || {}).id !== printBrand) return;
+    if (printBrand && (printerBrand(d) || {}).id !== printBrand) return;
     const saved = isSaved(d);
     const li = document.createElement("li");
     li.dataset.index = i;
@@ -238,7 +240,7 @@ function renderList() {
       add.addEventListener("click", (ev) => { ev.stopPropagation(); addPrinter(d); });
       li.appendChild(add);
     }
-    const brand = brandOf(d);
+    const brand = printerBrand(d);
     if (brand && brand.logo) {
       const img = document.createElement("img");
       img.className = "brand-mark";
@@ -273,7 +275,7 @@ async function rescan() {
     } catch (_) {}
     rebuildDevices();
     const others = devices.filter((d) => !isSaved(d));
-    const shown = printBrand ? others.filter((d) => (brandOf(d) || {}).id === printBrand).length : others.length;
+    const shown = printBrand ? others.filter((d) => (printerBrand(d) || {}).id === printBrand).length : others.length;
     $("search-note").textContent = others.length
       ? printBrand && !shown
         ? `No other ${(KagazBrands.byId("print", printBrand) || {}).name || "such"} printer answered; ${others.length} other${others.length === 1 ? "" : "s"} found (All).`
