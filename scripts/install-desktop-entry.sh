@@ -7,7 +7,9 @@
 #   scripts/install-desktop-entry.sh --remove
 set -eu
 here=$(cd "$(dirname "$0")/.." && pwd)
-# The window's Wayland app id / X11 class is the binary name; the entry must match it.
+# The entry's file and icon name. The window's Wayland app id / X11 class is the
+# name of the binary that runs, which differs between a cargo build (kagaz-desktop)
+# and a release binary (kagaz-desktop-linux-x64): StartupWMClass follows the binary.
 id=kagaz-desktop
 apps="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
 icons="${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor"
@@ -38,6 +40,7 @@ for size in 32 128 256 512; do
     mkdir -p "$icons/${size}x${size}/apps"
     cp "$here/apps/desktop/icons/$src" "$icons/${size}x${size}/apps/$id.png"
 done
+wmclass=$(basename "$bin")
 mkdir -p "$apps"
 cat > "$apps/$id.desktop" <<ENTRY
 [Desktop Entry]
@@ -46,7 +49,7 @@ Name=Kagaz
 Comment=Printers, scanners and cameras on your network
 Exec="$bin"
 Icon=$id
-StartupWMClass=$id
+StartupWMClass=$wmclass
 Categories=Utility;
 Terminal=false
 ENTRY
