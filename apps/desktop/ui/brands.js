@@ -76,7 +76,7 @@ const KagazBrands = (() => {
     ],
     // Every printer that speaks IPP works without a driver, whatever its brand.
     print: [
-      B("brother", "Brother", "brother", "#0d2ea0", true),
+      B("brother", "Brother", "brother", "#0d2ea0", true, /\b(brother|br[nw][0-9a-f]{6,12})\b/i),
       B("hp", "HP", "hp", "#0096d6", true, /\b(hp|hewlett|laserjet|deskjet|officejet|envy|smart tank)\b/i),
       B("canon", "Canon", "canon", "#cc0000", true, /\b(canon|pixma|imageclass|i-sensys|maxify)\b/i),
       B("epson", "Epson", "epson", "#003399", true, /\b(epson|ecotank|workforce)\b/i),

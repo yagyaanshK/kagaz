@@ -4,7 +4,7 @@
 // account (OneTouch keeps one session per account, so a sign-in here would
 // sign the person's other phone out).
 // Uses app.js's globals: $, invoke, selectCategory, devices, rescan,
-// printBrand, title, brandOf; onetouch.js's otOpenByName.
+// printBrand, title, printerBrand; onetouch.js's otOpenByName.
 
 const KagazHome = (() => {
   let lastScan = 0;
@@ -152,7 +152,7 @@ const KagazHome = (() => {
     if (!savedPrinters.length) return false;
     const g = group("print", "Printers & scanners", "", () => { printBrand = null; selectCategory("print"); });
     for (const d of savedPrinters) {
-      const b = brandOf(d);
+      const b = printerBrand(d);
       const key = printerKey(d);
       g.tiles.appendChild(tile(title(d), stateLine(d)[1], KagazBrands.ICON.print, () => {
         printBrand = null;
