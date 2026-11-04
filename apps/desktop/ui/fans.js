@@ -189,6 +189,12 @@ const KagazFans = (() => {
       }, `More for ${f.name}`);
       toggle.setAttribute("aria-expanded", String(menus.has(f.id)));
       head.appendChild(toggle);
+      // With a mouse, a right click on the card opens the same menu.
+      c.addEventListener("contextmenu", (ev) => {
+        if (!window.matchMedia("(pointer: fine)").matches || ev.target.closest("input, select, button")) return;
+        ev.preventDefault();
+        toggle.click();
+      });
     }
     c.appendChild(head);
 

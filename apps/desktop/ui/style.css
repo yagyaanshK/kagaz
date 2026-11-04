@@ -673,6 +673,7 @@ ul.cards li.add .name { color: var(--accent); }
   #categories .cat-icon { grid-row: 1; }
   #categories .cat-name { font-size: 12px; font-weight: 500; line-height: 1.2; }
   #categories .cat-note { display: none; }
+  #categories .cat-label { margin: 8px 0 0; padding: 10px 0 0; font-size: 9px; letter-spacing: 0.08em; text-align: center; }
   #main { padding: 20px 24px; }
   .cam-grid-inner { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   #cam-layout-label { display: none; }
@@ -766,7 +767,7 @@ ul.cards li.add .name { color: var(--accent); }
 }
 
 /* ---- Home, Add a device, Activity, Settings ---- */
-#categories .cat-label { cursor: default; padding: 14px 12px 2px; font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; border: none; background: none; display: block; }
+#categories .cat-label { cursor: default; display: block; margin: 10px 4px 0; padding: 12px 8px 2px; font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); border: none; border-top: 1px solid var(--line); border-radius: 0; background: none; }
 #categories .cat-label:hover { background: none; }
 .back.to-home { display: none; }
 .empty-state { margin-top: 24px; padding: 24px; border: 1px dashed var(--line); border-radius: 12px; text-align: center; }
@@ -934,7 +935,9 @@ dialog.ask .actions { display: flex; justify-content: flex-end; gap: 8px; margin
 }
 
 /* ID scan and ID copy (idscan.js): three steps in place of the form's button. */
-form.id-mode .no-id, form.id-mode > .actions.bar { display: none; }
+/* ID mode: the paper-source field stays in its place (an ID lies on the glass), greyed; only the Scan bar gives way to the steps. */
+form.id-mode .no-id { opacity: 0.55; pointer-events: none; }
+form.id-mode > .actions.bar { display: none; }
 .id-steps ol { margin: 14px 0 0; padding-left: 22px; display: flex; flex-direction: column; gap: 14px; }
 .id-steps li p { margin: 0 0 6px; }
 .id-row { display: flex; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
@@ -1092,6 +1095,24 @@ dialog.ask label.ask-title select, dialog.ask label.ask-title input[type="text"]
 #cameras.cam-page-open > .to-home, #cameras.cam-page-open > .cam-head { display: none; }
 #cameras.cam-page-open { max-width: 1000px; }
 .cp { gap: 0; }
+/* A wide window with a mouse: the picture on the left, the buttons and the
+   recordings in a column beside it, instead of the phone's stack widened. */
+@media (min-width: 840px) {
+  #cameras.cam-page-open { max-width: 1240px; }
+  .cp { display: grid; grid-template-columns: minmax(0, 1fr) 320px; grid-template-areas: "head head" "tile actions" "tile toast" "tile past" "tile forms"; column-gap: 20px; align-content: start; }
+  .cp > .cp-head { grid-area: head; }
+  .cp > .cam-tile { grid-area: tile; align-self: start; }
+  .cp > .cp-actions { grid-area: actions; flex-direction: column; justify-content: flex-start; align-items: stretch; gap: 4px; padding: 0; }
+  .cp > .cp-actions .cp-btn { flex-direction: row; justify-content: flex-start; gap: 12px; min-height: 48px; padding: 4px 8px; border-radius: 10px; font-size: 14px; }
+  .cp > .cp-actions .cp-btn:hover { background: var(--panel); }
+  .cp > .cp-actions .cp-btn .cp-icon { width: 40px; height: 40px; }
+  .cp > .cp-actions .cp-btn .cp-icon svg { width: 22px; height: 22px; }
+  .cp > .cp-toast { grid-area: toast; }
+  .cp > .cp-rec-box { grid-area: past; margin-top: 8px; }
+  .cp > .cp-forms { grid-area: forms; }
+  .cp .cp-days { justify-content: space-between; }
+  .cp .cp-speeds { margin-left: 0; }
+}
 .cp-head { position: relative; display: flex; align-items: center; gap: 6px; margin: 0 0 10px; }
 .cp-head h2 { margin: 0; flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cp-head .cp-menu { position: absolute; right: 0; top: 44px; }
@@ -1175,3 +1196,21 @@ dialog.ask label.ask-title select, dialog.ask label.ask-title input[type="text"]
 /* A zoomed picture: how far, and kept inside its frame. */
 .kz-stage .kz-player { transform-origin: center; }
 .kz-zoom-label { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); z-index: 3; padding: 2px 8px; border-radius: 4px; background: rgba(0, 0, 0, 0.55); color: #fff; font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; pointer-events: none; }
+
+/* Touch: the controls over a camera's picture are finger-sized, and the
+   grid's buttons that only hover reveals are not drawn at all (a tap on
+   the tile opens the camera's own screen, which has them). */
+@media (pointer: coarse) {
+  .cam-tile .cam-ctrl button { width: 44px; height: 44px; }
+  .cam-tile .cam-ctrl .cam-quality { min-height: 44px; font-size: 14px; padding: 6px 10px; }
+}
+@media (hover: none) {
+  #cam-grid:not(.cam-focus) .cam-tile .cam-size, #cam-grid:not(.cam-focus) .cam-tile .cam-full, #cam-grid:not(.cam-focus) .cam-tile .cam-volume { display: none; }
+}
+/* A mouse: Add a device's tiles need no finger room. */
+@media (pointer: fine) and (min-width: 840px) {
+  .choice-grid.kinds { grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); }
+  .choice-grid.brands { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); }
+  .kind-tile { min-height: 56px; padding: 10px 12px; }
+  .brand-tile { min-height: 84px; padding: 10px 8px; }
+}

@@ -1770,6 +1770,12 @@ function buildTile(cam) {
   more.setAttribute("aria-label", `Settings for ${camName(cam)}`);
   more.addEventListener("click", (ev) => { ev.stopPropagation(); cameraSettings(cam); });
   tile.appendChild(more);
+  // With a mouse, a right click on the picture opens the same settings.
+  tile.addEventListener("contextmenu", (ev) => {
+    if (rearranging || !window.matchMedia("(pointer: fine)").matches) return;
+    ev.preventDefault();
+    cameraSettings(cam);
+  });
   // Over the picture on the camera's own screen (campage.js): sound,
   // volume, quality and full screen in one bar.
   const ctrl = document.createElement("div");

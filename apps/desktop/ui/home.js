@@ -185,12 +185,27 @@ const KagazHome = (() => {
     const shown = [await doorbellGroup(fresh), await camerasGroup(fresh), printersGroup(fresh), await fansGroup(fresh)];
     root.replaceChildren(...fresh.childNodes);
     $("home-empty").classList.toggle("hidden", shown.some(Boolean));
+    kindNotes(root);
     // The added printers' states; their addresses are refreshed by a quiet
     // search now and then (a router can hand them new ones).
     checkPrinters();
     if (savedPrinters.length && Date.now() - lastScan > 5 * 60 * 1000 && !$("rescan").disabled) {
       lastScan = Date.now();
       rescan();
+    }
+  }
+
+  // The sidebar's kinds say what each holds ("2 devices", "none added
+  // yet"), so a kind with nothing in it does not read as a device.
+  const KIND_EMPTY = { doorbell: "not set up yet", cameras: "not signed in yet", print: "none added yet", fans: "none added yet" };
+  const KIND_GROUP = { doorbell: "doorbell", cameras: "security", print: "print", fans: "fan" };
+  function kindNotes(built) {
+    for (const [cat, empty] of Object.entries(KIND_EMPTY)) {
+      const note = document.querySelector(`#categories li[data-cat="${cat}"] .cat-note`);
+      if (!note) continue;
+      const tiles = built.querySelector(`#home-tiles-${KIND_GROUP[cat]}`);
+      const status = tiles && tiles.parentElement.querySelector(".home-status");
+      note.textContent = status && status.textContent ? status.textContent : empty;
     }
   }
 
