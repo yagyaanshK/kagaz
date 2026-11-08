@@ -41,13 +41,33 @@ for size in 32 128 256 512; do
     cp "$here/apps/desktop/icons/$src" "$icons/${size}x${size}/apps/$id.png"
 done
 wmclass=$(basename "$bin")
+# The entry runs a small script that is always on the system disk: GNOME
+# drops an entry whose program is missing when the Shell starts, and a
+# build on a drive that mounts a moment after login is missing just then.
+# The script waits for the drive, then runs the build.
+bindir="${XDG_DATA_HOME:-$HOME/.local/share}/../bin"
+bindir=$(cd "$(dirname "$bindir")" && pwd)/$(basename "$bindir")
+mkdir -p "$bindir"
+cat > "$bindir/$id" <<RUN
+#!/bin/sh
+# Runs Kagaz from its build (written by scripts/install-desktop-entry.sh).
+bin="$bin"
+n=0
+while [ ! -x "\$bin" ] && [ \$n -lt 40 ]; do sleep 0.5; n=\$((n + 1)); done
+if [ ! -x "\$bin" ]; then
+    command -v notify-send >/dev/null && notify-send "Kagaz" "The build is not there: \$bin (is the drive mounted?)"
+    exit 1
+fi
+exec "\$bin" "\$@"
+RUN
+chmod +x "$bindir/$id"
 mkdir -p "$apps"
 cat > "$apps/$id.desktop" <<ENTRY
 [Desktop Entry]
 Type=Application
 Name=Kagaz
 Comment=Printers, scanners and cameras on your network
-Exec="$bin"
+Exec=$bindir/$id
 Icon=$id
 StartupWMClass=$wmclass
 Categories=Utility;
@@ -55,4 +75,4 @@ Terminal=false
 ENTRY
 command -v update-desktop-database >/dev/null && update-desktop-database "$apps" 2>/dev/null || true
 command -v gtk-update-icon-cache >/dev/null && gtk-update-icon-cache -q -t "$icons" 2>/dev/null || true
-echo "Kagaz is in the app list with its icon (runs $bin)."
+echo "Kagaz is in the app list with its icon ($bindir/$id runs $bin)."
