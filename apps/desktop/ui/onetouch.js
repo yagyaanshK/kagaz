@@ -335,6 +335,121 @@ $('ot-login').addEventListener('submit', async e => {
     $('ot-login').classList.add('hidden'); $('ot-message').textContent = otStatus?.notice || ''; KagazNav.pop('ot-login');
   }, `Signing in to ${$('ot-provider').selectedOptions[0].textContent}…`);
 });
+
+// ---- Sign in by scanning the OneTouch QR code (welcome email or phone app) ----
+// The camera (or a chosen photo) is read in the window; Rust decodes the code.
+// A OneTouch code is encrypted with a key inside the vendor's own app, so Kagaz
+// cannot complete sign-in from it offline — it says so and points at the
+// username and password printed in the same email. A plain-credentials code
+// signs in straight away.
+let otQrStream = null, otQrTimer = null, otQrBusy = false, otQrDone = false;
+
+function otQrNote(t) { const n = $('ot-qr-note'); if (n) n.textContent = t; }
+
+async function otQrOpen() {
+  otQrDone = false;
+  const dlg = $('ot-qr-dialog');
+  if (!dlg.open) dlg.showModal();
+  otQrNote('Point the camera at the code.');
+  try {
+    otQrStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+    const v = $('ot-qr-video');
+    v.srcObject = otQrStream; await v.play();
+    dlg.classList.add('has-camera');
+    otQrTick();
+  } catch (_) {
+    dlg.classList.remove('has-camera');
+    otQrNote('No camera available here. Choose a photo of the QR code instead.');
+  }
+}
+
+function otQrStop() {
+  if (otQrTimer) { clearTimeout(otQrTimer); otQrTimer = null; }
+  if (otQrStream) { otQrStream.getTracks().forEach((t) => t.stop()); otQrStream = null; }
+  const v = $('ot-qr-video'); if (v) v.srcObject = null;
+}
+
+function otQrClose() {
+  otQrStop();
+  const dlg = $('ot-qr-dialog');
+  if (dlg.open) dlg.close();
+}
+
+// Draw a source (video frame or image) to the canvas, reduced so the longest
+// side is at most 640, and return its grayscale bytes for the decoder.
+function otQrGray(source, sw, sh) {
+  const max = 640, scale = Math.min(1, max / Math.max(sw, sh));
+  const w = Math.max(1, Math.round(sw * scale)), h = Math.max(1, Math.round(sh * scale));
+  const c = $('ot-qr-canvas'); c.width = w; c.height = h;
+  const ctx = c.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(source, 0, 0, w, h);
+  const rgba = ctx.getImageData(0, 0, w, h).data;
+  const gray = new Uint8Array(w * h);
+  for (let i = 0, j = 0; j < gray.length; i += 4, j++) {
+    gray[j] = (rgba[i] * 77 + rgba[i + 1] * 150 + rgba[i + 2] * 29) >> 8;
+  }
+  let bin = '';
+  for (let k = 0; k < gray.length; k++) bin += String.fromCharCode(gray[k]);
+  return { width: w, height: h, gray: btoa(bin) };
+}
+
+async function otQrDecode(frame) {
+  try { return await invoke('onetouch_qr_decode', frame); }
+  catch (_) { return { kind: 'none' }; }
+}
+
+function otQrHandle(res) {
+  if (!res || res.kind === 'none') return false;
+  if (res.kind === 'credentials') {
+    otQrDone = true; otQrClose();
+    $('ot-username').value = res.username; $('ot-password').value = res.password;
+    $('ot-login').requestSubmit();
+    return true;
+  }
+  if (res.kind === 'encrypted') {
+    otQrDone = true; otQrStop();
+    otQrNote('This is a OneTouch sign-in code. It is encrypted, so sign in with the username and password printed in the same welcome email.');
+    return true;
+  }
+  // Some other code: show a little of it and keep scanning.
+  otQrNote('That code is not a OneTouch sign-in code. Try the QR from your welcome email.');
+  return false;
+}
+
+async function otQrTick() {
+  if (otQrDone || !otQrStream) return;
+  const v = $('ot-qr-video');
+  if (v && v.videoWidth && !otQrBusy) {
+    otQrBusy = true;
+    const done = otQrHandle(await otQrDecode(otQrGray(v, v.videoWidth, v.videoHeight)));
+    otQrBusy = false;
+    if (done) return;
+  }
+  otQrTimer = setTimeout(otQrTick, 450);
+}
+
+async function otQrFromFile(file) {
+  if (!file) return;
+  otQrStop();
+  otQrNote('Reading the picture…');
+  const img = new Image();
+  img.onload = async () => {
+    const res = await otQrDecode(otQrGray(img, img.naturalWidth, img.naturalHeight));
+    if (!otQrHandle(res)) otQrNote('No QR code found in that picture. Try a clearer, closer photo.');
+    URL.revokeObjectURL(img.src);
+  };
+  img.onerror = () => otQrNote('That image could not be opened.');
+  img.src = URL.createObjectURL(file);
+}
+
+if ($('ot-qr-open')) {
+  $('ot-qr-open').addEventListener('click', otQrOpen);
+  $('ot-qr-cancel').addEventListener('click', otQrClose);
+  $('ot-qr-close').addEventListener('click', otQrClose);
+  $('ot-qr-file').addEventListener('change', (e) => otQrFromFile(e.target.files && e.target.files[0]));
+  $('ot-qr-dialog').addEventListener('close', otQrStop);
+}
+
 $('ot-signout').addEventListener('click', () => otRun(async () => {
   await stopOneTouch();
   await invoke('onetouch_logout'); otStatus = await invoke('onetouch_status'); otInitialized = false;

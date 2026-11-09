@@ -32,6 +32,7 @@ base64 = "0.22"
 url = "2"
 uuid = { version = "1", features = ["v4"] }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+quircs = "0.10.3"
 
 # Use the OS credential store on desktop platforms; never the mock backend.
 [target.'cfg(target_os = "linux")'.dependencies]

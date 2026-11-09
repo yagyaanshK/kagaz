@@ -334,7 +334,26 @@
           <p id="ot-remember-help" class="muted small">If your session expires, Kagaz signs in again by itself. Signing out keeps the saved sign-in; Forget saved sign-in removes it.</p>
           <p id="ot-session-note" class="muted small">OneTouch may sign you out of the phone app when you sign in here.</p>
           <div class="actions"><button id="ot-login-submit" class="accent" type="submit">Sign in</button><button id="ot-login-cancel" type="button">Cancel</button></div>
+          <div class="ot-or"><span>or</span></div>
+          <button id="ot-qr-open" type="button" class="ot-qr-btn">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h2v2h-2zM18 14h2v2h-2zM14 18h2v2h-2zM18 18h2v2h-2z"/></svg>
+            Sign in with a QR code
+          </button>
+          <p class="muted small">Scan the QR code from your OneTouch welcome email, or choose a saved picture of it.</p>
         </form>
+        <dialog id="ot-qr-dialog" class="qr-dialog">
+          <div class="qr-head"><strong>Scan your OneTouch QR code</strong><button id="ot-qr-cancel" type="button" class="icon" aria-label="Close scanner">&#x2715;</button></div>
+          <div class="qr-stage">
+            <video id="ot-qr-video" playsinline muted></video>
+            <div class="qr-frame" aria-hidden="true"></div>
+          </div>
+          <p id="ot-qr-note" class="muted small" role="status" aria-live="polite">Point the camera at the code.</p>
+          <div class="actions">
+            <label class="btn-like">Use a photo<input id="ot-qr-file" type="file" accept="image/*" hidden></label>
+            <button id="ot-qr-close" type="button">Cancel</button>
+          </div>
+          <canvas id="ot-qr-canvas" hidden></canvas>
+        </dialog>
         <p id="ot-message" class="muted" role="status" aria-live="polite"></p>
         <div id="ot-connected" class="hidden">
           <div class="tabs" role="group" aria-label="Doorbell view">

@@ -404,6 +404,24 @@ button.danger { background: var(--bad); color: #fff; border-color: var(--bad); }
 #ot-login .ot-remember { flex-direction: row; align-items: center; gap: 8px; margin-top: 12px; }
 .ot-remember input { min-height: 0; width: 18px; height: 18px; accent-color: var(--accent); }
 
+/* QR sign-in: an "or" divider, a QR button, and the scanner dialog. */
+.ot-or { display: flex; align-items: center; gap: 10px; margin: 16px 0 10px; color: var(--muted); font-size: 13px; }
+.ot-or::before, .ot-or::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+.ot-qr-btn { display: inline-flex; align-items: center; gap: 10px; width: 100%; justify-content: center; min-height: 48px; border: 1px solid var(--control); border-radius: 10px; background: var(--panel); color: var(--text); font-weight: 600; }
+.ot-qr-btn:hover { border-color: var(--accent); color: var(--accent); }
+.ot-qr-btn svg { width: 22px; height: 22px; fill: currentColor; }
+.qr-dialog { border: 1px solid var(--line); border-radius: 14px; background: var(--panel); color: var(--text); padding: 16px; max-width: 420px; width: calc(100vw - 32px); }
+.qr-dialog::backdrop { background: rgba(0,0,0,.5); }
+.qr-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 12px; }
+.qr-head strong { font-size: 17px; }
+.qr-stage { position: relative; width: 100%; aspect-ratio: 1 / 1; border-radius: 12px; overflow: hidden; background: #000; display: none; }
+.qr-dialog.has-camera .qr-stage { display: block; }
+.qr-stage video { width: 100%; height: 100%; object-fit: cover; }
+.qr-frame { position: absolute; inset: 16%; border: 3px solid rgba(255,255,255,.9); border-radius: 12px; box-shadow: 0 0 0 100vmax rgba(0,0,0,.25); }
+.qr-dialog .actions { margin-top: 14px; display: flex; gap: 10px; }
+.btn-like { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 0 16px; border: 1px solid var(--control); border-radius: 10px; background: var(--panel); color: var(--text); font-weight: 600; cursor: pointer; }
+.btn-like:hover { border-color: var(--accent); color: var(--accent); }
+
 /* Menus (a gear or ⋯ button opening a small panel) */
 .cam-menu { position: relative; }
 .cam-settings { position: absolute; right: 0; top: 40px; z-index: 5; background: var(--panel, #1e1e1e); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; min-width: 200px; box-shadow: 0 6px 20px rgba(0,0,0,0.35); }

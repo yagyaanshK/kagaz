@@ -18,6 +18,7 @@ mod doorbell;
 mod fans;
 mod media;
 mod onetouch;
+mod otqr;
 #[cfg(mobile)]
 mod mobile;
 mod printers;
@@ -2005,6 +2006,7 @@ pub fn run() {
             onetouch::onetouch_people,
             onetouch::onetouch_family_invite,
             onetouch::onetouch_family_remove,
+            otqr::onetouch_qr_decode,
             onetouch::onetouch_recording_media
         ])
         .build(tauri::generate_context!())
