@@ -1220,3 +1220,28 @@ ul.cards .purifier-card { position: relative; }
 ul.cards .purifier-card .actions { margin-top: 10px; gap: 8px; }
 ul.cards .purifier-card .add-printer { position: absolute; right: 12px; top: 12px; }
 ul.cards .purifier-card.unreachable .name { color: var(--muted); }
+
+/* The society's gate: a sign-in card per service, a card per person or
+   vehicle at the gate with its buttons in a row, a marked sample. */
+.signin-card { padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg); max-width: 560px; }
+.signin-card h3 { margin: 0 0 4px; }
+.signin-form label { display: flex; flex-direction: column; gap: 4px; margin-top: 10px; }
+.sample-banner { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 10px 0 0; padding: 8px 12px; border-radius: 8px; border: 1px dashed var(--warn); color: var(--warn); font-size: 13px; }
+.gate-list { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); margin-top: 8px; }
+.gate-card { padding: 12px 14px; border: 1px solid var(--accent); border-radius: 12px; background: var(--bg); }
+.gate-card.vehicle { border-color: var(--line); }
+.gate-head { display: flex; align-items: center; gap: 12px; }
+.gate-pic { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; width: 48px; height: 48px; border-radius: 50%; background: var(--panel); color: var(--accent); }
+.gate-pic svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.gate-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.gate-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; }
+.gate-actions button.big { min-height: 44px; flex: 1 1 auto; }
+.gate-future { display: flex; align-items: center; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.gate-future .act-pic.icon svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.8; }
+.gate-code { font-size: 28px; font-weight: 700; letter-spacing: 0.2em; text-align: center; margin: 8px 0; font-variant-numeric: tabular-nums; }
+.plate { font-family: ui-monospace, "DejaVu Sans Mono", monospace; letter-spacing: 0.08em; }
+.ask-choices { display: flex; flex-direction: column; gap: 8px; margin: 10px 0; }
+.ask-choice { display: flex; flex-direction: row; align-items: center; justify-content: flex-start; gap: 10px; min-height: 36px; text-align: left; }
+.ask-choice input { width: 18px; height: 18px; min-height: 0; margin: 0; accent-color: var(--accent); }
+.home-tile.waiting { border-color: var(--accent); }
+@media (pointer: coarse) { .gate-actions button.big { min-height: 48px; } }

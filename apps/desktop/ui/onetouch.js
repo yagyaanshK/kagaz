@@ -65,10 +65,12 @@ function otRender() {
   $('ot-devices').classList.toggle('hidden', otTab !== 'live');
   if ($('ot-dial-box')) $('ot-dial-box').classList.toggle('hidden', otTab !== 'live');
   $('ot-recordings-pane').classList.toggle('hidden', otTab !== 'recordings');
-  for (const [id, on] of [['ot-live-tab', otTab === 'live'], ['ot-recordings-tab', otTab === 'recordings']]) {
+  $('ot-family-pane').classList.toggle('hidden', otTab !== 'family');
+  if (otTab === 'family') otRenderFamily();
+  for (const [id, on] of [['ot-live-tab', otTab === 'live'], ['ot-recordings-tab', otTab === 'recordings'], ['ot-family-tab', otTab === 'family']]) {
     $(id).setAttribute('aria-pressed', String(on)); $(id).classList.toggle('active', on);
   }
-  for (const id of ['ot-reconnect','ot-forget','ot-remember','ot-signin','ot-signout','ot-refresh','ot-login-submit','ot-login-cancel','ot-live-tab','ot-recordings-tab','ot-recordings-refresh','ot-provider','ot-legacy-device','ot-username','ot-password','ot-password-toggle']) $(id).disabled = otBusy;
+  for (const id of ['ot-reconnect','ot-forget','ot-remember','ot-signin','ot-signout','ot-refresh','ot-login-submit','ot-login-cancel','ot-live-tab','ot-recordings-tab','ot-family-tab','ot-recordings-refresh','ot-provider','ot-legacy-device','ot-username','ot-password','ot-password-toggle']) $(id).disabled = otBusy;
   $('ot-prev').disabled = otBusy || otPage <= 1;
   $('ot-next').disabled = otBusy || !otMore;
   document.querySelectorAll('#ot-recordings button').forEach(b => { b.disabled = otBusy; });
@@ -434,6 +436,71 @@ async function otLoadRecordings(page) {
   $('ot-message').textContent = list.message || (list.entries.length ? '' : 'No cloud recordings or snapshots on this page. Footage stored only on an indoor monitor is not included.');
 }
 $('ot-live-tab').addEventListener('click', () => otRun(async () => { await stopOneTouch(); otTab = 'live'; }));
+$('ot-family-tab').addEventListener('click', () => otRun(async () => { await stopOneTouch(); otTab = 'family'; }));
+
+// ---- the family: the members with their own login, and inviting one ----
+const OT_FAMILY_MAX = 10;
+function otRenderFamily() {
+  const list = $('ot-family-list');
+  list.replaceChildren();
+  for (const p of otPeople) {
+    const row = document.createElement('div'); row.className = 'act-item';
+    const pic = document.createElement('span'); pic.className = 'act-pic icon'; pic.innerHTML = OT_ICON.family;
+    const text = document.createElement('span'); text.className = 'act-text';
+    const name = document.createElement('strong'); name.textContent = p.name;
+    const sub = document.createElement('span'); sub.className = 'muted small';
+    sub.textContent = [p.email, p.sip ? `number ${p.sip}` : ''].filter(Boolean).join(' · ') || 'Their own OneTouch login';
+    text.append(name, sub);
+    const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'small danger-text'; remove.textContent = 'Remove';
+    remove.setAttribute('aria-label', `Remove ${p.name} from the family`);
+    remove.addEventListener('click', async () => {
+      if (!(await KagazAsk.confirm(`Remove ${p.name}?`, 'Remove', 'They lose these devices in their OneTouch app; their own account stays.'))) return;
+      try {
+        await invoke('onetouch_family_remove', { id: p.id || '', name: p.name });
+        await otLoadPeople(); otRenderFamily();
+      } catch (e) {
+        $('ot-family-note').textContent = otFamilyNotReady(e, 'Removing');
+      }
+    });
+    row.append(pic, text, remove);
+    list.appendChild(row);
+  }
+  const n = otPeople.length;
+  $('ot-family-count').textContent = n ? `${n} of ${OT_FAMILY_MAX} members.` : 'No family members yet.';
+  $('ot-family-invite').disabled = n >= OT_FAMILY_MAX;
+  $('ot-family-note').textContent = n >= OT_FAMILY_MAX ? `OneTouch allows ${OT_FAMILY_MAX} members; remove one to invite another.` : '';
+}
+// Inviting and removing go through OneTouch, which Kagaz cannot do yet.
+function otFamilyNotReady(e, what) {
+  const msg = String(e && e.message || e);
+  return /not found|unknown command|not allowed/i.test(msg) ? `${what} a family member from Kagaz is not ready yet; use the OneTouch app for now.` : `Could not: ${msg}`;
+}
+$('ot-family-invite').addEventListener('click', async () => {
+  const email = await KagazAsk.ask((dlg, finish) => {
+    const form = document.createElement('form'); form.method = 'dialog';
+    const title = document.createElement('p'); title.className = 'ask-title'; title.textContent = 'Invite a family member';
+    const label = document.createElement('label'); label.textContent = 'Their email address ';
+    const input = document.createElement('input'); input.type = 'email'; input.required = true; input.autocomplete = 'email'; input.placeholder = 'name@example.com';
+    label.appendChild(input);
+    const help = document.createElement('p'); help.className = 'muted small'; help.textContent = 'OneTouch emails them an invitation; once they accept, these devices show in their OneTouch app and here.';
+    const row = document.createElement('div'); row.className = 'actions';
+    const cancel = document.createElement('button'); cancel.type = 'button'; cancel.textContent = 'Cancel'; cancel.addEventListener('click', () => finish(null));
+    const act = document.createElement('button'); act.type = 'submit'; act.className = 'accent'; act.textContent = 'Invite';
+    row.append(cancel, act);
+    form.append(title, label, help, row);
+    form.addEventListener('submit', (e) => { e.preventDefault(); if (input.checkValidity()) finish(input.value.trim()); else input.reportValidity(); });
+    dlg.appendChild(form);
+    setTimeout(() => input.focus(), 0);
+  });
+  if (!email) return;
+  try {
+    await invoke('onetouch_family_invite', { email });
+    $('ot-family-note').textContent = `Invitation sent to ${email}.`;
+    await otLoadPeople(); otRenderFamily();
+  } catch (e) {
+    $('ot-family-note').textContent = otFamilyNotReady(e, 'Inviting');
+  }
+});
 $('ot-recordings-tab').addEventListener('click', () => otRun(async () => {
   otTab = 'recordings';
   await stopOneTouch();

@@ -192,10 +192,27 @@ const KagazHome = (() => {
     return true;
   }
 
+  // The society's gate: who is waiting, when signed in (or looking at the sample).
+  function societyGroup(root) {
+    if (typeof KagazSociety === "undefined") return false;
+    const st = KagazSociety.homeState();
+    if (!st) return false;
+    const g = group("society", "Society gate", st.status, () => selectCategory("society"));
+    for (const v of st.pending) {
+      const t = tile(v.name, `${v.company ? v.company + " " : ""}${v.kind} at ${v.gate} · tap to answer`, KagazBrands.ICON.society, () => { selectCategory("society"); KagazSociety.open("visitors"); });
+      t.classList.add("waiting");
+      g.tiles.appendChild(t);
+    }
+    if (!st.pending.length) g.tiles.appendChild(tile("Nobody at the gate", "Open to allow someone in ahead of time", KagazBrands.ICON.society, () => selectCategory("society")));
+    g.count();
+    root.appendChild(g.box);
+    return true;
+  }
+
   async function show() {
     const root = $("home-groups");
     const fresh = document.createElement("div");
-    const shown = [await doorbellGroup(fresh), await camerasGroup(fresh), printersGroup(fresh), await fansGroup(fresh), await purifiersGroup(fresh)];
+    const shown = [await doorbellGroup(fresh), await camerasGroup(fresh), printersGroup(fresh), await fansGroup(fresh), await purifiersGroup(fresh), societyGroup(fresh)];
     root.replaceChildren(...fresh.childNodes);
     $("home-empty").classList.toggle("hidden", shown.some(Boolean));
     kindNotes(root);
@@ -210,8 +227,8 @@ const KagazHome = (() => {
 
   // The sidebar's kinds say what each holds ("2 devices", "none added
   // yet"), so a kind with nothing in it does not read as a device.
-  const KIND_EMPTY = { doorbell: "not set up yet", cameras: "not signed in yet", print: "none added yet", fans: "none added yet", purifiers: "none added yet" };
-  const KIND_GROUP = { doorbell: "doorbell", cameras: "security", print: "print", fans: "fan", purifiers: "purifier" };
+  const KIND_EMPTY = { doorbell: "not set up yet", cameras: "not signed in yet", print: "none added yet", fans: "none added yet", purifiers: "none added yet", society: "not signed in yet" };
+  const KIND_GROUP = { doorbell: "doorbell", cameras: "security", print: "print", fans: "fan", purifiers: "purifier", society: "society" };
   function kindNotes(built) {
     for (const [cat, empty] of Object.entries(KIND_EMPTY)) {
       const note = document.querySelector(`#categories li[data-cat="${cat}"] .cat-note`);
@@ -282,6 +299,9 @@ const KagazHome = (() => {
     } else if (kind.id === "purifier") {
       selectCategory("purifiers");
       KagazPurifiers.rescan();
+    } else if (kind.id === "society") {
+      selectCategory("society");
+      KagazSociety.open(b.id === "parkplus" ? "vehicles" : "visitors");
     }
   }
 

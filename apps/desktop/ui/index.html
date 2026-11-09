@@ -55,6 +55,11 @@
         <span class="cat-name">Air purifiers</span>
         <span class="cat-note muted">Philips, on the network</span>
       </li>
+      <li data-cat="society" tabindex="0" role="button">
+        <span class="cat-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 21V9l9-6 9 6v12M3 21h18M8 21v-6h8v6M12 3v4"/></svg></span>
+        <span class="cat-name">Society gate</span>
+        <span class="cat-note muted">MyGate, Park+</span>
+      </li>
     </ul>
   </aside>
 
@@ -149,6 +154,77 @@
       <ul id="purifiers-list" class="cards"></ul>
       <h3 id="purifiers-found-head" class="list-head hidden">Found nearby</h3>
       <ul id="purifiers-found" class="cards"></ul>
+    </section>
+
+    <!-- The society's gate (society.js): visitors through MyGate, vehicles
+         through Park+. Sign-in through Kagaz comes later; a marked sample
+         shows the look and the flow until then. -->
+    <section id="society" class="pane hidden">
+      <button type="button" class="back to-home">&#x2190; Home</button>
+      <div class="pane-head"><h2>Society gate</h2></div>
+      <div id="society-tabs" class="tabs" role="group" aria-label="What at the gate">
+        <button type="button" class="tab active" data-tab="visitors" aria-pressed="true">Visitors</button>
+        <button type="button" class="tab" data-tab="vehicles" aria-pressed="false">Vehicles</button>
+      </div>
+
+      <div id="society-visitors">
+        <div id="mg-signin" class="signin-card">
+          <h3>MyGate</h3>
+          <p class="muted small">Allow or deny whoever is at the gate, and let expected guests, deliveries and cabs in ahead of time, from here instead of the MyGate app.</p>
+          <form id="mg-form" class="signin-form">
+            <label>Phone number of your MyGate account <input id="mg-phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="+91 98765 43210"></label>
+            <label id="mg-code-row" class="hidden">Code sent to it <input id="mg-code" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="6 digits"></label>
+            <div class="actions"><button id="mg-submit" type="submit" class="accent">Get a code</button><button id="mg-sample-on" type="button">See a sample</button></div>
+          </form>
+          <p id="mg-note" class="muted small" role="status"></p>
+        </div>
+        <div id="mg-main" class="hidden">
+          <p id="mg-sample" class="sample-banner hidden">Sample entries, to see how this looks. Nothing here is real. <button id="mg-sample-off" type="button" class="small">Leave the sample</button></p>
+          <h3 class="list-head">At the gate now</h3>
+          <p id="mg-pending-empty" class="muted">Nobody is waiting. When someone comes for you, they show here with Allow and Deny.</p>
+          <div id="mg-pending" class="gate-list"></div>
+          <h3 class="list-head">Allow future entry</h3>
+          <p class="muted small">Say who is coming and the guard lets them in without asking you. A guest gets a code to show at the gate.</p>
+          <div id="mg-future-buttons" class="actions">
+            <button type="button" data-kind="guest">Guest</button>
+            <button type="button" data-kind="delivery">Delivery</button>
+            <button type="button" data-kind="cab">Cab</button>
+            <button type="button" data-kind="help">Visiting help</button>
+          </div>
+          <p id="mg-future-empty" class="muted small hidden">No one is expected.</p>
+          <div id="mg-future" class="gate-list"></div>
+          <h3 class="list-head">Activity</h3>
+          <div id="mg-activity" class="activity-list"></div>
+        </div>
+      </div>
+
+      <div id="society-vehicles" class="hidden">
+        <div id="pp-signin" class="signin-card">
+          <h3>Park+</h3>
+          <p class="muted small">Know when your vehicles enter and leave, and lock a tag so the barrier stays shut for it, from here instead of the Park+ app.</p>
+          <form id="pp-form" class="signin-form">
+            <label>Phone number of your Park+ account <input id="pp-phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="+91 98765 43210"></label>
+            <label id="pp-code-row" class="hidden">Code sent to it <input id="pp-code" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="6 digits"></label>
+            <div class="actions"><button id="pp-submit" type="submit" class="accent">Get a code</button><button id="pp-sample-on" type="button">See a sample</button></div>
+          </form>
+          <p id="pp-note" class="muted small" role="status"></p>
+        </div>
+        <div id="pp-main" class="hidden">
+          <p id="pp-sample" class="sample-banner hidden">Sample entries, to see how this looks. Nothing here is real. <button id="pp-sample-off" type="button" class="small">Leave the sample</button></p>
+          <h3 class="list-head">Your vehicles</h3>
+          <p id="pp-vehicles-empty" class="muted">No vehicles yet. Add one with its tag, and its comings and goings show below.</p>
+          <div id="pp-vehicles" class="gate-list"></div>
+          <div class="actions"><button id="pp-add" type="button">Add a vehicle</button></div>
+          <label class="switch"><input id="pp-alerts" type="checkbox" checked> Tell me on every entry and exit</label>
+          <h3 class="list-head">Comings and goings</h3>
+          <div id="pp-filters" class="chips" role="group" aria-label="Show">
+            <button type="button" class="chip active" data-filter="all">All</button>
+            <button type="button" class="chip" data-filter="in">Entered</button>
+            <button type="button" class="chip" data-filter="out">Left</button>
+          </div>
+          <div id="pp-moves" class="activity-list"></div>
+        </div>
+      </div>
     </section>
 
     <!-- Tools for any file on this device, no printer needed (tools.js;
@@ -264,6 +340,16 @@
           <div class="tabs" role="group" aria-label="Doorbell view">
             <button id="ot-live-tab" type="button" class="tab active" aria-pressed="true">Devices</button>
             <button id="ot-recordings-tab" type="button" class="tab" aria-pressed="false">History</button>
+            <button id="ot-family-tab" type="button" class="tab" aria-pressed="false">Family</button>
+          </div>
+          <!-- The home's family members: each uses these devices with their own
+               OneTouch login (up to ten). -->
+          <div id="ot-family-pane" class="hidden">
+            <p class="muted small">Up to ten family members can see and answer these devices with their own OneTouch login. Invite one by email; OneTouch sends them the invitation.</p>
+            <p id="ot-family-count" class="muted small"></p>
+            <div id="ot-family-list" class="activity-list"></div>
+            <div class="actions"><button id="ot-family-invite" type="button" class="accent">Invite a family member</button></div>
+            <p id="ot-family-note" class="muted small" role="status"></p>
           </div>
           <!-- Each device is one card (onetouch.js): a tap opens it and starts its
                live view inside it; its Call button sits under the picture. -->
@@ -745,6 +831,7 @@
   <script src="brands.js"></script>
   <script src="fans.js"></script>
   <script src="purifiers.js"></script>
+  <script src="society.js"></script>
   <script src="history.js"></script>
   <script src="settings.js"></script>
   <script src="home.js"></script>
