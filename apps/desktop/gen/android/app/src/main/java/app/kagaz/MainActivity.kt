@@ -10,6 +10,7 @@ import android.graphics.drawable.Icon
 import android.os.Build
 import android.os.Bundle
 import android.util.Rational
+import android.view.KeyEvent
 import android.view.View
 import androidx.annotation.RequiresApi
 import androidx.core.view.ViewCompat
@@ -166,6 +167,13 @@ class MainActivity : TauriActivity() {
   override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
     super.onActivityResult(requestCode, resultCode, data)
     KagazBle.answered(requestCode)
+  }
+
+  /** During a door call the volume keys change the door's sound (see
+   *  CallVolume), not the call volume Android would pick. */
+  override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+    if (CallVolume.active && CallVolume.key(event.keyCode, event.action == KeyEvent.ACTION_DOWN)) return true
+    return super.dispatchKeyEvent(event)
   }
 
   override fun onNewIntent(intent: Intent) {

@@ -24,6 +24,9 @@ import android.media.AudioFocusRequest
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioTrack
+import android.media.VolumeProvider
+import android.media.session.MediaSession
+import android.media.session.PlaybackState
 import android.net.Uri
 import android.os.PowerManager
 import android.provider.Settings
@@ -624,8 +627,10 @@ object CallAudio {
                 a.mode = AudioManager.MODE_IN_COMMUNICATION
                 silence = silentVoice()
                 Loudspeaker.fresh()
+                CallVolume.start(context)
             } else if (held) {
                 held = false
+                CallVolume.stop()
                 silence?.let {
                     try {
                         it.stop()
@@ -674,5 +679,80 @@ object CallAudio {
         t
     } catch (e: Exception) {
         null
+    }
+}
+
+/** The volume keys during a door call change the volume the door's sound
+ *  plays at. The page plays it as media (the web view's sound, on the
+ *  loudspeaker and on the earpiece alike), but call mode makes Android
+ *  send the keys to the call volume, which that sound does not use: the
+ *  slider rose to full while the person heard nothing (reported
+ *  2026-11-09). With Kagaz on screen MainActivity hands the keys here;
+ *  elsewhere (the small call window, another app, the lock screen) a media
+ *  session of Kagaz's own takes them, where Android lets it. */
+object CallVolume {
+    private var audio: AudioManager? = null
+    private var session: MediaSession? = null
+
+    val active: Boolean
+        get() = audio != null
+
+    fun start(context: Context) {
+        stop()
+        val a = context.applicationContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        audio = a
+        try {
+            val stream = AudioManager.STREAM_MUSIC
+            session = MediaSession(context.applicationContext, "kagaz-call").apply {
+                setPlaybackToRemote(object : VolumeProvider(
+                    VolumeProvider.VOLUME_CONTROL_ABSOLUTE,
+                    a.getStreamMaxVolume(stream),
+                    a.getStreamVolume(stream),
+                ) {
+                    override fun onAdjustVolume(direction: Int) {
+                        a.adjustStreamVolume(stream, direction, 0)
+                        currentVolume = a.getStreamVolume(stream)
+                    }
+
+                    override fun onSetVolumeTo(volume: Int) {
+                        a.setStreamVolume(stream, volume, 0)
+                        currentVolume = a.getStreamVolume(stream)
+                    }
+                })
+                setPlaybackState(PlaybackState.Builder().setState(PlaybackState.STATE_PLAYING, 0, 1f).build())
+                isActive = true
+            }
+        } catch (e: Exception) {
+            session = null
+        }
+    }
+
+    fun stop() {
+        try {
+            session?.release()
+        } catch (e: Exception) {
+        }
+        session = null
+        audio = null
+    }
+
+    /** A volume key pressed with Kagaz on screen: true when it was used. */
+    fun key(code: Int, down: Boolean): Boolean {
+        val a = audio ?: return false
+        val direction = when (code) {
+            android.view.KeyEvent.KEYCODE_VOLUME_UP -> AudioManager.ADJUST_RAISE
+            android.view.KeyEvent.KEYCODE_VOLUME_DOWN -> AudioManager.ADJUST_LOWER
+            android.view.KeyEvent.KEYCODE_VOLUME_MUTE -> AudioManager.ADJUST_TOGGLE_MUTE
+            else -> return false
+        }
+        // The press changes the volume (again while held); the release is
+        // taken too, so Android does not act on it.
+        if (down) {
+            try {
+                a.adjustStreamVolume(AudioManager.STREAM_MUSIC, direction, AudioManager.FLAG_SHOW_UI)
+            } catch (e: Exception) {
+            }
+        }
+        return true
     }
 }
