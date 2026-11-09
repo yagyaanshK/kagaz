@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Kagaz · Home shell mockups</title>
+<style>
+  body { margin: 0; padding: 24px; font-family: system-ui, sans-serif; background: #e9e9e6; color: #222; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  p.lead { margin: 0 0 20px; color: #555; max-width: 900px; }
+  h2 { font-size: 15px; margin: 28px 0 10px; color: #444; }
+  .row { display: flex; gap: 24px; flex-wrap: wrap; align-items: flex-start; }
+  figure { margin: 0; }
+  figcaption { font-size: 12px; color: #555; margin-bottom: 6px; }
+  iframe { border: 1px solid #bbb; background: #fff; border-radius: 10px; display: block; box-shadow: 0 6px 20px rgba(0,0,0,.12); }
+  .phone { width: 390px; height: 844px; }
+  .tablet { width: 800px; height: 640px; }
+  .desk { width: 1280px; height: 800px; }
+  .narrow { width: 800px; height: 640px; }
+  .snap { width: 420px; height: 640px; }
+  .controls { margin: 0 0 16px; display: flex; gap: 12px; align-items: center; font-size: 13px; }
+</style>
+</head>
+<body>
+<h1>Kagaz · Home and navigation, one screen per platform</h1>
+<p class="lead">The same Home content with each platform's own navigation, bars, sizes and colours. Width picks the layout at each OS's breakpoints; the OS picks the look. Names and readings are sample data. Open any frame on its own to resize it: <code>shell.html?os=windows&amp;state=urgent&amp;detail=fan&amp;theme=dark</code>.</p>
+<div class="controls">
+  <label><input type="checkbox" id="dark"> Dark</label>
+  <label>State <select id="state"><option value="normal">normal</option><option value="urgent">urgent (ringing)</option><option value="empty">empty</option></select></label>
+</div>
+
+<h2>Phones</h2>
+<div class="row">
+  <figure><figcaption>Android · Material 3 · Home</figcaption><iframe class="phone" data-src="shell.html?os=android"></iframe></figure>
+  <figure><figcaption>Android · fan opens as a bottom sheet</figcaption><iframe class="phone" data-src="shell.html?os=android&detail=fan"></iframe></figure>
+  <figure><figcaption>iPhone · iOS 26 · Home</figcaption><iframe class="phone" data-src="shell.html?os=ios"></iframe></figure>
+  <figure><figcaption>iPhone · fan opens as a sheet</figcaption><iframe class="phone" data-src="shell.html?os=ios&detail=fan"></iframe></figure>
+</div>
+
+<h2>Desktop windows at 1280 px</h2>
+<div class="row">
+  <figure><figcaption>Windows 11 · expanded navigation pane, Settings pinned at the bottom</figcaption><iframe class="desk" data-src="shell.html?os=windows"></iframe></figure>
+  <figure><figcaption>GNOME · sidebar split view, header bar per pane</figcaption><iframe class="desk" data-src="shell.html?os=gnome"></iframe></figure>
+  <figure><figcaption>macOS · sidebar with accent-coloured icons, toolbar</figcaption><iframe class="desk" data-src="shell.html?os=macos"></iframe></figure>
+  <figure><figcaption>Windows 11 · fan opens as a dialog on a wide window</figcaption><iframe class="desk" data-src="shell.html?os=windows&detail=fan"></iframe></figure>
+</div>
+
+<h2>Narrow desktop windows</h2>
+<div class="row">
+  <figure><figcaption>Windows 11 · 800 px · icon rail (641–1007)</figcaption><iframe class="narrow" data-src="shell.html?os=windows"></iframe></figure>
+  <figure><figcaption>Windows 11 · 420 px snapped · hamburger only (≤640)</figcaption><iframe class="snap" data-src="shell.html?os=windows"></iframe></figure>
+  <figure><figcaption>GNOME · 420 px · sidebar collapsed, bottom switcher (&lt;550 sp)</figcaption><iframe class="snap" data-src="shell.html?os=gnome"></iframe></figure>
+  <figure><figcaption>Android tablet · 800 px · navigation rail (≥600 dp)</figcaption><iframe class="tablet" data-src="shell.html?os=android"></iframe></figure>
+</div>
+<script>
+  const frames = [...document.querySelectorAll('iframe')];
+  function load() {
+    const dark = document.getElementById('dark').checked ? '&theme=dark' : '';
+    const st = document.getElementById('state').value;
+    for (const f of frames) f.src = f.dataset.src + (st !== 'normal' ? '&state=' + st : '') + dark;
+  }
+  document.getElementById('dark').addEventListener('change', load);
+  document.getElementById('state').addEventListener('change', load);
+  load();
+</script>
+</body>
+</html>
