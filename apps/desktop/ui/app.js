@@ -271,7 +271,7 @@ async function rescan() {
     foundDevices = await invoke("discover", { timeout: 3 });
     lastSearch = Date.now();
     try {
-      savedPrinters = await invoke("printers_seen", { found: foundDevices });
+      savedPrinters = (await invoke("printers_seen", { found: foundDevices })) || savedPrinters;
     } catch (_) {}
     rebuildDevices();
     const others = devices.filter((d) => !isSaved(d));
@@ -710,7 +710,7 @@ function showCameras() {
 // device (each with its own settings). The sidebar (wide windows) and the
 // bottom bar (phones) switch between them; every kind's page has a way
 // back to Home.
-const PANES = ["empty", "home", "add", "settings", "tools", "picker", "detail", "cameras", "doorbell", "fans"];
+const PANES = ["empty", "home", "add", "settings", "tools", "picker", "detail", "cameras", "doorbell", "fans", "purifiers"];
 let currentView = null;
 
 function selectCategory(cat) {
@@ -756,6 +756,7 @@ function selectCategory(cat) {
     refreshDoorbell();
   }
   if (cat === "fans" && typeof KagazFans !== "undefined") KagazFans.show();
+  if (cat === "purifiers" && typeof KagazPurifiers !== "undefined") KagazPurifiers.show();
   if (cat === "home" && typeof KagazHome !== "undefined") KagazHome.show();
   if (cat === "settings" && typeof KagazSettings !== "undefined") KagazSettings.show();
   $("main").scrollTop = 0;

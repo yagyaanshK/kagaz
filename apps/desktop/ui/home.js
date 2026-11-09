@@ -149,7 +149,7 @@ const KagazHome = (() => {
 
   // The printers the person added, each with how it is now.
   function printersGroup(root) {
-    if (!savedPrinters.length) return false;
+    if (!savedPrinters || !savedPrinters.length) return false; // not read yet, or none
     const g = group("print", "Printers & scanners", "", () => { printBrand = null; selectCategory("print"); });
     for (const d of savedPrinters) {
       const b = printerBrand(d);
@@ -179,10 +179,23 @@ const KagazHome = (() => {
     return true;
   }
 
+  // The purifiers the person added, as last seen (the page looks for
+  // them; Home does not).
+  async function purifiersGroup(root) {
+    const data = await invoke("purifiers_saved").catch(() => null);
+    if (!data || !data.purifiers.length) return false;
+    const g = group("purifier", "Air purifiers", "Philips", () => selectCategory("purifiers"));
+    const philips = KagazBrands.byId("purifier", "philips");
+    for (const p of data.purifiers) g.tiles.appendChild(tile(p.name, KagazPurifiers.homeWords(p), KagazBrands.ICON.purifier, () => selectCategory("purifiers"), philips && philips.logo));
+    g.count();
+    root.appendChild(g.box);
+    return true;
+  }
+
   async function show() {
     const root = $("home-groups");
     const fresh = document.createElement("div");
-    const shown = [await doorbellGroup(fresh), await camerasGroup(fresh), printersGroup(fresh), await fansGroup(fresh)];
+    const shown = [await doorbellGroup(fresh), await camerasGroup(fresh), printersGroup(fresh), await fansGroup(fresh), await purifiersGroup(fresh)];
     root.replaceChildren(...fresh.childNodes);
     $("home-empty").classList.toggle("hidden", shown.some(Boolean));
     kindNotes(root);
@@ -197,8 +210,8 @@ const KagazHome = (() => {
 
   // The sidebar's kinds say what each holds ("2 devices", "none added
   // yet"), so a kind with nothing in it does not read as a device.
-  const KIND_EMPTY = { doorbell: "not set up yet", cameras: "not signed in yet", print: "none added yet", fans: "none added yet" };
-  const KIND_GROUP = { doorbell: "doorbell", cameras: "security", print: "print", fans: "fan" };
+  const KIND_EMPTY = { doorbell: "not set up yet", cameras: "not signed in yet", print: "none added yet", fans: "none added yet", purifiers: "none added yet" };
+  const KIND_GROUP = { doorbell: "doorbell", cameras: "security", print: "print", fans: "fan", purifiers: "purifier" };
   function kindNotes(built) {
     for (const [cat, empty] of Object.entries(KIND_EMPTY)) {
       const note = document.querySelector(`#categories li[data-cat="${cat}"] .cat-note`);
@@ -266,6 +279,9 @@ const KagazHome = (() => {
     } else if (kind.id === "fan") {
       selectCategory("fans");
       KagazFans.rescan();
+    } else if (kind.id === "purifier") {
+      selectCategory("purifiers");
+      KagazPurifiers.rescan();
     }
   }
 

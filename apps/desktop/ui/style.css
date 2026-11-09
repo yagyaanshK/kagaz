@@ -1214,3 +1214,9 @@ dialog.ask label.ask-title select, dialog.ask label.ask-title input[type="text"]
   .kind-tile { min-height: 56px; padding: 10px 12px; }
   .brand-tile { min-height: 84px; padding: 10px 8px; }
 }
+
+/* Air purifiers: cards as the printers' are, with Rename and Remove in a row, Add at the side. */
+ul.cards .purifier-card { position: relative; }
+ul.cards .purifier-card .actions { margin-top: 10px; gap: 8px; }
+ul.cards .purifier-card .add-printer { position: absolute; right: 12px; top: 12px; }
+ul.cards .purifier-card.unreachable .name { color: var(--muted); }

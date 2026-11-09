@@ -22,6 +22,7 @@ mod onetouch;
 mod mobile;
 mod printers;
 mod printing;
+mod purifiers;
 #[cfg(desktop)]
 mod ring_notice;
 mod ringtones;
@@ -1932,6 +1933,11 @@ pub fn run() {
             fans::fan_forget,
             fans::fan_rename,
             fans::fan_set_room,
+            purifiers::purifiers_saved,
+            purifiers::purifiers_scan,
+            purifiers::purifier_add,
+            purifiers::purifier_forget,
+            purifiers::purifier_rename,
             fans::room_add,
             fans::room_rename,
             fans::room_remove,

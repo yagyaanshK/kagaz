@@ -15,6 +15,7 @@ const KagazBrands = (() => {
     fridge: '<svg viewBox="0 0 24 24"><path d="M6 2h12v20H6zM6 10h12M9 5v2M9 13v3"/></svg>',
     washer: '<svg viewBox="0 0 24 24"><path d="M4 2h16v20H4zM4 7h16M12 18a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM7 4.5h2"/></svg>',
     ac: '<svg viewBox="0 0 24 24"><path d="M2 5h20v8H2zM6 10h12M7 17l-1 3M12 17v3M17 17l1 3"/></svg>',
+    purifier: '<svg viewBox="0 0 24 24"><path d="M3 8h11a3 3 0 1 0-3-3M3 12h15a3 3 0 1 1-3 3M3 16h8a2.5 2.5 0 1 1-2.5 2.5"/></svg>',
     fan: '<svg viewBox="0 0 24 24"><path d="M12 12m-2 0a2 2 0 1 0 4 0a2 2 0 1 0-4 0M12 10c0-4 1-7 3-7s3 3 0 7M14 12c4 0 7 1 7 3s-3 3-7 0M12 14c0 4-1 7-3 7s-3-3 0-7M10 12c-4 0-7-1-7-3s3-3 7 0"/></svg>',
     room: '<svg viewBox="0 0 24 24"><path d="M4 21V8l8-5 8 5v13M9 21v-7h6v7"/></svg>',
     sip: '<svg viewBox="0 0 24 24"><path d="M6 3h12v18H6zM10 8h4M12 13a1.5 1.5 0 1 0 0 .01M9 18h6"/></svg>',
@@ -26,6 +27,7 @@ const KagazBrands = (() => {
     { id: "security", name: "Security cameras", note: "Home and shop cameras", page: "cameras", supported: true },
     { id: "print", name: "Printers & scanners", note: "On the network and USB", page: "print", supported: true },
     { id: "fan", name: "Ceiling fans", note: "Over Bluetooth, and Wi-Fi", page: "fans", supported: true },
+    { id: "purifier", name: "Air purifiers", note: "Philips, on the Wi-Fi network", page: "purifiers", supported: true },
     { id: "camera", name: "Cameras", note: "DSLR and mirrorless", supported: false },
     { id: "vacuum", name: "Robot vacuums", supported: false },
     { id: "tv", name: "TVs", supported: false },
@@ -152,6 +154,10 @@ const KagazBrands = (() => {
       B("siemens", "Siemens", "siemens", "#009999"),
       B("ifb", "IFB", "", "#e31e24"),
       B("panasonic", "Panasonic", "", "#0049ab"),
+    ],
+    purifier: [
+      B("philips", "Philips", "philips", "#0b5ed7", true),
+      B("other", "Another purifier", "", "#2f6f4e", true, /^$/),
     ],
     ac: [
       B("daikin", "Daikin", "", "#0097e0"),
