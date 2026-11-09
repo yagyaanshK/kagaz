@@ -363,22 +363,33 @@ button.danger { background: var(--bad); color: #fff; border-color: var(--bad); }
    it takes the whole row, its live view and calls play inside it, and
    its Call button sits under the picture. */
 .ot-devices { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; margin-top: 14px; }
-.dev-card { border: 1px solid var(--line); border-radius: 10px; background: var(--bg); min-width: 0; }
+.dev-card { border: 1px solid var(--line); border-radius: 12px; background: var(--panel); min-width: 0; overflow: hidden; }
 .dev-card.open { grid-column: 1 / -1; border-color: var(--accent); }
-.dev-head { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 60px; padding: 10px 14px; background: none; border: none; border-radius: 10px; text-align: left; color: var(--text); }
-.dev-head:hover { background: var(--panel); }
+.dev-card.watching { border-color: var(--accent); }
+.dev-head { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 56px; padding: 12px 14px 8px; color: var(--text); }
 .dev-icon { display: inline-flex; flex: 0 0 auto; color: var(--accent); }
 .dev-card.offline .dev-icon { color: var(--muted); }
 .dev-icon svg { width: 26px; height: 26px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .dev-text { display: flex; flex-direction: column; min-width: 0; flex: 1 1 auto; }
 .dev-text strong { overflow-wrap: anywhere; }
-.dev-go { flex: 0 0 auto; width: 36px; height: 36px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; background: var(--panel); border: 1px solid var(--line); color: var(--accent); font-size: 13px; }
+/* Online dot on the right of the head, like OneTouch's status pip. */
+.dev-dot { flex: 0 0 auto; width: 9px; height: 9px; border-radius: 50%; background: var(--control); }
+.dev-dot.on { background: var(--ok); }
 .dev-slot { padding: 0 14px; }
 .dev-slot:empty { display: none; }
 .dev-slot #call-card { margin-top: 0; padding: 0; border: none; background: none; }
-.dev-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 12px 14px 14px; }
-.dev-actions .dev-note { margin: 0; flex: 1 1 220px; }
-.dev-actions .dev-note:empty { display: none; }
+/* The row of per-device actions (Live, Call) — OneTouch shows these inline. */
+.dev-actions { display: flex; flex-wrap: wrap; gap: 8px; padding: 8px 14px 12px; }
+.dev-btn { display: inline-flex; align-items: center; gap: 7px; min-height: 40px; padding: 0 16px; border: 1px solid var(--control); border-radius: 999px; background: var(--panel); color: var(--text); font-weight: 600; }
+.dev-btn svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
+.dev-btn.call svg { fill: currentColor; stroke: none; }
+.dev-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.dev-btn.call { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+.dev-btn.call:hover:not(:disabled) { color: var(--accent-text); filter: brightness(1.05); }
+.dev-btn.on { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+.dev-btn:disabled { opacity: .5; }
+.dev-note { margin: 0 14px 12px; }
+.dev-note:empty { display: none; }
 .ot-recording { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 12px 0; border-bottom: 1px solid var(--line); }
 .ot-recording span { flex: 1 1 200px; }
 #ot-player { margin: 10px 0 14px; }
@@ -728,8 +739,10 @@ ul.cards li.add .name { color: var(--accent); }
   .dev-card.open .kz-stage[data-shape="wide"], .dev-card.open .call-video { border-radius: 0; }
   .dev-card.open #call-card { border: none; border-radius: 0; padding: 0 0 12px; background: none; }
   .dev-card.open .call-body { padding: 0 var(--edge); }
-  .dev-actions { padding: 12px var(--edge) 16px; }
-  .dev-actions button.big { flex: 1 1 100%; min-height: 52px; }
+  .dev-actions { padding: 8px var(--edge) 14px; }
+  .dev-note { margin: 0 var(--edge) 14px; }
+  /* Finger-sized action buttons that share the row evenly on a phone. */
+  .dev-btn { flex: 1 1 40%; justify-content: center; min-height: 48px; }
   .kz-stage[data-shape="tall"] { height: min(68vh, 720px); }
   .pb-bar-row { gap: 6px; }
   #pb-speed { width: 90px; }

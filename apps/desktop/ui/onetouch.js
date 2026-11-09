@@ -96,6 +96,11 @@ const OT_ICON = {
   family: '<svg viewBox="0 0 24 24"><path d="M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM2 21v-1a7 7 0 0 1 14 0v1M17 11a3 3 0 1 0 0-6M19 21v-1a5 5 0 0 0-3-4.6"/></svg>',
   other: '<svg viewBox="0 0 24 24"><path d="M4 4h16v16H4z"/></svg>',
 };
+// Small glyphs for the per-device action buttons (OneTouch shows a row of these).
+const OT_ACT = {
+  live: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>',
+  call: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.6 10.8a15 15 0 0 0 6.6 6.6l2.2-2.2a1 1 0 0 1 1-.24 11 11 0 0 0 3.5.56 1 1 0 0 1 1 1V20a1 1 0 0 1-1 1A17 17 0 0 1 3 4a1 1 0 0 1 1-1h3.5a1 1 0 0 1 1 1 11 11 0 0 0 .56 3.5 1 1 0 0 1-.24 1z"/></svg>',
+};
 let otOpen = null; // the key of the open card
 
 function otCallStatus() {
@@ -150,6 +155,8 @@ function otRenderDevices() {
   for (const c of cards) {
     const open = otOpen === c.key;
     const watching = otLive && otLive.key === c.key;
+    const canWatch = !!(c.live && c.live.can_monitor);
+    const activeCall = busy && open; // the call card nests in this card's slot
     const el = document.createElement("div");
     el.className = "dev-card";
     el.dataset.key = c.key;
@@ -158,10 +165,10 @@ function otRenderDevices() {
     el.classList.toggle("watching", !!watching);
     el.classList.toggle("offline", !c.online);
 
-    const head = document.createElement("button");
-    head.type = "button";
+    // Head: icon, name, status — a device row, like OneTouch's. Not a button;
+    // the actions below drive everything, so nothing toggles by surprise.
+    const head = document.createElement("div");
     head.className = "dev-head";
-    head.setAttribute("aria-expanded", String(open));
     const icon = document.createElement("span");
     icon.className = "dev-icon";
     icon.innerHTML = OT_ICON[c.kind] || OT_ICON.other;
@@ -171,51 +178,61 @@ function otRenderDevices() {
     name.textContent = c.name;
     const sub = document.createElement("span");
     sub.className = "muted small";
-    const canWatch = !!(c.live && c.live.can_monitor);
-    sub.textContent = [OT_KIND[c.kind] || OT_KIND.other, c.online ? "" : "offline", canWatch ? "live view" : ""].filter(Boolean).join(" · ");
+    sub.textContent = [OT_KIND[c.kind] || OT_KIND.other, c.online ? "" : "offline"].filter(Boolean).join(" · ");
     text.append(name, sub);
-    const go = document.createElement("span");
-    go.className = "dev-go";
-    go.setAttribute("aria-hidden", "true");
-    go.textContent = open ? "✕" : canWatch ? "▶" : "›";
-    head.append(icon, text, go);
-    head.disabled = otBusy;
-    head.title = open ? "Close" : canWatch ? "Watch live" : "Open";
-    head.addEventListener("click", () => (open ? otClose() : otOpenCard(c)));
+    const dot = document.createElement("span");
+    dot.className = "dev-dot" + (c.online ? " on" : "");
+    dot.setAttribute("aria-hidden", "true");
+    head.append(icon, text, dot);
     el.append(head);
 
+    // Inline live stage (or the running call card), shown in the slot.
     const slot = document.createElement("div");
     slot.className = "dev-slot";
     el.append(slot);
     if (watching) slot.append(otLive.stage.el);
 
-    if (open) {
+    // Persistent action row: Live · Call, the two things Kagaz can do for a
+    // OneTouch device (opening a door happens inside a call, via its button).
+    if (!activeCall && (canWatch || c.call)) {
       const actions = document.createElement("div");
       actions.className = "dev-actions";
-      const note = document.createElement("p");
-      note.className = "muted small dev-note";
-      if (c.call && !busy) {
+      if (canWatch) {
+        const live = document.createElement("button");
+        live.type = "button";
+        live.className = "dev-btn" + (watching ? " on" : "");
+        live.innerHTML = OT_ACT.live + `<span>${watching ? "Stop" : "Live"}</span>`;
+        live.disabled = otBusy;
+        live.title = watching ? "Stop live view" : "Watch live";
+        live.addEventListener("click", () => (watching ? otClose() : otOpenCard(c)));
+        actions.append(live);
+      }
+      if (c.call) {
         const call = document.createElement("button");
         call.type = "button";
-        call.className = "accent big";
-        call.textContent = c.kind === "apps" ? "Ring them" : c.kind === "family" ? `Call ${c.name.split(" ")[0]}` : "Call";
-        call.disabled = !lineUp || busy;
-        call.addEventListener("click", () => window.KagazCalls.call(c.call.sip, c.key));
+        call.className = "dev-btn call";
+        call.innerHTML = OT_ACT.call + `<span>${c.kind === "apps" ? "Ring" : "Call"}</span>`;
+        call.disabled = !lineUp || busy || otBusy;
+        call.title = c.kind === "apps" ? "Ring the phones on your login" : `Call ${c.name}`;
+        call.addEventListener("click", async () => { await otFocusCard(c); window.KagazCalls.call(c.call.sip, c.key); });
         actions.append(call);
-        if (!lineUp) note.textContent = calls && calls.line === "off" ? "Turn on “Ring me here” above to make calls." : "Calls connect once the call line is up (see above).";
       }
-      if (watching) {
-        note.textContent = [note.textContent, "Live view is picture only: the door sends its sound in a call."].filter(Boolean).join(" ");
-      } else if (!canWatch) {
-        note.textContent = [note.textContent,
-          c.live ? "OneTouch does not allow live view of this device."
-          : c.kind === "apps" ? "Every phone and tablet signed in with your own login shares one number, so they ring together. Family members with their own login are listed separately and ring on their own."
-          : c.kind === "family" && !c.call ? "OneTouch did not give a call number for this member yet."
-          : ""].filter(Boolean).join(" ");
-      }
-      actions.append(note);
       el.append(actions);
     }
+
+    // A short reason line, only when something needs explaining.
+    const note = document.createElement("p");
+    note.className = "muted small dev-note";
+    if (watching) note.textContent = "Live view is picture only; the door sends its sound in a call.";
+    else if (c.call && !lineUp && !busy) note.textContent = calls && calls.line === "off" ? "Turn on “Ring me here” above to call." : "Calls connect once the call line is up.";
+    else if (!canWatch && !c.call) {
+      note.textContent = c.live ? "OneTouch does not allow live view of this device."
+        : c.kind === "apps" ? "Every phone signed in with your login shares one number, so they ring together. Family members with their own login are listed on their own."
+        : c.kind === "family" ? "OneTouch did not give a call number for this member yet."
+        : "";
+    }
+    if (note.textContent) el.append(note);
+
     list.append(el);
   }
   if (window.KagazCalls) window.KagazCalls.place();
@@ -229,6 +246,18 @@ async function otOpenCard(card) {
   if (card.live && card.live.can_monitor) await otWatch(card);
   else otRenderDevices();
   // The open card comes to the top, so its picture has the screen.
+  const el = document.querySelector(`.dev-card[data-key="${CSS.escape(card.key)}"]`);
+  if (el) el.scrollIntoView({ block: "start", behavior: "smooth" });
+}
+
+// Make a card the open (full-width) one without starting live, so a call
+// placed into it has room. Used by the Call button.
+async function otFocusCard(card) {
+  if (otOpen === card.key) return;
+  await otStopLive();
+  otOpen = card.key;
+  KagazNav.push("ot-card", otClose);
+  otRenderDevices();
   const el = document.querySelector(`.dev-card[data-key="${CSS.escape(card.key)}"]`);
   if (el) el.scrollIntoView({ block: "start", behavior: "smooth" });
 }
