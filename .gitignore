@@ -17,3 +17,8 @@ tapo-*.ts
 
 # Kagaz release signing key and its passwords (private, never commit)
 /.signing/
+
+# Scanned images and camera recordings are private: never commit them.
+*.tif
+*.tiff
+/*.ts
