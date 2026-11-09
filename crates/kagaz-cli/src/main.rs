@@ -350,6 +350,18 @@ enum IntercomCommand {
         /// With --watch: ask for the door's sound too (the request the official app uses; nothing rings)
         #[arg(long, requires = "watch")]
         sound: bool,
+        /// List the home's family members (their own logins) and stop
+        #[arg(long, conflicts_with_all = ["call", "number", "listen", "watch"])]
+        family: bool,
+        /// Invite a family member with this name (give --email too); OneTouch emails them their login
+        #[arg(long, requires = "email", conflicts_with_all = ["call", "number", "listen", "watch"])]
+        invite: Option<String>,
+        /// With --invite: the address the invitation goes to
+        #[arg(long)]
+        email: Option<String>,
+        /// Remove the family member with this id (see --family)
+        #[arg(long, conflicts_with_all = ["call", "number", "listen", "watch", "invite"])]
+        remove: Option<String>,
     },
     /// Wait for an incoming call (the doorbell) and report each ring; for Direct IP use port 5060
     Listen {
@@ -2520,10 +2532,44 @@ fn intercom_command(cmd: IntercomCommand) -> Result<()> {
             press,
             watch,
             sound,
+            family,
+            invite,
+            email,
+            remove,
         } => {
             use kagaz_core::intercom::onetouch::Session;
             if let Some(name) = &watch {
                 return watch_onetouch_live(name, seconds, sound);
+            }
+            if family || invite.is_some() || remove.is_some() {
+                let mut session = Session::load()?
+                    .ok_or_else(|| anyhow::anyhow!("not signed in to OneTouch; sign in from the Doorbell pane first"))?;
+                let role = session.account()?.role;
+                if let Some(name) = &invite {
+                    let to = email.as_deref().unwrap_or_default();
+                    let r = session.invite(&role, name, to)?;
+                    println!(
+                        "Invited {name}: {}{}",
+                        if r.emailed { "OneTouch emailed them" } else { "OneTouch texted them" },
+                        if r.message.is_empty() { String::new() } else { format!(" ({})", r.message) }
+                    );
+                }
+                if let Some(id) = &remove {
+                    session.remove_member(&role, id)?;
+                    println!("Removed member {id}.");
+                }
+                let people = session.people(&role)?;
+                println!("Family members: {}", people.len());
+                for p in &people {
+                    println!(
+                        "  {}  id {}{}{}",
+                        p.name,
+                        if p.id.is_empty() { "-" } else { &p.id },
+                        if p.email.is_empty() { String::new() } else { format!("  {}", p.email) },
+                        if p.sip.is_empty() { String::new() } else { format!("  number {}", p.sip) }
+                    );
+                }
+                return Ok(());
             }
             use kagaz_core::intercom::phone::{Event as PhoneEvent, MediaOut, Phone};
             use std::sync::atomic::{AtomicUsize, Ordering};

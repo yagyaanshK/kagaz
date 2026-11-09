@@ -129,7 +129,33 @@ older one, and reads either shape.
 
 Family members (each with their own login) come from
 `/web-server/v3/app/<project>/user/getSubList`; the test account has none,
-so the member fields are read loosely (name, `SipAccount`).
+so the member fields are read loosely (name, `Email`, `SipAccount`, `ID`).
+
+Adding and removing them is what the vendor's `FamilyMember.html`,
+`AddFamilyMember.html` and `FamilyMemberInfo.html` pages do (read from
+their published JavaScript, 2026-11-09). Their `v3/` writes are form posts
+(`application/x-www-form-urlencoded`) to the web backend with the same
+`x-auth-token`, `x-cloud-lang` and `x-cloud-version` headers as the reads;
+only `v4/` writes take JSON.
+
+- Add: `POST /web-server/v3/app/single/subUser/add` with `Name`, `Email`,
+  `PhoneCode`, `Phone`, `MobileNumber`; community homes post to
+  `.../community/subUser/add` with `FirstName`, `LastName`, `Email`,
+  `PhoneCode`, `Phone`, `MobileNumber`, `Remark`. The page requires a
+  name, and a country code only when a phone number is given. The answer's
+  `TipCode` says how the member was told: 0 by email, 1 by text message
+  (phone-only members). Kagaz invites by email only (`Session::invite`).
+- Remove: `POST /web-server/v3/app/<project>/subUser/delete` with `ID`
+  (`Session::remove_member`). Edit exists too (`.../subUser/edit`, same
+  fields plus `ID`); Kagaz does not use it.
+- Limits: the page reads the home's allowance from
+  `v4/smartplus/<project>/user/master/getInfo` (`memberLimitNum`, and for
+  communities `pmAllowMemberNum` when `familyMemberControl` is set), with a
+  built-in fallback of 63; Kagaz shows its own ceiling of 10, as asked.
+
+Not yet exercised against the live account: the add and remove posts
+(the reads are). `kagaz intercom cloud --family`, `--invite NAME --email
+ADDRESS` and `--remove ID` try them from the terminal.
 
 
 

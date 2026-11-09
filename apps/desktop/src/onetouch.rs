@@ -494,6 +494,27 @@ pub async fn onetouch_people(app: AppHandle) -> Result<Vec<onetouch::history::Pe
     super::blocking(move || with_session(&app, |session, role| session.people(role))).await
 }
 
+/// Invite a family member by email: OneTouch creates their login on this
+/// home and emails them.
+#[tauri::command]
+pub async fn onetouch_family_invite(
+    app: AppHandle,
+    name: String,
+    email: String,
+) -> Result<onetouch::history::Invited, String> {
+    super::blocking(move || {
+        with_session(&app, |session, role| session.invite(role, &name, &email))
+    })
+    .await
+}
+
+/// Remove a family member from this home (their own account stays).
+#[tauri::command]
+pub async fn onetouch_family_remove(app: AppHandle, id: String) -> Result<(), String> {
+    super::blocking(move || with_session(&app, |session, role| session.remove_member(role, &id)))
+        .await
+}
+
 #[tauri::command]
 pub async fn onetouch_recordings(app: AppHandle, page: u32) -> Result<Recordings, String> {
     super::blocking(move || {

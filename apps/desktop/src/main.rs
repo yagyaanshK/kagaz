@@ -2003,6 +2003,8 @@ pub fn run() {
             ringtones::ringtone_remove,
             onetouch::onetouch_history,
             onetouch::onetouch_people,
+            onetouch::onetouch_family_invite,
+            onetouch::onetouch_family_remove,
             onetouch::onetouch_recording_media
         ])
         .build(tauri::generate_context!())

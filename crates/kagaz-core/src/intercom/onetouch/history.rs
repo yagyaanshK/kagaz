@@ -73,6 +73,18 @@ pub struct Person {
     pub name: String,
     /// Their call number, when the cloud gives it.
     pub sip: String,
+    /// The address their invitation went to, when the cloud gives it.
+    pub email: String,
+}
+
+/// What came of inviting a family member.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct Invited {
+    /// The cloud emailed them an invitation (it may instead have texted a
+    /// phone-only member, which Kagaz does not create).
+    pub emailed: bool,
+    /// The cloud's own words, when it gave any.
+    pub message: String,
 }
 
 /// The project and role words of the account's role code.
@@ -124,6 +136,33 @@ fn check(v: &Value) -> Result<(), Error> {
         )));
     }
     Ok(())
+}
+
+/// A write's answer: ok when the cloud says code 0, else its own words.
+fn accepted(v: &Value, what: &str) -> Result<(), Error> {
+    match check(v) {
+        Err(Error::Expired) => Err(Error::Expired),
+        Err(_) => {
+            let msg = field(v, "msg");
+            Err(protocol(&if msg.is_empty() {
+                format!("OneTouch did not {what} (code {}).", field(v, "code"))
+            } else {
+                format!("OneTouch did not {what}: {msg}")
+            }))
+        }
+        Ok(()) => Ok(()),
+    }
+}
+
+/// The answer to an invitation: `TipCode` 0 means an email went out, 1 a
+/// text message (phone-only members, which the vendor's page offers only
+/// without an email).
+pub(crate) fn parse_invited(v: &Value) -> Result<Invited, Error> {
+    accepted(v, "add the member")?;
+    Ok(Invited {
+        emailed: field(v, "TipCode") != "1",
+        message: field(v, "msg"),
+    })
 }
 
 /// The rows of either shape: `data.list` (v4) or `data` (v3).
@@ -281,6 +320,7 @@ pub(crate) fn parse_people(v: &Value) -> Result<Vec<Person>, Error> {
                 id: pick(item, &["ID", "id", "UUID", "uuid", "Account", "account"]),
                 name: if name.is_empty() { "Family member".into() } else { name },
                 sip: pick(item, &["SipAccount", "sipAccount", "Sip", "sip"]),
+                email: pick(item, &["Email", "email"]),
             }
         })
         .collect())
@@ -293,6 +333,11 @@ impl Session {
             "7.13",
             &[("page", page.max(1).to_string()), ("row", ROWS.to_string())],
         )
+    }
+    /// A form post to the web backend, as the vendor's pages send their
+    /// `v3/` writes (the `v4/` ones take JSON; none is used here).
+    fn web_post(&self, path: &str, form: &[(&str, &str)]) -> Result<Value, Error> {
+        self.post_form(&format!("{}/web-server/{path}", self.web), form)
     }
 
     /// One page of a history, newest first: the newer list, else the
@@ -341,6 +386,93 @@ impl Session {
         }
         Err(Error::Expired)
     }
+
+    /// Invite a family member by email: the cloud creates their login and
+    /// emails them. A single home takes one name; a community one takes
+    /// first and last names, so the last word of the name becomes the last
+    /// name there. Phone fields stay empty: Kagaz invites by email only.
+    pub fn invite(&mut self, role: &str, name: &str, email: &str) -> Result<Invited, Error> {
+        if self.provider == Provider::Otipvdp {
+            return Err(protocol(
+                "Family members are managed on OneTouch Smart Cloud accounts.",
+            ));
+        }
+        let name = name.trim();
+        let email = email.trim();
+        if name.is_empty() {
+            return Err(protocol("Give the member a name."));
+        }
+        if !looks_like_email(email) {
+            return Err(protocol("That does not look like an email address."));
+        }
+        let (project, _) = place(role)?;
+        let path = format!("v3/app/{project}/subUser/add");
+        let (first, last) = match name.rsplit_once(' ') {
+            Some((first, last)) => (first.trim(), last),
+            None => (name, ""),
+        };
+        let form: Vec<(&str, &str)> = if project == "single" {
+            vec![
+                ("Name", name),
+                ("Email", email),
+                ("PhoneCode", ""),
+                ("Phone", ""),
+                ("MobileNumber", ""),
+            ]
+        } else {
+            vec![
+                ("FirstName", first),
+                ("LastName", last),
+                ("Email", email),
+                ("PhoneCode", ""),
+                ("Phone", ""),
+                ("MobileNumber", ""),
+                ("Remark", ""),
+            ]
+        };
+        for attempt in 0..2 {
+            match self.web_post(&path, &form).and_then(|v| parse_invited(&v)) {
+                Err(Error::Expired) if attempt == 0 => self.refresh()?,
+                result => return result,
+            }
+        }
+        Err(Error::Expired)
+    }
+
+    /// Remove a family member (their login loses this home; it is not
+    /// deleted).
+    pub fn remove_member(&mut self, role: &str, id: &str) -> Result<(), Error> {
+        if self.provider == Provider::Otipvdp {
+            return Err(protocol(
+                "Family members are managed on OneTouch Smart Cloud accounts.",
+            ));
+        }
+        if id.trim().is_empty() {
+            return Err(protocol("OneTouch gave no id for this member."));
+        }
+        let (project, _) = place(role)?;
+        let path = format!("v3/app/{project}/subUser/delete");
+        for attempt in 0..2 {
+            match self
+                .web_post(&path, &[("ID", id.trim())])
+                .and_then(|v| accepted(&v, "remove the member"))
+            {
+                Err(Error::Expired) if attempt == 0 => self.refresh()?,
+                result => return result,
+            }
+        }
+        Err(Error::Expired)
+    }
+}
+
+/// The vendor page's own test, loosely: something@domain.tld.
+fn looks_like_email(s: &str) -> bool {
+    let Some((user, host)) = s.split_once('@') else { return false };
+    !user.is_empty()
+        && host.contains('.')
+        && !host.starts_with('.')
+        && !host.ends_with('.')
+        && s.chars().all(|c| !c.is_whitespace())
 }
 
 #[cfg(test)]
@@ -408,6 +540,22 @@ mod tests {
         assert_eq!(people[0].name, "Asha Example");
         assert_eq!(people[0].sip, "1100");
         assert_eq!(people[1].name, "member@example.test");
+        assert_eq!(people[1].email, "member@example.test");
         assert!(people[1].sip.is_empty());
+    }
+
+    #[test]
+    fn invitation_answers() {
+        let ok = parse_invited(&json!({"code": 0, "msg": "Success", "TipCode": 0})).unwrap();
+        assert!(ok.emailed);
+        assert_eq!(ok.message, "Success");
+        assert!(!parse_invited(&json!({"code": 0, "TipCode": 1})).unwrap().emailed);
+        let refused = parse_invited(&json!({"code": 400, "msg": "Email exists"})).unwrap_err();
+        assert!(refused.to_string().contains("Email exists"));
+        assert!(matches!(parse_invited(&json!({"code": 2})), Err(Error::Expired)));
+        assert!(accepted(&json!({"code": 0}), "remove the member").is_ok());
+        assert!(looks_like_email("asha@example.test"));
+        assert!(!looks_like_email("asha@example"));
+        assert!(!looks_like_email("asha example@example.test"));
     }
 }

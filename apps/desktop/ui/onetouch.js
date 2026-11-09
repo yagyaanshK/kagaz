@@ -456,10 +456,11 @@ function otRenderFamily() {
     remove.addEventListener('click', async () => {
       if (!(await KagazAsk.confirm(`Remove ${p.name}?`, 'Remove', 'They lose these devices in their OneTouch app; their own account stays.'))) return;
       try {
-        await invoke('onetouch_family_remove', { id: p.id || '', name: p.name });
+        await invoke('onetouch_family_remove', { id: p.id || '' });
         await otLoadPeople(); otRenderFamily();
+        $('ot-family-note').textContent = `${p.name} was removed.`;
       } catch (e) {
-        $('ot-family-note').textContent = otFamilyNotReady(e, 'Removing');
+        $('ot-family-note').textContent = otFamilyFailed(e, 'remove');
       }
     });
     row.append(pic, text, remove);
@@ -470,35 +471,48 @@ function otRenderFamily() {
   $('ot-family-invite').disabled = n >= OT_FAMILY_MAX;
   $('ot-family-note').textContent = n >= OT_FAMILY_MAX ? `OneTouch allows ${OT_FAMILY_MAX} members; remove one to invite another.` : '';
 }
-// Inviting and removing go through OneTouch, which Kagaz cannot do yet.
-function otFamilyNotReady(e, what) {
+// Inviting and removing go through OneTouch's own cloud, with its words on failure.
+function otFamilyFailed(e, what) {
   const msg = String(e && e.message || e);
-  return /not found|unknown command|not allowed/i.test(msg) ? `${what} a family member from Kagaz is not ready yet; use the OneTouch app for now.` : `Could not: ${msg}`;
+  return /^OneTouch did not/.test(msg) ? msg : `Could not ${what} the member: ${msg}`;
 }
 $('ot-family-invite').addEventListener('click', async () => {
-  const email = await KagazAsk.ask((dlg, finish) => {
+  const who = await KagazAsk.ask((dlg, finish) => {
     const form = document.createElement('form'); form.method = 'dialog';
     const title = document.createElement('p'); title.className = 'ask-title'; title.textContent = 'Invite a family member';
+    const nameLabel = document.createElement('label'); nameLabel.textContent = 'Their name ';
+    const name = document.createElement('input'); name.type = 'text'; name.required = true; name.autocomplete = 'name'; name.placeholder = 'Asha Example'; name.maxLength = 64;
+    nameLabel.appendChild(name);
     const label = document.createElement('label'); label.textContent = 'Their email address ';
     const input = document.createElement('input'); input.type = 'email'; input.required = true; input.autocomplete = 'email'; input.placeholder = 'name@example.com';
     label.appendChild(input);
-    const help = document.createElement('p'); help.className = 'muted small'; help.textContent = 'OneTouch emails them an invitation; once they accept, these devices show in their OneTouch app and here.';
+    const help = document.createElement('p'); help.className = 'muted small'; help.textContent = 'OneTouch makes them a login on this home and emails them how to sign in; these devices then show in their OneTouch app, and in Kagaz once they sign in there.';
     const row = document.createElement('div'); row.className = 'actions';
     const cancel = document.createElement('button'); cancel.type = 'button'; cancel.textContent = 'Cancel'; cancel.addEventListener('click', () => finish(null));
     const act = document.createElement('button'); act.type = 'submit'; act.className = 'accent'; act.textContent = 'Invite';
     row.append(cancel, act);
-    form.append(title, label, help, row);
-    form.addEventListener('submit', (e) => { e.preventDefault(); if (input.checkValidity()) finish(input.value.trim()); else input.reportValidity(); });
+    form.append(title, nameLabel, label, help, row);
+    form.addEventListener('submit', (e) => {
+      e.preventDefault();
+      if (!name.checkValidity()) return name.reportValidity();
+      if (!input.checkValidity()) return input.reportValidity();
+      finish({ name: name.value.trim(), email: input.value.trim() });
+    });
     dlg.appendChild(form);
-    setTimeout(() => input.focus(), 0);
+    setTimeout(() => name.focus(), 0);
   });
-  if (!email) return;
+  if (!who) return;
+  $('ot-family-invite').disabled = true;
+  $('ot-family-note').textContent = `Inviting ${who.name}…`;
   try {
-    await invoke('onetouch_family_invite', { email });
-    $('ot-family-note').textContent = `Invitation sent to ${email}.`;
+    const r = await invoke('onetouch_family_invite', who);
     await otLoadPeople(); otRenderFamily();
+    $('ot-family-note').textContent = r && r.emailed === false
+      ? `${who.name} was added; OneTouch sent them a text message rather than an email.`
+      : `Invitation emailed to ${who.email}.`;
   } catch (e) {
-    $('ot-family-note').textContent = otFamilyNotReady(e, 'Inviting');
+    $('ot-family-invite').disabled = otPeople.length >= OT_FAMILY_MAX;
+    $('ot-family-note').textContent = otFamilyFailed(e, 'invite');
   }
 });
 $('ot-recordings-tab').addEventListener('click', () => otRun(async () => {

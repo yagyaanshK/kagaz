@@ -360,6 +360,21 @@ impl Session {
         }
         read_response(req.call().map_err(transport_error)?)
     }
+    /// A form post with the same headers as `get`: how the vendor's web
+    /// pages send their `v3/` writes.
+    pub(crate) fn post_form(&self, url: &str, form: &[(&str, &str)]) -> Result<Value, Error> {
+        let a = match self.provider {
+            Provider::SmartCloud => smart_cloud_agent(),
+            Provider::Otipvdp => agent(),
+        };
+        let req = a
+            .post(url)
+            .set("api-version", "7.13")
+            .set("x-auth-token", &self.token)
+            .set("x-cloud-lang", "en")
+            .set("x-cloud-version", "6.4");
+        read_response(req.send_form(form).map_err(transport_error)?)
+    }
     fn refresh(&mut self) -> Result<(), Error> {
         if self.refresh_token.is_empty() {
             return Err(Error::Expired);
