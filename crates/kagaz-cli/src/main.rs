@@ -353,12 +353,24 @@ enum IntercomCommand {
         /// List the home's family members (their own logins) and stop
         #[arg(long, conflicts_with_all = ["call", "number", "listen", "watch"])]
         family: bool,
-        /// Invite a family member with this name (give --email too); OneTouch emails them their login
-        #[arg(long, requires = "email", conflicts_with_all = ["call", "number", "listen", "watch"])]
+        /// Invite a family member with this first name (with --last, and --email and/or --mobile); OneTouch sends them their login
+        #[arg(long, conflicts_with_all = ["call", "number", "listen", "watch"])]
         invite: Option<String>,
-        /// With --invite: the address the invitation goes to
-        #[arg(long)]
+        /// With --invite: their last name
+        #[arg(long, requires = "invite")]
+        last: Option<String>,
+        /// With --invite: the address the login is emailed to
+        #[arg(long, requires = "invite")]
         email: Option<String>,
+        /// With --invite: their mobile number (give --country-code too)
+        #[arg(long, requires = "invite")]
+        mobile: Option<String>,
+        /// With --mobile: the country calling code, e.g. 91
+        #[arg(long, requires = "mobile")]
+        country_code: Option<String>,
+        /// With --invite: a remark for the home's records
+        #[arg(long, requires = "invite")]
+        remark: Option<String>,
         /// Remove the family member with this id (see --family)
         #[arg(long, conflicts_with_all = ["call", "number", "listen", "watch", "invite"])]
         remove: Option<String>,
@@ -2534,7 +2546,11 @@ fn intercom_command(cmd: IntercomCommand) -> Result<()> {
             sound,
             family,
             invite,
+            last,
             email,
+            mobile,
+            country_code,
+            remark,
             remove,
         } => {
             use kagaz_core::intercom::onetouch::Session;
@@ -2546,8 +2562,15 @@ fn intercom_command(cmd: IntercomCommand) -> Result<()> {
                     .ok_or_else(|| anyhow::anyhow!("not signed in to OneTouch; sign in from the Doorbell pane first"))?;
                 let role = session.account()?.role;
                 if let Some(name) = &invite {
-                    let to = email.as_deref().unwrap_or_default();
-                    let r = session.invite(&role, name, to)?;
+                    let member = kagaz_core::intercom::onetouch::history::NewMember {
+                        first_name: name.clone(),
+                        last_name: last.clone().unwrap_or_default(),
+                        email: email.clone().unwrap_or_default(),
+                        phone_code: country_code.clone().unwrap_or_default(),
+                        mobile: mobile.clone().unwrap_or_default(),
+                        remark: remark.clone().unwrap_or_default(),
+                    };
+                    let r = session.invite(&role, &member)?;
                     println!(
                         "Invited {name}: {}{}",
                         if r.emailed { "OneTouch emailed them" } else { "OneTouch texted them" },

@@ -17,7 +17,7 @@
 //! `v3/app/<project>/user/getSubList`.
 
 use super::{field, media_url, protocol, Error, Provider, Session};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 const ROWS: usize = 20;
@@ -75,6 +75,21 @@ pub struct Person {
     pub sip: String,
     /// The address their invitation went to, when the cloud gives it.
     pub email: String,
+}
+
+/// A new family member, as OneTouch's own "New Family Member" form asks for one.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
+pub struct NewMember {
+    pub first_name: String,
+    pub last_name: String,
+    /// Where the login is emailed; optional when a mobile number is given.
+    pub email: String,
+    /// The country calling code for the mobile number, digits only ("91").
+    pub phone_code: String,
+    pub mobile: String,
+    /// A note for the home's records (up to 255 characters).
+    pub remark: String,
 }
 
 /// What came of inviting a family member.
@@ -387,49 +402,22 @@ impl Session {
         Err(Error::Expired)
     }
 
-    /// Invite a family member by email: the cloud creates their login and
-    /// emails them. A single home takes one name; a community one takes
-    /// first and last names, so the last word of the name becomes the last
-    /// name there. Phone fields stay empty: Kagaz invites by email only.
-    pub fn invite(&mut self, role: &str, name: &str, email: &str) -> Result<Invited, Error> {
+    /// Invite a family member: the fields of OneTouch's "New Family Member"
+    /// form (first and last name, email, remark, country and mobile number),
+    /// checked the way that form checks them. OneTouch makes their login and
+    /// sends it by email (or by text message when only a mobile is given). A
+    /// single home's form takes one Name, so the two names are joined there,
+    /// and it has no Remark.
+    pub fn invite(&mut self, role: &str, m: &NewMember) -> Result<Invited, Error> {
         if self.provider == Provider::Otipvdp {
             return Err(protocol(
                 "Family members are managed on OneTouch Smart Cloud accounts.",
             ));
         }
-        let name = name.trim();
-        let email = email.trim();
-        if name.is_empty() {
-            return Err(protocol("Give the member a name."));
-        }
-        if !looks_like_email(email) {
-            return Err(protocol("That does not look like an email address."));
-        }
+        let form = member_form(role, m)?;
         let (project, _) = place(role)?;
         let path = format!("v3/app/{project}/subUser/add");
-        let (first, last) = match name.rsplit_once(' ') {
-            Some((first, last)) => (first.trim(), last),
-            None => (name, ""),
-        };
-        let form: Vec<(&str, &str)> = if project == "single" {
-            vec![
-                ("Name", name),
-                ("Email", email),
-                ("PhoneCode", ""),
-                ("Phone", ""),
-                ("MobileNumber", ""),
-            ]
-        } else {
-            vec![
-                ("FirstName", first),
-                ("LastName", last),
-                ("Email", email),
-                ("PhoneCode", ""),
-                ("Phone", ""),
-                ("MobileNumber", ""),
-                ("Remark", ""),
-            ]
-        };
+        let form: Vec<(&str, &str)> = form.iter().map(|(k, v)| (*k, v.as_str())).collect();
         for attempt in 0..2 {
             match self.web_post(&path, &form).and_then(|v| parse_invited(&v)) {
                 Err(Error::Expired) if attempt == 0 => self.refresh()?,
@@ -463,6 +451,60 @@ impl Session {
         }
         Err(Error::Expired)
     }
+}
+
+/// The form a new member is posted with, after the checks OneTouch's own
+/// page makes (names, a valid email, a country code with a mobile number).
+pub(crate) fn member_form(role: &str, m: &NewMember) -> Result<Vec<(&'static str, String)>, Error> {
+    let (project, _) = place(role)?;
+    let clean = |s: &str| s.split_whitespace().collect::<Vec<_>>().join(" ");
+    let first = clean(&m.first_name);
+    let last = clean(&m.last_name);
+    let email = m.email.trim().to_string();
+    let mobile: String = m.mobile.chars().filter(|c| c.is_ascii_digit()).collect();
+    let code: String = m.phone_code.chars().filter(|c| c.is_ascii_digit()).collect();
+    let remark = m.remark.trim().to_string();
+    if first.is_empty() {
+        return Err(protocol("Please enter the first name."));
+    }
+    if project == "community" && last.is_empty() {
+        return Err(protocol("Please enter the last name."));
+    }
+    if !email.is_empty() && !looks_like_email(&email) {
+        return Err(protocol("That does not look like an email address."));
+    }
+    if email.is_empty() && mobile.is_empty() {
+        return Err(protocol("Give an email address or a mobile number, so OneTouch can send them their login."));
+    }
+    if !m.mobile.trim().is_empty() && (mobile.len() < 6 || mobile.len() > 15) {
+        return Err(protocol("That does not look like a mobile number."));
+    }
+    if !mobile.is_empty() && code.is_empty() {
+        return Err(protocol("Choose the country or region of the mobile number."));
+    }
+    if remark.chars().count() > 255 {
+        return Err(protocol("The remark can be at most 255 characters."));
+    }
+    let phone_code = if mobile.is_empty() { String::new() } else { code };
+    Ok(if project == "single" {
+        vec![
+            ("Name", format!("{first} {last}").trim().to_string()),
+            ("Email", email),
+            ("PhoneCode", phone_code),
+            ("Phone", String::new()),
+            ("MobileNumber", mobile),
+        ]
+    } else {
+        vec![
+            ("FirstName", first),
+            ("LastName", last),
+            ("Email", email),
+            ("PhoneCode", phone_code),
+            ("Phone", String::new()),
+            ("MobileNumber", mobile),
+            ("Remark", remark),
+        ]
+    })
 }
 
 /// The vendor page's own test, loosely: something@domain.tld.
@@ -555,6 +597,16 @@ mod tests {
         assert!(matches!(parse_invited(&json!({"code": 2})), Err(Error::Expired)));
         assert!(accepted(&json!({"code": 0}), "remove the member").is_ok());
         assert!(looks_like_email("asha@example.test"));
+        let m = |f: &str, l: &str, e: &str, c: &str, n: &str, r: &str| NewMember { first_name: f.into(), last_name: l.into(), email: e.into(), phone_code: c.into(), mobile: n.into(), remark: r.into() };
+        let form = member_form("20", &m(" Asha ", "Example", "asha@example.test", "+91", "00000 00000", "Sister")).unwrap();
+        assert_eq!(form, vec![("FirstName", "Asha".into()), ("LastName", "Example".into()), ("Email", "asha@example.test".into()), ("PhoneCode", "91".into()), ("Phone", String::new()), ("MobileNumber", "0000000000".into()), ("Remark", "Sister".into())]);
+        let single = member_form("10", &m("Asha", "Example", "asha@example.test", "", "", "")).unwrap();
+        assert_eq!(single[0], ("Name", "Asha Example".to_string()));
+        assert!(member_form("20", &m("Asha", "", "asha@example.test", "", "", "")).is_err()); // community needs a last name
+        assert!(member_form("10", &m("Asha", "", "", "", "", "")).is_err()); // email or mobile
+        assert!(member_form("10", &m("Asha", "", "", "", "0000000000", "")).is_err()); // mobile needs a country
+        assert!(member_form("10", &m("Asha", "", "", "91", "0000000000", "")).is_ok()); // mobile only is fine
+        assert!(member_form("20", &m("Asha", "Example", "a@example.test", "", "", &"x".repeat(256))).is_err());
         assert!(!looks_like_email("asha@example"));
         assert!(!looks_like_email("asha example@example.test"));
     }

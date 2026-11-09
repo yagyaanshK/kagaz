@@ -1276,3 +1276,20 @@ ul.cards .purifier-card.unreachable .name { color: var(--muted); }
 .ask-choice input { width: 18px; height: 18px; min-height: 0; margin: 0; accent-color: var(--accent); }
 .home-tile.waiting { border-color: var(--accent); }
 @media (pointer: coarse) { .gate-actions button.big { min-height: 48px; } }
+
+/* New family member form (onetouch.js): OneTouch's own field order, label above
+   each field, its message under it. */
+dialog.ask.member-form { width: min(460px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow: auto; }
+.member-form .mf-field { display: flex; flex-direction: column; gap: 4px; margin-top: 10px; position: relative; }
+.member-form .mf-field label { font-weight: 600; font-size: 14px; }
+.member-form .mf-field input, .member-form .mf-field select, .member-form .mf-field textarea { width: 100%; box-sizing: border-box; font: inherit; }
+.member-form .mf-field textarea { resize: vertical; min-height: 56px; }
+.member-form .mf-count { align-self: flex-end; }
+.member-form .mf-error { margin: 0; color: var(--bad); font-size: 13px; }
+.member-form .mf-error:empty { display: none; }
+.member-form [aria-invalid] { border-color: var(--bad); }
+.member-form > form > p.muted { margin: 12px 0 0; }
+@media (pointer: coarse) {
+  .member-form .mf-field input, .member-form .mf-field select { min-height: 48px; font-size: 16px; }
+  .member-form .actions button { min-height: 48px; flex: 1 1 40%; }
+}

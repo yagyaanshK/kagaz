@@ -499,13 +499,10 @@ pub async fn onetouch_people(app: AppHandle) -> Result<Vec<onetouch::history::Pe
 #[tauri::command]
 pub async fn onetouch_family_invite(
     app: AppHandle,
-    name: String,
-    email: String,
+    member: onetouch::history::NewMember,
 ) -> Result<onetouch::history::Invited, String> {
-    super::blocking(move || {
-        with_session(&app, |session, role| session.invite(role, &name, &email))
-    })
-    .await
+    super::blocking(move || with_session(&app, |session, role| session.invite(role, &member)))
+        .await
 }
 
 /// Remove a family member from this home (their own account stays).

@@ -651,44 +651,92 @@ function otFamilyFailed(e, what) {
   const msg = String(e && e.message || e);
   return /^OneTouch did not/.test(msg) ? msg : `Could not ${what} the member: ${msg}`;
 }
+// The invite form follows OneTouch's own "New Family Member" form, field for field:
+// First Name, Last Name, Email, Remark, Country / Region, Mobile Number. It is sent
+// from inside the dialog, so a refusal shows under the form with everything kept.
 $('ot-family-invite').addEventListener('click', async () => {
-  const who = await KagazAsk.ask((dlg, finish) => {
-    const form = document.createElement('form'); form.method = 'dialog';
-    const title = document.createElement('p'); title.className = 'ask-title'; title.textContent = 'Invite a family member';
-    const nameLabel = document.createElement('label'); nameLabel.textContent = 'Their name ';
-    const name = document.createElement('input'); name.type = 'text'; name.required = true; name.autocomplete = 'name'; name.placeholder = 'Asha Example'; name.maxLength = 64;
-    nameLabel.appendChild(name);
-    const label = document.createElement('label'); label.textContent = 'Their email address ';
-    const input = document.createElement('input'); input.type = 'email'; input.required = true; input.autocomplete = 'email'; input.placeholder = 'name@example.com';
-    label.appendChild(input);
-    const help = document.createElement('p'); help.className = 'muted small'; help.textContent = 'OneTouch makes them a login on this home and emails them how to sign in; these devices then show in their OneTouch app, and in Kagaz once they sign in there.';
+  const done = await KagazAsk.ask((dlg, finish) => {
+    dlg.classList.add('member-form');
+    const form = document.createElement('form'); form.method = 'dialog'; form.noValidate = true;
+    const title = document.createElement('p'); title.className = 'ask-title'; title.textContent = 'New family member';
+    const errs = {};
+    const field = (key, label, input, hint) => {
+      const wrap = document.createElement('div'); wrap.className = 'mf-field';
+      const l = document.createElement('label'); l.textContent = label; l.htmlFor = input.id;
+      const err = document.createElement('p'); err.className = 'mf-error'; err.id = `${input.id}-err`; err.setAttribute('role', 'alert');
+      input.setAttribute('aria-describedby', err.id);
+      wrap.append(l, input);
+      if (hint) wrap.appendChild(hint);
+      wrap.appendChild(err);
+      errs[key] = (msg) => { err.textContent = msg || ''; input.toggleAttribute('aria-invalid', !!msg); };
+      return wrap;
+    };
+    const text = (id, ac, max, extra = {}) => { const i = document.createElement('input'); i.id = id; i.type = extra.type || 'text'; i.autocomplete = ac; i.maxLength = max; if (extra.inputmode) i.inputMode = extra.inputmode; return i; };
+    const first = text('mf-first', 'given-name', 64);
+    const last = text('mf-last', 'family-name', 64);
+    const email = text('mf-email', 'email', 128, { type: 'email', inputmode: 'email' });
+    const remark = document.createElement('textarea'); remark.id = 'mf-remark'; remark.maxLength = 255; remark.rows = 2;
+    const count = document.createElement('span'); count.className = 'mf-count muted small'; count.textContent = '0/255';
+    remark.addEventListener('input', () => { count.textContent = `${remark.value.length}/255`; });
+    const country = KagazCountries.select('mf-country'); country.autocomplete = 'tel-country-code';
+    const mobile = text('mf-mobile', 'tel-national', 20, { type: 'tel', inputmode: 'tel' });
+    const note = document.createElement('p'); note.className = 'muted small'; note.textContent = 'OneTouch makes them a login on this home and sends it to them: by email, or by text message when only a mobile number is given.';
+    const formErr = document.createElement('p'); formErr.className = 'mf-error'; formErr.setAttribute('role', 'alert');
     const row = document.createElement('div'); row.className = 'actions';
     const cancel = document.createElement('button'); cancel.type = 'button'; cancel.textContent = 'Cancel'; cancel.addEventListener('click', () => finish(null));
-    const act = document.createElement('button'); act.type = 'submit'; act.className = 'accent'; act.textContent = 'Invite';
-    row.append(cancel, act);
-    form.append(title, nameLabel, label, help, row);
-    form.addEventListener('submit', (e) => {
+    const submit = document.createElement('button'); submit.type = 'submit'; submit.className = 'accent'; submit.textContent = 'Invite';
+    row.append(cancel, submit);
+    form.append(title,
+      field('first', 'First name', first),
+      field('last', 'Last name', last),
+      field('email', 'Email', email),
+      field('remark', 'Remark (optional)', remark, count),
+      field('country', 'Country / Region', country),
+      field('mobile', 'Mobile number', mobile),
+      note, formErr, row);
+    // The same checks as OneTouch's form, shown under each field.
+    const check = () => {
+      for (const k in errs) errs[k]('');
+      const em = email.value.trim(), mob = mobile.value.replace(/\D/g, '');
+      let firstBad = null;
+      const bad = (k, el, msg) => { errs[k](msg); firstBad = firstBad || el; };
+      if (!first.value.trim()) bad('first', first, 'Please enter the first name.');
+      if (!last.value.trim()) bad('last', last, 'Please enter the last name.');
+      if (em && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)) bad('email', email, 'That does not look like an email address.');
+      if (!em && !mob) bad('email', email, 'Give an email address or a mobile number.');
+      if (mobile.value.trim() && (mob.length < 6 || mob.length > 15)) bad('mobile', mobile, 'That does not look like a mobile number.');
+      if (mob && !country.value) bad('country', country, 'Choose the country or region of the mobile number.');
+      if (firstBad) firstBad.focus();
+      return !firstBad;
+    };
+    form.addEventListener('submit', async (e) => {
       e.preventDefault();
-      if (!name.checkValidity()) return name.reportValidity();
-      if (!input.checkValidity()) return input.reportValidity();
-      finish({ name: name.value.trim(), email: input.value.trim() });
+      formErr.textContent = '';
+      if (!check()) return;
+      const member = {
+        first_name: first.value.trim(), last_name: last.value.trim(), email: email.value.trim(), remark: remark.value.trim(),
+        phone_code: mobile.value.trim() ? KagazCountries.codeOf(country.value) : '', mobile: mobile.value.trim(),
+      };
+      submit.disabled = cancel.disabled = true; submit.textContent = 'Inviting…';
+      try {
+        const r = await invoke('onetouch_family_invite', { member });
+        if (member.mobile) KagazCountries.remember(country.value);
+        finish({ member, r });
+      } catch (err) {
+        formErr.textContent = otFamilyFailed(err, 'invite');
+        submit.disabled = cancel.disabled = false; submit.textContent = 'Invite';
+      }
     });
     dlg.appendChild(form);
-    setTimeout(() => name.focus(), 0);
+    setTimeout(() => first.focus(), 0);
   });
-  if (!who) return;
-  $('ot-family-invite').disabled = true;
-  $('ot-family-note').textContent = `Inviting ${who.name}…`;
-  try {
-    const r = await invoke('onetouch_family_invite', who);
-    await otLoadPeople(); otRenderFamily();
-    $('ot-family-note').textContent = r && r.emailed === false
-      ? `${who.name} was added; OneTouch sent them a text message rather than an email.`
-      : `Invitation emailed to ${who.email}.`;
-  } catch (e) {
-    $('ot-family-invite').disabled = otPeople.length >= OT_FAMILY_MAX;
-    $('ot-family-note').textContent = otFamilyFailed(e, 'invite');
-  }
+  if (!done) return;
+  const { member, r } = done;
+  const who = `${member.first_name} ${member.last_name}`.trim();
+  await otLoadPeople();
+  $('ot-family-note').textContent = r && r.emailed === false
+    ? `${who} was added; OneTouch sent their login by text message.`
+    : `${who} was added; OneTouch emailed their login to ${member.email}.`;
 });
 $('ot-recordings-tab').addEventListener('click', () => otRun(async () => {
   otTab = 'recordings';
