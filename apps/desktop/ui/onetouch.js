@@ -88,6 +88,7 @@ const OT_KIND = { door: "Door station", indoor: "Indoor monitor", guard: "Guard 
 const OT_LIVE_KIND = { "0": "door", "1": "door", "2": "indoor", "3": "guard" };
 const OT_ORDER = { door: 0, indoor: 1, guard: 2, other: 3, family: 4, apps: 5 };
 let otPeople = []; // the home's family members (their own logins)
+let otPeopleState = { phase: 'idle', error: '' }; // idle | loading | ok | error
 const OT_ICON = {
   door: '<svg viewBox="0 0 24 24"><path d="M6 3h12v18H6zM10 8h4M12 13a1.5 1.5 0 1 0 0 .01M9 18h6"/></svg>',
   indoor: '<svg viewBox="0 0 24 24"><path d="M3 5h18v11H3zM8 20h8M12 16v4"/></svg>',
@@ -299,9 +300,22 @@ async function refreshOneTouch() {
   });
   otLoadPeople();
 }
+// Fetched fresh after every sign-in, reconnect and refresh, and whenever the Family tab opens.
+// A failure is shown as one (with Try again), never as an empty family.
+let otPeopleSeq = 0;
 async function otLoadPeople() {
-  if (!otStatus?.logged_in) { otPeople = []; return; }
-  try { otPeople = await invoke('onetouch_people'); } catch (_) { otPeople = []; }
+  if (!otStatus?.logged_in) { otPeople = []; otPeopleState = { phase: 'idle', error: '' }; otRenderFamily(); return; }
+  const seq = ++otPeopleSeq;
+  otPeopleState = { phase: 'loading', error: '' }; otRenderFamily();
+  try {
+    const list = await invoke('onetouch_people');
+    if (seq !== otPeopleSeq) return;
+    otPeople = Array.isArray(list) ? list : []; otPeopleState = { phase: 'ok', error: '' };
+  } catch (e) {
+    if (seq !== otPeopleSeq) return;
+    otPeopleState = { phase: 'error', error: String((e && e.message) || e) };
+  }
+  otRenderFamily();
   otRenderDevices();
 }
 $('ot-signin').addEventListener('click', () => {
@@ -333,6 +347,7 @@ $('ot-login').addEventListener('submit', async e => {
     finally { $('ot-password').value = ''; otPasswordVisible(false); }
     otInitialized = true; otTab = 'live'; otPage = 1;
     $('ot-login').classList.add('hidden'); $('ot-message').textContent = otStatus?.notice || ''; KagazNav.pop('ot-login');
+    otLoadPeople();
   }, `Signing in to ${$('ot-provider').selectedOptions[0].textContent}…`);
 });
 
@@ -462,6 +477,7 @@ $('ot-reconnect').addEventListener('click', () => otRun(async () => {
   $('ot-login').classList.add('hidden');
   $('ot-password').value = ''; otPasswordVisible(false);
   $('ot-message').textContent = otStatus.notice || '';
+  otLoadPeople();
 }, 'Reconnecting to OneTouch…'));
 $('ot-forget').addEventListener('click', () => otRun(async () => {
   otStatus = await invoke('onetouch_forget');
@@ -470,6 +486,7 @@ $('ot-forget').addEventListener('click', () => otRun(async () => {
 }));
 $('ot-refresh').addEventListener('click', () => otRun(async () => {
   otStatus = await invoke('onetouch_refresh'); otInitialized = true; $('ot-message').textContent = '';
+  otLoadPeople();
 }, 'Refreshing OneTouch devices…'));
 
 // Stop the live view (the card stays open).
@@ -580,13 +597,27 @@ async function otLoadRecordings(page) {
   $('ot-message').textContent = list.message || (list.entries.length ? '' : 'No cloud recordings or snapshots on this page. Footage stored only on an indoor monitor is not included.');
 }
 $('ot-live-tab').addEventListener('click', () => otRun(async () => { await stopOneTouch(); otTab = 'live'; }));
-$('ot-family-tab').addEventListener('click', () => otRun(async () => { await stopOneTouch(); otTab = 'family'; }));
+$('ot-family-tab').addEventListener('click', async () => { await otRun(async () => { await stopOneTouch(); otTab = 'family'; }); otLoadPeople(); });
 
 // ---- the family: the members with their own login, and inviting one ----
 const OT_FAMILY_MAX = 10;
 function otRenderFamily() {
   const list = $('ot-family-list');
+  if (!list) return;
   list.replaceChildren();
+  if (otPeopleState.phase === 'loading' && !otPeople.length) {
+    $('ot-family-count').textContent = 'Loading family members…';
+    $('ot-family-invite').disabled = true;
+    return;
+  }
+  if (otPeopleState.phase === 'error') {
+    $('ot-family-count').textContent = `Could not load the family members: ${otPeopleState.error}`;
+    const retry = document.createElement('button'); retry.type = 'button'; retry.textContent = 'Try again';
+    retry.addEventListener('click', otLoadPeople);
+    list.appendChild(retry);
+    $('ot-family-invite').disabled = true;
+    return;
+  }
   for (const p of otPeople) {
     const row = document.createElement('div'); row.className = 'act-item';
     const pic = document.createElement('span'); pic.className = 'act-pic icon'; pic.innerHTML = OT_ICON.family;
