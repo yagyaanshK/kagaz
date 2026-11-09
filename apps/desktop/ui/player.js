@@ -504,9 +504,9 @@ const KagazPlayer = (() => {
   });
 
   const ICON = {
-    full: '<svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>',
-    unfull: '<svg viewBox="0 0 24 24"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/></svg>',
-    close: '<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>',
+    full: KagazIcons.svg("full"),
+    unfull: KagazIcons.svg("unfull"),
+    close: KagazIcons.svg("close"),
   };
 
   // Zoom a picture inside its frame, as a phone's photo viewer does: two

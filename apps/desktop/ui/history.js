@@ -93,11 +93,11 @@ const KagazHistory = (() => {
   // ---------- drawing ----------
 
   const ICON = {
-    door: '<svg viewBox="0 0 24 24"><path d="M6 8a6 6 0 0 1 12 0v5l2 3H4l2-3zM10 19a2 2 0 0 0 4 0"/></svg>',
-    missed: '<svg viewBox="0 0 24 24"><path d="M3 5l6 6 4-4 8 8M21 9v6h-6"/></svg>',
-    answered: '<svg viewBox="0 0 24 24"><path d="M21 3l-8 8M14 3h7v7M5 4h3l2 5-2 1a11 11 0 0 0 6 6l1-2 5 2v3a2 2 0 0 1-2 2A17 17 0 0 1 3 6a2 2 0 0 1 2-2z"/></svg>',
-    outgoing: '<svg viewBox="0 0 24 24"><path d="M14 10l7-7M15 3h6v6M5 4h3l2 5-2 1a11 11 0 0 0 6 6l1-2 5 2v3a2 2 0 0 1-2 2A17 17 0 0 1 3 6a2 2 0 0 1 2-2z"/></svg>',
-    local: '<svg viewBox="0 0 24 24"><path d="M6 3h12v18H6zM10 8h4M12 13a1.5 1.5 0 1 0 0 .01M9 18h6"/></svg>',
+    door: KagazIcons.svg("bell"),
+    missed: KagazIcons.svg("missed"),
+    answered: KagazIcons.svg("incoming"),
+    outgoing: KagazIcons.svg("outgoing"),
+    local: KagazIcons.svg("doorbell"),
   };
 
   function shown(e) {
@@ -124,7 +124,7 @@ const KagazHistory = (() => {
       img.referrerPolicy = "no-referrer";
       img.addEventListener("error", () => { pic.innerHTML = ICON.door; pic.classList.add("icon"); });
       pic.appendChild(img);
-      if (e.video) pic.insertAdjacentHTML("beforeend", '<span class="act-play" aria-hidden="true">▶</span>');
+      if (e.video) pic.insertAdjacentHTML("beforeend", `<span class="act-play" aria-hidden="true">${KagazIcons.svg("play")}</span>`);
     } else {
       pic.classList.add("icon");
       pic.innerHTML = ICON[e.direction] || ICON[e.source] || ICON.door;

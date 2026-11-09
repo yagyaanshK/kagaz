@@ -15,16 +15,16 @@
 let camFocus = null; // { id, listMode, at }: the camera on its own screen
 
 const CP_ICON = {
-  back: '<svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg>',
-  talk: '<svg viewBox="0 0 24 24"><path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3zM5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/></svg>',
-  shot: '<svg viewBox="0 0 24 24"><path d="M3.5 8h3.5l2-3h6l2 3h3.5v11h-17z"/><circle cx="12" cy="13" r="3.5"/></svg>',
-  rec: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="7.5"/><circle cx="12" cy="12" r="3.5" class="fill"/></svg>',
-  past: '<svg viewBox="0 0 24 24"><path d="M4.5 12a7.5 7.5 0 1 0 2.2-5.3M4.5 4v3.5H8"/><path d="M12 8v4.5l3 1.8"/></svg>',
-  live: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="2.5" class="fill"/><path d="M7.8 7.8a6 6 0 0 0 0 8.4M16.2 7.8a6 6 0 0 1 0 8.4M5 5a10 10 0 0 0 0 14M19 5a10 10 0 0 1 0 14"/></svg>',
-  pause: '<svg viewBox="0 0 24 24"><path d="M9 6v12M15 6v12"/></svg>',
-  play: '<svg viewBox="0 0 24 24"><path d="M8 5.5v13l10.5-6.5z" class="fill"/></svg>',
-  prev: '<svg viewBox="0 0 24 24"><path d="M14.5 6l-6 6 6 6"/></svg>',
-  next: '<svg viewBox="0 0 24 24"><path d="M9.5 6l6 6-6 6"/></svg>',
+  back: KagazIcons.svg("back"),
+  talk: KagazIcons.svg("mic"),
+  shot: KagazIcons.svg("shot"),
+  rec: KagazIcons.svg("rec"),
+  past: KagazIcons.svg("past"),
+  live: KagazIcons.svg("live"),
+  pause: KagazIcons.svg("pause"),
+  play: KagazIcons.svg("play"),
+  prev: KagazIcons.svg("back"),
+  next: KagazIcons.svg("forward"),
 };
 
 // ---- opening and closing ----

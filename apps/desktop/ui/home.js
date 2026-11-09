@@ -1,14 +1,22 @@
-// Home: the devices set up on this device, grouped by kind, and "Add a
-// device" (a kind, then a brand, then that brand's sign-in or search).
+// Home: first what needs a look (a row of chips, each a count and a noun
+// that opens its kind), then the person's favourites, then every device
+// set up here by kind, and "Add a device" (a kind, then a brand, then that
+// brand's sign-in or search).
+//
 // Home reads only what Kagaz already knows: it never signs in to a cloud
 // account (OneTouch keeps one session per account, so a sign-in here would
-// sign the person's other phone out).
+// sign the person's other phone out), and it switches nothing: a tile opens
+// its device. (Fans' commands are not checked against a fan yet and
+// purifiers cannot be switched yet, so a switch on Home would promise what
+// the page cannot keep.)
 // Uses app.js's globals: $, invoke, selectCategory, devices, rescan,
-// printBrand, title, printerBrand; onetouch.js's otOpenByName.
+// printBrand, title, printerBrand, savedPrinters, stateLine, printerKey,
+// checkPrinters, select; onetouch.js's otOpenByName, otCallByName.
 
 const KagazHome = (() => {
   let lastScan = 0;
   let addKind = null; // the kind whose brands are shown in Add a device
+  let choosing = false; // picking favourites: every tile shows its star
 
   function el(tag, cls, text) {
     const e = document.createElement(tag);
@@ -16,81 +24,115 @@ const KagazHome = (() => {
     if (text !== undefined) e.textContent = text;
     return e;
   }
+  function button(cls, html, label) {
+    const b = el("button", cls);
+    b.type = "button";
+    if (html) b.innerHTML = html;
+    if (label) b.setAttribute("aria-label", label);
+    return b;
+  }
 
+  // ---------- favourites ----------
+  // Kept on this device, as "kind:name" keys, in the order they were starred.
+  const FAV_KEY = "kagaz.home.favourites";
+  function favs() {
+    try {
+      const v = JSON.parse(localStorage.getItem(FAV_KEY) || "[]");
+      return Array.isArray(v) ? v : [];
+    } catch (e) {
+      return [];
+    }
+  }
+  function setFavs(list) {
+    try {
+      localStorage.setItem(FAV_KEY, JSON.stringify(list));
+    } catch (e) {}
+  }
+  const favKey = (kind, name) => `${kind}:${name.trim().toLowerCase()}`;
+
+  // ---------- tiles ----------
+  // A tile: the device's icon, name and how it is; the whole tile opens it.
+  // A doorbell's tile adds Live and Call, the two things it is opened for.
+  // While choosing favourites, a star sits at its end.
+  function tile(d) {
+    const t = el("div", "home-tile" + (d.tone ? " " + d.tone : ""));
+    const main = button("tile-main");
+    main.append(Object.assign(el("span", "tile-icon"), { innerHTML: KagazIcons.svg(d.icon) }));
+    const text = el("span", "tile-text");
+    text.append(el("span", "tile-name", d.name), el("span", "tile-sub", d.sub || ""));
+    main.append(text);
+    main.addEventListener("click", d.open);
+    t.append(main);
+    if (d.actions && d.actions.length) {
+      const row = el("span", "tile-actions");
+      for (const a of d.actions) {
+        const b = button("tile-act", KagazIcons.label(a.icon, a.label));
+        b.title = a.title || a.label;
+        b.addEventListener("click", a.run);
+        row.append(b);
+      }
+      t.append(row);
+      t.classList.add("has-actions");
+    }
+    if (d.key) {
+      const on = favs().includes(d.key);
+      const star = button("tile-star" + (on ? " on" : ""), KagazIcons.svg("star"), on ? `Remove ${d.name} from favourites` : `Add ${d.name} to favourites`);
+      star.setAttribute("aria-pressed", String(on));
+      star.addEventListener("click", () => {
+        const list = favs().filter((k) => k !== d.key);
+        if (!on) list.push(d.key);
+        setFavs(list);
+        show();
+      });
+      t.append(star);
+    }
+    return t;
+  }
+
+  // ---------- kinds ----------
   // Kinds start collapsed; one opens when the person taps it (kept while
   // the app runs).
   const expanded = new Set();
 
-  function group(kindId, title, status, open) {
+  function group(kind) {
     const box = el("section", "home-group");
     const head = el("div", "home-group-head");
-    const toggle = el("button", "home-group-toggle");
-    toggle.type = "button";
+    const toggle = button("home-group-toggle");
     const icon = el("span", "kind-icon");
-    icon.innerHTML = KagazBrands.ICON[kindId];
+    icon.innerHTML = KagazIcons.svg(kind.icon);
     const words = el("span", "home-group-words");
-    const h = el("span", "home-group-title", title);
-    const st = el("span", "muted small home-status", status || "");
-    words.append(h, st);
+    words.append(el("span", "home-group-title", kind.title), el("span", "home-status", kind.status || ""));
     const chevron = el("span", "home-chevron");
-    chevron.setAttribute("aria-hidden", "true");
+    chevron.innerHTML = KagazIcons.svg("down");
     toggle.append(icon, words, chevron);
-    const go = el("button", "link", "Open \u203A");
-    go.type = "button";
-    go.setAttribute("aria-label", `Open ${title}`);
-    go.addEventListener("click", open);
+    const go = button("link home-open", "", `Open ${kind.title}`);
+    go.textContent = "Open";
+    go.addEventListener("click", kind.open);
     head.append(toggle, go);
     const tiles = el("div", "home-tiles");
-    tiles.id = `home-tiles-${kindId}`;
+    tiles.id = `home-tiles-${kind.id}`;
     toggle.setAttribute("aria-controls", tiles.id);
-    const show = (on) => {
+    for (const d of kind.devices) tiles.append(tile(d));
+    const open = choosing || expanded.has(kind.id);
+    box.classList.toggle("open", open);
+    tiles.hidden = !open;
+    toggle.setAttribute("aria-expanded", String(open));
+    toggle.addEventListener("click", () => {
+      if (expanded.has(kind.id)) expanded.delete(kind.id); else expanded.add(kind.id);
+      const on = choosing || expanded.has(kind.id);
       box.classList.toggle("open", on);
       tiles.hidden = !on;
       toggle.setAttribute("aria-expanded", String(on));
-    };
-    show(expanded.has(kindId));
-    toggle.addEventListener("click", () => {
-      const on = !expanded.has(kindId);
-      if (on) expanded.add(kindId); else expanded.delete(kindId);
-      show(on);
     });
     box.append(head, tiles);
-    // The count joins the status once the tiles are in.
-    const count = () => {
-      const n = tiles.childElementCount;
-      st.textContent = [status, `${n} device${n === 1 ? "" : "s"}`].filter(Boolean).join(" \u00B7 ");
-    };
-    return { box, tiles, count };
+    return box;
   }
 
-  function tile(name, sub, iconHtml, onClick, logo) {
-    const t = el("button", "home-tile");
-    t.type = "button";
-    const icon = el("span", "tile-icon");
-    if (logo) {
-      const img = document.createElement("img");
-      img.src = logo;
-      img.alt = "";
-      icon.appendChild(img);
-      icon.classList.add("logo");
-    } else {
-      icon.innerHTML = iconHtml;
-    }
-    const text = el("span", "tile-text");
-    text.append(el("span", "tile-name", name), el("span", "tile-sub muted small", sub || ""));
-    t.append(icon, text);
-    t.addEventListener("click", onClick);
-    return t;
-  }
-
-  const DOOR_ICON = {
-    door: '<svg viewBox="0 0 24 24"><path d="M6 3h12v18H6zM10 8h4M12 13a1.5 1.5 0 1 0 0 .01M9 18h6"/></svg>',
-    indoor: '<svg viewBox="0 0 24 24"><path d="M3 5h18v11H3zM8 20h8M12 16v4"/></svg>',
-    guard: '<svg viewBox="0 0 24 24"><path d="M12 3l8 3v6c0 4.5-3.5 8-8 9-4.5-1-8-4.5-8-9V6z"/></svg>',
-  };
+  // ---------- what Kagaz knows, kind by kind ----------
+  const DOOR_ICON = { door: "doorbell", indoor: "indoor", guard: "guard" };
   const DOOR_WORDS = { door: "Door station", indoor: "Indoor monitor", guard: "Guard phone" };
 
-  async function doorbellGroup(root) {
+  async function doorbellKind() {
     const [calls, ot, stations] = await Promise.all([
       invoke("calls_status").catch(() => null),
       invoke("onetouch_peek").catch(() => null),
@@ -101,121 +143,147 @@ const KagazHome = (() => {
     for (const d of (ot && ot.devices) || []) {
       items.set(d.name.trim().toLowerCase(), { name: d.name, kind: kindOf[d.kind] || "door", live: d.can_monitor, cloud: true });
     }
+    const lineUp = !!(calls && calls.enabled && calls.line === "up");
     for (const d of (calls && calls.devices) || []) {
       if (d.kind === "apps") continue;
       const key = d.name.trim().toLowerCase();
       const had = items.get(key);
-      items.set(key, { name: d.name, kind: d.kind || (had && had.kind) || "door", live: had ? had.live : false, cloud: true, offline: !d.online });
+      items.set(key, { name: d.name, kind: d.kind || (had && had.kind) || "door", live: had ? had.live : false, cloud: true, offline: !d.online, callable: true });
     }
     for (const s of (stations && stations.stations) || []) {
       const key = s.name.trim().toLowerCase();
       if (!items.has(key)) items.set(key, { name: s.name, kind: "door", live: false, cloud: false });
     }
     const signedUp = (ot && (ot.logged_in || ot.remembered)) || items.size;
-    if (!signedUp) return false;
-    const status = calls && calls.enabled && calls.line === "up" ? "Ringing here" : calls && calls.enabled ? "Not connected yet" : "Not ringing here";
-    const g = group("doorbell", "Doorbell", status, () => selectCategory("doorbell"));
+    if (!signedUp) return null;
+    const status = lineUp ? "Ringing here" : calls && calls.enabled ? "Not connected yet" : "Not ringing here";
+    const open = () => selectCategory("doorbell");
+    const devs = [];
     for (const d of items.values()) {
-      const sub = [DOOR_WORDS[d.kind] || "Device", d.offline ? "offline" : "", d.live ? "live view" : "", d.cloud ? "" : "this network"].filter(Boolean).join(" · ");
-      g.tiles.appendChild(tile(d.name, sub, DOOR_ICON[d.kind] || DOOR_ICON.door, () => {
-        selectCategory("doorbell");
-        if (d.cloud && typeof otOpenByName === "function") otOpenByName(d.name);
-      }));
+      const sub = [DOOR_WORDS[d.kind] || "Device", d.offline ? "offline" : "", d.cloud ? "" : "this network"].filter(Boolean).join(" · ");
+      const actions = [];
+      if (d.cloud && d.live && !d.offline) actions.push({ icon: "eye", label: "Live", title: `Watch ${d.name} live`, run: () => { open(); if (typeof otOpenByName === "function") otOpenByName(d.name); } });
+      if (d.cloud && d.callable && lineUp && !d.offline) actions.push({ icon: "phone", label: "Call", title: `Call ${d.name}`, run: () => { open(); if (typeof otCallByName === "function") otCallByName(d.name); } });
+      devs.push({
+        key: favKey("doorbell", d.name), name: d.name, sub, icon: DOOR_ICON[d.kind] || "doorbell", actions,
+        open: () => { open(); if (d.cloud && typeof otOpenByName === "function") otOpenByName(d.name); },
+      });
     }
-    if (!items.size) {
-      g.tiles.appendChild(tile("OneTouch", ot && ot.logged_in ? "Signed in" : "Open to sign in again", DOOR_ICON.door, () => selectCategory("doorbell")));
-    }
-    g.count();
-    root.appendChild(g.box);
-    return true;
+    if (!items.size) devs.push({ name: "OneTouch", sub: ot && ot.logged_in ? "Signed in" : "Open to sign in again", icon: "doorbell", open });
+    const chip = calls && calls.enabled && !lineUp ? { icon: "doorbell", text: "Doorbell not connected", tone: "warn", open } : null;
+    return { id: "doorbell", icon: "doorbell", title: "Doorbell", status, devices: devs, open, chips: chip ? [chip] : [], count: items.size };
   }
 
-  async function camerasGroup(root) {
+  async function camerasKind() {
     const cam = await invoke("cameras_status").catch(() => null);
-    if (!cam || !cam.logged_in) return false;
+    if (!cam || !cam.logged_in) return null;
     const brandOf = (c) => KagazBrands.byId("security", c.brand || "tapo") || KagazBrands.byId("security", "tapo");
     const names = [...new Set((cam.cameras || []).map((c) => brandOf(c).name))];
-    const g = group("security", "Security cameras", names.join(", ") || "Tapo", () => selectCategory("cameras"));
-    if (cam.cameras && cam.cameras.length) {
-      for (const c of cam.cameras) g.tiles.appendChild(tile(c.name, brandOf(c).name, "", () => selectCategory("cameras"), brandOf(c).logo));
-    } else {
-      const tapo = KagazBrands.byId("security", "tapo");
-      g.tiles.appendChild(tile("Your cameras", "Open to watch", "", () => selectCategory("cameras"), tapo.logo));
-    }
-    if (cam.cameras && cam.cameras.length) g.count();
-    root.appendChild(g.box);
-    return true;
+    const open = () => selectCategory("cameras");
+    const devs = (cam.cameras || []).map((c) => ({ key: favKey("cameras", c.name), name: c.name, sub: brandOf(c).name, icon: "cameras", open }));
+    if (!devs.length) devs.push({ name: "Your cameras", sub: "Open to watch", icon: "cameras", open });
+    return { id: "cameras", icon: "cameras", title: "Security cameras", status: names.join(", ") || "Tapo", devices: devs, open, chips: [], count: (cam.cameras || []).length };
   }
 
   // The printers the person added, each with how it is now.
-  function printersGroup(root) {
-    if (!savedPrinters || !savedPrinters.length) return false; // not read yet, or none
-    const g = group("print", "Printers & scanners", "", () => { printBrand = null; selectCategory("print"); });
-    for (const d of savedPrinters) {
-      const b = printerBrand(d);
+  function printersKind() {
+    if (!savedPrinters || !savedPrinters.length) return null; // not read yet, or none
+    const open = () => { printBrand = null; selectCategory("print"); };
+    let trouble = 0;
+    const devs = savedPrinters.map((d) => {
       const key = printerKey(d);
-      g.tiles.appendChild(tile(title(d), stateLine(d)[1], KagazBrands.ICON.print, () => {
-        printBrand = null;
-        selectCategory("print");
-        const i = devices.findIndex((x) => printerKey(x) === key);
-        if (i >= 0) select(i);
-      }, b && b.logo));
-    }
-    g.count();
-    root.appendChild(g.box);
-    return true;
+      const [cls, words] = stateLine(d);
+      if (cls === "cap-warn" || cls === "cap-bad") trouble++;
+      const b = printerBrand(d);
+      return {
+        key: favKey("print", title(d)), name: title(d), sub: [b && b.name, words].filter(Boolean).join(" · "), icon: "print",
+        tone: cls === "cap-warn" ? "warn" : cls === "cap-bad" ? "bad" : "",
+        open: () => {
+          open();
+          const i = devices.findIndex((x) => printerKey(x) === key);
+          if (i >= 0) select(i);
+        },
+      };
+    });
+    const chips = trouble ? [{ icon: "print", text: trouble === 1 && savedPrinters.length === 1 ? "Printer needs a look" : `${trouble} printers need a look`, tone: "warn", open }] : [];
+    return { id: "print", icon: "print", title: "Printers & scanners", status: "", devices: devs, open, chips, count: devs.length };
   }
 
   // The fans the person added, by room, as last seen (the Fans page
   // looks for them; Home does not, so it opens at once).
-  async function fansGroup(root) {
+  async function fansKind() {
     const data = await invoke("fans_saved").catch(() => null);
-    if (!data || !data.fans.length) return false;
-    const g = group("fan", "Ceiling fans", "Atomberg", () => selectCategory("fans"));
-    const fans = data.fans.slice().sort((a, b) => (a.room || "\uffff").localeCompare(b.room || "\uffff") || a.name.localeCompare(b.name));
-    for (const f of fans) g.tiles.appendChild(tile(f.name, KagazFans.homeWords(f), KagazBrands.ICON.fan, () => selectCategory("fans")));
-    g.count();
-    root.appendChild(g.box);
-    return true;
+    if (!data || !data.fans.length) return null;
+    const open = () => selectCategory("fans");
+    const fans = data.fans.slice().sort((a, b) => (a.room || "￿").localeCompare(b.room || "￿") || a.name.localeCompare(b.name));
+    const on = fans.filter((f) => f.last_state && f.last_state.power).length;
+    const devs = fans.map((f) => ({ key: favKey("fans", f.name), name: f.name, sub: KagazFans.homeWords(f), icon: "fan", tone: f.last_state && f.last_state.power ? "on" : "", open }));
+    const chips = on ? [{ icon: "fan", text: `${on} fan${on === 1 ? "" : "s"} on`, open }] : [];
+    return { id: "fans", icon: "fan", title: "Ceiling fans", status: `Atomberg · ${on} of ${fans.length} on`, devices: devs, open, chips, count: devs.length };
   }
 
   // The purifiers the person added, as last seen (the page looks for
   // them; Home does not).
-  async function purifiersGroup(root) {
+  async function purifiersKind() {
     const data = await invoke("purifiers_saved").catch(() => null);
-    if (!data || !data.purifiers.length) return false;
-    const g = group("purifier", "Air purifiers", "Philips", () => selectCategory("purifiers"));
-    const philips = KagazBrands.byId("purifier", "philips");
-    for (const p of data.purifiers) g.tiles.appendChild(tile(p.name, KagazPurifiers.homeWords(p), KagazBrands.ICON.purifier, () => selectCategory("purifiers"), philips && philips.logo));
-    g.count();
-    root.appendChild(g.box);
-    return true;
+    if (!data || !data.purifiers.length) return null;
+    const open = () => selectCategory("purifiers");
+    const devs = data.purifiers.map((p) => ({ key: favKey("purifiers", p.name), name: p.name, sub: KagazPurifiers.homeWords(p), icon: "purifier", open }));
+    return { id: "purifiers", icon: "purifier", title: "Air purifiers", status: "Philips", devices: devs, open, chips: [], count: devs.length };
   }
 
   // The society's gate: who is waiting, when signed in (or looking at the sample).
-  function societyGroup(root) {
-    if (typeof KagazSociety === "undefined") return false;
+  function societyKind() {
+    if (typeof KagazSociety === "undefined") return null;
     const st = KagazSociety.homeState();
-    if (!st) return false;
-    const g = group("society", "Society gate", st.status, () => selectCategory("society"));
-    for (const v of st.pending) {
-      const t = tile(v.name, `${v.company ? v.company + " " : ""}${v.kind} at ${v.gate} · tap to answer`, KagazBrands.ICON.society, () => { selectCategory("society"); KagazSociety.open("visitors"); });
-      t.classList.add("waiting");
-      g.tiles.appendChild(t);
-    }
-    if (!st.pending.length) g.tiles.appendChild(tile("Nobody at the gate", "Open to allow someone in ahead of time", KagazBrands.ICON.society, () => selectCategory("society")));
-    g.count();
-    root.appendChild(g.box);
-    return true;
+    if (!st) return null;
+    const open = () => selectCategory("society");
+    const answer = () => { open(); KagazSociety.open("visitors"); };
+    const devs = st.pending.map((v) => ({
+      name: v.name, sub: `${v.company ? v.company + " " : ""}${v.kind} at ${v.gate} · tap to answer`, icon: "guest", tone: "warn", open: answer,
+    }));
+    if (!st.pending.length) devs.push({ name: "Nobody at the gate", sub: "Open to allow someone in ahead of time", icon: "society", open });
+    const n = st.pending.length;
+    const chips = n ? [{ icon: "guest", text: `${n} at the gate`, tone: "warn", open: answer }] : [];
+    return { id: "society", icon: "society", title: "Society gate", status: st.status, devices: devs, open, chips, count: 0 };
   }
 
+  // ---------- drawing Home ----------
+  let drawing = 0;
   async function show() {
-    const root = $("home-groups");
-    const fresh = document.createElement("div");
-    const shown = [await doorbellGroup(fresh), await camerasGroup(fresh), printersGroup(fresh), await fansGroup(fresh), await purifiersGroup(fresh), societyGroup(fresh)];
-    root.replaceChildren(...fresh.childNodes);
-    $("home-empty").classList.toggle("hidden", shown.some(Boolean));
-    kindNotes(root);
+    const mine = ++drawing;
+    const kinds = (await Promise.all([doorbellKind(), camerasKind(), printersKind(), fansKind(), purifiersKind(), societyKind()])).filter(Boolean);
+    if (mine !== drawing) return; // a newer drawing is on its way
+
+    // Chips: what needs a look, most pressing first.
+    const chips = kinds.flatMap((k) => k.chips).sort((a, b) => (b.tone === "warn") - (a.tone === "warn"));
+    const row = $("home-chips");
+    row.replaceChildren(...chips.map((c) => {
+      const b = button("status-chip" + (c.tone ? " " + c.tone : ""), KagazIcons.label(c.icon, c.text));
+      b.setAttribute("role", "listitem");
+      b.addEventListener("click", c.open);
+      return b;
+    }));
+    row.classList.toggle("hidden", !chips.length);
+
+    // Favourites, in the order they were starred.
+    const all = new Map();
+    for (const k of kinds) for (const d of k.devices) if (d.key) all.set(d.key, d);
+    const fav = favs().map((k) => all.get(k)).filter(Boolean);
+    $("home-favs").replaceChildren(...fav.map((d) => tile({ ...d, key: choosing ? d.key : null })));
+    $("home-favs-box").classList.toggle("hidden", !fav.length);
+    $("home-fav-edit").textContent = choosing ? "Done" : "Edit";
+    $("home-fav-choose").textContent = choosing ? "Done" : "Choose favourites";
+    $("home-fav-choose").classList.toggle("hidden", !all.size || (!!fav.length && !choosing));
+    $("home-fav-hint").classList.toggle("hidden", !choosing);
+    $("home").classList.toggle("choosing", choosing);
+
+    // Every kind, its devices inside (stars only while choosing).
+    $("home-groups").replaceChildren(...kinds.map((k) => group({ ...k, devices: k.devices.map((d) => ({ ...d, key: choosing ? d.key : null })) })));
+    $("home-empty").classList.toggle("hidden", kinds.length > 0);
+    $("home-all-title").textContent = kinds.length ? "All devices" : "Your devices";
+    kindNotes(kinds);
+
     // The added printers' states; their addresses are refreshed by a quiet
     // search now and then (a router can hand them new ones).
     checkPrinters();
@@ -225,21 +293,27 @@ const KagazHome = (() => {
     }
   }
 
-  // The sidebar's kinds say what each holds ("2 devices", "none added
-  // yet"), so a kind with nothing in it does not read as a device.
+  function choose(on) {
+    choosing = on;
+    show();
+  }
+  $("home-fav-edit").addEventListener("click", () => choose(!choosing));
+  $("home-fav-choose").addEventListener("click", () => choose(!choosing));
+
+  // The navigation's kinds carry a short note ("2 devices", "none added
+  // yet"); the sidebar shows it where it has room for it.
   const KIND_EMPTY = { doorbell: "not set up yet", cameras: "not signed in yet", print: "none added yet", fans: "none added yet", purifiers: "none added yet", society: "not signed in yet" };
-  const KIND_GROUP = { doorbell: "doorbell", cameras: "security", print: "print", fans: "fan", purifiers: "purifier", society: "society" };
-  function kindNotes(built) {
+  function kindNotes(kinds) {
     for (const [cat, empty] of Object.entries(KIND_EMPTY)) {
       const note = document.querySelector(`#categories li[data-cat="${cat}"] .cat-note`);
-      if (!note) continue;
-      const tiles = built.querySelector(`#home-tiles-${KIND_GROUP[cat]}`);
-      const status = tiles && tiles.parentElement.querySelector(".home-status");
-      note.textContent = status && status.textContent ? status.textContent : empty;
+      if (!note || note.closest(".ringing")) continue;
+      const k = kinds.find((x) => x.id === cat);
+      note.textContent = !k ? empty : k.count ? `${k.count} device${k.count === 1 ? "" : "s"}` : k.status || "";
     }
   }
 
-  // The printer search finished: redraw if Home is on screen.
+  // Something changed (a printer search finished, a purifier added): redraw
+  // if Home is on screen.
   function devicesChanged() {
     if (!$("home").classList.contains("hidden")) show();
   }
@@ -306,6 +380,7 @@ const KagazHome = (() => {
   }
 
   function openAdd() {
+    choosing = false;
     selectCategory("add");
     showKinds();
   }

@@ -1633,6 +1633,26 @@ fn phone_plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
     tauri::plugin::Builder::new("kagaz-phone").build()
 }
 
+/// The system the page runs on, told before the page loads, so it wears
+/// that system's look from its first frame (ui/platform.js, ui/skins.css).
+/// Any Linux desktop gets GNOME's: Kagaz's windows are GTK ones there.
+fn os_plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
+    let os = if cfg!(target_os = "android") {
+        "android"
+    } else if cfg!(target_os = "ios") {
+        "ios"
+    } else if cfg!(target_os = "windows") {
+        "windows"
+    } else if cfg!(target_os = "macos") {
+        "macos"
+    } else {
+        "gnome"
+    };
+    tauri::plugin::Builder::new("kagaz-os")
+        .js_init_script(format!("window.__KAGAZ_OS__ = \"{os}\";"))
+        .build()
+}
+
 /// GNOME (and other systemd desktops) decide which app a window belongs to
 /// from the systemd unit its process runs in. Started from a terminal,
 /// Kagaz sits in the terminal's unit and the dock files its window under
@@ -1837,6 +1857,7 @@ pub fn run() {
         .manage(xiaomi::XiaomiState::default())
         .plugin(tauri_plugin_dialog::init())
         .plugin(phone_plugin())
+        .plugin(os_plugin())
         .setup(|app| {
             #[cfg(target_os = "linux")]
             follow_dark_style();

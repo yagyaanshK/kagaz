@@ -6,21 +6,21 @@
 
 const KagazBrands = (() => {
   const ICON = {
-    doorbell: '<svg viewBox="0 0 24 24"><path d="M6 8a6 6 0 0 1 12 0v5l2 3H4l2-3zM10 19a2 2 0 0 0 4 0"/></svg>',
-    security: '<svg viewBox="0 0 24 24"><path d="M2 4.5h13.5A1.5 1.5 0 0 1 17 6v5a1.5 1.5 0 0 1-1.5 1.5H2zM5.5 8.5h.01M17 7h2.5v3H17M10 12.5v5.5h11M21 14v7"/></svg>',
-    print: '<svg viewBox="0 0 24 24"><path d="M6 9V3h12v6M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2M6 14h12v7H6z"/></svg>',
-    camera: '<svg viewBox="0 0 24 24"><path d="M4 7h3l2-2h6l2 2h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1zM12 16a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z"/></svg>',
-    vacuum: '<svg viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 8a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM6 16h12"/></svg>',
-    tv: '<svg viewBox="0 0 24 24"><path d="M3 5h18v12H3zM8 21h8M9 17l-1 4M15 17l1 4"/></svg>',
-    fridge: '<svg viewBox="0 0 24 24"><path d="M6 2h12v20H6zM6 10h12M9 5v2M9 13v3"/></svg>',
-    washer: '<svg viewBox="0 0 24 24"><path d="M4 2h16v20H4zM4 7h16M12 18a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM7 4.5h2"/></svg>',
-    ac: '<svg viewBox="0 0 24 24"><path d="M2 5h20v8H2zM6 10h12M7 17l-1 3M12 17v3M17 17l1 3"/></svg>',
-    society: '<svg viewBox="0 0 24 24"><path d="M3 21V9l9-6 9 6v12M3 21h18M8 21v-6h8v6M12 3v4"/></svg>',
-    purifier: '<svg viewBox="0 0 24 24"><path d="M3 8h11a3 3 0 1 0-3-3M3 12h15a3 3 0 1 1-3 3M3 16h8a2.5 2.5 0 1 1-2.5 2.5"/></svg>',
-    fan: '<svg viewBox="0 0 24 24"><path d="M12 12m-2 0a2 2 0 1 0 4 0a2 2 0 1 0-4 0M12 10c0-4 1-7 3-7s3 3 0 7M14 12c4 0 7 1 7 3s-3 3-7 0M12 14c0 4-1 7-3 7s-3-3 0-7M10 12c-4 0-7-1-7-3s3-3 7 0"/></svg>',
-    room: '<svg viewBox="0 0 24 24"><path d="M4 21V8l8-5 8 5v13M9 21v-7h6v7"/></svg>',
-    sip: '<svg viewBox="0 0 24 24"><path d="M6 3h12v18H6zM10 8h4M12 13a1.5 1.5 0 1 0 0 .01M9 18h6"/></svg>',
-    other: '<svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>',
+    doorbell: KagazIcons.svg("doorbell"),
+    security: KagazIcons.svg("cameras"),
+    print: KagazIcons.svg("print"),
+    camera: KagazIcons.svg("photo"),
+    vacuum: KagazIcons.svg("vacuum"),
+    tv: KagazIcons.svg("tv"),
+    fridge: KagazIcons.svg("fridge"),
+    washer: KagazIcons.svg("washer"),
+    ac: KagazIcons.svg("ac"),
+    society: KagazIcons.svg("society"),
+    purifier: KagazIcons.svg("purifier"),
+    fan: KagazIcons.svg("fan"),
+    room: KagazIcons.svg("home"),
+    sip: KagazIcons.svg("doorbell"),
+    other: KagazIcons.svg("plus"),
   };
 
   const KINDS = [

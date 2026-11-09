@@ -4,77 +4,70 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Kagaz</title>
+  <script src="platform.js"></script>
   <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="skins.css">
 </head>
 <body>
-  <!-- The kinds of device: a sidebar on a wide window, a rail on a tablet,
-       a bar along the bottom on a phone (the same three entries). -->
-  <aside id="sidebar">
-    <header>
-      <h1>Kagaz</h1>
-    </header>
+  <!-- Where to go. One list, drawn the way each system draws its own:
+       Android's navigation rail, Windows' navigation pane, GNOME's and
+       macOS's sidebars (skins.css). On a phone it gives way to the bar
+       along the bottom (#bottom-nav), and the kinds are reached from Home. -->
+  <aside id="sidebar" aria-label="Kagaz">
+    <div class="side-head">
+      <button id="pane-toggle" type="button" class="side-toggle" aria-label="Show or hide the names" title="Navigation" aria-expanded="true"><span class="ic" data-icon="menu"></span></button>
+      <span class="side-title">Kagaz</span>
+    </div>
     <ul id="categories">
-      <li data-cat="home" tabindex="0" role="button" class="active">
-        <span class="cat-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 11l9-7 9 7M5 10v10h5v-6h4v6h5V10"/></svg></span>
-        <span class="cat-name">Home</span>
-        <span class="cat-note muted">your devices</span>
-      </li>
-      <li data-cat="settings" tabindex="0" role="button">
-        <span class="cat-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></span>
-        <span class="cat-name">Settings</span>
-        <span class="cat-note muted">accounts, about</span>
-      </li>
-      <li data-cat="tools" tabindex="0" role="button">
-        <span class="cat-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.5 2.5-2.4-.6-.6-2.4z"/></svg></span>
-        <span class="cat-name">Tools</span>
-        <span class="cat-note muted">tidy, crop, compress a file</span>
-      </li>
-      <li class="cat-label muted" aria-hidden="true">My devices</li>
-      <li data-cat="doorbell" tabindex="0" role="button">
-        <span class="cat-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M6 8a6 6 0 0 1 12 0v5l2 3H4l2-3zM10 19a2 2 0 0 0 4 0"/></svg></span>
-        <span class="cat-name">Doorbell</span>
-        <span class="cat-note muted">video intercom</span>
-      </li>
-      <li data-cat="cameras" tabindex="0" role="button">
-        <span class="cat-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M2 4.5h13.5A1.5 1.5 0 0 1 17 6v5a1.5 1.5 0 0 1-1.5 1.5H2zM5.5 8.5h.01M17 7h2.5v3H17M10 12.5v5.5h11M21 14v7"/></svg></span>
-        <span class="cat-name">Security cameras</span>
-        <span class="cat-note muted">Tapo, through your account</span>
-      </li>
-      <li data-cat="print" tabindex="0" role="button">
-        <span class="cat-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M6 9V3h12v6M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2M6 14h12v7H6z"/></svg></span>
-        <span class="cat-name">Printers &amp; scanners</span>
-        <span class="cat-note muted">on the network and USB</span>
-      </li>
-      <li data-cat="fans" tabindex="0" role="button">
-        <span class="cat-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 12m-2 0a2 2 0 1 0 4 0a2 2 0 1 0-4 0M12 10c0-4 1-7 3-7s3 3 0 7M14 12c4 0 7 1 7 3s-3 3-7 0M12 14c0 4-1 7-3 7s-3-3 0-7M10 12c-4 0-7-1-7-3s3-3 7 0"/></svg></span>
-        <span class="cat-name">Ceiling fans</span>
-        <span class="cat-note muted">Atomberg, over Bluetooth</span>
-      </li>
-      <li data-cat="purifiers" tabindex="0" role="button">
-        <span class="cat-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 8h11a3 3 0 1 0-3-3M3 12h15a3 3 0 1 1-3 3M3 16h8a2.5 2.5 0 1 1-2.5 2.5"/></svg></span>
-        <span class="cat-name">Air purifiers</span>
-        <span class="cat-note muted">Philips, on the network</span>
-      </li>
-      <li data-cat="society" tabindex="0" role="button">
-        <span class="cat-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 21V9l9-6 9 6v12M3 21h18M8 21v-6h8v6M12 3v4"/></svg></span>
-        <span class="cat-name">Society gate</span>
-        <span class="cat-note muted">MyGate, Park+</span>
-      </li>
+      <li data-cat="home" tabindex="0" role="button" class="active" title="Home"><span class="cat-icon" data-icon="home" aria-hidden="true"></span><span class="cat-name">Home</span><span class="cat-note muted">your devices</span></li>
+      <li data-cat="doorbell" tabindex="0" role="button" title="Doorbell"><span class="cat-icon" data-icon="doorbell" aria-hidden="true"></span><span class="cat-name">Doorbell</span><span class="cat-note muted">video intercom</span></li>
+      <li data-cat="cameras" tabindex="0" role="button" title="Security cameras"><span class="cat-icon" data-icon="cameras" aria-hidden="true"></span><span class="cat-name">Cameras</span><span class="cat-note muted">Tapo, through your account</span></li>
+      <li data-cat="print" tabindex="0" role="button" title="Printers and scanners"><span class="cat-icon" data-icon="print" aria-hidden="true"></span><span class="cat-name">Print &amp; scan</span><span class="cat-note muted">on the network and USB</span></li>
+      <li data-cat="fans" tabindex="0" role="button" title="Ceiling fans"><span class="cat-icon" data-icon="fan" aria-hidden="true"></span><span class="cat-name">Fans</span><span class="cat-note muted">Atomberg, over Bluetooth</span></li>
+      <li data-cat="purifiers" tabindex="0" role="button" title="Air purifiers"><span class="cat-icon" data-icon="purifier" aria-hidden="true"></span><span class="cat-name">Purifiers</span><span class="cat-note muted">Philips, on the network</span></li>
+      <li data-cat="society" tabindex="0" role="button" title="Society gate"><span class="cat-icon" data-icon="society" aria-hidden="true"></span><span class="cat-name">Society gate</span><span class="cat-note muted">MyGate, Park+</span></li>
+      <li data-cat="tools" tabindex="0" role="button" title="Tools"><span class="cat-icon" data-icon="tools" aria-hidden="true"></span><span class="cat-name">Tools</span><span class="cat-note muted">tidy, crop, compress a file</span></li>
+      <li data-cat="settings" tabindex="0" role="button" class="cat-foot" title="Settings"><span class="cat-icon" data-icon="settings" aria-hidden="true"></span><span class="cat-name">Settings</span><span class="cat-note muted">accounts, about</span></li>
     </ul>
   </aside>
 
-  <main id="main">
-    <!-- Home: the devices set up here, by kind; Add a device starts from a kind, then a brand. -->
-    <section id="home" class="pane hidden">
-      <div class="pane-head">
-        <h2>My devices</h2>
-        <button id="home-add" type="button" class="accent">+ Add a device</button>
+  <div id="column">
+    <!-- The page's bar: Back when there is somewhere to go back to, the
+         page's name, and its action (shell.js). -->
+    <header id="bar">
+      <button id="bar-menu" type="button" class="bar-btn hidden" aria-label="Navigation" title="Navigation"><span class="ic" data-icon="menu"></span></button>
+      <button id="bar-back" type="button" class="bar-btn bar-back hidden" aria-label="Back"><span class="ic" data-icon="back"></span><span class="bar-back-word">Back</span></button>
+      <h1 id="bar-title">Home</h1>
+      <div class="bar-actions">
+        <button id="bar-add" type="button" class="bar-btn" aria-label="Add a device" title="Add a device"><span class="ic" data-icon="plus"></span></button>
       </div>
+    </header>
+    <!-- A ring, wherever the person is (the doorbell's own page shows its call). -->
+    <div id="urgent" class="urgent hidden" role="alert">
+      <span class="urgent-icon ic" data-icon="bell"></span>
+      <span class="urgent-text"><strong id="urgent-title"></strong><span id="urgent-sub"></span></span>
+      <span class="urgent-actions">
+        <button id="urgent-answer" type="button" class="urgent-btn primary">Answer</button>
+        <button id="urgent-decline" type="button" class="urgent-btn">Decline</button>
+      </span>
+    </div>
+  <main id="main">
+    <!-- Home (home.js): what needs a look first, favourites, then every
+         device by kind; Add a device starts from a kind, then a brand. -->
+    <section id="home" class="pane hidden">
+      <div id="home-chips" class="status-chips" role="list" aria-label="At a glance"></div>
+      <div id="home-favs-box" class="hidden">
+        <div class="section-head"><h2 class="section-title">Favourites</h2><button id="home-fav-edit" type="button" class="link">Edit</button></div>
+        <div id="home-favs" class="home-tiles"></div>
+      </div>
+      <div class="section-head"><h2 id="home-all-title" class="section-title">All devices</h2><button id="home-fav-choose" type="button" class="link hidden">Choose favourites</button></div>
+      <p id="home-fav-hint" class="muted small hidden">Tap the star on the devices you use most. They show at the top of Home.</p>
       <div id="home-groups"></div>
       <div id="home-empty" class="empty-state hidden">
         <p>Nothing set up yet.</p>
-        <p class="muted">Add a doorbell, security cameras or a printer to see them here.</p>
+        <p class="muted">Add a doorbell, security cameras, a printer, a fan, a purifier or your society gate to see them here.</p>
       </div>
+      <button id="home-add" type="button" class="add-device"><span class="ic" data-icon="plus"></span><span>Add a device</span></button>
     </section>
 
     <section id="add" class="pane hidden">
@@ -97,7 +90,7 @@
 
     <!-- A picture or video from the history, over everything. -->
     <div id="viewer" class="viewer hidden" role="dialog" aria-modal="true" aria-label="Picture">
-      <div class="viewer-top"><span id="viewer-title"></span><button id="viewer-close" type="button" class="icon" aria-label="Close">&#x2715;</button></div>
+      <div class="viewer-top"><span id="viewer-title"></span><button id="viewer-close" type="button" class="icon" aria-label="Close"><span class="ic" data-icon="close"></span></button></div>
       <img id="viewer-img" alt="">
       <video id="viewer-video" class="hidden" controls playsinline></video>
     </div>
@@ -244,7 +237,7 @@
         <h2>Doorbell</h2>
         <div class="actions">
           <span id="door-listen" class="pill muted">…</span>
-          <button id="door-gear" type="button" class="icon" title="Doorbell settings" aria-label="Doorbell settings">&#x2699;</button>
+          <button id="door-gear" type="button" class="icon" title="Doorbell settings" aria-label="Doorbell settings"><span class="ic" data-icon="settings"></span></button>
         </div>
       </div>
       <!-- Doorbell settings (settings.js): what applies to every doorbell,
@@ -299,7 +292,7 @@
             <button id="ot-reconnect" type="button" class="accent hidden">Reconnect</button>
             <button id="ot-signin" type="button">Sign in</button>
             <div class="cam-menu" id="ot-menu-box">
-              <button id="ot-menu" type="button" class="icon hidden" title="Account" aria-label="Account menu" aria-haspopup="true">&#x22EF;</button>
+              <button id="ot-menu" type="button" class="icon hidden" title="Account" aria-label="Account menu" aria-haspopup="true"><span class="ic" data-icon="more"></span></button>
               <div id="ot-actions" class="cam-settings menu hidden">
                 <button id="ot-refresh" type="button" class="hidden">Refresh devices</button>
                 <button id="ot-signout" type="button" class="hidden">Sign out</button>
@@ -336,13 +329,13 @@
           <div class="actions"><button id="ot-login-submit" class="accent" type="submit">Sign in</button><button id="ot-login-cancel" type="button">Cancel</button></div>
           <div class="ot-or"><span>or</span></div>
           <button id="ot-qr-open" type="button" class="ot-qr-btn">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h2v2h-2zM18 14h2v2h-2zM14 18h2v2h-2zM18 18h2v2h-2z"/></svg>
+            <span class="ic" data-icon="qr"></span>
             Sign in with a QR code
           </button>
           <p class="muted small">Scan the QR code from your OneTouch welcome email, or choose a saved picture of it.</p>
         </form>
         <dialog id="ot-qr-dialog" class="qr-dialog">
-          <div class="qr-head"><strong>Scan your OneTouch QR code</strong><button id="ot-qr-cancel" type="button" class="icon" aria-label="Close scanner">&#x2715;</button></div>
+          <div class="qr-head"><strong>Scan your OneTouch QR code</strong><button id="ot-qr-cancel" type="button" class="icon" aria-label="Close scanner"><span class="ic" data-icon="close"></span></button></div>
           <div class="qr-stage">
             <video id="ot-qr-video" playsinline muted></video>
             <div class="qr-frame" aria-hidden="true"></div>
@@ -450,12 +443,12 @@
           <span id="cam-state" class="muted"></span>
           <!-- These three move into the menu on a narrow window (app.js). -->
           <span id="cam-tools" class="cam-tools">
-            <button id="cam-reload-all" type="button" title="Reconnect every tile">&#x21bb; Reload all</button>
-            <button id="cam-sound-all" type="button" title="Hear every camera shown at once, or mute them all">&#x1F50A; Sound on all</button>
+            <button id="cam-reload-all" type="button" title="Reconnect every tile"><span class="ic" data-icon="reload"></span><span>Reload all</span></button>
+            <button id="cam-sound-all" type="button" title="Hear every camera shown at once, or mute them all"><span class="ic" data-icon="speaker"></span><span>Sound on all</span></button>
             <button id="cam-rearrange" type="button" title="Make groups and drag cameras between them">Rearrange</button>
           </span>
           <div class="cam-menu">
-            <button id="cam-gear" type="button" class="icon" title="Settings" aria-label="Camera settings">&#x2699;</button>
+            <button id="cam-gear" type="button" class="icon" title="Settings" aria-label="Camera settings"><span class="ic" data-icon="settings"></span></button>
             <div id="cam-settings" class="cam-settings hidden">
               <div id="cam-tools-menu" class="cam-settings-tools"></div>
               <label>Playback method
@@ -493,7 +486,7 @@
         </span>
         <input type="hidden" id="pb-date"><input type="hidden" id="pb-time">
         <button id="pb-play" type="button" class="accent" title="Play every camera shown from this time">Play all</button>
-        <button id="pb-pause" type="button" title="Pause or resume every camera">&#x23F8; Pause all</button>
+        <button id="pb-pause" type="button" title="Pause or resume every camera"><span class="ic" data-icon="pause"></span><span>Pause all</span></button>
         <div id="pb-seek" title="Every camera shown: recordings, and what the cameras detected. Click or drag to move all of them; scroll to zoom, shift + scroll to move along"></div>
         <span id="pb-seek-at" class="muted">—</span>
         <span class="tl-legend"><i class="tl-key tl-key-rec"></i>recording <i class="tl-key tl-key-motion"></i>motion <i class="tl-key tl-key-person"></i>person <i class="tl-key tl-key-unsure"></i>clock unsure after a restart <i class="tl-key tl-key-fixed"></i>clock corrected</span>
@@ -824,13 +817,16 @@
     </section>
   </main>
 
-  <!-- A phone: the three kinds of device along the bottom, under the thumb. -->
+  </div>
+
+  <!-- A phone: Home, Tools and Settings along the bottom, under the thumb. -->
   <nav id="bottom-nav" aria-label="Kagaz">
-    <button type="button" data-cat="home" class="active"><span class="cat-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 11l9-7 9 7M5 10v10h5v-6h4v6h5V10"/></svg></span><span>Home</span></button>
-    <button type="button" data-cat="tools"><span class="cat-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.5 2.5-2.4-.6-.6-2.4z"/></svg></span><span>Tools</span></button>
-    <button type="button" data-cat="settings"><span class="cat-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></span><span>Settings</span></button>
+    <button type="button" data-cat="home" class="active"><span class="cat-icon" data-icon="home" aria-hidden="true"></span><span class="cat-name">Home</span></button>
+    <button type="button" data-cat="tools"><span class="cat-icon" data-icon="tools" aria-hidden="true"></span><span class="cat-name">Tools</span></button>
+    <button type="button" data-cat="settings"><span class="cat-icon" data-icon="settings" aria-hidden="true"></span><span class="cat-name">Settings</span></button>
   </nav>
 
+  <script src="icons.js"></script>
   <script src="nav.js"></script>
   <script src="ask.js"></script>
   <script src="reveal.js"></script>
@@ -855,5 +851,6 @@
   <script src="history.js"></script>
   <script src="settings.js"></script>
   <script src="home.js"></script>
+  <script src="shell.js"></script>
 </body>
 </html>

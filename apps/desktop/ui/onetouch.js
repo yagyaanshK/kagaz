@@ -90,17 +90,17 @@ const OT_ORDER = { door: 0, indoor: 1, guard: 2, other: 3, family: 4, apps: 5 };
 let otPeople = []; // the home's family members (their own logins)
 let otPeopleState = { phase: 'idle', error: '' }; // idle | loading | ok | error
 const OT_ICON = {
-  door: '<svg viewBox="0 0 24 24"><path d="M6 3h12v18H6zM10 8h4M12 13a1.5 1.5 0 1 0 0 .01M9 18h6"/></svg>',
-  indoor: '<svg viewBox="0 0 24 24"><path d="M3 5h18v11H3zM8 20h8M12 16v4"/></svg>',
-  guard: '<svg viewBox="0 0 24 24"><path d="M12 3l8 3v6c0 4.5-3.5 8-8 9-4.5-1-8-4.5-8-9V6z"/></svg>',
-  apps: '<svg viewBox="0 0 24 24"><path d="M8 3h8v18H8zM11 18h2"/></svg>',
-  family: '<svg viewBox="0 0 24 24"><path d="M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM2 21v-1a7 7 0 0 1 14 0v1M17 11a3 3 0 1 0 0-6M19 21v-1a5 5 0 0 0-3-4.6"/></svg>',
-  other: '<svg viewBox="0 0 24 24"><path d="M4 4h16v16H4z"/></svg>',
+  door: KagazIcons.svg("doorbell"),
+  indoor: KagazIcons.svg("indoor"),
+  guard: KagazIcons.svg("guard"),
+  apps: KagazIcons.svg("mobile"),
+  family: KagazIcons.svg("family"),
+  other: KagazIcons.svg("device"),
 };
 // Small glyphs for the per-device action buttons (OneTouch shows a row of these).
 const OT_ACT = {
-  live: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>',
-  call: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.6 10.8a15 15 0 0 0 6.6 6.6l2.2-2.2a1 1 0 0 1 1-.24 11 11 0 0 0 3.5.56 1 1 0 0 1 1 1V20a1 1 0 0 1-1 1A17 17 0 0 1 3 4a1 1 0 0 1 1-1h3.5a1 1 0 0 1 1 1 11 11 0 0 0 .56 3.5 1 1 0 0 1-.24 1z"/></svg>',
+  live: KagazIcons.svg("eye"),
+  call: KagazIcons.svg("phone"),
 };
 let otOpen = null; // the key of the open card
 
@@ -269,6 +269,16 @@ async function otOpenByName(name) {
   for (let i = 0; i < 40 && !(otStatus && otStatus.devices); i++) await new Promise((r) => setTimeout(r, 150));
   const card = otCards().find((c) => c.name.trim().toLowerCase() === want);
   if (card) await otOpenCard(card);
+}
+
+// Home: call a device by its name (its card opens, and the call plays in it).
+async function otCallByName(name) {
+  const want = (name || "").trim().toLowerCase();
+  for (let i = 0; i < 40 && !(otStatus && otStatus.devices); i++) await new Promise((r) => setTimeout(r, 150));
+  const card = otCards().find((c) => c.name.trim().toLowerCase() === want);
+  if (!card || !card.call || !window.KagazCalls) return otOpenByName(name);
+  await otFocusCard(card);
+  window.KagazCalls.call(card.call.sip, card.key);
 }
 
 async function otClose() {

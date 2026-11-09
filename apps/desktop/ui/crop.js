@@ -309,7 +309,8 @@ const KagazCrop = (() => {
       f.remove = document.createElement("button");
       f.remove.type = "button";
       f.remove.className = "crop-remove";
-      f.remove.textContent = "✕";
+      f.remove.innerHTML = KagazIcons.svg("close");
+      f.remove.setAttribute("aria-label", `Remove the ${f.name} frame`);
       f.remove.title = `Remove the ${f.name} frame (a one-sided ID)`;
       f.remove.setAttribute("aria-label", f.remove.title);
       f.remove.addEventListener("click", () => {

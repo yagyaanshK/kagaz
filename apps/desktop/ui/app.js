@@ -733,6 +733,7 @@ function selectCategory(cat) {
     if (on) el.setAttribute("aria-current", "page");
     else el.removeAttribute("aria-current");
   });
+  if (typeof KagazShell !== "undefined") KagazShell.place(cat);
   if (cat === "cameras") {
     for (const id of PANES) $(id).classList.toggle("hidden", id !== "cameras");
     showCameras();
@@ -1612,8 +1613,8 @@ function stopAudio(tile) {
 }
 
 const SOUND_ICON = {
-  on: '<svg viewBox="0 0 24 24"><path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z"/><path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11"/></svg>',
-  off: '<svg viewBox="0 0 24 24"><path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z"/><path d="M16 9.5l5 5M21 9.5l-5 5"/></svg>',
+  on: KagazIcons.svg("speaker"),
+  off: KagazIcons.svg("mute"),
 };
 
 function volumeOf(cam) {
@@ -1700,7 +1701,7 @@ function toggleAudio(tile, cam) {
 function refreshSoundAll() {
   const tiles = [...$("cam-grid").querySelectorAll(".cam-tile:not(.placeholder)")];
   const anyOff = !tiles.length || tiles.some((t) => !t.querySelector("audio") && !t._fileSound && !(t._player && t._player.sound));
-  $("cam-sound-all").textContent = anyOff ? "\u{1F50A} Sound on all" : "\u{1F507} Mute all";
+  $("cam-sound-all").innerHTML = anyOff ? KagazIcons.label("speaker", "Sound on all") : KagazIcons.label("mute", "Mute all");
 }
 
 function cameraById(id) {
@@ -2136,7 +2137,7 @@ function moveCamera(id, toKey, beforeId) {
 function buildGroupControls(box) {
   const row = document.createElement("div");
   row.className = "grp-controls";
-  row.innerHTML = '<button type="button" class="grp-pause" title="Pause or resume this group">\u23F8</button>'
+  row.innerHTML = '<button type="button" class="grp-pause" title="Pause or resume this group" aria-label="Pause">' + KagazIcons.svg("pause") + '</button>'
     + '<div class="grp-tl" title="This group: recordings and detections. Click or drag to move its cameras together; scroll to zoom"></div>'
     + '<span class="grp-at muted">—</span>'
     + '<input type="range" class="grp-speed" aria-label="Speed for this group" min="-2" max="3" step="0.05" value="0" title="Speed for this group">'
@@ -2722,10 +2723,10 @@ function speedSlider(speed) { return String(Math.log2(speed || 1)); }
 // Pause buttons and speed sliders say what their cameras are doing.
 function refreshPlaybackControls() {
   const gp = $("pb-pause");
-  if (gp) gp.textContent = cellsPaused(cellsOf($("cam-grid"))) ? "▶ Resume all" : "⏸ Pause all";
+  if (gp) gp.innerHTML = cellsPaused(cellsOf($("cam-grid"))) ? KagazIcons.label("play", "Resume all") : KagazIcons.label("pause", "Pause all");
   document.querySelectorAll(".cam-group").forEach((box) => {
     const b = box.querySelector(".grp-pause");
-    if (b) b.textContent = cellsPaused(cellsOf(box)) ? "▶" : "⏸";
+    if (b) { const p = cellsPaused(cellsOf(box)); b.innerHTML = KagazIcons.svg(p ? "play" : "pause"); b.setAttribute("aria-label", p ? "Resume" : "Pause"); }
     const sl = box.querySelector(".grp-speed");
     const first = cellsOf(box).map((c) => c.querySelector(".cam-tile")).find((t) => t._sync);
     if (sl && first && document.activeElement !== sl) {
@@ -2736,7 +2737,7 @@ function refreshPlaybackControls() {
   allTiles().forEach((tile) => {
     const cell = tile.closest(".cam-cell");
     const b = cell.querySelector(".tile-pause");
-    if (b) b.textContent = tile._sync && tile._sync.paused ? "▶" : "⏸";
+    if (b) { const p = !!(tile._sync && tile._sync.paused); b.innerHTML = KagazIcons.svg(p ? "play" : "pause"); b.setAttribute("aria-label", p ? "Resume" : "Pause"); }
     const sl = cell.querySelector(".tile-speed");
     if (sl && tile._sync && document.activeElement !== sl) {
       sl.value = speedSlider(tile._sync.speed);
@@ -2951,7 +2952,7 @@ function buildTimeline(cam, tile) {
   const row = document.createElement("div");
   row.className = "pb-row";
   row.innerHTML = '<span class="pb-at">—</span>'
-    + '<button type="button" class="tile-pause" title="Pause or resume this camera">\u23F8</button>'
+    + '<button type="button" class="tile-pause" title="Pause or resume this camera" aria-label="Pause">' + KagazIcons.svg("pause") + '</button>'
     + '<input type="range" class="tile-speed" aria-label="Speed for this camera" min="-2" max="3" step="0.05" value="0" title="Speed for this camera">'
     + '<span class="tile-speed-label">1x</span>'
     + '<button type="button" class="pb-download">Download…</button>'
@@ -3282,6 +3283,15 @@ function renderDoorbell() {
   // A phone rings with its notification (also with the window closed).
   if (ringing && !st.silent && !/Android/i.test(navigator.userAgent)) startChime(doorStationName(st.from) || st.caller || "", "local"); else stopChime();
 
+  // Ringing while the person is elsewhere in Kagaz: the banner over the page.
+  if (typeof KagazShell !== "undefined") {
+    const who = doorStationName(st.from) || st.caller || "The door";
+    KagazShell.ring("local", ringing ? {
+      title: `${who} is ringing`, sub: "Door station on this network",
+      answer: () => { selectCategory("doorbell"); $("door-answer").click(); },
+      decline: () => $("door-decline").click(),
+    } : null);
+  }
   // The sidebar entry says when it is ringing, so other views notice too.
   for (const el of document.querySelectorAll('#categories li[data-cat="doorbell"], #bottom-nav button[data-cat="doorbell"]')) {
     el.classList.toggle("ringing", ringing);

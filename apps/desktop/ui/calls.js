@@ -15,16 +15,8 @@
   // The call's buttons: a symbol, with its word beside it where there is
   // room (on a phone the symbol alone; the word stays its name for
   // screen readers).
-  const ICON = {
-    phone: '<path d="M6.5 3.5h3l1.5 4.5-2 1.3a11 11 0 0 0 5.7 5.7l1.3-2 4.5 1.5v3a2 2 0 0 1-2 2A16.5 16.5 0 0 1 4.5 5.5a2 2 0 0 1 2-2z"/>',
-    mic: '<path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3zM5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/>',
-    micOff: '<path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3zM5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M4 4l16 16"/>',
-    speaker: '<path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z"/><path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11"/>',
-    camera: '<rect x="3" y="7" width="12.5" height="10" rx="2"/><path d="M15.5 10.5 21 7.5v9l-5.5-3"/>',
-    cameraOff: '<rect x="3" y="7" width="12.5" height="10" rx="2"/><path d="M15.5 10.5 21 7.5v9l-5.5-3M3 4l18 16"/>',
-    unlock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7.5a4 4 0 0 1 7.7-1.5M12 15v2"/>',
-  };
-  const svg = (name) => `<svg viewBox="0 0 24 24" aria-hidden="true">${ICON[name]}</svg>`;
+  const ICON = { phone: "phone", mic: "mic", micOff: "micOff", speaker: "speaker", camera: "video", cameraOff: "videoOff", unlock: "unlock" };
+  const svg = (name) => KagazIcons.svg(ICON[name]);
   function btn(id, cls, icon, label, extra = "") {
     const down = icon === "phone down";
     return `<button id="${id}" type="button" class="${cls}" aria-label="${label}" title="${label}" ${extra}>`
@@ -207,6 +199,14 @@
     show("call-hangup", phase === "talking" || phase === "calling");
     $("call-clock").classList.toggle("hidden", phase !== "talking");
 
+    // Ringing while the person is elsewhere in Kagaz: the banner over the page.
+    if (typeof KagazShell !== "undefined") {
+      KagazShell.ring("cloud", phase === "ringing" ? {
+        title: `${s.peer || "The door"} is calling`, sub: "OneTouch",
+        answer: () => { selectCategory("doorbell"); $("call-answer").click(); },
+        decline: () => $("call-decline").click(),
+      } : null);
+    }
     if (phase === "ringing" && !ringing) {
       ringing = true;
       // Ring mode brings the ring up; silent mode leaves the screen alone

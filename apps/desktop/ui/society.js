@@ -40,13 +40,13 @@ const KagazSociety = (() => {
   const code6 = () => String(Math.floor(100000 + Math.random() * 900000));
 
   const ICON = {
-    guest: '<svg viewBox="0 0 24 24"><path d="M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4 21v-1a8 8 0 0 1 16 0v1"/></svg>',
-    delivery: '<svg viewBox="0 0 24 24"><path d="M3 7h11v9H3zM14 10h4l3 3v3h-7zM7 19a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zM17 19a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z"/></svg>',
-    cab: '<svg viewBox="0 0 24 24"><path d="M5 11l1.5-4.5h11L19 11M4 11h16v6H4zM7 17v2M17 17v2M7.5 14h.01M16.5 14h.01"/></svg>',
-    help: '<svg viewBox="0 0 24 24"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.5 2.5-2.4-.6-.6-2.4z"/></svg>',
-    car: '<svg viewBox="0 0 24 24"><path d="M5 11l1.5-4.5h11L19 11M4 11h16v6H4zM7 17v2M17 17v2M7.5 14h.01M16.5 14h.01"/></svg>',
-    in: '<svg viewBox="0 0 24 24"><path d="M4 12h12M11 7l5 5-5 5M20 4v16"/></svg>',
-    out: '<svg viewBox="0 0 24 24"><path d="M20 12H8M13 7l-5 5 5 5M4 4v16"/></svg>',
+    guest: KagazIcons.svg("guest"),
+    delivery: KagazIcons.svg("delivery"),
+    cab: KagazIcons.svg("cab"),
+    help: KagazIcons.svg("tools"),
+    car: KagazIcons.svg("car"),
+    in: KagazIcons.svg("enter"),
+    out: KagazIcons.svg("leave"),
   };
   const KIND_WORDS = { guest: "Guest", delivery: "Delivery", cab: "Cab", help: "Visiting help" };
 

@@ -15,6 +15,14 @@ const KagazNav = (() => {
   let depth = 0; // our history entries above Home
   let pending = false; // a history.go() is on its way
   let closing = false;
+  const watchers = []; // told when the levels change (shell.js's bar)
+  function changed() {
+    for (const fn of watchers) {
+      try {
+        fn(stack.length);
+      } catch (e) {}
+    }
+  }
 
   try {
     history.replaceState({ depth: 0 }, "");
@@ -50,6 +58,7 @@ const KagazNav = (() => {
     }
     closing = false;
     sync(); // forward past what is open: step back to it
+    changed();
   });
 
   // A computer's Back: Alt+Left (Windows, Linux), Cmd+[ (macOS) and the
@@ -84,6 +93,7 @@ const KagazNav = (() => {
     stack = stack.filter((l) => l.id !== id);
     stack.push({ id, close });
     sync();
+    changed();
   }
 
   // That level closed from the page itself; levels above it go too.
@@ -93,6 +103,7 @@ const KagazNav = (() => {
     if (i < 0) return;
     stack.length = i;
     sync();
+    changed();
   }
 
   // A top-level place: Home (null), or a page one level above Home.
@@ -118,6 +129,7 @@ const KagazNav = (() => {
     stack = id ? [{ id, close }, ...(leaving === id ? [] : kept.get(id) || [])] : [];
     kept.delete(id);
     sync();
+    changed();
   }
 
   // Is this level open (on the page shown)?
@@ -125,5 +137,10 @@ const KagazNav = (() => {
     return stack.some((l) => l.id === id);
   }
 
-  return { push, pop, root, has };
+  // Back from the page's own Back button: one level, as the system's Back.
+  function goBack() {
+    if (depth > 0 && !pending) history.back();
+  }
+
+  return { push, pop, root, has, back: goBack, depth: () => stack.length, watch: (fn) => watchers.push(fn) };
 })();

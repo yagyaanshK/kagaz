@@ -1,0 +1,418 @@
+/* Kagaz in each system's own look. platform.js marks the page with the
+   system (html[data-os]); shell.js marks the navigation the window has room
+   for (html[data-layout]: bar, rail, sidebar, minimal). This file holds the
+   frame (navigation, the page's bar, the ring banner), Home, and each
+   system's numbers: type, sizes, corners, colours, light and dark.
+
+   The numbers come from the systems' own published values: Material 3
+   (Android), Apple's HIG and iOS 26 (iPhone, iPad), Fluent 2 and WinUI 3
+   (Windows 11), libadwaita 1.8 (GNOME), and macOS. Where a system publishes
+   no number (iOS 26's floating tab bar, macOS 26 corners) the value is
+   measured from screenshots and marked (approx).
+   Approved as design/mockups/home-shell/ before it was built here. */
+
+/* ======================= the frame, on every system ======================= */
+body {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) auto;
+  grid-template-areas: "nav column" "bottom bottom";
+  background: var(--nav-bg, var(--bg));
+}
+#sidebar { grid-area: nav; display: flex; flex-direction: column; min-height: 0; overflow-y: auto; overflow-x: hidden; background: var(--nav-bg, var(--panel)); }
+#column { grid-area: column; display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--bg); }
+#main { flex: 1 1 auto; }
+#bottom-nav { grid-area: bottom; display: none; }
+
+.side-head { display: flex; align-items: center; gap: 8px; flex: none; }
+.side-toggle, .bar-btn { display: inline-flex; align-items: center; justify-content: center; min-width: var(--tap); min-height: var(--tap); padding: 0; border: none; background: none; color: inherit; border-radius: var(--r-icon-btn, 50%); }
+.side-toggle svg, .bar-btn svg { width: 20px; height: 20px; }
+.side-title { font-weight: 700; }
+
+#categories { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; flex: 1 1 auto; }
+#categories li { display: flex; align-items: center; cursor: default; position: relative; color: var(--nav-fg, var(--text)); }
+#categories li.cat-foot { margin-top: auto; }
+#categories .cat-note { display: none; }
+.cat-icon { display: inline-flex; align-items: center; justify-content: center; position: relative; flex: none; }
+.cat-icon svg { width: var(--nav-icon, 20px); height: var(--nav-icon, 20px); }
+.cat-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+/* A ring shows on the Doorbell's entry wherever the person is. */
+#categories li.ringing .cat-icon::after, #bottom-nav button.ringing .cat-icon::after {
+  content: ""; position: absolute; top: -2px; right: -4px; width: 9px; height: 9px; border-radius: 50%;
+  background: var(--bad); box-shadow: 0 0 0 2px var(--nav-bg, var(--panel)); animation: ring-dot 1.2s ease-in-out infinite;
+}
+@keyframes ring-dot { 50% { transform: scale(1.35); } }
+
+/* The page's bar. */
+#bar { display: flex; align-items: center; gap: 4px; flex: none; position: relative; z-index: 4; background: var(--bar-bg, var(--bg)); color: var(--text); }
+#bar-title { flex: 1 1 auto; margin: 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; letter-spacing: normal; }
+.bar-back-word { display: none; }
+.bar-actions { display: flex; gap: 4px; align-items: center; }
+/* The bar names the page; the page no longer repeats it. */
+.pane > .pane-head:has(> h2:only-child) { display: none; }
+.pane > .pane-head > h2:first-child { display: none; }
+.pane > .pane-head > h2:first-child + * { margin-left: auto; }
+#add-title { display: none; }
+
+/* A ring, over whatever page is open. */
+.urgent { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; flex: none; margin: 8px var(--edge) 0; padding: 12px 14px; border-radius: var(--r-card); background: var(--urgent-bg); color: var(--urgent-fg); }
+.urgent-icon svg { width: 28px; height: 28px; animation: ring-dot 1.2s ease-in-out infinite; }
+.urgent-text { display: flex; flex-direction: column; flex: 1 1 160px; min-width: 0; }
+.urgent-text span { font-size: var(--small); opacity: 0.9; }
+.urgent-actions { display: flex; gap: 8px; }
+.urgent-btn { min-height: var(--tap); padding: 0 16px; border-radius: var(--r-btn); border: 1px solid currentColor; background: none; color: inherit; font-weight: 600; }
+.urgent-btn.primary { background: var(--urgent-fg); color: var(--urgent-bg); border-color: transparent; }
+@media (max-width: 480px) { .urgent-actions { flex: 1 1 100%; } .urgent-btn { flex: 1; } }
+
+/* Which navigation (shell.js). */
+[data-layout="bar"] #sidebar, [data-layout="minimal"] #sidebar { display: none; }
+[data-layout="bar"] #bottom-nav { display: flex; }
+[data-layout="bar"] #bar-title { font-size: var(--bar-title-phone, 22px); }
+.pane-over[data-layout="minimal"] #sidebar, .pane-over[data-layout="rail"] #sidebar {
+  display: flex; position: fixed; z-index: 50; top: 0; bottom: 0; left: 0; width: var(--pane-wide, 300px); box-shadow: var(--overlay-shadow, 0 8px 32px rgba(0, 0, 0, 0.28));
+}
+.pane-over[data-layout="rail"] #sidebar .cat-name { display: block; }
+#bottom-nav button { flex: 1 1 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; min-width: 0; padding: 0; border: none; border-radius: 0; background: none; color: var(--nav-fg, var(--muted)); }
+#bottom-nav .cat-name { font-size: 12px; }
+
+/* ================================= Home ================================= */
+#home.pane { max-width: 1080px; }
+#home { display: flex; flex-direction: column; gap: 12px; }
+.status-chips { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; padding: 2px 0; }
+.status-chip { display: inline-flex; align-items: center; gap: 6px; flex: none; min-height: var(--chip-h) !important; padding: 0 12px; border-radius: var(--r-chip); border: 1px solid var(--line); background: var(--chip-bg, var(--panel)); color: var(--text); white-space: nowrap; font-size: var(--small); font-weight: 500; }
+.status-chip svg { width: 16px; height: 16px; }
+.status-chip.warn { color: var(--warn); border-color: currentColor; }
+.section-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-top: 4px; }
+.section-title { margin: 0; font-size: var(--section-size, 16px); font-weight: 600; }
+.home-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--tile-min, 220px), 1fr)); gap: 8px; }
+.home-tile { display: flex; align-items: center; min-width: 0; min-height: 64px; border-radius: var(--r-card); background: var(--tile-bg); border: 1px solid var(--tile-line, transparent); box-shadow: var(--card-shadow, none); overflow: hidden; }
+.home-tile.has-actions { grid-column: span 2; }
+.tile-main { display: flex; align-items: center; gap: 12px; flex: 1 1 auto; min-width: 0; min-height: 64px; padding: 8px 12px; border: none; border-radius: 0; background: none; text-align: left; color: var(--text); }
+.tile-icon { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; border-radius: var(--r-icon, 50%); background: var(--icon-bg); color: var(--icon-fg); }
+.tile-icon svg { width: 22px; height: 22px; }
+.home-tile.on .tile-icon { background: var(--accent-soft); color: var(--accent); }
+.home-tile.warn .tile-icon { color: var(--warn); }
+.home-tile.bad .tile-icon { color: var(--bad); }
+.tile-text { display: flex; flex-direction: column; min-width: 0; }
+.tile-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tile-sub { color: var(--muted); font-size: var(--small); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.home-tile.warn .tile-sub { color: var(--warn); }
+.home-tile.bad .tile-sub { color: var(--bad); }
+.tile-actions { display: flex; gap: 6px; padding-right: 10px; flex: none; }
+.tile-act { min-height: 32px; padding: 0 12px; border-radius: var(--r-btn); border: none; background: var(--accent-soft); color: var(--accent); font-weight: 600; font-size: var(--small); }
+.tile-act svg { width: 16px !important; height: 16px !important; }
+.tile-star { flex: none; width: var(--tap); min-height: var(--tap); margin-right: 6px; padding: 0; border: none; border-radius: 50%; background: none; color: var(--muted); }
+.tile-star svg { width: 22px; height: 22px; }
+.tile-star.on { color: var(--star, #e8a200); }
+.tile-star.on svg path { fill: currentColor; }
+/* A phone: two tiles a row, names on up to two lines; a doorbell's tile
+   takes the row, its Live and Call as round icon buttons. */
+@media (max-width: 599px) {
+  .home-tile.has-actions { grid-column: 1 / -1; }
+  .tile-act { width: 40px; min-height: 40px !important; padding: 0; border-radius: 50%; }
+  .tile-act span { display: none; }
+  .tile-act svg { width: 20px !important; height: 20px !important; }
+  .tile-name { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 1.25; }
+}
+.home-group { border-radius: var(--r-card); background: var(--group-bg); border: 1px solid var(--tile-line, transparent); box-shadow: var(--card-shadow, none); overflow: hidden; }
+.home-group + .home-group { margin-top: 8px; }
+.home-group-head { display: flex; align-items: center; gap: 4px; padding-right: 8px; }
+.home-group-toggle { display: flex; align-items: center; gap: 12px; flex: 1 1 auto; min-width: 0; min-height: var(--row); padding: 8px 12px; border: none; border-radius: 0; background: none; text-align: left; color: var(--text); }
+.home-group-toggle .kind-icon { display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; border-radius: var(--r-icon, 50%); background: var(--icon-bg); color: var(--icon-fg); flex: none; }
+.home-group-toggle .kind-icon svg { width: 20px; height: 20px; }
+.home-group-words { display: flex; flex-direction: column; min-width: 0; flex: 1 1 auto; }
+.home-group-title { font-weight: 600; }
+.home-status { color: var(--muted); font-size: var(--small); overflow-wrap: anywhere; }
+.home-chevron { display: inline-flex; color: var(--muted); transition: transform 0.2s; }
+.home-chevron svg { width: 18px; height: 18px; }
+.home-group.open .home-chevron { transform: rotate(180deg); }
+.home-group .home-tiles { padding: 0 12px 12px; }
+.home-group .home-tile { background: var(--tile-in-group, var(--tile-bg)); box-shadow: none; }
+.home-open { flex: none; }
+.add-device { display: inline-flex; align-items: center; gap: 8px; align-self: flex-start; min-height: var(--tap); padding: 0 16px; border-radius: var(--r-btn); border: 1px dashed var(--control); background: none; color: var(--accent); font-weight: 600; }
+.add-device svg { width: 18px; height: 18px; }
+@media (hover: hover) and (pointer: fine) {
+  .tile-main:hover .tile-name { text-decoration: underline; text-decoration-color: var(--muted); }
+  .home-group-toggle:hover { background: var(--hover, rgba(127, 127, 127, 0.07)); }
+}
+
+/* ============== Android: Material 3 (baseline scheme, Expressive) ============== */
+:root[data-os="android"] {
+  --font: "Google Sans Flex", "Google Sans", Roboto, "Noto Sans", system-ui, sans-serif;
+  --body-size: 16px; --body-lh: 1.5; --small: 14px; --section-size: 16px; --bar-title-phone: 22px; /* body-L, body-M, title-M, title-L */
+  --icon-stroke: 1.9; --nav-icon: 24px;
+  --tap: 48px; --row: 56px; --chip-h: 32px;
+  --r-card: 12px; --r-btn: 999px; --r-ctl: 4px; --r-chip: 8px; --r-icon: 50%; --r-icon-btn: 50%; --edge: 16px;
+  --bg: #FEF7FF; --panel: #F7F2FA; --text: #1D1B20; --muted: #49454F; --line: #CAC4D0; --control: #79747E;
+  --accent: #6750A4; --accent-text: #FFFFFF; --accent-soft: #EADDFF;
+  --ok: #2E6B30; --warn: #7A4F00; --bad: #B3261E;
+  --nav-bg: #FEF7FF; --nav-fg: #49454F; --nav-active-bg: #E8DEF8; --nav-active-fg: #1D192B; --bar-bg: #FEF7FF;
+  --tile-bg: #F3EDF7; --group-bg: #F7F2FA; --tile-in-group: #ECE6F0; --chip-bg: transparent; --icon-bg: #E8DEF8; --icon-fg: #1D192B;
+  --urgent-bg: #B3261E; --urgent-fg: #FFFFFF; --hover: rgba(29, 27, 32, 0.08);
+}
+@media (prefers-color-scheme: dark) {
+  :root[data-os="android"] {
+    --bg: #141218; --panel: #211F26; --text: #E6E0E9; --muted: #CAC4D0; --line: #49454F; --control: #938F99;
+    --accent: #D0BCFF; --accent-text: #381E72; --accent-soft: #4F378B;
+    --ok: #8FD694; --warn: #FFB95D; --bad: #F2B8B5;
+    --nav-bg: #141218; --nav-fg: #CAC4D0; --nav-active-bg: #4A4458; --nav-active-fg: #E8DEF8; --bar-bg: #141218;
+    --tile-bg: #211F26; --group-bg: #1D1B20; --tile-in-group: #2B2930; --icon-bg: #4A4458; --icon-fg: #E8DEF8;
+    --urgent-bg: #8C1D18; --urgent-fg: #FFDAD6; --hover: rgba(230, 224, 233, 0.08);
+  }
+}
+[data-os="android"] #bar { min-height: 64px; padding: 0 4px; gap: 4px; }
+[data-os="android"] #bar-title { font-size: 22px; font-weight: 400; padding-left: 12px; }
+[data-os="android"] .bar-back:not(.hidden) + #bar-title { padding-left: 0; }
+[data-os="android"] .bar-btn svg { width: 24px; height: 24px; }
+[data-os="android"] .side-head { display: none; }
+/* The navigation bar: a pill behind the current place's icon. */
+[data-os="android"] #bottom-nav { min-height: 64px; padding-bottom: env(safe-area-inset-bottom); background: #F3EDF7; }
+@media (prefers-color-scheme: dark) { [data-os="android"] #bottom-nav { background: #211F26; } }
+[data-os="android"] #bottom-nav button { gap: 4px; padding: 6px 0 12px; }
+[data-os="android"] #bottom-nav .cat-icon, [data-os="android"][data-layout="rail"] #categories .cat-icon { width: 56px; height: 32px; border-radius: 16px; }
+[data-os="android"] #bottom-nav button.active .cat-icon { background: var(--nav-active-bg); color: var(--nav-active-fg); }
+[data-os="android"] #bottom-nav button.active { color: var(--text); }
+[data-os="android"] #bottom-nav .cat-name, [data-os="android"] #categories .cat-name { font-size: 12px; font-weight: 500; }
+/* The navigation rail: 96 wide, the same pills, names under them. */
+[data-os="android"][data-layout="rail"] #sidebar { width: 96px; padding: 44px 0 16px; }
+[data-os="android"][data-layout="rail"] #categories { gap: 12px; }
+[data-os="android"][data-layout="rail"] #categories li { flex-direction: column; gap: 4px; padding: 0; }
+[data-os="android"][data-layout="rail"] #categories .cat-name { max-width: 88px; text-align: center; }
+[data-os="android"][data-layout="rail"] #categories li.active .cat-icon { background: var(--nav-active-bg); color: var(--nav-active-fg); }
+[data-os="android"][data-layout="rail"] #categories li.active { color: var(--text); }
+/* The expanded rail (1200 and up): icon and name side by side in the pill. */
+[data-os="android"][data-layout="sidebar"] #sidebar { width: 260px; padding: 44px 12px 16px; }
+[data-os="android"][data-layout="sidebar"] #categories li { gap: 12px; min-height: 56px; padding: 0 16px; border-radius: 28px; }
+[data-os="android"][data-layout="sidebar"] #categories .cat-name { font-size: 14px; }
+[data-os="android"][data-layout="sidebar"] #categories li.active { background: var(--nav-active-bg); color: var(--nav-active-fg); }
+[data-os="android"] .section-title { font-size: 16px; font-weight: 500; }
+[data-os="android"] .status-chip { border-color: var(--line); color: var(--muted); }
+[data-os="android"] .status-chip.warn { color: var(--warn); border-color: var(--warn); }
+[data-os="android"] #main { padding: 4px var(--edge) 24px; }
+[data-os="android"][data-layout="bar"] .home-tiles { --tile-min: 150px; }
+
+/* ===================== iPhone and iPad: iOS 26 ===================== */
+:root[data-os="ios"] {
+  --font: -apple-system, "SF Pro Text", "SF Pro", system-ui, "Helvetica Neue", sans-serif;
+  --body-size: 17px; --body-lh: 1.294; --small: 15px; --section-size: 22px; --bar-title-phone: 34px; /* body, subheadline, title 2, large title */
+  --icon-stroke: 1.7; --nav-icon: 26px;
+  --tap: 44px; --row: 52px; --chip-h: 32px;
+  --r-card: 16px; --r-btn: 999px; --r-ctl: 10px; --r-chip: 999px; --r-icon: 50%; --r-icon-btn: 50%; --edge: 16px;
+  --bg: rgb(242, 242, 247); --panel: #FFFFFF; --text: #000000; --muted: rgba(60, 60, 67, 0.6); --line: rgba(60, 60, 67, 0.29); --control: rgba(60, 60, 67, 0.36);
+  --accent: rgb(0, 136, 255); --accent-text: #FFFFFF; --accent-soft: rgba(0, 136, 255, 0.14);
+  --ok: rgb(36, 138, 61); --warn: rgb(176, 96, 0); --bad: rgb(215, 0, 21);
+  --nav-bg: rgb(242, 242, 247); --nav-fg: rgba(60, 60, 67, 0.6); --bar-bg: rgb(242, 242, 247);
+  --tile-bg: #FFFFFF; --group-bg: #FFFFFF; --tile-in-group: rgb(242, 242, 247); --chip-bg: #FFFFFF; --icon-bg: rgb(229, 229, 234); --icon-fg: #000000;
+  --urgent-bg: rgb(255, 56, 60); --urgent-fg: #FFFFFF; --star: rgb(255, 179, 0);
+  --glass: rgba(255, 255, 255, 0.75);
+}
+@media (prefers-color-scheme: dark) {
+  :root[data-os="ios"] {
+    --bg: #000000; --panel: rgb(28, 28, 30); --text: #FFFFFF; --muted: rgba(235, 235, 245, 0.6); --line: rgba(84, 84, 88, 0.6); --control: rgba(235, 235, 245, 0.3);
+    --accent: rgb(0, 145, 255); --accent-soft: rgba(0, 145, 255, 0.2);
+    --ok: rgb(48, 209, 88); --warn: rgb(255, 179, 64); --bad: rgb(255, 105, 97);
+    --nav-bg: #000000; --nav-fg: rgba(235, 235, 245, 0.6); --bar-bg: #000000;
+    --tile-bg: rgb(28, 28, 30); --group-bg: rgb(28, 28, 30); --tile-in-group: rgb(44, 44, 46); --chip-bg: rgb(28, 28, 30); --icon-bg: rgb(44, 44, 46); --icon-fg: #FFFFFF;
+    --glass: rgba(40, 40, 42, 0.6);
+  }
+}
+/* The bar: Back and the page's buttons on top, the large title under them. */
+[data-os="ios"] #bar { display: grid; grid-template-columns: auto 1fr auto; grid-template-areas: "back . actions" "title title title"; padding: calc(6px + env(safe-area-inset-top)) 8px 6px; row-gap: 2px; }
+[data-os="ios"] #bar-menu { display: none; }
+[data-os="ios"] .bar-back { grid-area: back; }
+[data-os="ios"] .bar-actions { grid-area: actions; }
+[data-os="ios"] #bar-title { grid-area: title; padding: 0 8px; font-size: 34px; font-weight: 700; line-height: 41px; letter-spacing: 0.4px; }
+[data-os="ios"]:not([data-layout="bar"]) #bar-title { font-size: 28px; line-height: 34px; }
+[data-os="ios"] .bar-back { color: var(--accent); gap: 2px; padding-right: 8px; min-height: 44px; }
+[data-os="ios"] .bar-back svg { width: 22px; height: 22px; stroke-width: 2.4; }
+[data-os="ios"] .bar-back-word { display: inline; font-size: 17px; }
+[data-os="ios"] .bar-actions .bar-btn { color: var(--accent); background: var(--glass); backdrop-filter: saturate(180%) blur(16px); -webkit-backdrop-filter: saturate(180%) blur(16px); box-shadow: inset 0 0 0 0.5px rgba(0, 0, 0, 0.08), 0 2px 8px rgba(0, 0, 0, 0.08); }
+[data-os="ios"] .bar-btn svg { width: 22px; height: 22px; }
+/* The tab bar: a glass capsule floating over the page (approx). */
+[data-os="ios"] #bottom-nav { position: fixed; left: 16px; right: 16px; bottom: calc(10px + env(safe-area-inset-bottom)); z-index: 30; height: 62px; border-radius: 31px; padding: 0 6px; background: var(--glass); backdrop-filter: saturate(180%) blur(18px); -webkit-backdrop-filter: saturate(180%) blur(18px); box-shadow: inset 0 0 0 0.5px rgba(0, 0, 0, 0.1), 0 8px 24px rgba(0, 0, 0, 0.12); }
+[data-os="ios"] #bottom-nav button { gap: 1px; border-radius: 26px; margin: 5px 0; }
+[data-os="ios"] #bottom-nav .cat-name { font-size: 10px; font-weight: 600; }
+[data-os="ios"] #bottom-nav button.active { color: var(--accent); background: rgba(120, 120, 128, 0.12); }
+[data-os="ios"][data-layout="bar"] #main { padding-bottom: calc(96px + env(safe-area-inset-bottom)); }
+/* The sidebar (iPad): rows with the place's icon in the accent colour. */
+[data-os="ios"] .side-head { display: none; }
+[data-os="ios"] #sidebar { width: 280px; padding: calc(16px + env(safe-area-inset-top)) 12px 16px; }
+[data-os="ios"] #categories { gap: 2px; }
+[data-os="ios"] #categories li { gap: 12px; min-height: 44px; padding: 0 12px; border-radius: 10px; font-size: 17px; }
+[data-os="ios"] #categories .cat-icon { color: var(--accent); }
+[data-os="ios"] #categories li.active { background: var(--accent); color: #fff; }
+[data-os="ios"] #categories li.active .cat-icon { color: #fff; }
+[data-os="ios"] .section-title { font-weight: 700; }
+[data-os="ios"] .tile-act { background: var(--accent); color: #fff; }
+[data-os="ios"] .add-device { border: none; background: var(--panel); }
+[data-os="ios"] .status-chip { border: none; }
+[data-os="ios"] #main { padding: 4px var(--edge) 24px; }
+[data-os="ios"][data-layout="bar"] .home-tiles { --tile-min: 150px; }
+
+/* ======================= Windows 11: Fluent 2 / WinUI 3 ======================= */
+:root[data-os="windows"] {
+  --font: "Segoe UI Variable Text", "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+  --body-size: 14px; --body-lh: 1.43; --small: 12px; --section-size: 14px; --bar-title-phone: 20px; /* body, caption, body strong, subtitle */
+  --icon-stroke: 1.6; --nav-icon: 16px;
+  --tap: 32px; --row: 48px; --chip-h: 28px;
+  --r-card: 8px; --r-btn: 4px; --r-ctl: 4px; --r-chip: 4px; --r-icon: 4px; --r-icon-btn: 4px; --edge: 24px;
+  --nav-bg: #F3F3F3; --bg: #F9F9F9; --panel: #FFFFFF; --text: rgba(0, 0, 0, 0.894); --muted: rgba(0, 0, 0, 0.62); --line: rgba(0, 0, 0, 0.08); --control: rgba(0, 0, 0, 0.45);
+  --accent: #005FB8; --accent-text: #FFFFFF; --accent-soft: rgba(0, 95, 184, 0.1);
+  --ok: #0F7B0F; --warn: #9D5D00; --bad: #C42B1C;
+  --nav-fg: rgba(0, 0, 0, 0.894); --nav-active-bg: rgba(0, 0, 0, 0.0373); --bar-bg: transparent;
+  --tile-bg: #FFFFFF; --tile-line: rgba(0, 0, 0, 0.0578); --group-bg: rgba(255, 255, 255, 0.7); --tile-in-group: #F9F9F9; --chip-bg: rgba(255, 255, 255, 0.7);
+  --icon-bg: rgba(0, 0, 0, 0.0373); --icon-fg: rgba(0, 0, 0, 0.894);
+  --urgent-bg: #FDE7E9; --urgent-fg: #C42B1C; --hover: rgba(0, 0, 0, 0.0373);
+  --overlay-shadow: 0 8px 16px rgba(0, 0, 0, 0.14), 0 0 0 1px rgba(0, 0, 0, 0.06); --pane-wide: 320px;
+}
+@media (prefers-color-scheme: dark) {
+  :root[data-os="windows"] {
+    --nav-bg: #202020; --bg: #272727; --panel: #2D2D2D; --text: #FFFFFF; --muted: rgba(255, 255, 255, 0.786); --line: rgba(255, 255, 255, 0.0837); --control: rgba(255, 255, 255, 0.5);
+    --accent: #60CDFF; --accent-text: #000000; --accent-soft: rgba(96, 205, 255, 0.15);
+    --ok: #6CCB5F; --warn: #FCE100; --bad: #FF99A4;
+    --nav-fg: #FFFFFF; --nav-active-bg: rgba(255, 255, 255, 0.0605);
+    --tile-bg: rgba(255, 255, 255, 0.0512); --tile-line: rgba(0, 0, 0, 0.1); --group-bg: rgba(255, 255, 255, 0.0512); --tile-in-group: rgba(255, 255, 255, 0.0326); --chip-bg: rgba(255, 255, 255, 0.0605);
+    --icon-bg: rgba(255, 255, 255, 0.0605); --icon-fg: #FFFFFF;
+    --urgent-bg: #442726; --urgent-fg: #FF99A4; --hover: rgba(255, 255, 255, 0.0605);
+  }
+}
+/* The navigation pane: 320 wide with names, 48 with icons only. */
+[data-os="windows"] #sidebar { width: 320px; padding: 4px 0 4px; background: var(--nav-bg); }
+[data-os="windows"][data-layout="rail"] #sidebar { width: 48px; }
+[data-os="windows"][data-layout="rail"]:not(.pane-over) #categories .cat-name { display: none; }
+[data-os="windows"] .side-head { padding: 2px 4px 4px; }
+[data-os="windows"] .side-toggle { width: 40px; height: 36px; min-height: 36px; }
+[data-os="windows"] .side-toggle svg { width: 16px; height: 16px; }
+[data-os="windows"] .side-title { display: none; }
+[data-os="windows"] #categories li { gap: 16px; min-height: 36px; margin: 2px 4px; padding: 0 12px; border-radius: 4px; font-size: 14px; }
+[data-os="windows"] #categories li:hover { background: var(--hover); }
+[data-os="windows"] #categories li.active { background: var(--nav-active-bg); }
+[data-os="windows"] #categories li.active::before { content: ""; position: absolute; left: 0; top: 50%; width: 3px; height: 16px; margin-top: -8px; border-radius: 2px; background: var(--accent); }
+[data-os="windows"] #categories li.cat-foot { margin-top: auto; }
+/* The page sits on its own layer, its corner rounded under the pane. */
+[data-os="windows"] #column { border-top-left-radius: 8px; border: 1px solid var(--line); border-right: none; border-bottom: none; }
+[data-os="windows"][data-layout="bar"] #column, [data-os="windows"][data-layout="minimal"] #column { border-radius: 0; border-left: none; }
+/* The page header: its name large, Back before it, actions after. */
+[data-os="windows"] #bar { padding: 28px 32px 8px 36px; gap: 8px; }
+[data-os="windows"] #bar-title { font-size: 28px; font-weight: 600; line-height: 36px; }
+[data-os="windows"] .bar-btn { min-width: 32px; min-height: 32px; border-radius: 4px; }
+[data-os="windows"] .bar-btn:hover { background: var(--hover); }
+[data-os="windows"] .bar-back { margin-left: -8px; }
+[data-os="windows"] .bar-btn svg { width: 16px; height: 16px; }
+[data-os="windows"] #bar-add { padding: 0 12px; gap: 8px; border: 1px solid var(--tile-line); background: var(--tile-bg); }
+[data-os="windows"] #bar-add::after { content: "Add a device"; font-size: 14px; }
+[data-os="windows"][data-layout="minimal"] #bar { padding: 8px 12px; }
+[data-os="windows"][data-layout="minimal"] #bar-title { font-size: 20px; }
+[data-os="windows"] #main { padding: 8px 36px 32px; }
+[data-os="windows"] .section-title { font-size: 14px; font-weight: 600; }
+[data-os="windows"] .tile-icon, [data-os="windows"] .home-group-toggle .kind-icon { border-radius: 4px; }
+[data-os="windows"] .home-tile.on .tile-icon { background: var(--accent); color: var(--accent-text); }
+[data-os="windows"] .add-device { border-style: solid; border-color: var(--tile-line); background: var(--tile-bg); }
+[data-os="windows"] .tile-act { background: var(--accent); color: var(--accent-text); border-radius: 4px; }
+[data-os="windows"] .urgent { border-radius: 4px; border: 1px solid rgba(196, 43, 28, 0.25); }
+[data-os="windows"] .urgent-btn { border-radius: 4px; min-height: 32px; }
+[data-os="windows"] .urgent-btn.primary { background: #C42B1C; color: #fff; }
+[data-os="windows"] .urgent-icon svg { width: 20px; height: 20px; }
+[data-os="windows"] .home-tile, [data-os="windows"] .tile-main { min-height: 60px; }
+
+/* ============================ GNOME: libadwaita 1.8 ============================ */
+:root[data-os="gnome"] {
+  --font: "Adwaita Sans", Cantarell, "Noto Sans", system-ui, sans-serif;
+  --body-size: 14.667px; --body-lh: 1.4; --small: 12.667px; --section-size: 15px; --bar-title-phone: 14.667px; /* 11 pt, caption, heading */
+  --icon-stroke: 2; --nav-icon: 16px;
+  --tap: 34px; --row: 50px; --chip-h: 30px;
+  --r-card: 12px; --r-btn: 9px; --r-ctl: 9px; --r-chip: 9999px; --r-icon: 50%; --r-icon-btn: 9px; --edge: 18px;
+  --nav-bg: #EBEBED; --bg: #FAFAFB; --panel: #FFFFFF; --text: rgba(0, 0, 6, 0.8); --muted: rgba(0, 0, 6, 0.55); --line: rgba(0, 0, 6, 0.1); --control: rgba(0, 0, 6, 0.3);
+  --accent: #1C71D8; --accent-text: #FFFFFF; --accent-soft: rgba(53, 132, 228, 0.15);
+  --ok: #1B8553; --warn: #9C6E03; --bad: #C01C28;
+  --nav-fg: rgba(0, 0, 6, 0.8); --nav-active-bg: rgba(0, 0, 6, 0.1); --bar-bg: #FFFFFF;
+  --tile-bg: #FFFFFF; --group-bg: #FFFFFF; --tile-in-group: #FAFAFB; --chip-bg: rgba(0, 0, 6, 0.08);
+  --icon-bg: rgba(0, 0, 6, 0.08); --icon-fg: rgba(0, 0, 6, 0.8);
+  --card-shadow: 0 0 0 1px rgba(0, 0, 6, 0.03), 0 1px 3px 1px rgba(0, 0, 6, 0.07), 0 2px 6px 2px rgba(0, 0, 6, 0.03);
+  --urgent-bg: #E01B24; --urgent-fg: #FFFFFF; --hover: rgba(0, 0, 6, 0.07);
+}
+@media (prefers-color-scheme: dark) {
+  :root[data-os="gnome"] {
+    --nav-bg: #2E2E32; --bg: #222226; --panel: #36363A; --text: #FFFFFF; --muted: rgba(255, 255, 255, 0.55); --line: rgba(255, 255, 255, 0.1); --control: rgba(255, 255, 255, 0.3);
+    --accent: #81D0FF; --accent-text: #000000; --accent-soft: rgba(129, 208, 255, 0.16);
+    --ok: #78E9AB; --warn: #FFC252; --bad: #FF938C;
+    --nav-fg: #FFFFFF; --nav-active-bg: rgba(255, 255, 255, 0.1); --bar-bg: #2E2E32;
+    --tile-bg: rgba(255, 255, 255, 0.08); --group-bg: rgba(255, 255, 255, 0.08); --tile-in-group: rgba(255, 255, 255, 0.05); --chip-bg: rgba(255, 255, 255, 0.1);
+    --icon-bg: rgba(255, 255, 255, 0.1); --icon-fg: #FFFFFF;
+    --card-shadow: 0 0 0 1px rgba(0, 0, 6, 0.09), 0 1px 3px 1px rgba(0, 0, 6, 0.18), 0 2px 6px 2px rgba(0, 0, 6, 0.09);
+    --urgent-bg: #C01C28; --hover: rgba(255, 255, 255, 0.07);
+  }
+}
+/* The sidebar: a quarter of the window, 180 to 280 wide, its own header. */
+[data-os="gnome"] #sidebar { width: clamp(180px, 25vw, 280px); box-shadow: inset -1px 0 var(--line); }
+[data-os="gnome"] .side-head { min-height: 47px; justify-content: center; padding: 6px 7px 7px; }
+[data-os="gnome"] .side-toggle { display: none; }
+[data-os="gnome"] #categories { padding: 6px 0; }
+[data-os="gnome"] #categories li { gap: 12px; min-height: 38px; margin: 0 6px 2px; padding: 0 10px; border-radius: 9px; }
+[data-os="gnome"] #categories li:hover { background: var(--hover); }
+[data-os="gnome"] #categories li.cat-foot { margin-top: auto; margin-bottom: 6px; }
+[data-os="gnome"] #categories li.active { background: var(--nav-active-bg); }
+/* The header bar: the page's name in the middle, flat buttons either side. */
+[data-os="gnome"] #bar { min-height: 47px; padding: 6px 7px 7px; gap: 6px; background: var(--bar-bg); box-shadow: inset 0 -1px rgba(0, 0, 6, 0.12); }
+[data-os="gnome"] #bar-title { position: absolute; left: 60px; right: 60px; text-align: center; font-size: 14.667px; font-weight: 700; pointer-events: none; }
+[data-os="gnome"] .bar-actions { margin-left: auto; }
+[data-os="gnome"] .bar-btn { min-width: 34px; min-height: 34px; border-radius: 9px; }
+[data-os="gnome"] .bar-btn svg { width: 16px; height: 16px; }
+[data-os="gnome"] .bar-btn:hover { background: var(--hover); }
+/* Narrow (under 550): the view switcher bar along the bottom. */
+[data-os="gnome"] #bottom-nav { background: var(--bar-bg); box-shadow: inset 0 1px rgba(0, 0, 6, 0.12); padding-bottom: env(safe-area-inset-bottom); }
+[data-os="gnome"] #bottom-nav button { min-height: 52px; gap: 2px; margin: 6px 3px; border-radius: 9px; }
+[data-os="gnome"] #bottom-nav .cat-icon svg { width: 16px; height: 16px; }
+[data-os="gnome"] #bottom-nav button.active { color: var(--text); background: var(--nav-active-bg); }
+[data-os="gnome"] .section-title { font-weight: 700; font-size: 15px; }
+[data-os="gnome"] .home-tile, [data-os="gnome"] .home-group { border: none; }
+[data-os="gnome"] .status-chip { border: none; }
+[data-os="gnome"] .status-chip.warn { color: var(--warn); background: rgba(205, 147, 9, 0.15); }
+[data-os="gnome"] .add-device { border: none; background: rgba(0, 0, 6, 0.08); color: var(--text); font-weight: 700; border-radius: 9px; }
+@media (prefers-color-scheme: dark) { [data-os="gnome"] .add-device { background: rgba(255, 255, 255, 0.1); } }
+[data-os="gnome"] .tile-act { border-radius: 9px; font-weight: 700; }
+[data-os="gnome"] #main { padding: 18px 24px 24px; }
+
+/* ============================== macOS 26 / 15 ============================== */
+:root[data-os="macos"] {
+  --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro", system-ui, "Helvetica Neue", sans-serif;
+  --body-size: 13px; --body-lh: 1.23; --small: 11px; --section-size: 13px; --bar-title-phone: 15px; /* body, subheadline, headline */
+  --icon-stroke: 1.6; --nav-icon: 16px;
+  --tap: 28px; --row: 40px; --chip-h: 24px;
+  --r-card: 10px; --r-btn: 6px; --r-ctl: 6px; --r-chip: 999px; --r-icon: 8px; --r-icon-btn: 6px; --edge: 20px;
+  --nav-bg: rgba(236, 236, 238, 0.92); --bg: #FFFFFF; --panel: #FFFFFF; --text: rgba(0, 0, 0, 0.85); --muted: rgba(0, 0, 0, 0.5); --line: rgba(0, 0, 0, 0.1); --control: rgba(0, 0, 0, 0.25);
+  --accent: rgb(0, 122, 255); --accent-text: #FFFFFF; --accent-soft: rgba(0, 122, 255, 0.14);
+  --ok: rgb(36, 138, 61); --warn: rgb(176, 96, 0); --bad: rgb(215, 0, 21);
+  --nav-fg: rgba(0, 0, 0, 0.85); --nav-active-bg: rgba(0, 0, 0, 0.1); --bar-bg: #FFFFFF;
+  --tile-bg: rgba(0, 0, 0, 0.035); --tile-line: rgba(0, 0, 0, 0.06); --group-bg: rgba(0, 0, 0, 0.025); --tile-in-group: rgba(0, 0, 0, 0.035); --chip-bg: rgba(0, 0, 0, 0.05);
+  --icon-bg: rgba(0, 0, 0, 0.07); --icon-fg: rgba(0, 0, 0, 0.85);
+  --urgent-bg: rgb(255, 59, 48); --urgent-fg: #FFFFFF; --hover: rgba(0, 0, 0, 0.05);
+}
+@media (prefers-color-scheme: dark) {
+  :root[data-os="macos"] {
+    --nav-bg: rgba(40, 40, 42, 0.92); --bg: #1E1E1E; --panel: #2A2A2A; --text: rgba(255, 255, 255, 0.85); --muted: rgba(255, 255, 255, 0.55); --line: rgba(255, 255, 255, 0.12); --control: rgba(255, 255, 255, 0.3);
+    --accent: rgb(10, 132, 255); --accent-soft: rgba(10, 132, 255, 0.2);
+    --ok: rgb(48, 209, 88); --warn: rgb(255, 179, 64); --bad: rgb(255, 105, 97);
+    --nav-fg: rgba(255, 255, 255, 0.85); --nav-active-bg: rgba(255, 255, 255, 0.12); --bar-bg: #1E1E1E;
+    --tile-bg: rgba(255, 255, 255, 0.06); --tile-line: rgba(255, 255, 255, 0.08); --group-bg: rgba(255, 255, 255, 0.04); --tile-in-group: rgba(255, 255, 255, 0.06); --chip-bg: rgba(255, 255, 255, 0.08);
+    --icon-bg: rgba(255, 255, 255, 0.1); --icon-fg: #FFFFFF; --hover: rgba(255, 255, 255, 0.06);
+  }
+}
+/* The sidebar: rows with the place's icon in the accent colour. */
+[data-os="macos"] #sidebar { width: 220px; padding: 10px 10px 12px; backdrop-filter: saturate(180%) blur(20px); -webkit-backdrop-filter: saturate(180%) blur(20px); border-right: 1px solid var(--line); }
+[data-os="macos"] .side-head { display: none; }
+[data-os="macos"] #categories { gap: 1px; }
+[data-os="macos"] #categories li { gap: 8px; min-height: 28px; padding: 0 8px; border-radius: 6px; font-size: 13px; }
+[data-os="macos"] #categories .cat-icon { color: var(--accent); }
+[data-os="macos"] #categories li.active { background: var(--nav-active-bg); }
+/* The toolbar: the page's name, then its buttons. */
+[data-os="macos"] #bar { min-height: 52px; padding: 0 16px; gap: 8px; border-bottom: 1px solid var(--line); }
+[data-os="macos"] #bar-title { font-size: 15px; font-weight: 700; }
+[data-os="macos"] .bar-btn { min-width: 28px; min-height: 28px; border-radius: 6px; }
+[data-os="macos"] .bar-actions .bar-btn { background: rgba(127, 127, 127, 0.12); }
+[data-os="macos"] .bar-btn svg { width: 16px; height: 16px; }
+[data-os="macos"] .section-title { font-size: 13px; font-weight: 700; color: var(--muted); }
+[data-os="macos"] .tile-icon, [data-os="macos"] .home-group-toggle .kind-icon { border-radius: 8px; }
+[data-os="macos"] .tile-act, [data-os="macos"] .urgent-btn, [data-os="macos"] .add-device { border-radius: 6px; min-height: 24px; font-size: 12px; }
+[data-os="macos"] .tile-main, [data-os="macos"] .home-tile { min-height: 52px; }
+[data-os="macos"] #main { padding: 16px 20px 24px; }

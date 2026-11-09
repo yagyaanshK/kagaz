@@ -48,34 +48,19 @@ html, body {
   height: 100%;
   background: var(--bg);
   color: var(--text);
-  font: 14px/1.45 var(--font);
+  font: var(--body-size, 14px)/var(--body-lh, 1.45) var(--font);
 }
 
-/* Layout by window width, not by platform (Material 3 window size classes,
-   Windows breakpoints): a wide window (840 px and up) has the sidebar; a
-   medium one (600 to 839, a tablet or a phone on its side) a narrow rail;
-   a phone (under 600) a bar of the same three entries along the bottom,
-   under the thumb. */
-body {
-  display: grid;
-  grid-template-columns: 300px 1fr;
-  grid-template-rows: 100%;
-}
-
-#sidebar {
-  border-right: 1px solid var(--line);
-  background: var(--panel);
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-}
-
-#sidebar header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 14px 16px 8px;
-}
+/* Icons (icons.js): one grid, one stroke, round ends; --icon-stroke is the
+   system's weight (skins.css). A part marked .fill is solid, .dot a point. */
+svg.kz-i { fill: none; stroke: currentColor; stroke-width: var(--icon-stroke, 1.75); stroke-linecap: round; stroke-linejoin: round; flex: none; }
+svg.kz-i .fill { fill: currentColor; stroke: none; }
+svg.kz-i .dot { stroke-width: calc(var(--icon-stroke, 1.75) * 1.5); }
+.ic { display: inline-flex; align-items: center; justify-content: center; }
+.ic svg { width: 20px; height: 20px; }
+/* A button with an icon and its word: the two side by side. */
+button:has(> svg.kz-i), button:has(> .ic) { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+button > svg.kz-i, button > .ic svg { width: 18px; height: 18px; }
 
 h1 { font-size: 18px; margin: 0; letter-spacing: 0.02em; }
 h2 { font-size: 20px; margin: 0 0 2px; }
@@ -85,37 +70,6 @@ h3 { font-size: 14px; margin: 18px 0 6px; }
 .hidden { display: none !important; }
 
 #search-note { margin: 0 0 8px; font-size: 13px; }
-
-/* The categories: an icon, a name and a note. */
-#categories {
-  list-style: none;
-  margin: 4px 0 0;
-  padding: 8px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-#categories li {
-  padding: 10px 12px;
-  border-radius: 8px;
-  cursor: default;
-  border: 1px solid transparent;
-  display: grid;
-  grid-template-columns: auto 1fr;
-  grid-template-rows: auto auto;
-  column-gap: 10px;
-  align-items: center;
-}
-#categories li:hover { background: var(--bg); }
-#categories li.active { border-color: var(--accent); background: var(--bg); }
-#categories .cat-icon { grid-row: 1 / span 2; }
-#categories .cat-name { font-weight: 600; }
-#categories .cat-note { font-size: 12px; }
-.cat-icon { display: inline-flex; color: var(--muted); }
-.active .cat-icon { color: var(--accent); }
-.cat-icon svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
-
-#bottom-nav { display: none; }
 
 /* The available devices of the chosen category, in the main area. */
 #picker.pane { max-width: 980px; }
@@ -161,7 +115,7 @@ h3 { font-size: 14px; margin: 18px 0 6px; }
 .cap-warn { color: var(--warn); }
 .cap-bad { color: var(--bad); }
 
-#main { padding: 22px 28px; overflow-y: auto; min-width: 0; }
+#main { padding: 22px 28px; overflow-y: auto; min-width: 0; min-height: 0; }
 .pane { max-width: 760px; }
 
 .tabs { display: flex; flex-wrap: wrap; gap: 4px; border-bottom: 1px solid var(--line); margin: 16px 0 14px; }
@@ -195,7 +149,7 @@ select, button, input {
   color: var(--text);
   background: var(--panel);
   border: 1px solid var(--control);
-  border-radius: 6px;
+  border-radius: var(--r-ctl, 6px);
   padding: 6px 10px;
   min-height: 32px;
   max-width: 100%;
@@ -277,7 +231,7 @@ button.icon { font-size: 16px; padding: 4px 9px; min-width: 36px; }
 .kz-bar { bottom: 0; justify-content: flex-end; background: linear-gradient(transparent, rgba(0, 0, 0, 0.6)); }
 .kz-tools { margin-right: auto; display: flex; gap: 8px; align-items: center; }
 .kz-button { width: 40px; height: 40px; min-height: 0; padding: 0; border-radius: 50%; border: none; background: rgba(0, 0, 0, 0.45); color: #fff; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; }
-.kz-button svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.kz-button svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: var(--icon-stroke, 1.75); stroke-linecap: round; stroke-linejoin: round; }
 .kz-button:hover { background: rgba(255, 255, 255, 0.22); }
 .kz-button.kz-word { width: auto; border-radius: 999px; padding: 0 16px; font-weight: 600; }
 .kz-button.kz-danger { background: var(--bad); }
@@ -349,8 +303,6 @@ button.danger { background: var(--bad); color: #fff; border-color: var(--bad); }
 #door-recent li.ok { color: var(--ok); }
 
 /* The navigation entry while the bell rings */
-#categories li.ringing, #bottom-nav button.ringing { border-color: var(--bad); animation: door-pulse 1.4s ease-in-out infinite; }
-#categories li.ringing .cat-note { color: var(--bad); font-weight: 600; }
 
 /* OneTouch account and cloud media */
 .ot-panel { margin-top: 16px; padding: 16px; border: 1px solid var(--line); border-radius: 10px; }
@@ -369,7 +321,7 @@ button.danger { background: var(--bad); color: #fff; border-color: var(--bad); }
 .dev-head { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 56px; padding: 12px 14px 8px; color: var(--text); }
 .dev-icon { display: inline-flex; flex: 0 0 auto; color: var(--accent); }
 .dev-card.offline .dev-icon { color: var(--muted); }
-.dev-icon svg { width: 26px; height: 26px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.dev-icon svg { width: 26px; height: 26px; fill: none; stroke: currentColor; stroke-width: var(--icon-stroke, 1.75); stroke-linecap: round; stroke-linejoin: round; }
 .dev-text { display: flex; flex-direction: column; min-width: 0; flex: 1 1 auto; }
 .dev-text strong { overflow-wrap: anywhere; }
 /* Online dot on the right of the head, like OneTouch's status pip. */
@@ -381,8 +333,7 @@ button.danger { background: var(--bad); color: #fff; border-color: var(--bad); }
 /* The row of per-device actions (Live, Call) — OneTouch shows these inline. */
 .dev-actions { display: flex; flex-wrap: wrap; gap: 8px; padding: 8px 14px 12px; }
 .dev-btn { display: inline-flex; align-items: center; gap: 7px; min-height: 40px; padding: 0 16px; border: 1px solid var(--control); border-radius: 999px; background: var(--panel); color: var(--text); font-weight: 600; }
-.dev-btn svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
-.dev-btn.call svg { fill: currentColor; stroke: none; }
+.dev-btn svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: var(--icon-stroke, 1.75); stroke-linecap: round; stroke-linejoin: round; }
 .dev-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
 .dev-btn.call { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
 .dev-btn.call:hover:not(:disabled) { color: var(--accent-text); filter: brightness(1.05); }
@@ -409,7 +360,7 @@ button.danger { background: var(--bad); color: #fff; border-color: var(--bad); }
 .ot-or::before, .ot-or::after { content: ""; flex: 1; height: 1px; background: var(--line); }
 .ot-qr-btn { display: inline-flex; align-items: center; gap: 10px; width: 100%; justify-content: center; min-height: 48px; border: 1px solid var(--control); border-radius: 10px; background: var(--panel); color: var(--text); font-weight: 600; }
 .ot-qr-btn:hover { border-color: var(--accent); color: var(--accent); }
-.ot-qr-btn svg { width: 22px; height: 22px; fill: currentColor; }
+.ot-qr-btn svg { width: 22px; height: 22px; }
 .qr-dialog { border: 1px solid var(--line); border-radius: 14px; background: var(--panel); color: var(--text); padding: 16px; max-width: 420px; width: calc(100vw - 32px); }
 .qr-dialog::backdrop { background: rgba(0,0,0,.5); }
 .qr-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 12px; }
@@ -579,7 +530,7 @@ label small { font-size: 12px; min-height: 1.2em; }
 .cam-tile .cam-size:hover { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
 .cam-tile.placeholder .cam-size { display: none; }
 .cam-tile .cam-full { position: absolute; top: 6px; right: 52px; z-index: 2; width: 34px; height: 30px; min-height: 0; padding: 0; display: inline-flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.55); color: #fff; border: 1px solid rgba(255,255,255,0.5); border-radius: 6px; opacity: 0; transition: opacity 0.15s; }
-.cam-tile .cam-full svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+.cam-tile .cam-full svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: var(--icon-stroke, 1.75); stroke-linecap: round; }
 .cam-tile:hover .cam-full, .cam-tile.big .cam-full, .cam-tile.kz-full .cam-full, .cam-tile:focus-within .cam-full { opacity: 1; }
 .cam-tile.placeholder .cam-full { display: none; }
 .cam-tile.kz-full .cam-size { display: none; }
@@ -694,15 +645,6 @@ ul.cards li.add .name { color: var(--accent); }
 /* ---- Medium windows (600 to 839 px), and phones on their side: a narrow
    rail, two tiles per row ---- */
 @media (max-width: 839px), (max-height: 500px) and (pointer: coarse) {
-  body { grid-template-columns: 88px 1fr; }
-  #sidebar header { justify-content: center; padding: 12px 6px 4px; }
-  #sidebar header h1 { font-size: 15px; }
-  #categories { padding: 6px; }
-  #categories li { grid-template-columns: 1fr; grid-template-rows: auto auto; justify-items: center; text-align: center; padding: 10px 4px; row-gap: 4px; }
-  #categories .cat-icon { grid-row: 1; }
-  #categories .cat-name { font-size: 12px; font-weight: 500; line-height: 1.2; }
-  #categories .cat-note { display: none; }
-  #categories .cat-label { margin: 8px 0 0; padding: 10px 0 0; font-size: 9px; letter-spacing: 0.08em; text-align: center; }
   #main { padding: 20px 24px; }
   .cam-grid-inner { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   #cam-layout-label { display: none; }
@@ -714,23 +656,6 @@ ul.cards li.add .name { color: var(--accent); }
 
 /* ---- Phones (under 600 px): the bar along the bottom, one column ---- */
 @media (max-width: 599px) {
-  body { grid-template-columns: 1fr; grid-template-rows: minmax(0, 1fr) auto; }
-  #sidebar { display: none; }
-  #bottom-nav {
-    display: grid;
-    grid-auto-flow: column;
-    grid-auto-columns: minmax(0, 1fr);
-    gap: 4px;
-    padding: 6px 8px calc(6px + env(safe-area-inset-bottom));
-    border-top: 1px solid var(--line);
-    background: var(--panel);
-  }
-  #bottom-nav button {
-    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
-    min-height: 56px; padding: 6px 4px; font-size: 12px; background: none; border: 1px solid transparent; border-radius: 10px; color: var(--muted);
-  }
-  #bottom-nav button.active { color: var(--text); background: var(--bg); border-color: var(--accent); }
-  #bottom-nav .cat-icon svg { width: 24px; height: 24px; }
   #main { padding: 12px var(--edge) 24px; }
   .pane { max-width: none; }
   h2 { font-size: 18px; }
@@ -771,7 +696,6 @@ ul.cards li.add .name { color: var(--accent); }
 @media (max-width: 839px) and (orientation: landscape) and (max-height: 500px) {
   /* A phone on its side: two tiles across, the bar stays small. */
   .cam-grid-inner { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  #bottom-nav button { min-height: 44px; flex-direction: row; gap: 6px; }
 }
 
 /* ---- Touch: finger-sized targets, nothing hidden behind hover ---- */
@@ -794,13 +718,11 @@ ul.cards li.add .name { color: var(--accent); }
   .cam-tile .cam-more, .cam-tile .cam-talk { width: 40px; height: 40px; }
   .cam-tile .cam-talk { left: 54px; }
   .cam-reload { width: 64px; height: 64px; }
-  #categories li { min-height: 48px; }
 }
 
 /* ---- Home, Add a device, Activity, Settings ---- */
-#categories .cat-label { cursor: default; display: block; margin: 10px 4px 0; padding: 12px 8px 2px; font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); border: none; border-top: 1px solid var(--line); border-radius: 0; background: none; }
-#categories .cat-label:hover { background: none; }
-.back.to-home { display: none; }
+/* Back to Home is the bar's Back now (shell.js). */
+.back.to-home, #add-back { display: none !important; }
 .empty-state { margin-top: 24px; padding: 24px; border: 1px dashed var(--line); border-radius: 12px; text-align: center; }
 .empty-state p { margin: 4px 0; }
 button.link { background: none; border: none; color: var(--accent); padding: 4px 6px; min-height: 0; font-weight: 600; }
@@ -814,14 +736,14 @@ button.link { background: none; border: none; color: var(--accent); padding: 4px
 .kind-tile .kind-name { font-weight: 600; }
 .kind-tile .kind-note { font-size: 12px; }
 .kind-icon { display: inline-flex; }
-.kind-icon svg { width: 26px; height: 26px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.kind-icon svg { width: 26px; height: 26px; fill: none; stroke: currentColor; stroke-width: var(--icon-stroke, 1.75); stroke-linecap: round; stroke-linejoin: round; }
 .kind-tile.soon .kind-icon, .kind-tile.soon .kind-name { color: var(--muted); }
 .brand-tile { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 14px 10px; border-radius: 12px; background: var(--bg); min-height: 112px; position: relative; }
 .brand-tile:hover, .kind-tile:hover { border-color: var(--accent); }
 .brand-logo { display: flex; align-items: center; justify-content: center; width: 100%; height: 44px; padding: 6px 10px; border-radius: 8px; background: #fff; }
 .brand-logo img { max-width: 100%; max-height: 32px; object-fit: contain; }
 .brand-logo .wordmark { font-weight: 800; font-size: 18px; letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.brand-logo.brand-icon svg { width: 28px; height: 28px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.brand-logo.brand-icon svg { width: 28px; height: 28px; fill: none; stroke: currentColor; stroke-width: var(--icon-stroke, 1.75); stroke-linecap: round; stroke-linejoin: round; }
 .brand-name { font-size: 13px; text-align: center; }
 .brand-tile.soon .brand-logo { filter: grayscale(1); opacity: 0.45; }
 .brand-tile.soon .brand-name { color: var(--muted); }
@@ -836,21 +758,6 @@ button.link { background: none; border: none; color: var(--accent); padding: 4px
 .chip { border-radius: 999px; padding: 4px 12px; min-height: 32px; font-size: 13px; background: var(--panel); }
 .chip.active { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
 
-/* Home: each kind with its devices. */
-.home-group { margin-top: 18px; }
-.home-group-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
-.home-group-head h3 { margin: 0; font-size: 16px; }
-.home-group-head .kind-icon { color: var(--accent); }
-.home-group-head .home-status { flex: 1 1 auto; }
-.home-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; }
-.home-tile { display: flex; align-items: center; gap: 12px; padding: 12px; border-radius: 12px; background: var(--bg); text-align: left; min-height: 64px; min-width: 0; }
-.home-tile:hover { border-color: var(--accent); }
-.tile-icon { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; border-radius: 10px; background: var(--panel); color: var(--accent); }
-.tile-icon svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
-.tile-icon.logo { background: #fff; padding: 4px; width: 56px; }
-.tile-icon.logo img { max-width: 100%; max-height: 100%; object-fit: contain; }
-.tile-text { display: flex; flex-direction: column; min-width: 0; }
-.tile-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Activity: a list by day. */
 .activity-list { margin-top: 6px; }
@@ -864,8 +771,9 @@ button.link { background: none; border: none; color: var(--accent); padding: 4px
 .act-pic { position: relative; flex: 0 0 auto; width: 72px; height: 48px; border-radius: 8px; overflow: hidden; background: var(--panel); display: inline-flex; align-items: center; justify-content: center; color: var(--muted); }
 .act-pic img { width: 100%; height: 100%; object-fit: cover; }
 .act-pic.icon { width: 48px; }
-.act-pic svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.act-pic svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: var(--icon-stroke, 1.75); stroke-linecap: round; stroke-linejoin: round; }
 .act-play { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #fff; text-shadow: 0 0 4px #000; font-size: 16px; }
+.act-play svg { width: 18px; height: 18px; filter: drop-shadow(0 0 3px rgba(0, 0, 0, 0.8)); }
 .act-text { display: flex; flex-direction: column; min-width: 0; flex: 1 1 auto; }
 .act-text strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .act-time { flex: 0 0 auto; }
@@ -894,10 +802,8 @@ button.link { background: none; border: none; color: var(--accent); padding: 4px
 input.toggle { width: 44px; height: 24px; min-height: 0; accent-color: var(--accent); }
 
 @media (max-width: 599px) {
-  .back.to-home { display: inline-block; }
   .choice-grid.kinds { grid-template-columns: 1fr; }
   .choice-grid.brands { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .home-tiles { grid-template-columns: 1fr; }
   .set-control select { max-width: 60vw; }
 }
 @media (pointer: coarse) {
@@ -920,18 +826,6 @@ input.toggle { width: 44px; height: 24px; min-height: 0; accent-color: var(--acc
 .reveal-button { flex: 0 0 auto; min-width: 4.5em; padding: 4px 8px; }
 #cam-signin .reveal-field { display: flex; width: 100%; }
 
-/* Home's kinds: collapsed until tapped. */
-.home-group { border: 1px solid var(--line); border-radius: 12px; background: var(--bg); margin-top: 10px; }
-.home-group-head { margin: 0; padding: 4px 8px 4px 4px; }
-.home-group-toggle { display: flex; align-items: center; gap: 12px; flex: 1 1 auto; min-width: 0; min-height: 56px; padding: 8px 10px; border: none; background: none; text-align: left; color: var(--text); }
-.home-group-words { display: flex; flex-direction: column; min-width: 0; flex: 1 1 auto; }
-.home-group-title { font-size: 16px; font-weight: 600; }
-.home-group-toggle .home-status { overflow-wrap: anywhere; }
-.home-chevron { flex: 0 0 auto; width: 10px; height: 10px; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: rotate(45deg); margin: 0 6px 4px; transition: transform 0.15s; }
-.home-group.open .home-chevron { transform: rotate(-135deg); margin-bottom: -4px; }
-.home-group .home-tiles { padding: 0 12px 12px; }
-.home-group .home-tile { background: var(--panel); }
-.home-group:not(.open) .home-tiles { display: none; }
 
 /* The Doorbell's settings, shown in place of the rest of its page. */
 #doorbell.show-settings > *:not(.cam-head):not(#door-settings-view):not(.to-home) { display: none !important; }
@@ -1044,7 +938,7 @@ body.pip .pip-target .call-body, body.pip .pip-target .door-call-body { position
 .fan-card.on .fan-icon svg { animation: fan-spin 2.4s linear infinite; }
 @media (prefers-reduced-motion: reduce) { .fan-card.on .fan-icon svg { animation: none; } }
 @keyframes fan-spin { to { transform: rotate(360deg); } }
-.fan-icon svg { width: 26px; height: 26px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.fan-icon svg { width: 26px; height: 26px; fill: none; stroke: currentColor; stroke-width: var(--icon-stroke, 1.75); stroke-linecap: round; stroke-linejoin: round; }
 .fan-text { display: flex; flex-direction: column; min-width: 0; flex: 1 1 auto; }
 .fan-text strong { overflow-wrap: anywhere; }
 .fan-more, .fan-arrange { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
@@ -1147,7 +1041,7 @@ dialog.ask label.ask-title select, dialog.ask label.ask-title input[type="text"]
 .cp-head { position: relative; display: flex; align-items: center; gap: 6px; margin: 0 0 10px; }
 .cp-head h2 { margin: 0; flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cp-head .cp-menu { position: absolute; right: 0; top: 44px; }
-.cp svg, .cam-exit svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.cp svg, .cam-exit svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: var(--icon-stroke, 1.75); stroke-linecap: round; stroke-linejoin: round; }
 .cp svg .fill { fill: currentColor; stroke: none; }
 .cp .cam-tile { border-radius: 10px; }
 .cp-actions { display: flex; justify-content: space-around; gap: 8px; padding: 16px 0 6px; }
@@ -1189,7 +1083,7 @@ dialog.ask label.ask-title select, dialog.ask label.ask-title input[type="text"]
 .cam-tile .cam-ctrl button { display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; min-width: 0; min-height: 0; padding: 0; border: none; border-radius: 50%; background: rgba(0,0,0,0.45); color: #fff; }
 .cam-tile .cam-ctrl button:hover { background: rgba(255,255,255,0.22); }
 .cam-tile .cam-ctrl button.on { background: var(--accent); color: var(--accent-text); }
-.cam-tile .cam-ctrl svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.cam-tile .cam-ctrl svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: var(--icon-stroke, 1.75); stroke-linecap: round; stroke-linejoin: round; }
 .cam-tile .cam-ctrl .cam-quality { height: 32px; padding: 0 10px; font-size: 13px; border: none; border-radius: 16px; background: rgba(0,0,0,0.45); color: #fff; max-width: 11em; }
 @media (pointer: coarse) { #main .cam-tile .cam-ctrl button { width: 44px; height: 44px; min-width: 0; min-height: 0; } }
 .cam-past .cam-ctrl .cam-quality { display: none; }
@@ -1198,7 +1092,7 @@ dialog.ask label.ask-title select, dialog.ask label.ask-title input[type="text"]
 /* ---- A call's buttons: a symbol with its word; on a phone the symbol alone ---- */
 .cbtn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
 .cbtn .ci { display: inline-flex; }
-.cbtn svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.cbtn svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: var(--icon-stroke, 1.75); stroke-linecap: round; stroke-linejoin: round; }
 .cbtn .ci-down svg { transform: rotate(135deg); }
 .cbtn.on:not(.danger):not(.ok) { background: var(--text); color: var(--bg); border-color: var(--text); }
 
@@ -1263,12 +1157,12 @@ ul.cards .purifier-card.unreachable .name { color: var(--muted); }
 .gate-card.vehicle { border-color: var(--line); }
 .gate-head { display: flex; align-items: center; gap: 12px; }
 .gate-pic { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; width: 48px; height: 48px; border-radius: 50%; background: var(--panel); color: var(--accent); }
-.gate-pic svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.gate-pic svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: var(--icon-stroke, 1.75); stroke-linecap: round; stroke-linejoin: round; }
 .gate-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .gate-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; }
 .gate-actions button.big { min-height: 44px; flex: 1 1 auto; }
 .gate-future { display: flex; align-items: center; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--line); }
-.gate-future .act-pic.icon svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.8; }
+.gate-future .act-pic.icon svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: var(--icon-stroke, 1.75); }
 .gate-code { font-size: 28px; font-weight: 700; letter-spacing: 0.2em; text-align: center; margin: 8px 0; font-variant-numeric: tabular-nums; }
 .plate { font-family: ui-monospace, "DejaVu Sans Mono", monospace; letter-spacing: 0.08em; }
 .ask-choices { display: flex; flex-direction: column; gap: 8px; margin: 10px 0; }
