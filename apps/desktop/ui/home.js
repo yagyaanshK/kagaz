@@ -357,7 +357,7 @@ const KagazHome = (() => {
       }, 600);
     } else if (kind.id === "doorbell") {
       selectCategory("doorbell");
-      setTimeout(() => $("door-list").scrollIntoView({ block: "start", behavior: "smooth" }), 300);
+      addLocalStation();
     } else if (kind.id === "security") {
       selectCategory("cameras");
       if (b.id === "xiaomi") {

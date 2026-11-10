@@ -106,7 +106,10 @@ const KagazShell = (() => {
     // iOS names where Back goes; the others show the arrow alone.
     back.querySelector(".bar-back-word").textContent = levels > 1 && TITLES[view] && view !== "add" ? shortTitle(view) : "Home";
     back.setAttribute("aria-label", "Back");
-    $("bar-title").textContent = view === "add" ? $("add-title").textContent || TITLES.add : TITLES[view] || "Kagaz";
+    // A page can name a step inside it (data-title on its section).
+    const pane = $(view);
+    const step = pane && pane.dataset.title;
+    $("bar-title").textContent = view === "add" ? $("add-title").textContent || TITLES.add : step || TITLES[view] || "Kagaz";
     $("bar-add").classList.toggle("hidden", view !== "home");
     $("bar-menu").classList.toggle("hidden", layout !== "minimal");
     root.dataset.view = view;

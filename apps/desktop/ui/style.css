@@ -834,6 +834,12 @@ input.toggle { width: 44px; height: 24px; min-height: 0; accent-color: var(--acc
 .door-settings-title { margin: 6px 0 0; font-size: 16px; }
 #door-settings-local .set-control input[type="number"] { width: 7em; }
 #doorbell.show-settings .to-home { display: none !important; }
+/* Adding a door station on this network (Add a device): only the stations,
+   none of OneTouch's account. */
+#door-add-intro, #door-add-again { display: none; }
+#doorbell.adding-local > *:not(#door-list):not(#door-station):not(#door-call) { display: none !important; }
+#doorbell.adding-local #door-add-intro { display: block; }
+#doorbell.adding-local #door-add-again { display: flex; margin: 0 0 12px; }
 
 /* Small controls on a computer: never under 24 px (WCAG 2.5.8). */
 @media (pointer: fine) {

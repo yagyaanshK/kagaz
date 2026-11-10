@@ -3362,7 +3362,7 @@ function renderDoorStations() {
     ul.appendChild(stationCard({
       title: f.agent,
       where: `${f.address}:${f.port}`,
-      line: ["cap-warn", "found on the network · click to add"],
+      line: ["cap-warn", "found on the network · not added yet"],
       onClick: () => openStation({ name: f.agent, address: f.address, port: f.port, saved: false }),
     }));
   }
@@ -3395,6 +3395,7 @@ function stationCard({ title, where, line, onClick }) {
 
 async function lookForStations() {
   $("door-rescan").disabled = true;
+  $("door-add-rescan").disabled = true;
   $("door-note").textContent = "Looking for door stations on this network…";
   try {
     doorFound = await invoke("doorbell_discover", { port: doorStations.listen_port });
@@ -3406,7 +3407,26 @@ async function lookForStations() {
     $("door-note").textContent = "Could not look: " + e;
   }
   $("door-rescan").disabled = false;
+  $("door-add-rescan").disabled = false;
   renderDoorStations();
+}
+
+// Add a device › Doorbell › Door station on this network: the stations
+// found here and Add by address, without OneTouch's sign-in around them.
+function addLocalStation() {
+  const pane = $("doorbell");
+  pane.dataset.title = "Add a door station";
+  pane.classList.add("adding-local");
+  KagazNav.push("door-add-local", endAddLocal);
+  $("main").scrollTop = 0;
+  lookForStations();
+}
+function endAddLocal() {
+  const pane = $("doorbell");
+  delete pane.dataset.title;
+  pane.classList.remove("adding-local");
+  KagazNav.pop("door-add-local");
+  if (typeof KagazShell !== "undefined") KagazShell.place(currentView);
 }
 
 function openStation(s) {
@@ -3471,6 +3491,7 @@ $("door-station-check").addEventListener("click", async () => {
 });
 
 $("door-rescan").addEventListener("click", lookForStations);
+$("door-add-rescan").addEventListener("click", lookForStations);
 // The gear opens the Doorbell's settings in place of the page (settings.js).
 function doorSettings(on) {
   $("doorbell").classList.toggle("show-settings", on);
