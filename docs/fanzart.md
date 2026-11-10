@@ -1,6 +1,7 @@
 # FANZART ceiling fan: findings
 
 Checked on 2026-11-10 from the Linux laptop, by listening only: nothing was paired, connected or sent. Parked until there is a radio transmitter to work with.
+The [Sleep Company bed](sleep-company-bed.md) waits on the same hardware.
 
 ## What the fan has
 
