@@ -331,6 +331,16 @@ with the commit that closes them.
       needed; the protocol came from public sources and works. Keep the tools
       under tapo-analysis/ (git-ignored) in case TP-Link changes the relay.
 
+## Computers & phones (remote connection)
+
+Plan: `docs/remote-connection.md` (agreed 2026-11-16).
+
+- [ ] **Step 0: the RDP library on a real Windows computer.** Resizing to
+      the window, sound, clipboard, files, monitor choice.
+- [ ] **Step 0: mockups** of the device list, Add and the viewer.
+- [ ] **Step 1: the viewer in the desktop window** (RDP, VNC, paths tried
+      at once, the command line).
+
 ## Roadmap, not yet started
 
 - [x] M3 driverless print over IPP: `kagaz print` sends PWG Raster; one test

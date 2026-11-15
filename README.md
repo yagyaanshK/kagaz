@@ -425,6 +425,14 @@ still needs verification with a real account. See [protocol notes and limits](do
 - **Print from anywhere.** Send a document to your own printer at home
   from a phone or laptop elsewhere, through a Kagaz device on the printer's
   network that you set up for it; no vendor cloud.
+- **Computers & phones.** View and control your own computers and phones
+  from each other.
+  > *Added 2026-11-16:* plan in [docs/remote-connection.md](docs/remote-connection.md).
+  > First a viewer for RDP and VNC in the desktop window that tries every
+  > known path to a device at once (home network, Tailscale, a phone's
+  > hotspot); then the viewer on the phone, Wake-on-LAN, adb and SFTP;
+  > then Kagaz on both ends with pairing and its own session, hosts on
+  > Linux, Windows and Android, and a self-hostable relay last.
 - **M8 AI assistant module.** Configurable model backends (local servers,
   OpenRouter, OpenAI-compatible and Anthropic endpoints, the Claude Agent SDK
   as the agent runtime), used to draft, test and package a module for a
