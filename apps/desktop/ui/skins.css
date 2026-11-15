@@ -11,6 +11,11 @@
    measured from screenshots and marked (approx).
    Approved as design/mockups/home-shell/ before it was built here. */
 
+/* The accent is Kagaz green on every system (#2f6f4e; #6fbf93 in dark),
+   not each system's default: the brand colour is the owner's choice. On
+   Android the surfaces and containers come from a Material 3 palette
+   seeded from it (material-color-utilities 0.3.0, tonal spot). */
+
 /* ======================= the frame, on every system ======================= */
 body {
   display: grid;
@@ -143,21 +148,21 @@ body {
   --icon-stroke: 1.9; --nav-icon: 24px;
   --tap: 48px; --row: 56px; --chip-h: 32px;
   --r-card: 12px; --r-btn: 999px; --r-ctl: 4px; --r-chip: 8px; --r-icon: 50%; --r-icon-btn: 50%; --edge: 16px;
-  --bg: #FEF7FF; --panel: #F7F2FA; --text: #1D1B20; --muted: #49454F; --line: #CAC4D0; --control: #79747E;
-  --accent: #6750A4; --accent-text: #FFFFFF; --accent-soft: #EADDFF;
+  --bg: #F6FBF4; --panel: #F0F5EE; --text: #171D19; --muted: #404942; --line: #C0C9C0; --control: #707972;
+  --accent: #2f6f4e; --accent-text: #FFFFFF; --accent-soft: #ADF2C7;
   --ok: #2E6B30; --warn: #7A4F00; --bad: #B3261E;
-  --nav-bg: #FEF7FF; --nav-fg: #49454F; --nav-active-bg: #E8DEF8; --nav-active-fg: #1D192B; --bar-bg: #FEF7FF;
-  --tile-bg: #F3EDF7; --group-bg: #F7F2FA; --tile-in-group: #ECE6F0; --chip-bg: transparent; --icon-bg: #E8DEF8; --icon-fg: #1D192B;
-  --urgent-bg: #B3261E; --urgent-fg: #FFFFFF; --hover: rgba(29, 27, 32, 0.08);
+  --nav-bg: #F6FBF4; --nav-fg: #404942; --nav-active-bg: #D0E8D6; --nav-active-fg: #0B2015; --bar-bg: #F6FBF4;
+  --tile-bg: #EAEFE9; --group-bg: #F0F5EE; --tile-in-group: #E4EAE3; --chip-bg: transparent; --icon-bg: #D0E8D6; --icon-fg: #374B3E;
+  --urgent-bg: #BA1A1A; --urgent-fg: #FFFFFF; --hover: rgba(23, 29, 25, 0.08);
 }
 @media (prefers-color-scheme: dark) {
   :root[data-os="android"] {
-    --bg: #141218; --panel: #211F26; --text: #E6E0E9; --muted: #CAC4D0; --line: #49454F; --control: #938F99;
-    --accent: #D0BCFF; --accent-text: #381E72; --accent-soft: #4F378B;
+    --bg: #0F1511; --panel: #1B211D; --text: #DFE4DD; --muted: #C0C9C0; --line: #404942; --control: #8A938B;
+    --accent: #6fbf93; --accent-text: #10201a; --accent-soft: #045233;
     --ok: #8FD694; --warn: #FFB95D; --bad: #F2B8B5;
-    --nav-bg: #141218; --nav-fg: #CAC4D0; --nav-active-bg: #4A4458; --nav-active-fg: #E8DEF8; --bar-bg: #141218;
-    --tile-bg: #211F26; --group-bg: #1D1B20; --tile-in-group: #2B2930; --icon-bg: #4A4458; --icon-fg: #E8DEF8;
-    --urgent-bg: #8C1D18; --urgent-fg: #FFDAD6; --hover: rgba(230, 224, 233, 0.08);
+    --nav-bg: #0F1511; --nav-fg: #C0C9C0; --nav-active-bg: #374B3E; --nav-active-fg: #D0E8D6; --bar-bg: #0F1511;
+    --tile-bg: #1B211D; --group-bg: #171D19; --tile-in-group: #262B27; --icon-bg: #374B3E; --icon-fg: #D0E8D6;
+    --urgent-bg: #93000A; --urgent-fg: #FFDAD6; --hover: rgba(223, 228, 221, 0.08);
   }
 }
 [data-os="android"] #bar { min-height: 64px; padding: 0 4px; gap: 4px; }
@@ -166,8 +171,8 @@ body {
 [data-os="android"] .bar-btn svg { width: 24px; height: 24px; }
 [data-os="android"] .side-head { display: none; }
 /* The navigation bar: a pill behind the current place's icon. */
-[data-os="android"] #bottom-nav { min-height: 64px; padding-bottom: env(safe-area-inset-bottom); background: #F3EDF7; }
-@media (prefers-color-scheme: dark) { [data-os="android"] #bottom-nav { background: #211F26; } }
+[data-os="android"] #bottom-nav { min-height: 64px; padding-bottom: env(safe-area-inset-bottom); background: #EAEFE9; }
+@media (prefers-color-scheme: dark) { [data-os="android"] #bottom-nav { background: #1B211D; } }
 [data-os="android"] #bottom-nav button { gap: 4px; padding: 6px 0 12px; }
 [data-os="android"] #bottom-nav .cat-icon, [data-os="android"][data-layout="rail"] #categories .cat-icon { width: 56px; height: 32px; border-radius: 16px; }
 [data-os="android"] #bottom-nav button.active .cat-icon { background: var(--nav-active-bg); color: var(--nav-active-fg); }
@@ -199,7 +204,7 @@ body {
   --tap: 44px; --row: 52px; --chip-h: 32px;
   --r-card: 16px; --r-btn: 999px; --r-ctl: 10px; --r-chip: 999px; --r-icon: 50%; --r-icon-btn: 50%; --edge: 16px;
   --bg: rgb(242, 242, 247); --panel: #FFFFFF; --text: #000000; --muted: rgba(60, 60, 67, 0.6); --line: rgba(60, 60, 67, 0.29); --control: rgba(60, 60, 67, 0.36);
-  --accent: rgb(0, 136, 255); --accent-text: #FFFFFF; --accent-soft: rgba(0, 136, 255, 0.14);
+  --accent: #2f6f4e; --accent-text: #FFFFFF; --accent-soft: rgba(47, 111, 78, 0.14);
   --ok: rgb(36, 138, 61); --warn: rgb(176, 96, 0); --bad: rgb(215, 0, 21);
   --nav-bg: rgb(242, 242, 247); --nav-fg: rgba(60, 60, 67, 0.6); --bar-bg: rgb(242, 242, 247);
   --tile-bg: #FFFFFF; --group-bg: #FFFFFF; --tile-in-group: rgb(242, 242, 247); --chip-bg: #FFFFFF; --icon-bg: rgb(229, 229, 234); --icon-fg: #000000;
@@ -209,7 +214,7 @@ body {
 @media (prefers-color-scheme: dark) {
   :root[data-os="ios"] {
     --bg: #000000; --panel: rgb(28, 28, 30); --text: #FFFFFF; --muted: rgba(235, 235, 245, 0.6); --line: rgba(84, 84, 88, 0.6); --control: rgba(235, 235, 245, 0.3);
-    --accent: rgb(0, 145, 255); --accent-soft: rgba(0, 145, 255, 0.2);
+    --accent: #6fbf93; --accent-text: #10201a; --accent-soft: rgba(111, 191, 147, 0.2);
     --ok: rgb(48, 209, 88); --warn: rgb(255, 179, 64); --bad: rgb(255, 105, 97);
     --nav-bg: #000000; --nav-fg: rgba(235, 235, 245, 0.6); --bar-bg: #000000;
     --tile-bg: rgb(28, 28, 30); --group-bg: rgb(28, 28, 30); --tile-in-group: rgb(44, 44, 46); --chip-bg: rgb(28, 28, 30); --icon-bg: rgb(44, 44, 46); --icon-fg: #FFFFFF;
@@ -257,7 +262,7 @@ body {
   --tap: 32px; --row: 48px; --chip-h: 28px;
   --r-card: 8px; --r-btn: 4px; --r-ctl: 4px; --r-chip: 4px; --r-icon: 4px; --r-icon-btn: 4px; --edge: 24px;
   --nav-bg: #F3F3F3; --bg: #F9F9F9; --panel: #FFFFFF; --text: rgba(0, 0, 0, 0.894); --muted: rgba(0, 0, 0, 0.62); --line: rgba(0, 0, 0, 0.08); --control: rgba(0, 0, 0, 0.45);
-  --accent: #005FB8; --accent-text: #FFFFFF; --accent-soft: rgba(0, 95, 184, 0.1);
+  --accent: #2f6f4e; --accent-text: #FFFFFF; --accent-soft: rgba(47, 111, 78, 0.1);
   --ok: #0F7B0F; --warn: #9D5D00; --bad: #C42B1C;
   --nav-fg: rgba(0, 0, 0, 0.894); --nav-active-bg: rgba(0, 0, 0, 0.0373); --bar-bg: transparent;
   --tile-bg: #FFFFFF; --tile-line: rgba(0, 0, 0, 0.0578); --group-bg: rgba(255, 255, 255, 0.7); --tile-in-group: #F9F9F9; --chip-bg: rgba(255, 255, 255, 0.7);
@@ -268,7 +273,7 @@ body {
 @media (prefers-color-scheme: dark) {
   :root[data-os="windows"] {
     --nav-bg: #202020; --bg: #272727; --panel: #2D2D2D; --text: #FFFFFF; --muted: rgba(255, 255, 255, 0.786); --line: rgba(255, 255, 255, 0.0837); --control: rgba(255, 255, 255, 0.5);
-    --accent: #60CDFF; --accent-text: #000000; --accent-soft: rgba(96, 205, 255, 0.15);
+    --accent: #6fbf93; --accent-text: #10201a; --accent-soft: rgba(111, 191, 147, 0.15);
     --ok: #6CCB5F; --warn: #FCE100; --bad: #FF99A4;
     --nav-fg: #FFFFFF; --nav-active-bg: rgba(255, 255, 255, 0.0605);
     --tile-bg: rgba(255, 255, 255, 0.0512); --tile-line: rgba(0, 0, 0, 0.1); --group-bg: rgba(255, 255, 255, 0.0512); --tile-in-group: rgba(255, 255, 255, 0.0326); --chip-bg: rgba(255, 255, 255, 0.0605);
@@ -323,7 +328,7 @@ body {
   --tap: 34px; --row: 50px; --chip-h: 30px;
   --r-card: 12px; --r-btn: 9px; --r-ctl: 9px; --r-chip: 9999px; --r-icon: 50%; --r-icon-btn: 9px; --edge: 18px;
   --nav-bg: #EBEBED; --bg: #FAFAFB; --panel: #FFFFFF; --text: rgba(0, 0, 6, 0.8); --muted: rgba(0, 0, 6, 0.55); --line: rgba(0, 0, 6, 0.1); --control: rgba(0, 0, 6, 0.3);
-  --accent: #1C71D8; --accent-text: #FFFFFF; --accent-soft: rgba(53, 132, 228, 0.15);
+  --accent: #2f6f4e; --accent-text: #FFFFFF; --accent-soft: rgba(47, 111, 78, 0.14);
   --ok: #1B8553; --warn: #9C6E03; --bad: #C01C28;
   --nav-fg: rgba(0, 0, 6, 0.8); --nav-active-bg: rgba(0, 0, 6, 0.1); --bar-bg: #FFFFFF;
   --tile-bg: #FFFFFF; --group-bg: #FFFFFF; --tile-in-group: #FAFAFB; --chip-bg: rgba(0, 0, 6, 0.08);
@@ -334,7 +339,7 @@ body {
 @media (prefers-color-scheme: dark) {
   :root[data-os="gnome"] {
     --nav-bg: #2E2E32; --bg: #222226; --panel: #36363A; --text: #FFFFFF; --muted: rgba(255, 255, 255, 0.55); --line: rgba(255, 255, 255, 0.1); --control: rgba(255, 255, 255, 0.3);
-    --accent: #81D0FF; --accent-text: #000000; --accent-soft: rgba(129, 208, 255, 0.16);
+    --accent: #6fbf93; --accent-text: #10201a; --accent-soft: rgba(111, 191, 147, 0.16);
     --ok: #78E9AB; --warn: #FFC252; --bad: #FF938C;
     --nav-fg: #FFFFFF; --nav-active-bg: rgba(255, 255, 255, 0.1); --bar-bg: #2E2E32;
     --tile-bg: rgba(255, 255, 255, 0.08); --group-bg: rgba(255, 255, 255, 0.08); --tile-in-group: rgba(255, 255, 255, 0.05); --chip-bg: rgba(255, 255, 255, 0.1);
@@ -381,7 +386,7 @@ body {
   --tap: 28px; --row: 40px; --chip-h: 24px;
   --r-card: 10px; --r-btn: 6px; --r-ctl: 6px; --r-chip: 999px; --r-icon: 8px; --r-icon-btn: 6px; --edge: 20px;
   --nav-bg: rgba(236, 236, 238, 0.92); --bg: #FFFFFF; --panel: #FFFFFF; --text: rgba(0, 0, 0, 0.85); --muted: rgba(0, 0, 0, 0.5); --line: rgba(0, 0, 0, 0.1); --control: rgba(0, 0, 0, 0.25);
-  --accent: rgb(0, 122, 255); --accent-text: #FFFFFF; --accent-soft: rgba(0, 122, 255, 0.14);
+  --accent: #2f6f4e; --accent-text: #FFFFFF; --accent-soft: rgba(47, 111, 78, 0.14);
   --ok: rgb(36, 138, 61); --warn: rgb(176, 96, 0); --bad: rgb(215, 0, 21);
   --nav-fg: rgba(0, 0, 0, 0.85); --nav-active-bg: rgba(0, 0, 0, 0.1); --bar-bg: #FFFFFF;
   --tile-bg: rgba(0, 0, 0, 0.035); --tile-line: rgba(0, 0, 0, 0.06); --group-bg: rgba(0, 0, 0, 0.025); --tile-in-group: rgba(0, 0, 0, 0.035); --chip-bg: rgba(0, 0, 0, 0.05);
@@ -391,7 +396,7 @@ body {
 @media (prefers-color-scheme: dark) {
   :root[data-os="macos"] {
     --nav-bg: rgba(40, 40, 42, 0.92); --bg: #1E1E1E; --panel: #2A2A2A; --text: rgba(255, 255, 255, 0.85); --muted: rgba(255, 255, 255, 0.55); --line: rgba(255, 255, 255, 0.12); --control: rgba(255, 255, 255, 0.3);
-    --accent: rgb(10, 132, 255); --accent-soft: rgba(10, 132, 255, 0.2);
+    --accent: #6fbf93; --accent-text: #10201a; --accent-soft: rgba(111, 191, 147, 0.2);
     --ok: rgb(48, 209, 88); --warn: rgb(255, 179, 64); --bad: rgb(255, 105, 97);
     --nav-fg: rgba(255, 255, 255, 0.85); --nav-active-bg: rgba(255, 255, 255, 0.12); --bar-bg: #1E1E1E;
     --tile-bg: rgba(255, 255, 255, 0.06); --tile-line: rgba(255, 255, 255, 0.08); --group-bg: rgba(255, 255, 255, 0.04); --tile-in-group: rgba(255, 255, 255, 0.06); --chip-bg: rgba(255, 255, 255, 0.08);
