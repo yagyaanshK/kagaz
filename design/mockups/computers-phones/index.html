@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Kagaz · Computers &amp; phones mockups</title>
+<style>
+  body { margin: 0; padding: 24px; font-family: system-ui, sans-serif; background: #e9e9e6; color: #222; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  p.lead { margin: 0 0 16px; color: #555; max-width: 900px; }
+  h2 { font-size: 15px; margin: 28px 0 10px; color: #444; }
+  .row { display: flex; gap: 24px; flex-wrap: wrap; align-items: flex-start; }
+  figure { margin: 0; }
+  figcaption { font-size: 12px; color: #555; margin-bottom: 6px; max-width: 420px; }
+  iframe { border: 1px solid #bbb; background: #fff; border-radius: 10px; display: block; box-shadow: 0 6px 20px rgba(0,0,0,.12); }
+  .phone { width: 390px; height: 844px; }
+  .wide { width: 844px; height: 390px; }
+  .desk { width: 1280px; height: 800px; }
+  .mid { width: 1000px; height: 700px; }
+  .controls { margin: 0 0 8px; display: flex; gap: 16px; align-items: center; font-size: 13px; flex-wrap: wrap; }
+</style>
+</head>
+<body>
+<h1>Kagaz · Computers &amp; phones</h1>
+<p class="lead">The device list, Add, one device's page and the viewer, in each system's own look (the app's real stylesheets and icons). Names, addresses and readings are sample data, and the remote screen is a drawing. Any frame opens on its own to resize it: <code>screen.html?os=gnome&amp;screen=viewer&amp;open=picture</code>.</p>
+<div class="controls">
+  <label>Desktop look <select id="desk"><option value="gnome">Ubuntu (GNOME)</option><option value="windows">Windows 11</option><option value="macos">macOS</option></select></label>
+  <label>Phone look <select id="phone"><option value="android">Android</option><option value="ios">iPhone</option></select></label>
+  <label><input type="checkbox" id="dark"> Dark</label>
+</div>
+
+<h2>1 · The list, on Home's pattern: your devices, then Found nearby</h2>
+<div class="row">
+  <figure><figcaption>Desktop. Each device says how it is reached and how fast; Connect is one click.</figcaption><iframe class="desk" data-kind="desk" data-q="screen=list"></iframe></figure>
+  <figure><figcaption>Phone (step 2).</figcaption><iframe class="phone" data-kind="phone" data-q="screen=list"></iframe></figure>
+  <figure><figcaption>Nothing added yet.</figcaption><iframe class="phone" data-kind="phone" data-q="screen=list&state=empty"></iframe></figure>
+</div>
+
+<h2>2 · Add: found on this network, in your Tailscale, or by its address</h2>
+<div class="row">
+  <figure><figcaption>Three ways in on one page; no wizard.</figcaption><iframe class="mid" data-kind="desk" data-q="screen=add"></iframe></figure>
+  <figure><figcaption>After choosing one: sign in, with the password kept only if you say so.</figcaption><iframe class="mid" data-kind="desk" data-q="screen=add&state=signin"></iframe></figure>
+</div>
+
+<h2>3 · One device's page: its paths and its settings</h2>
+<div class="row">
+  <figure><figcaption>Every way to reach it with what answers now; screen size, monitor, picture; left click stays left; sound; sign-in.</figcaption><iframe class="mid" data-kind="desk" data-q="screen=device"></iframe></figure>
+  <figure><figcaption>Phone.</figcaption><iframe class="phone" data-kind="phone" data-q="screen=device"></iframe></figure>
+</div>
+
+<h2>4 · The viewer</h2>
+<div class="row">
+  <figure><figcaption>Connecting: every path at once, the first to answer wins.</figcaption><iframe class="mid" data-kind="desk" data-q="screen=viewer&state=connecting"></iframe></figure>
+  <figure><figcaption>Connected over Remote Desktop. The window is the remote screen; the bar carries the path, the delay and the tools.</figcaption><iframe class="desk" data-kind="desk" data-q="screen=viewer"></iframe></figure>
+  <figure><figcaption>Picture: one slider from Sharper to Smoother, and what the connection is doing.</figcaption><iframe class="mid" data-kind="desk" data-q="screen=viewer&open=picture"></iframe></figure>
+  <figure><figcaption>Send keys the local keyboard cannot.</figcaption><iframe class="mid" data-kind="desk" data-q="screen=viewer&open=keys"></iframe></figure>
+  <figure><figcaption>A phone over VNC on plain Wi-Fi: Kagaz says it is not encrypted; tools VNC lacks are dimmed.</figcaption><iframe class="mid" data-kind="desk" data-q="screen=viewer&state=vnc"></iframe></figure>
+  <figure><figcaption>Out of reach, with why and what fixes it.</figcaption><iframe class="mid" data-kind="desk" data-q="screen=viewer&state=lost"></iframe></figure>
+  <figure><figcaption>Phone viewer (step 2), upright: tools under the picture.</figcaption><iframe class="phone" data-kind="phone" data-q="screen=viewer"></iframe></figure>
+  <figure><figcaption>Phone viewer, on its side.</figcaption><iframe class="wide" data-kind="phone" data-q="screen=viewer"></iframe></figure>
+</div>
+<script>
+  const frames = [...document.querySelectorAll("iframe")];
+  function load() {
+    const os = { desk: document.getElementById("desk").value, phone: document.getElementById("phone").value };
+    const dark = document.getElementById("dark").checked;
+    for (const f of frames) {
+      // A frame follows the colour scheme of its element, so Dark needs no page support.
+      f.style.colorScheme = dark ? "dark" : "light";
+      f.src = "screen.html?os=" + os[f.dataset.kind] + "&" + f.dataset.q;
+    }
+  }
+  for (const id of ["desk", "phone", "dark"]) document.getElementById(id).addEventListener("change", load);
+  load();
+</script>
+</body>
+</html>

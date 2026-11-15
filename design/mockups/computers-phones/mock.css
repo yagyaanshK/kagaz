@@ -1,0 +1,108 @@
+/* Computers & phones mockup: only what this kind adds to the app's own
+   stylesheets (style.css, skins.css). Colours, radii and sizes come from
+   the app's tokens, so each system's skin carries over. */
+
+.rc-pane { max-width: 1040px; }
+
+/* ---- the device list ---- */
+.rc-tiles.home-tiles { --tile-min: 320px; align-content: start; }
+.rc-tiles .home-tile.has-actions { grid-column: auto; }
+/* A phone shows one device per row, so its name and state are never cut. */
+[data-layout="bar"] .rc-tiles.home-tiles { grid-template-columns: 1fr; }
+.rc-tiles .tile-sub { white-space: normal; }
+.rc-dot { display: inline-block; width: 8px; height: 8px; margin-right: 6px; border-radius: 50%; border: 2px solid var(--muted); box-sizing: border-box; vertical-align: 1px; }
+.rc-dot.ok { background: var(--ok); border-color: var(--ok); }
+.tile-act:disabled { opacity: 0.45; }
+
+.rc-rows { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.rc-row { display: flex; align-items: center; gap: 12px; min-height: 56px; padding: 6px 12px; border-radius: var(--r-card, 12px); background: var(--tile-bg, var(--panel)); border: 1px solid var(--tile-line, var(--line)); }
+.rc-row .tile-text { flex: 1 1 auto; }
+.rc-row.off .tile-name, .rc-row.off .tile-icon { opacity: 0.6; }
+
+.rc-empty { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 40px 16px 24px; text-align: center; }
+.rc-empty h3 { margin: 6px 0 0; font-size: 18px; }
+.rc-empty p { margin: 0 0 10px; max-width: 420px; }
+.rc-empty-icon { color: var(--muted); }
+.rc-empty-icon svg { width: 56px; height: 56px; }
+
+/* ---- forms ---- */
+.rc-form { display: flex; flex-direction: column; gap: 12px; max-width: 460px; margin-top: 8px; }
+.rc-form input[type="text"], .rc-form input[type="password"], .rc-form select { width: 100%; box-sizing: border-box; }
+.rc-pass { display: flex; gap: 6px; }
+.rc-pass input { flex: 1 1 auto; }
+.rc-buttons { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; margin-top: 4px; }
+.rc-buttons.start { justify-content: flex-start; margin-top: 10px; }
+/* Windows puts the action first, Cancel last (ui-guidelines W23). */
+[data-os="windows"] .rc-buttons:not(.start) { flex-direction: row-reverse; justify-content: flex-start; }
+.rc-done { opacity: 0.55; }
+.rc-add .set-section:first-child { margin-top: 0; }
+
+/* ---- one device's page ---- */
+.rc-head { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.rc-head-text { flex: 1 1 220px; min-width: 0; }
+.rc-head-text h2 { display: block !important; margin: 0; }
+.rc-head-text p { margin: 2px 0 0; }
+.rc-big { display: inline-flex; align-items: center; justify-content: center; width: 56px; height: 56px; border-radius: var(--r-card, 12px); background: var(--accent-soft, rgba(47, 111, 78, 0.14)); color: var(--accent); }
+.rc-big svg { width: 30px; height: 30px; }
+.rc-good { display: inline-flex; align-items: center; gap: 4px; color: var(--ok); }
+.rc-good svg { width: 16px; height: 16px; }
+.rc-slider { display: inline-flex; align-items: center; gap: 8px; font-size: var(--small, 13px); color: var(--muted); }
+.rc-slider input { width: 160px; accent-color: var(--accent); }
+.switch.wrap { flex-wrap: wrap; white-space: normal; }
+.switch.wrap small { flex-basis: 100%; padding-left: 26px; }
+.set-row > label:not(.switch) { color: var(--text); font-size: inherit; }
+
+/* ---- the viewer: the window is the remote screen ---- */
+[data-view="viewer"] #sidebar, [data-view="viewer"] #bottom-nav { display: none; }
+[data-view="viewer"] body { grid-template-columns: 1fr; }
+[data-view="viewer"] #column { grid-column: 1 / -1; }
+[data-view="viewer"] #main { padding: 0; display: flex; }
+.rc-viewer { max-width: none; flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; padding: 0 !important; margin: 0 !important; }
+.rc-stage { position: relative; flex: 1 1 auto; min-height: 0; display: flex; align-items: center; justify-content: center; background: #16181a; padding: 0; }
+.rc-chip { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; padding: 0 10px; margin-right: 4px; border-radius: 999px; border: 1px solid var(--line); font-size: var(--small, 13px); color: var(--muted); white-space: nowrap; }
+.rc-chip svg { width: 15px; height: 15px; }
+.bar-btn[disabled] { opacity: 0.35; }
+.bar-btn[aria-expanded="true"] { background: var(--accent-soft, rgba(47, 111, 78, 0.14)); color: var(--accent); }
+/* The system's own bar is short on a phone: the tools move under the picture. */
+[data-layout="bar"][data-view="viewer"] .bar-actions .bar-btn { display: none; }
+.rc-touchbar { display: none; }
+[data-layout="bar"] .rc-touchbar { display: flex; justify-content: space-around; flex: none; padding: 6px 4px calc(6px + env(safe-area-inset-bottom)); background: var(--bar-bg, var(--bg)); border-top: 1px solid var(--line); }
+.rc-touchbar button { flex-direction: column; gap: 2px; min-width: 64px; min-height: 48px; border: none; background: none; font-size: 11px; color: var(--text); }
+.rc-touchbar button svg { width: 22px; height: 22px; }
+
+.rc-banner { display: flex; align-items: flex-start; gap: 10px; flex: none; padding: 10px var(--edge, 16px); background: color-mix(in srgb, var(--warn) 14%, var(--bg)); color: var(--text); border-bottom: 1px solid var(--line); font-size: var(--small, 13px); }
+.rc-banner svg { width: 18px; height: 18px; color: var(--warn); flex: none; margin-top: 1px; }
+
+/* The remote screen: a drawing that stands in for a desktop. */
+.rc-remote { position: relative; width: 100%; height: 100%; max-height: 100%; overflow: hidden; background: linear-gradient(135deg, #2b5876, #4e4376); }
+.rc-remote.tall { width: auto; height: 100%; aspect-ratio: 9 / 19.5; max-width: 100%; background: linear-gradient(160deg, #134e5e, #71b280); }
+.rc-win { position: absolute; border-radius: 8px; background: rgba(255, 255, 255, 0.92); box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35); }
+.rc-win::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 26px; border-radius: 8px 8px 0 0; background: rgba(0, 0, 0, 0.12); }
+.rc-win.a { left: 8%; top: 12%; width: 46%; height: 52%; }
+.rc-win.b { left: 44%; top: 30%; width: 44%; height: 48%; background: rgba(240, 244, 250, 0.95); }
+.rc-task { position: absolute; left: 0; right: 0; bottom: 0; height: 7%; min-height: 26px; background: rgba(10, 14, 20, 0.72); }
+.rc-remote.tall .rc-win.a { left: 8%; top: 8%; width: 84%; height: 30%; }
+.rc-remote.tall .rc-win.b { left: 8%; top: 44%; width: 84%; height: 38%; }
+.rc-sample { position: absolute; right: 10px; top: 8px; padding: 2px 8px; border-radius: 999px; background: rgba(0, 0, 0, 0.55); color: #fff; font-size: 11px; }
+
+.rc-card { width: min(440px, calc(100% - 32px)); padding: 20px; border-radius: var(--r-card, 12px); background: var(--panel); color: var(--text); box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4); }
+.rc-card h3 { margin: 0 0 8px; font-size: 17px; }
+.rc-paths { list-style: none; margin: 0 0 8px; padding: 0; }
+.rc-paths li { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-top: 1px solid var(--line); font-size: var(--small, 13px); }
+.rc-spin { display: inline-block; width: 12px; height: 12px; margin-right: 4px; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%; vertical-align: -2px; animation: rc-spin 0.9s linear infinite; }
+@keyframes rc-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .rc-spin { animation: none; } }
+
+.rc-pop { position: absolute; top: 8px; right: 12px; z-index: 5; display: flex; flex-direction: column; gap: 6px; min-width: 220px; padding: 12px; border-radius: var(--r-card, 12px); background: var(--panel); color: var(--text); box-shadow: 0 10px 32px rgba(0, 0, 0, 0.45); }
+.rc-pop.keys button { justify-content: flex-start; text-align: left; border: none; background: none; min-height: 34px; }
+.rc-pop.keys button:hover { background: var(--hover, rgba(127, 127, 127, 0.12)); }
+.rc-pop p { margin: 2px 0 0; font-size: 12px; }
+
+/* On a phone Connect keeps its word: an icon alone would repeat the device's. */
+[data-layout="bar"] .rc-tiles .tile-act { width: auto; min-height: 40px !important; padding: 0 14px; border-radius: var(--r-btn, 20px); }
+[data-layout="bar"] .rc-tiles .tile-act span { display: inline; }
+[data-layout="bar"] .rc-tiles .tile-act svg { display: none; }
+/* A phone's row is narrow: the icon and name already say what the device is. */
+[data-layout="bar"] .rc-tiles .rc-what { display: none; }
+/* iPhone's large title: the name is long, so it steps down a size to fit. */
+[data-os="ios"][data-layout="bar"][data-view="remote"] #bar-title { font-size: 28px; }

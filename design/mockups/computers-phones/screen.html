@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Kagaz · Computers &amp; phones mockup</title>
+<!--
+  One screen of "Computers & phones", wearing the app's own look: the
+  stylesheets, the system detection and the icons are the app's files, so
+  each system's skin here is the real one. Only mock.css and mock.js are new.
+    ?os=android|ios|windows|gnome|macos
+    &screen=list|add|device|viewer
+    &state=   list: empty | searching      add: signin
+              viewer: vnc | connecting | lost
+    &open=keys|picture                      (a viewer popover held open)
+  Names, addresses and readings are invented sample data; the remote screen
+  is a drawing, not a capture.
+-->
+<script src="../../../apps/desktop/ui/platform.js"></script>
+<link rel="stylesheet" href="../../../apps/desktop/ui/style.css">
+<link rel="stylesheet" href="../../../apps/desktop/ui/skins.css">
+<link rel="stylesheet" href="mock.css">
+</head>
+<body>
+  <aside id="sidebar" aria-label="Kagaz">
+    <div class="side-head">
+      <button id="pane-toggle" type="button" class="side-toggle" aria-label="Show or hide the names" title="Navigation"><span class="ic" data-icon="menu"></span></button>
+      <span class="side-title">Kagaz</span>
+    </div>
+    <ul id="categories">
+      <li data-cat="home" title="Home"><span class="cat-icon" data-icon="home"></span><span class="cat-name">Home</span><span class="cat-note muted">your devices</span></li>
+      <li data-cat="doorbell" title="Doorbell"><span class="cat-icon" data-icon="doorbell"></span><span class="cat-name">Doorbell</span><span class="cat-note muted">video intercom</span></li>
+      <li data-cat="cameras" title="Security cameras"><span class="cat-icon" data-icon="cameras"></span><span class="cat-name">Cameras</span><span class="cat-note muted">Tapo, through your account</span></li>
+      <li data-cat="print" title="Printers and scanners"><span class="cat-icon" data-icon="print"></span><span class="cat-name">Print &amp; scan</span><span class="cat-note muted">on the network and USB</span></li>
+      <li data-cat="fans" title="Ceiling fans"><span class="cat-icon" data-icon="fan"></span><span class="cat-name">Fans</span><span class="cat-note muted">Atomberg, over Bluetooth</span></li>
+      <li data-cat="remote" class="active" title="Computers and phones"><span class="cat-icon" data-m="computer"></span><span class="cat-name">Computers</span><span class="cat-note muted">view and control yours</span></li>
+      <li data-cat="tools" title="Tools"><span class="cat-icon" data-icon="tools"></span><span class="cat-name">Tools</span><span class="cat-note muted">tidy, crop, compress a file</span></li>
+      <li data-cat="settings" class="cat-foot" title="Settings"><span class="cat-icon" data-icon="settings"></span><span class="cat-name">Settings</span><span class="cat-note muted">accounts, about</span></li>
+    </ul>
+  </aside>
+
+  <div id="column">
+    <header id="bar">
+      <button id="bar-menu" type="button" class="bar-btn hidden" aria-label="Navigation"><span class="ic" data-icon="menu"></span></button>
+      <button id="bar-back" type="button" class="bar-btn bar-back hidden" aria-label="Back"><span class="ic" data-icon="back"></span><span class="bar-back-word">Home</span></button>
+      <h1 id="bar-title">Computers &amp; phones</h1>
+      <div class="bar-actions" id="bar-actions"></div>
+    </header>
+    <main id="main"></main>
+  </div>
+
+  <nav id="bottom-nav" aria-label="Kagaz">
+    <button type="button" data-cat="home" class="active"><span class="cat-icon" data-icon="home"></span><span class="cat-name">Home</span></button>
+    <button type="button" data-cat="tools"><span class="cat-icon" data-icon="tools"></span><span class="cat-name">Tools</span></button>
+    <button type="button" data-cat="settings"><span class="cat-icon" data-icon="settings"></span><span class="cat-name">Settings</span></button>
+  </nav>
+
+  <script src="../../../apps/desktop/ui/icons.js"></script>
+  <script src="mock.js"></script>
+</body>
+</html>
