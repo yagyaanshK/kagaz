@@ -255,6 +255,22 @@ fn phone_call_audio(app: AppHandle, on: bool) -> Result<(), String> {
     }
 }
 
+/// On Android: the call's microphone recorded by Kagaz itself, from both
+/// of the phone's microphones (CallMic.kt), muted or not. False elsewhere,
+/// and when it cannot: the page then records it.
+#[tauri::command]
+fn phone_call_mic(app: AppHandle, on: bool, muted: bool) -> Result<bool, String> {
+    #[cfg(target_os = "android")]
+    {
+        mobile::call_mic(&app, on, muted)
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = (app, on, muted);
+        Ok(false)
+    }
+}
+
 /// On a phone: whether doorbell calls ring in Do Not Disturb; none on a
 /// computer, which has no such switch for Kagaz.
 #[tauri::command]
@@ -1766,6 +1782,44 @@ mod reopen {
         }
     }
 
+    /// The call's microphone, recorded by Kagaz itself (CallMic.kt): 8 kHz
+    /// 16-bit mono, 40 ms at a time, into the call.
+    #[no_mangle]
+    pub extern "system" fn Java_app_kagaz_KagazNative_micPcm(
+        env: jni::JNIEnv,
+        _class: jni::objects::JClass,
+        data: jni::objects::JByteArray,
+    ) {
+        let Some(app) = APP.get() else {
+            return;
+        };
+        let Ok(bytes) = env.convert_byte_array(&data) else {
+            return;
+        };
+        let pcm: Vec<i16> = bytes.chunks_exact(2).map(|b| i16::from_le_bytes([b[0], b[1]])).collect();
+        super::calls::send_mic(app, &pcm);
+    }
+
+    /// What the call's microphone is doing (CallMic.kt, JSON), for the page
+    /// (the "call-mic" event) and the call's log.
+    #[no_mangle]
+    pub extern "system" fn Java_app_kagaz_KagazNative_micState(
+        mut env: jni::JNIEnv,
+        _class: jni::objects::JClass,
+        state: jni::objects::JString,
+    ) {
+        let Some(app) = APP.get() else {
+            return;
+        };
+        let Ok(s) = env.get_string(&state) else {
+            return;
+        };
+        let s: String = s.into();
+        kagaz_core::cameras::tapo::serve::log(&format!("call microphone: {s}"));
+        use tauri::Emitter;
+        let _ = app.emit("call-mic", s);
+    }
+
     /// The ring notification (KagazNative.kt): 0 its card was tapped (show
     /// the ring), 1 Answer, 2 Decline; 3 Hang up (picture-in-picture).
     #[no_mangle]
@@ -1898,6 +1952,7 @@ pub fn run() {
             camera_talk,
             phone_speaker,
             phone_call_audio,
+            phone_call_mic,
             ring_in_dnd,
             ring_dnd_settings,
             camera_talk_stop,

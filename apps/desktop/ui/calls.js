@@ -558,6 +558,11 @@
 
   function releaseMic() {
     if (!mic) return;
+    if (mic.native) {
+      mic = null;
+      invoke("phone_call_mic", { on: false, muted: false }).catch(() => {});
+      return;
+    }
     mic.stream.getTracks().forEach((t) => t.stop());
     try {
       mic.source.disconnect();
@@ -574,6 +579,23 @@
     try {
       await takeCallAudio();
       if (!status || status.phase !== "talking") return;
+      // Android: Kagaz records the call itself, from both of the phone's
+      // microphones where the phone gives them, else the bottom one
+      // (CallMic.kt): the page can only have the one Android picks, which
+      // on the loudspeaker is the second microphone. The page's microphone
+      // stays the way when Android does not let Kagaz do that.
+      if (/Android/i.test(navigator.userAgent)) {
+        const native = await invoke("phone_call_mic", { on: true, muted }).catch(() => false);
+        if (native) {
+          if (!status || status.phase !== "talking") {
+            invoke("phone_call_mic", { on: false, muted: false }).catch(() => {});
+            return;
+          }
+          mic = { native: true };
+          clearInterval(micWatch);
+          return;
+        }
+      }
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw new Error("this window cannot use the microphone");
       const stream = await openMic();
       if (!status || status.phase !== "talking") {
@@ -749,10 +771,30 @@
   });
   $("call-mute").addEventListener("click", () => {
     muted = !muted;
+    if (mic && mic.native) invoke("phone_call_mic", { on: true, muted }).catch(() => {});
     setToggle("call-mute", muted, muted ? "micOff" : "mic", muted ? "Unmute" : "Mute", muted ? "Your microphone is off; tap to turn it on" : "Mute your microphone");
   });
 
   listen("call-event", (e) => render(e.payload));
+  // The phone's own microphone (Android, CallMic.kt): which way it records,
+  // and a word on the call when it hears nothing at all.
+  let micSilentNote = false;
+  listen("call-mic", (e) => {
+    let s = null;
+    try {
+      s = JSON.parse(e.payload);
+    } catch (err) {
+      return;
+    }
+    if (!mic || !mic.native) return;
+    if (s.silent) {
+      micSilentNote = true;
+      note("They may not hear you: the phone's microphones hear nothing. A microphone hole may be blocked, or another app may be using it. Kagaz keeps trying.");
+    } else if (micSilentNote) {
+      micSilentNote = false;
+      note("");
+    }
+  });
   listen("call-video", (e) => {
     videoStats = e.payload;
   });

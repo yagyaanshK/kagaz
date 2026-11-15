@@ -39,6 +39,12 @@ object KagazNative {
     /** The call is in (or out of) a picture-in-picture window. */
     @JvmStatic external fun pip(on: Boolean)
 
+    /** The call's microphone (CallMic): 8 kHz 16-bit mono PCM, little-endian. */
+    @JvmStatic external fun micPcm(data: ByteArray)
+
+    /** What the call's microphone is doing (CallMic), as JSON, for the page. */
+    @JvmStatic external fun micState(json: String)
+
     fun sendPip(on: Boolean) {
         try {
             pip(on)

@@ -558,6 +558,13 @@ pub async fn calls_audio(app: AppHandle, data: String) -> Result<(), String> {
     .await
 }
 
+/// Sound from the phone's own microphone (Android, CallMic.kt): 8 kHz
+/// 16-bit mono; dropped when no call is connected.
+#[cfg(target_os = "android")]
+pub fn send_mic(app: &AppHandle, pcm: &[i16]) {
+    let _ = with_phone(app, |p| p.send_audio(pcm));
+}
+
 /// A picture from the page's camera: H.264 (Annex-B), base64.
 #[tauri::command]
 pub async fn calls_video(app: AppHandle, data: String) -> Result<(), String> {

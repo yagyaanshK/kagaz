@@ -479,6 +479,20 @@ pub fn call_audio(app: &AppHandle, on: bool) -> Result<(), String> {
     phone(app)?.run_mobile_plugin::<()>("callAudio", SpeakerArgs { on }).map_err(|e| e.to_string())
 }
 
+#[derive(Serialize)]
+struct MicArgs {
+    on: bool,
+    muted: bool,
+}
+
+/// The call's microphone recorded by Kagaz itself, from both of the phone's
+/// microphones (CallMic.kt); its sound comes in through KagazNative.micPcm.
+/// False when Android does not let it (the page's microphone is then used).
+pub fn call_mic(app: &AppHandle, on: bool, muted: bool) -> Result<bool, String> {
+    let r: On = phone(app)?.run_mobile_plugin("callMic", MicArgs { on, muted }).map_err(|e| e.to_string())?;
+    Ok(r.on)
+}
+
 #[derive(Deserialize)]
 struct On {
     on: bool,

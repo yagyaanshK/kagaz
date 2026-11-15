@@ -100,6 +100,12 @@ class SpeakerArgs {
 }
 
 @InvokeArg
+class MicArgs {
+    var on: Boolean = true
+    var muted: Boolean = false
+}
+
+@InvokeArg
 class SecretArgs {
     lateinit var name: String
     var value: String? = null
@@ -375,6 +381,22 @@ class KagazPlugin(private val first: Activity) : Plugin(first) {
         val args = invoke.parseArgs(SpeakerArgs::class.java)
         CallAudio.set(activity, args.on)
         invoke.resolve()
+    }
+
+    // The call's microphone, recorded by Kagaz itself from both of the
+    // phone's microphones (see CallMic); false when it may not (the page's
+    // microphone is then the way). Called again to mute or unmute.
+    @Command
+    fun callMic(invoke: Invoke) {
+        val args = invoke.parseArgs(MicArgs::class.java)
+        val ret = JSObject()
+        if (args.on) {
+            ret.put("on", CallMic.start(activity, args.muted))
+        } else {
+            CallMic.stop()
+            ret.put("on", false)
+        }
+        invoke.resolve(ret)
     }
 
     // Whether doorbell calls ring in Do Not Disturb: Android keeps that
