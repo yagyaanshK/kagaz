@@ -215,3 +215,131 @@ pub fn why_not(device: &Device, reports: &[PathReport], tailscale: &tailscale::T
     }
     parts.join("; ")
 }
+
+/// The path to show for a device: one that answered for the way that
+/// shows its screen (else for any way), the quickest of them.
+pub fn best(device: &Device, reports: &[PathReport]) -> Option<Answer> {
+    let screen = device.screen_way();
+    let mut ok: Vec<&Answer> = reports.iter().filter_map(|r| r.outcome.as_ref().ok()).collect();
+    ok.sort_by_key(|a| (Some(a.way) != screen, a.millis));
+    ok.first().map(|a| (*a).clone())
+}
+
+/// What is known of a host before it is added.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct Described {
+    /// Where to reach it: the host as given, or its Tailscale address when
+    /// it was given by its Tailscale name.
+    pub host: String,
+    pub ways: Vec<Way>,
+    /// What each way's server said of itself, in the same order.
+    pub banners: Vec<String>,
+    pub identity: Identity,
+    /// From Tailscale, when the host is one of its devices.
+    pub system: String,
+    /// A name to suggest: Tailscale's, else the certificate's, else the host.
+    pub name: String,
+}
+
+/// Ask a host what it speaks (unless `ways` already says), and gather what
+/// else is known of it.
+pub fn describe(host: &str, ways: &[Way], tailscale: &tailscale::Tailscale, timeout: Duration) -> Described {
+    let host = host.trim();
+    let peer = tailscale.peers().iter().find(|p| {
+        p.address == host || p.name.eq_ignore_ascii_case(host) || p.dns_name.eq_ignore_ascii_case(host.trim_end_matches('.'))
+    });
+    let reach_host = peer.map(|p| p.address.clone()).unwrap_or_else(|| host.to_string());
+    let mut out = Described {
+        host: reach_host.clone(),
+        ways: ways.to_vec(),
+        banners: ways.iter().map(|_| String::new()).collect(),
+        system: peer.map(|p| p.os.to_ascii_lowercase()).unwrap_or_default(),
+        ..Default::default()
+    };
+    if ways.is_empty() {
+        for (way, _, seen) in detect(&reach_host, timeout) {
+            if !seen.identity.is_empty() {
+                out.identity = seen.identity.clone();
+            }
+            out.ways.push(way);
+            out.banners.push(if way.speaks == Speaks::Rdp { String::new() } else { seen.banner });
+        }
+    }
+    out.name = peer
+        .map(|p| p.name.clone())
+        .or_else(|| out.identity.name.clone())
+        .unwrap_or_else(|| host.to_string());
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_best_answer_is_the_screen_way_then_the_quickest() {
+        let d = Device {
+            ways: vec![Way::new(Speaks::Ssh), Way::new(Speaks::Rdp)],
+            paths: vec![PathTo::new("192.0.2.20"), PathTo::new("100.64.0.7")],
+            ..Default::default()
+        };
+        let answer = |path: usize, speaks: Speaks, millis: u32| PathReport {
+            path,
+            way: Way::new(speaks),
+            outcome: Ok(Answer {
+                path,
+                way: Way::new(speaks),
+                addr: "192.0.2.20:1".parse().unwrap(),
+                millis,
+                seen: Seen {
+                    speaks,
+                    banner: String::new(),
+                    identity: Default::default(),
+                },
+            }),
+        };
+        let reports = vec![answer(0, Speaks::Ssh, 2), answer(1, Speaks::Rdp, 40), answer(0, Speaks::Rdp, 9)];
+        let b = best(&d, &reports).unwrap();
+        assert_eq!((b.path, b.way.speaks, b.millis), (0, Speaks::Rdp, 9));
+    }
+
+    #[test]
+    fn a_tailscale_name_is_reached_at_its_address() {
+        let ts = tailscale::Tailscale::On {
+            peers: vec![tailscale::Peer {
+                name: "travel-laptop".into(),
+                dns_name: "travel-laptop.example.ts.net".into(),
+                os: "Linux".into(),
+                address: "100.64.0.7".into(),
+                online: true,
+            }],
+        };
+        let d = describe("Travel-Laptop", &[Way::new(Speaks::Ssh)], &ts, Duration::from_millis(100));
+        assert_eq!(d.host, "100.64.0.7");
+        assert_eq!(d.system, "linux");
+        assert_eq!(d.name, "travel-laptop");
+        // Not a Tailscale device: the host as given, named after itself.
+        let d = describe("192.0.2.20", &[Way::new(Speaks::Rdp)], &ts, Duration::from_millis(100));
+        assert_eq!((d.host.as_str(), d.name.as_str(), d.system.as_str()), ("192.0.2.20", "192.0.2.20", ""));
+    }
+
+    #[test]
+    fn out_of_reach_says_why() {
+        let d = Device {
+            ways: vec![Way::new(Speaks::Rdp)],
+            paths: vec![PathTo::new("100.64.0.7")],
+            ..Default::default()
+        };
+        assert_eq!(why_not(&d, &[], &tailscale::Tailscale::Off), "Tailscale is turned off here");
+        let ts = tailscale::Tailscale::On {
+            peers: vec![tailscale::Peer {
+                name: "x".into(),
+                dns_name: String::new(),
+                os: String::new(),
+                address: "100.64.0.7".into(),
+                online: false,
+            }],
+        };
+        assert!(why_not(&d, &[], &ts).starts_with("it is offline in Tailscale"));
+    }
+}

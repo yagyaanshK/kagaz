@@ -18,6 +18,7 @@ const KagazBrands = (() => {
     society: KagazIcons.svg("society"),
     purifier: KagazIcons.svg("purifier"),
     fan: KagazIcons.svg("fan"),
+    computer: KagazIcons.svg("computer"),
     room: KagazIcons.svg("home"),
     sip: KagazIcons.svg("doorbell"),
     other: KagazIcons.svg("plus"),
@@ -29,6 +30,7 @@ const KagazBrands = (() => {
     { id: "print", name: "Printers & scanners", note: "On the network and USB", page: "print", supported: true },
     { id: "fan", name: "Ceiling fans", note: "Over Bluetooth, and Wi-Fi", page: "fans", supported: true },
     { id: "purifier", name: "Air purifiers", note: "Philips, on the Wi-Fi network", page: "purifiers", supported: true },
+    { id: "computer", name: "Computers & phones", note: "See and use your own from here", page: "remote", supported: true },
     { id: "society", name: "Society gate", note: "Visitors and vehicles at your gate", page: "society", supported: true },
     { id: "camera", name: "Cameras", note: "DSLR and mirrorless", supported: false },
     { id: "vacuum", name: "Robot vacuums", supported: false },
@@ -164,6 +166,15 @@ const KagazBrands = (() => {
     purifier: [
       B("philips", "Philips", "philips", "#0b5ed7", true),
       B("other", "Another purifier", "", "#2f6f4e", true, /^$/),
+    ],
+    // By what the device runs: Remote Desktop (Windows, GNOME) and VNC are
+    // spoken; a Mac's own screen sharing and an iPhone are not yet.
+    computer: [
+      B("windows", "Windows", "", "#0078d4", true),
+      B("linux", "Linux", "", "#e95420", true),
+      B("android", "Android phone", "", "#3ddc84", true),
+      B("mac", "Mac", "", "#555555"),
+      B("iphone", "iPhone", "", "#555555"),
     ],
     ac: [
       B("daikin", "Daikin", "", "#0097e0"),

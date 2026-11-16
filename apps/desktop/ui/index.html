@@ -25,6 +25,7 @@
       <li data-cat="print" tabindex="0" role="button" title="Printers and scanners"><span class="cat-icon" data-icon="print" aria-hidden="true"></span><span class="cat-name">Print &amp; scan</span><span class="cat-note muted">on the network and USB</span></li>
       <li data-cat="fans" tabindex="0" role="button" title="Ceiling fans"><span class="cat-icon" data-icon="fan" aria-hidden="true"></span><span class="cat-name">Fans</span><span class="cat-note muted">Atomberg, over Bluetooth</span></li>
       <li data-cat="purifiers" tabindex="0" role="button" title="Air purifiers"><span class="cat-icon" data-icon="purifier" aria-hidden="true"></span><span class="cat-name">Purifiers</span><span class="cat-note muted">Philips, on the network</span></li>
+      <li data-cat="remote" tabindex="0" role="button" title="Computers and phones"><span class="cat-icon" data-icon="computer" aria-hidden="true"></span><span class="cat-name">Computers</span><span class="cat-note muted">yours, from here</span></li>
       <li data-cat="society" tabindex="0" role="button" title="Society gate"><span class="cat-icon" data-icon="society" aria-hidden="true"></span><span class="cat-name">Society gate</span><span class="cat-note muted">MyGate, Park+</span></li>
       <li data-cat="tools" tabindex="0" role="button" title="Tools"><span class="cat-icon" data-icon="tools" aria-hidden="true"></span><span class="cat-name">Tools</span><span class="cat-note muted">tidy, crop, compress a file</span></li>
       <li data-cat="settings" tabindex="0" role="button" class="cat-foot" title="Settings"><span class="cat-icon" data-icon="settings" aria-hidden="true"></span><span class="cat-name">Settings</span><span class="cat-note muted">accounts, about</span></li>
@@ -147,6 +148,55 @@
       <ul id="purifiers-list" class="cards"></ul>
       <h3 id="purifiers-found-head" class="list-head hidden">Found nearby</h3>
       <ul id="purifiers-found" class="cards"></ul>
+    </section>
+
+    <!-- Computers & phones (remote.js): the person's own devices, every way
+         to reach each and how it does now, the ones nearby, and Add. The
+         viewer opens from a device's page once it is built. -->
+    <section id="remote" class="pane hidden">
+      <button type="button" class="back to-home">&#x2190; Home</button>
+      <div id="remote-list-view">
+        <div class="pane-head rc-tools">
+          <div class="fan-tools">
+            <button id="remote-rescan" type="button" title="Check your devices again and look for others on this network and in Tailscale"><span class="ic" data-icon="reload"></span><span>Look again</span></button>
+            <button id="remote-add" type="button" class="accent" title="Add a computer or phone"><span class="ic" data-icon="plus"></span><span>Add</span></button>
+          </div>
+        </div>
+        <p id="remote-note" class="muted" role="status"></p>
+        <div id="remote-empty" class="rc-empty hidden">
+          <span class="rc-empty-icon ic" data-icon="computer"></span>
+          <h3>No computers or phones yet</h3>
+          <p class="muted">Add one of yours, and Kagaz keeps every way to reach it and shows how it does. Seeing its screen here comes next.</p>
+          <button id="remote-empty-add" type="button" class="accent"><span class="ic" data-icon="plus"></span><span>Add a computer or phone</span></button>
+        </div>
+        <div id="remote-tiles" class="home-tiles rc-tiles"></div>
+        <h3 id="remote-found-head" class="list-head">Found nearby</h3>
+        <p id="remote-found-note" class="muted" role="status"></p>
+        <ul id="remote-found" class="rc-rows"></ul>
+      </div>
+      <div id="remote-add-view" class="rc-add hidden">
+        <section class="set-section">
+          <h3>Found on this network</h3>
+          <p id="remote-add-network-note" class="muted"></p>
+          <ul id="remote-add-network" class="rc-rows"></ul>
+        </section>
+        <section class="set-section">
+          <h3>In your Tailscale</h3>
+          <p id="remote-add-peers-note" class="muted"></p>
+          <ul id="remote-add-peers" class="rc-rows"></ul>
+        </section>
+        <section class="set-section">
+          <h3>By its address</h3>
+          <p id="remote-add-note" class="muted" role="status"></p>
+          <form id="remote-add-form" class="rc-form">
+            <label>Address<input id="remote-add-host" type="text" autocapitalize="none" autocorrect="off" spellcheck="false" enterkeyhint="next" aria-describedby="remote-add-hint"><small id="remote-add-hint">A name or an address, such as study-laptop.local or 192.0.2.20.</small></label>
+            <label>Name<input id="remote-add-name" type="text" enterkeyhint="done" aria-describedby="remote-add-name-hint"><small id="remote-add-name-hint">What to call it. Left empty, its own name is used.</small></label>
+            <label>It speaks<select id="remote-add-speaks"><option value="">Find out for me</option><option value="rdp">Remote Desktop (Windows, GNOME)</option><option value="vnc">VNC</option></select></label>
+            <div class="rc-buttons"><button id="remote-add-go" type="submit" class="accent">Add device</button></div>
+          </form>
+        </section>
+      </div>
+      <div id="remote-device-view" class="hidden"></div>
     </section>
 
     <!-- The society's gate (society.js): visitors through MyGate, vehicles
@@ -851,6 +901,7 @@
   <script src="fans.js"></script>
   <script src="purifiers.js"></script>
   <script src="society.js"></script>
+  <script src="remote.js"></script>
   <script src="history.js"></script>
   <script src="settings.js"></script>
   <script src="home.js"></script>

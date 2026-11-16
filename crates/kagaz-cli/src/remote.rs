@@ -126,15 +126,6 @@ fn trouble_words(t: &Trouble) -> String {
     t.to_string()
 }
 
-/// The quickest path that answered for the way that shows the screen (or
-/// for any way, when the device has none that does).
-fn best(d: &Device, reports: &[PathReport]) -> Option<Answer> {
-    let screen = d.screen_way();
-    let mut ok: Vec<&Answer> = reports.iter().filter_map(|r| r.outcome.as_ref().ok()).collect();
-    ok.sort_by_key(|a| (Some(a.way) != screen, a.millis));
-    ok.first().map(|a| (*a).clone())
-}
-
 fn report_json(d: &Device, r: &PathReport) -> serde_json::Value {
     let p = &d.paths[r.path];
     let mut v = serde_json::json!({
@@ -222,7 +213,7 @@ fn list(no_check: bool, json: bool) -> Result<()> {
         let at = remote::store::now();
         Devices::update(&list_path(), |all| {
             for (d, reports) in devices.devices.iter().zip(&checks) {
-                if let Some(a) = reports.as_deref().and_then(|r| best(d, r)) {
+                if let Some(a) = reports.as_deref().and_then(|r| remote::best(d, r)) {
                     all.note_reached(&d.id, a.path, at);
                     all.note_identity(&d.id, &a.seen.identity);
                 }
@@ -241,7 +232,7 @@ fn list(no_check: bool, json: bool) -> Result<()> {
                     "ways": d.ways.iter().map(Way::words).collect::<Vec<_>>(),
                 });
                 if let Some(reports) = reports {
-                    let answer = best(d, reports);
+                    let answer = remote::best(d, reports);
                     v["within_reach"] = answer.is_some().into();
                     v["paths"] = reports.iter().map(|r| report_json(d, r)).collect::<Vec<_>>().into();
                     if answer.is_none() {
@@ -263,7 +254,7 @@ fn list(no_check: bool, json: bool) -> Result<()> {
         println!("{}  ({})", d.name, what(d));
         match reports {
             None => {}
-            Some(reports) => match best(d, reports) {
+            Some(reports) => match remote::best(d, reports) {
                 Some(a) => println!("  within reach: {}, {} ms", d.paths[a.path].words(), a.millis),
                 None => println!("  out of reach: {}", remote::why_not(d, reports, &tailscale)),
             },
@@ -277,51 +268,36 @@ fn add(host: &str, name: Option<String>, user: Option<String>, asked: [(Speaks, 
     if host.is_empty() {
         bail!("an address or a name is needed");
     }
-    let tailscale = tailscale::status();
-    let peer = tailscale
-        .peers()
-        .iter()
-        .find(|p| p.address == host || p.name.eq_ignore_ascii_case(host) || p.dns_name.eq_ignore_ascii_case(host.trim_end_matches('.')));
-    // A Tailscale device given by its short name is reached by its address.
-    let reach_host = peer.map(|p| p.address.as_str()).unwrap_or(host);
-
-    let mut ways: Vec<Way> = asked
+    let asked: Vec<Way> = asked
         .iter()
         .filter_map(|(speaks, port)| port.map(|port| Way { speaks: *speaks, port }))
         .collect();
-    let mut identity = Default::default();
-    if ways.is_empty() {
-        println!("Asking {reach_host} what it speaks…");
-        let found = remote::detect(reach_host, QUICK);
-        if found.is_empty() {
-            bail!(
-                "nothing answered at {reach_host} for Remote Desktop, VNC or SSH. Check that it is on and that remote access is switched on there; \
-                 to add it anyway, say what it speaks: --rdp, --vnc or --ssh"
-            );
-        }
-        for (way, _, seen) in &found {
-            println!("  {}{}", way.words(), if seen.banner.is_empty() || way.speaks == Speaks::Rdp { String::new() } else { format!(" ({})", seen.banner) });
-            if !seen.identity.is_empty() {
-                identity = seen.identity.clone();
-            }
-            ways.push(*way);
+    if asked.is_empty() {
+        println!("Asking {host} what it speaks…");
+    }
+    let found = remote::describe(host, &asked, &tailscale::status(), QUICK);
+    if found.ways.is_empty() {
+        bail!(
+            "nothing answered at {} for Remote Desktop, VNC or SSH. Check that it is on and that remote access is switched on there; \
+             to add it anyway, say what it speaks: --rdp, --vnc or --ssh",
+            found.host
+        );
+    }
+    if asked.is_empty() {
+        for (way, banner) in found.ways.iter().zip(&found.banners) {
+            println!("  {}{}", way.words(), if banner.is_empty() { String::new() } else { format!(" ({banner})") });
         }
     }
-    let system = peer.map(|p| p.os.to_ascii_lowercase()).unwrap_or_default();
-    let name = name
-        .or_else(|| peer.map(|p| p.name.clone()))
-        .or_else(|| identity.name.clone())
-        .unwrap_or_else(|| host.to_string());
-    let mut paths = vec![PathTo::new(reach_host)];
+    let mut paths = vec![PathTo::new(&found.host)];
     if hotspot {
         paths.push(PathTo::gateway());
     }
     let device = Device {
-        name,
-        system,
-        ways,
+        name: name.unwrap_or(found.name),
+        system: found.system,
+        ways: found.ways,
         paths,
-        identity,
+        identity: found.identity,
         user,
         ..Default::default()
     };
@@ -533,28 +509,5 @@ mod tests {
         };
         assert_eq!(device, "study");
         assert_eq!(command, ["uname", "-a"]);
-    }
-
-    #[test]
-    fn the_best_answer_is_the_screen_way_then_the_quickest() {
-        let d = Device {
-            ways: vec![Way::new(Speaks::Ssh), Way::new(Speaks::Rdp)],
-            paths: vec![PathTo::new("192.0.2.20"), PathTo::new("100.64.0.7")],
-            ..Default::default()
-        };
-        let answer = |path: usize, speaks: Speaks, millis: u32| PathReport {
-            path,
-            way: Way::new(speaks),
-            outcome: Ok(Answer {
-                path,
-                way: Way::new(speaks),
-                addr: "192.0.2.20:1".parse().unwrap(),
-                millis,
-                seen: remote::Seen { speaks, banner: String::new(), identity: Default::default() },
-            }),
-        };
-        let reports = vec![answer(0, Speaks::Ssh, 2), answer(1, Speaks::Rdp, 40), answer(0, Speaks::Rdp, 9)];
-        let b = best(&d, &reports).unwrap();
-        assert_eq!((b.path, b.way.speaks, b.millis), (0, Speaks::Rdp, 9));
     }
 }

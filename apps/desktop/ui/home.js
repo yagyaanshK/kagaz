@@ -232,6 +232,21 @@ const KagazHome = (() => {
     return { id: "purifiers", icon: "purifier", title: "Air purifiers", status: "Philips", devices: devs, open, chips: [], count: devs.length };
   }
 
+  // The person's computers and phones, as last known (their page checks
+  // them; Home does not, so it opens at once).
+  async function remoteKind() {
+    if (typeof KagazRemote === "undefined") return null;
+    const data = await invoke("remote_saved").catch(() => null);
+    if (!data || !data.devices.length) return null;
+    const open = () => selectCategory("remote");
+    const devs = data.devices.map((d) => ({
+      key: favKey("remote", d.name), name: d.name, sub: KagazRemote.homeWords(d), icon: KagazRemote.shapeIcon(d),
+      tone: KagazRemote.within(d.id) ? "on" : "",
+      open: () => { open(); KagazRemote.open(d.id); },
+    }));
+    return { id: "remote", icon: "computer", title: "Computers & phones", status: "", devices: devs, open, chips: [], count: devs.length };
+  }
+
   // The society's gate: who is waiting, when signed in (or looking at the sample).
   function societyKind() {
     if (typeof KagazSociety === "undefined") return null;
@@ -252,7 +267,7 @@ const KagazHome = (() => {
   let drawing = 0;
   async function show() {
     const mine = ++drawing;
-    const kinds = (await Promise.all([doorbellKind(), camerasKind(), printersKind(), fansKind(), purifiersKind(), societyKind()])).filter(Boolean);
+    const kinds = (await Promise.all([doorbellKind(), camerasKind(), printersKind(), fansKind(), purifiersKind(), remoteKind(), societyKind()])).filter(Boolean);
     if (mine !== drawing) return; // a newer drawing is on its way
 
     // Chips: what needs a look, most pressing first.
@@ -302,7 +317,7 @@ const KagazHome = (() => {
 
   // The navigation's kinds carry a short note ("2 devices", "none added
   // yet"); the sidebar shows it where it has room for it.
-  const KIND_EMPTY = { doorbell: "not set up yet", cameras: "not signed in yet", print: "none added yet", fans: "none added yet", purifiers: "none added yet", society: "not signed in yet" };
+  const KIND_EMPTY = { doorbell: "not set up yet", cameras: "not signed in yet", print: "none added yet", fans: "none added yet", purifiers: "none added yet", remote: "none added yet", society: "not signed in yet" };
   function kindNotes(kinds) {
     for (const [cat, empty] of Object.entries(KIND_EMPTY)) {
       const note = document.querySelector(`#categories li[data-cat="${cat}"] .cat-note`);
@@ -373,6 +388,9 @@ const KagazHome = (() => {
     } else if (kind.id === "purifier") {
       selectCategory("purifiers");
       KagazPurifiers.rescan();
+    } else if (kind.id === "computer") {
+      selectCategory("remote");
+      KagazRemote.openAdd();
     } else if (kind.id === "society") {
       selectCategory("society");
       KagazSociety.open(b.id === "parkplus" ? "vehicles" : "visitors");

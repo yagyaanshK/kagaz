@@ -1193,3 +1193,46 @@ dialog.ask.member-form { width: min(460px, calc(100vw - 32px)); max-height: calc
   .member-form .mf-field input, .member-form .mf-field select { min-height: 48px; font-size: 16px; }
   .member-form .actions button { min-height: 48px; flex: 1 1 40%; }
 }
+
+/* ---- Computers & phones (remote.js): the devices, the ones nearby, Add
+   and one device's page. Colours, radii and sizes are the skins' tokens. */
+#remote.pane { max-width: 1040px; }
+.rc-tiles.home-tiles { --tile-min: 320px; align-content: start; }
+[data-layout="bar"] .rc-tiles.home-tiles { grid-template-columns: 1fr; }
+.rc-tiles .tile-sub { white-space: normal; }
+.rc-tiles .tile-text { flex: 1 1 auto; }
+.rc-chev { flex: none; margin-right: 12px; }
+/* A phone's row is narrow: the icon and name already say what the device is. */
+[data-layout="bar"] .rc-tiles .rc-what { display: none; }
+.rc-dot { display: inline-block; width: 8px; height: 8px; margin-right: 6px; border-radius: 50%; border: 2px solid var(--muted); box-sizing: border-box; vertical-align: 1px; }
+.rc-dot.ok { background: var(--ok); border-color: var(--ok); }
+.rc-rows { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.rc-row { display: flex; align-items: center; gap: 12px; min-height: 56px; padding: 6px 12px; border-radius: var(--r-card, 12px); background: var(--tile-bg, var(--panel)); border: 1px solid var(--tile-line, var(--line)); }
+.rc-row .tile-text { flex: 1 1 auto; }
+.rc-row.off .tile-name, .rc-row.off .tile-icon { opacity: 0.6; }
+.rc-empty { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 40px 16px 24px; text-align: center; }
+.rc-empty h3 { margin: 6px 0 0; font-size: 18px; }
+.rc-empty p { margin: 0 0 10px; max-width: 440px; }
+.rc-empty-icon { color: var(--muted); }
+.rc-empty-icon svg { width: 56px; height: 56px; }
+.rc-form { display: flex; flex-direction: column; gap: 12px; max-width: 460px; margin-top: 8px; }
+.rc-form input[type="text"], .rc-form select { width: 100%; box-sizing: border-box; }
+.rc-buttons { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; margin-top: 4px; }
+.rc-buttons.start { justify-content: flex-start; margin-top: 10px; }
+.rc-add .set-section:first-of-type { margin-top: 0; }
+.rc-head { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.rc-head-text { flex: 1 1 220px; min-width: 0; }
+.rc-head-text .rc-name { margin: 0; font-size: 20px; overflow-wrap: anywhere; }
+.rc-head-text p { margin: 2px 0 0; }
+.rc-big { display: inline-flex; align-items: center; justify-content: center; width: 56px; height: 56px; border-radius: var(--r-card, 12px); background: var(--accent-soft, rgba(47, 111, 78, 0.14)); color: var(--accent); }
+.rc-big svg { width: 30px; height: 30px; }
+.rc-path-state { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; margin-left: auto; text-align: right; font-size: var(--small, 13px); }
+.rc-good { display: inline-flex; align-items: center; gap: 4px; color: var(--ok); }
+.rc-good svg { width: 16px; height: 16px; }
+.rc-remove { flex: none; }
+#remote .set-row > label { color: var(--text); font-size: inherit; flex-direction: row; }
+#remote .set-row input[type="text"] { min-width: 0; flex: 0 1 240px; }
+.rc-tools { justify-content: flex-end; }
+/* A phone's row: the path on its own line, how it does and Remove under it. */
+[data-layout="bar"] #remote .set-row > span:first-child { flex: 1 1 100%; }
+[data-layout="bar"] .rc-path-state { margin-left: 0; align-items: flex-start; text-align: left; flex: 1 1 auto; }

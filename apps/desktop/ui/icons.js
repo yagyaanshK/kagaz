@@ -41,6 +41,8 @@ const KagazIcons = (() => {
     mobile: '<rect x="7" y="2.5" width="10" height="19" rx="2.5"/><path d="M11 18.5h2"/>',
     family: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0M14.2 16.1A5 5 0 0 1 21.5 20"/><circle cx="16.5" cy="9" r="2.5"/>',
     device: '<rect x="4" y="4" width="16" height="16" rx="3"/><circle cx="12" cy="12" r="2"/>',
+    computer: '<rect x="3" y="4" width="18" height="12" rx="1.5"/><path d="M12 16v4M8 20h8"/>',
+    laptop: '<rect x="5" y="5" width="14" height="10" rx="1.5"/><path d="M3 18.5h18L19 15H5z"/>',
 
     // ---- actions ----
     plus: '<path d="M12 5v14M5 12h14"/>',

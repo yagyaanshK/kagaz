@@ -24,6 +24,7 @@ mod mobile;
 mod printers;
 mod printing;
 mod purifiers;
+mod remote;
 #[cfg(desktop)]
 mod ring_notice;
 mod ringtones;
@@ -2015,6 +2016,16 @@ pub fn run() {
             purifiers::purifier_add,
             purifiers::purifier_forget,
             purifiers::purifier_rename,
+            remote::remote_saved,
+            remote::remote_check,
+            remote::remote_nearby,
+            remote::remote_describe,
+            remote::remote_add,
+            remote::remote_rename,
+            remote::remote_forget,
+            remote::remote_path_add,
+            remote::remote_path_remove,
+            remote::remote_settings,
             fans::room_add,
             fans::room_rename,
             fans::room_remove,

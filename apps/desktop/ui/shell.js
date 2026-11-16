@@ -23,11 +23,12 @@ const KagazShell = (() => {
     home: "Home", add: "Add a device", settings: "Settings", tools: "Tools",
     doorbell: "Doorbell", cameras: "Security cameras", print: "Printers & scanners",
     fans: "Ceiling fans", purifiers: "Air purifiers", society: "Society gate",
+    remote: "Computers & phones",
   };
   // Places the navigation itself reaches: there, Back has nowhere to go
   // unless something is open inside the page.
   const PHONE_ROOTS = new Set(["home", "tools", "settings"]);
-  const ALL_ROOTS = new Set(["home", "tools", "settings", "doorbell", "cameras", "print", "fans", "purifiers", "society"]);
+  const ALL_ROOTS = new Set(["home", "tools", "settings", "doorbell", "cameras", "print", "fans", "purifiers", "society", "remote"]);
 
   let view = "home";
   let layout = "";
@@ -114,7 +115,7 @@ const KagazShell = (() => {
     $("bar-menu").classList.toggle("hidden", layout !== "minimal");
     root.dataset.view = view;
   }
-  const SHORT = { cameras: "Cameras", print: "Print & scan", fans: "Fans", purifiers: "Purifiers" };
+  const SHORT = { cameras: "Cameras", print: "Print & scan", fans: "Fans", purifiers: "Purifiers", remote: "Computers" };
   const shortTitle = (v) => SHORT[v] || TITLES[v];
 
   $("bar-back").addEventListener("click", () => {

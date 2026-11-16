@@ -334,6 +334,16 @@ the page uses the phone's own Bluetooth: the first look asks for Nearby
 devices (location before Android 12), and to turn Bluetooth on if it is
 off.
 
+On **Computers & phones**, the computers and phones you added each say
+how they are reached now and how fast ("Within reach: local network,
+12 ms") or why not; **Found nearby** lists what on this network shows its
+screen and the devices in your Tailscale that are not added yet. **Add**
+takes one of those or an address, asks the device what it speaks, and
+opens its page: every way to reach it with how each does, more addresses,
+"It also shares its hotspot" for a phone, what it is and who signs in.
+Seeing and using the device's screen from here comes next; the page says
+so rather than offering a Connect that does nothing.
+
 Each page keeps its place: leave a printer's page with a scan under way
 for the cameras, and coming back finds the scan where it was. Camera
 pictures play only while their page is chosen (on a phone, also only

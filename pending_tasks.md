@@ -345,8 +345,13 @@ Plan: `docs/remote-connection.md` (agreed 2026-11-16).
       paths, path, rename, forget, ssh, copy). Checked against a test
       server here; not yet against a real Windows computer, a phone's VNC
       server or over a hotspot. The gateway is read on Linux only.
-- [ ] **Step 1, the window's page**: the list, Add and a device's page, as
-      in `design/mockups/computers-phones/`.
+- [x] **Step 1, the window's page** (2026-11-16): the list with how each
+      device does, Found nearby (this network and Tailscale), Add, and a
+      device's page with its paths, as in
+      `design/mockups/computers-phones/`; on Home and in Add a device.
+      Checked in a browser with a stand-in backend (Ubuntu, Windows, macOS,
+      Android and iPhone looks), not yet looked at in the real window.
+      Connect, the screen settings and the password come with the viewer.
 - [ ] **Step 1, the sessions and the viewer**: Remote Desktop (IronRDP)
       and VNC, the picture in the window, mouse and keyboard, clipboard,
       sound, monitors, files; `kagaz remote open`, `clip` and `send`.
