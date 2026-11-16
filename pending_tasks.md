@@ -338,8 +338,18 @@ Plan: `docs/remote-connection.md` (agreed 2026-11-16).
 - [ ] **Step 0: the RDP library on a real Windows computer.** Resizing to
       the window, sound, clipboard, files, monitor choice.
 - [ ] **Step 0: mockups** of the device list, Add and the viewer.
-- [ ] **Step 1: the viewer in the desktop window** (RDP, VNC, paths tried
-      at once, the command line).
+- [x] **Step 1, reaching** (2026-11-16): the saved list
+      (`remote.toml`), every path tried at once, what a host speaks, the
+      certificate a Remote Desktop computer shows, the look over the local
+      network, Tailscale's list, and `kagaz remote` (list, add, nearby,
+      paths, path, rename, forget, ssh, copy). Checked against a test
+      server here; not yet against a real Windows computer, a phone's VNC
+      server or over a hotspot. The gateway is read on Linux only.
+- [ ] **Step 1, the window's page**: the list, Add and a device's page, as
+      in `design/mockups/computers-phones/`.
+- [ ] **Step 1, the sessions and the viewer**: Remote Desktop (IronRDP)
+      and VNC, the picture in the window, mouse and keyboard, clipboard,
+      sound, monitors, files; `kagaz remote open`, `clip` and `send`.
 
 ## Roadmap, not yet started
 

@@ -18,6 +18,7 @@ pub mod output;
 pub mod paths;
 pub mod print;
 pub mod purifiers;
+pub mod remote;
 pub mod scan;
 pub mod select;
 pub mod tools;

@@ -15,6 +15,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 mod fans;
+mod remote;
 
 #[derive(Parser)]
 #[command(
@@ -292,6 +293,11 @@ enum Command {
     Rooms {
         #[command(subcommand)]
         action: Option<fans::RoomAction>,
+    },
+    /// Your computers and phones: every way to reach each, how it does now, and ssh over whichever answers
+    Remote {
+        #[command(subcommand)]
+        action: Option<remote::RemoteAction>,
     },
 }
 
@@ -1277,6 +1283,7 @@ fn main() -> Result<()> {
         } => fans::list(seconds, no_scan, read, json),
         Command::Fan { fan, action } => fans::fan(&fan, action),
         Command::Rooms { action } => fans::rooms(action),
+        Command::Remote { action } => remote::run(action),
     }
 }
 

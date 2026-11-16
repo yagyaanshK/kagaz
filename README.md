@@ -189,6 +189,32 @@ Light, colour, brightness, sleep and timer are still from the community's
 notes, as is Wi-Fi, which awaits a fan on the network.
 
 ```
+kagaz remote add study-laptop.local --name "Study laptop"
+kagaz remote
+kagaz remote paths "Study laptop"
+kagaz remote ssh "Study laptop"
+```
+
+Your own computers and phones, and the fragile part of using one from
+another: reaching it. A device is remembered with every way to it (its
+address on the local network, its name, its Tailscale address, and for a
+phone that shares its hotspot, whatever the gateway is then); all are tried
+at once and the first to answer is used. `remote` lists the devices with
+how each is reached now and how fast, or why it is out of reach ("this
+device is not on its network; Tailscale is turned off here"). `remote add`
+asks the device what it speaks (Remote Desktop, VNC, SSH) and, for Remote
+Desktop, remembers the certificate it shows, so that a computer whose
+router gave it a new address is found again and another device at its old
+address is not mistaken for it. `remote nearby` shows what on this network
+shows its screen, and your Tailscale devices (read from Tailscale on this
+computer; nothing is changed there). `remote ssh` and `remote copy` run
+the system's own ssh and scp over the working path, with one known-hosts
+entry per device whichever address it has. The window's viewer for Remote
+Desktop and VNC is being built on this (plan:
+[docs/remote-connection.md](docs/remote-connection.md)). The list lives in
+`~/.config/kagaz/remote.toml`; passwords are never in it.
+
+```
 kagaz tapo login
 kagaz cameras
 ```
