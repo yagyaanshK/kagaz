@@ -40,6 +40,71 @@ impl TestServer {
     fn resize(&mut self, width: u16, height: u16) {
         writeln!(self.input, "size {width} {height}").unwrap();
     }
+
+    /// What a viewer offers is pasted "on the computer", which waits so
+    /// many milliseconds before it asks for each piece.
+    fn paste(&mut self, wait: u32) {
+        writeln!(self.input, "paste {wait}").unwrap();
+    }
+}
+
+/// A folder of files to send, gone when the test is over. What is in
+/// them is made here: nobody's files.
+struct Folder(std::path::PathBuf);
+
+impl Folder {
+    fn new(test: &str) -> Folder {
+        let path = std::env::temp_dir().join(format!("kagaz-rdp-test-{}-{test}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&path);
+        std::fs::create_dir_all(&path).unwrap();
+        Folder(path)
+    }
+
+    fn file(&self, name: &str, contents: &[u8]) -> std::path::PathBuf {
+        let path = self.0.join(name);
+        std::fs::write(&path, contents).unwrap();
+        path
+    }
+}
+
+impl Drop for Folder {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+/// Bytes that repeat nowhere near a piece's length.
+fn made(length: usize) -> Vec<u8> {
+    (0..length).map(|i| (i * 31 + i / 251) as u8).collect()
+}
+
+/// What the test server says of a file that arrived whole.
+fn arrived(name: &str, contents: &[u8]) -> String {
+    use sha2::Digest as _;
+    let sum: String = sha2::Sha256::digest(contents).iter().map(|b| format!("{b:02x}")).collect();
+    format!("File({name:?}, {}, {sum})", contents.len())
+}
+
+/// Collects what a session tells, to look through.
+struct Told<'a> {
+    session: &'a Session,
+    events: Vec<Event>,
+}
+
+impl Told<'_> {
+    fn of(session: &Session) -> Told<'_> {
+        Told {
+            session,
+            events: Vec::new(),
+        }
+    }
+
+    fn has(&mut self, want: &Event) -> bool {
+        until(|| {
+            self.events.extend(self.session.screen.take().events);
+            self.events.contains(want)
+        })
+    }
 }
 
 impl Drop for TestServer {
@@ -392,6 +457,172 @@ fn copied_text_travels_both_ways_in_any_script() {
     let want = format!("Text({:?})", "and once more");
     assert!(until(|| server.heard().contains(&want)), "heard {:?}", server.heard());
     assert_eq!(server.heard().iter().filter(|h| h.starts_with("Text(")).count(), 2);
+}
+
+#[test]
+fn files_wait_on_the_computers_clipboard_and_go_when_pasted() {
+    let Some(mut server) = serve(64, 64) else { return };
+    let folder = Folder::new("pasted");
+    let notes = "नमस्ते, notes\nof two lines\n".as_bytes();
+    let big = made(300_000);
+    let paths = vec![
+        folder.file("notes.txt", notes),
+        folder.file("big.bin", &big),
+        folder.file("empty.bin", b""),
+        // A name a Windows computer would refuse.
+        folder.file("what: when?.txt", b"soon"),
+    ];
+    let session = connect(&server, Some("asha"), Some("sesame"), &Trust::default()).unwrap();
+    let mut told = Told::of(&session);
+    // Offered at once, before the clipboard's channel is even ready.
+    session.send(Input::Files(paths));
+    let names: Vec<String> = ["notes.txt", "big.bin", "empty.bin", "what_ when_.txt"].map(String::from).into();
+    let offered = Event::Sending(Sending::Offered {
+        names,
+        bytes: (notes.len() + big.len() + 4) as u64,
+    });
+    assert!(told.has(&offered), "told {:?}", told.events);
+    assert!(until(|| server.heard().contains(&"Offer".to_string())), "heard {:?}", server.heard());
+    // Nothing goes until it is pasted there.
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(!server.heard().iter().any(|h| h.starts_with("File")), "heard {:?}", server.heard());
+    server.paste(0);
+    assert!(until(|| server.heard().contains(&"PasteDone".to_string())), "heard {:?}", server.heard());
+    let heard = server.heard();
+    // The computer sees names and sizes, not where the files are kept.
+    let list = format!(
+        "FileList([(\"notes.txt\", {}), (\"big.bin\", 300000), (\"empty.bin\", 0), (\"what_ when_.txt\", 4)])",
+        notes.len()
+    );
+    assert!(heard.contains(&list), "heard {heard:?}");
+    for (name, contents) in [("notes.txt", notes), ("big.bin", &big[..]), ("empty.bin", b""), ("what_ when_.txt", b"soon")] {
+        assert!(heard.contains(&arrived(name, contents)), "{name}: heard {heard:?}");
+        let taken = Event::Sending(Sending::Taken {
+            name: name.into(),
+            size: contents.len() as u64,
+        });
+        assert!(told.has(&taken), "{name}: told {:?}", told.events);
+    }
+    // Pasted once more, they go once more.
+    server.paste(0);
+    assert!(until(|| server.heard().iter().filter(|h| *h == "PasteDone").count() == 2), "heard {:?}", server.heard());
+    assert_eq!(server.heard().iter().filter(|h| **h == arrived("big.bin", &big)).count(), 2);
+}
+
+#[test]
+fn a_file_on_its_way_arrives_whole_when_something_else_is_copied() {
+    let Some(mut server) = serve(64, 64) else { return };
+    let folder = Folder::new("meanwhile");
+    let big = made(400_000);
+    let session = connect(&server, Some("asha"), Some("sesame"), &Trust::default()).unwrap();
+    let mut told = Told::of(&session);
+    session.send(Input::Files(vec![folder.file("big.bin", &big)]));
+    assert!(until(|| server.heard().contains(&"Offer".to_string())), "heard {:?}", server.heard());
+    // Pasted over a slow link; while it goes, text is copied here.
+    server.paste(40);
+    assert!(until(|| server.heard().iter().any(|h| h.starts_with("FileList"))), "heard {:?}", server.heard());
+    session.send(Input::Clipboard("copied meanwhile".into()));
+    assert!(told.has(&Event::Sending(Sending::Withdrawn)), "told {:?}", told.events);
+    let text = format!("Text({:?})", "copied meanwhile");
+    assert!(until(|| server.heard().contains(&text)), "heard {:?}", server.heard());
+    assert!(until(|| server.heard().contains(&arrived("big.bin", &big))), "heard {:?}", server.heard());
+    // The text was there before the file was all in.
+    let heard = server.heard();
+    let at = |what: &str| heard.iter().position(|h| h == what).unwrap();
+    assert!(at(&text) < at(&arrived("big.bin", &big)), "heard {heard:?}");
+    // How far it had got was told on the way, and that it is all there.
+    let taken = Event::Sending(Sending::Taken {
+        name: "big.bin".into(),
+        size: 400_000,
+    });
+    assert!(told.has(&taken), "told {:?}", told.events);
+    assert!(
+        told.events.iter().any(|e| matches!(e, Event::Sending(Sending::Going { name, .. }) if name == "big.bin")),
+        "told {:?}",
+        told.events
+    );
+}
+
+#[test]
+fn an_offer_ends_when_the_computer_copies_something_of_its_own() {
+    let Some(mut server) = serve(64, 64) else { return };
+    let folder = Folder::new("theirs");
+    let session = connect(&server, Some("asha"), Some("sesame"), &Trust::default()).unwrap();
+    let mut told = Told::of(&session);
+    session.send(Input::Files(vec![folder.file("notes.txt", b"notes")]));
+    assert!(until(|| server.heard().contains(&"Offer".to_string())), "heard {:?}", server.heard());
+    server.copy("the computer's own");
+    assert!(told.has(&Event::Sending(Sending::Withdrawn)), "told {:?}", told.events);
+    assert!(told.has(&Event::Clipboard("the computer's own".into())), "told {:?}", told.events);
+    // The same files can be offered again.
+    session.send(Input::Files(vec![folder.0.join("notes.txt")]));
+    assert!(until(|| server.heard().iter().filter(|h| *h == "Offer").count() == 2), "heard {:?}", server.heard());
+    server.paste(0);
+    assert!(until(|| server.heard().contains(&arrived("notes.txt", b"notes"))), "heard {:?}", server.heard());
+}
+
+#[test]
+fn the_text_already_here_does_not_push_offered_files_aside() {
+    let Some(mut server) = serve(64, 64) else { return };
+    let folder = Folder::new("aside");
+    let session = connect(&server, Some("asha"), Some("sesame"), &Trust::default()).unwrap();
+    let mut told = Told::of(&session);
+    session.send(Input::Clipboard("copied before".into()));
+    let text = format!("Text({:?})", "copied before");
+    assert!(until(|| server.heard().contains(&text)), "heard {:?}", server.heard());
+    session.send(Input::Files(vec![folder.file("notes.txt", b"notes")]));
+    assert!(until(|| server.heard().contains(&"Offer".to_string())), "heard {:?}", server.heard());
+    // The viewer says again what is on the clipboard here, as it does
+    // whenever the person comes back to it: the files stay on offer.
+    session.send(Input::Clipboard("copied before".into()));
+    std::thread::sleep(Duration::from_millis(300));
+    server.paste(0);
+    assert!(until(|| server.heard().contains(&arrived("notes.txt", b"notes"))), "heard {:?}", server.heard());
+    assert!(!told.events.contains(&Event::Sending(Sending::Withdrawn)));
+    // Asked for by the person, the same text takes the files' place.
+    session.send(Input::ClipboardAsked("copied before".into()));
+    assert!(told.has(&Event::Sending(Sending::Withdrawn)), "told {:?}", told.events);
+    assert!(until(|| server.heard().iter().filter(|h| **h == text).count() == 2), "heard {:?}", server.heard());
+    // And asked for once more, it is not said once more.
+    session.send(Input::ClipboardAsked("copied before".into()));
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(server.heard().iter().filter(|h| **h == text).count(), 2);
+}
+
+#[test]
+fn files_that_cannot_be_sent_are_said_in_words() {
+    let Some(server) = serve(64, 64) else { return };
+    let folder = Folder::new("refused");
+    let session = connect(&server, Some("asha"), Some("sesame"), &Trust::default()).unwrap();
+    let mut told = Told::of(&session);
+    let failed = |why: &str| Event::Sending(Sending::Failed { why: why.into() });
+    session.send(Input::Files(vec![folder.0.join("gone.txt")]));
+    assert!(told.has(&failed("gone.txt is not there")), "told {:?}", told.events);
+    std::fs::create_dir(folder.0.join("album")).unwrap();
+    session.send(Input::Files(vec![folder.file("one.txt", b"1"), folder.0.join("album")]));
+    assert!(told.has(&failed("album is a folder; only files can be sent yet")), "told {:?}", told.events);
+    session.send(Input::Files(Vec::new()));
+    assert!(told.has(&failed("no file was chosen")), "told {:?}", told.events);
+    // None of that reached the computer.
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(!server.heard().contains(&"Offer".to_string()), "heard {:?}", server.heard());
+}
+
+#[test]
+fn a_computer_that_takes_no_files_is_said_in_words() {
+    let Some(server) = serve_with(64, 64, &["--no-files"]) else { return };
+    let folder = Folder::new("no-files");
+    let session = connect(&server, Some("asha"), Some("sesame"), &Trust::default()).unwrap();
+    let mut told = Told::of(&session);
+    session.send(Input::Files(vec![folder.file("notes.txt", b"notes")]));
+    let failed = Event::Sending(Sending::Failed {
+        why: "this device does not take files over its clipboard".into(),
+    });
+    assert!(told.has(&failed), "told {:?}", told.events);
+    // Text still travels.
+    session.send(Input::Clipboard("text all the same".into()));
+    let want = format!("Text({:?})", "text all the same");
+    assert!(until(|| server.heard().contains(&want)), "heard {:?}", server.heard());
 }
 
 #[test]

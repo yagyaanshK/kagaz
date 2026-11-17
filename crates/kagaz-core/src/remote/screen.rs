@@ -102,8 +102,27 @@ pub enum Event {
     /// The device shows its ordinary arrow again.
     PointerDefault,
     Bell,
+    /// How files offered to the device are getting on.
+    Sending(Sending),
     /// The session is over, and why.
     Ended(String),
+}
+
+/// Files offered to the device (see [`super::Input::Files`]): they wait on
+/// its clipboard until they are pasted there, then go one by one.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(tag = "state", rename_all = "lowercase")]
+pub enum Sending {
+    /// They are on the device's clipboard, to be pasted there.
+    Offered { names: Vec<String>, bytes: u64 },
+    /// The device is taking this one; so much of it has gone.
+    Going { name: String, sent: u64, size: u64 },
+    /// The device has all of this one.
+    Taken { name: String, size: u64 },
+    /// They are no longer on offer: something else was copied since.
+    Withdrawn,
+    /// They could not be offered, or one could not be read.
+    Failed { why: String },
 }
 
 /// One step in bringing a shown copy of the screen up to date; the steps

@@ -222,6 +222,11 @@ fn forward(app: AppHandle, id: u64, session: remote::Session, channel: Channel<I
                     Event::Pointer(p) => (pointer_packet(&p), false),
                     Event::PointerDefault => (news_packet(serde_json::json!({ "type": "pointer-default" })), false),
                     Event::Bell => (news_packet(serde_json::json!({ "type": "bell" })), false),
+                    Event::Sending(how) => {
+                        let mut news = serde_json::to_value(&how).unwrap_or_default();
+                        news["type"] = "sending".into();
+                        (news_packet(news), false)
+                    }
                     Event::Ended(why) => (news_packet(serde_json::json!({ "type": "ended", "why": why })), true),
                 };
                 if !send(packet) || last {
@@ -438,9 +443,11 @@ pub fn remote_numbers(viewers: tauri::State<'_, Viewers>, session: u64) -> Resul
 }
 
 /// Offer what is on this computer's clipboard to the device. Says how
-/// many characters went, or none when there is no text to offer.
+/// many characters went, or none when there is no text to offer. `asked`
+/// when the person pressed the button for it: the text is then offered
+/// even over files offered since it was last said.
 #[tauri::command]
-pub async fn remote_clipboard_push(app: AppHandle, session: u64) -> Result<Option<usize>, String> {
+pub async fn remote_clipboard_push(app: AppHandle, session: u64, asked: Option<bool>) -> Result<Option<usize>, String> {
     if !CLIPBOARD_HERE {
         return Err("the clipboard is not carried on this system yet".into());
     }
@@ -449,10 +456,48 @@ pub async fn remote_clipboard_push(app: AppHandle, session: u64) -> Result<Optio
             return Ok(None);
         };
         let characters = text.chars().count();
-        app.state::<Viewers>().with(session, |open| open.input.send(Input::Clipboard(text)))?;
+        let input = if asked == Some(true) { Input::ClipboardAsked(text) } else { Input::Clipboard(text) };
+        app.state::<Viewers>().with(session, |open| open.input.send(input))?;
         Ok(Some(characters))
     })
     .await
+}
+
+/// Offer files to the device: they wait on its clipboard until they are
+/// pasted there. Without `paths` the person is asked which; says how many
+/// were offered, none when they chose nothing. How the files get on
+/// arrives with the session's news.
+#[tauri::command]
+pub async fn remote_send_files(app: AppHandle, session: u64, paths: Option<Vec<String>>) -> Result<usize, String> {
+    blocking(move || {
+        let paths: Vec<std::path::PathBuf> = match paths {
+            Some(paths) => paths.into_iter().map(Into::into).collect(),
+            None => {
+                use tauri_plugin_dialog::DialogExt;
+                let picked = app.dialog().file().set_title("Send to the device").blocking_pick_files();
+                picked.unwrap_or_default().into_iter().filter_map(|p| p.into_path().ok()).collect()
+            }
+        };
+        if paths.is_empty() {
+            return Ok(0);
+        }
+        let count = paths.len();
+        app.state::<Viewers>().with(session, |open| open.input.send(Input::Files(paths)))?;
+        Ok(count)
+    })
+    .await
+}
+
+/// Files the window was started to send (`kagaz remote send` starts it
+/// with `KAGAZ_SEND`, a list of paths): handed out once, to the first
+/// session that opens.
+#[tauri::command]
+pub fn remote_startup_files() -> Vec<String> {
+    static ASKED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if ASKED.swap(true, Ordering::AcqRel) {
+        return Vec::new();
+    }
+    std::env::var("KAGAZ_SEND").ok().and_then(|list| serde_json::from_str(&list).ok()).unwrap_or_default()
 }
 
 #[tauri::command]

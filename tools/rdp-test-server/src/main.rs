@@ -3,11 +3,11 @@
 //! and talk to it over its standard input and output; it can also be run
 //! by hand to try the viewer.
 //!
-//!   kagaz-rdp-test-server [--port N] [--size 1280x720] [--fit] [--user asha] [--password sesame]
+//!   kagaz-rdp-test-server [--port N] [--size 1280x720] [--fit] [--no-files] [--user asha] [--password sesame]
 //!
 //! With `--fit` its screen takes the size the viewer asks for, at the
 //! start and whenever the viewer's size changes, as a real computer's
-//! does.
+//! does. With `--no-files` it takes no files over its clipboard.
 //!
 //! It says `listening <address>` and `fingerprint <sha-256 of its
 //! certificate>`, then `heard <what a viewer did>` for every key and
@@ -16,6 +16,13 @@
 //! moves the card to that tick, `size <width> <height>` changes the
 //! screen's size, and `copy <text>` copies text "on the computer" (write
 //! `\n` for a line's end).
+//!
+//! Files a viewer offers are said as `heard Offer`; they are taken when
+//! `paste` comes on the input (`paste <ms>` waits that long before each
+//! piece, as a slow link would). It keeps none of them: it says `heard
+//! FileList([("name", size), …])`, then for each `heard File("name",
+//! size, sha-256 of what arrived)` or `heard FileFailed("name")`, and
+//! `heard PasteDone`.
 
 // The same card as the VNC test server and the tests draw.
 #[path = "../../../crates/kagaz-core/src/remote/pattern.rs"]
@@ -24,8 +31,8 @@ mod pattern;
 
 use ironrdp_cliprdr::backend::{ClipboardMessage, CliprdrBackend, CliprdrBackendFactory};
 use ironrdp_cliprdr::pdu::{
-    ClipboardFormat, ClipboardFormatId, ClipboardGeneralCapabilityFlags, FileContentsRequest, FileContentsResponse,
-    FormatDataRequest, FormatDataResponse, LockDataId,
+    ClipboardFormat, ClipboardFormatId, ClipboardFormatName, ClipboardGeneralCapabilityFlags, FileContentsFlags,
+    FileContentsRequest, FileContentsResponse, FileDescriptor, FormatDataRequest, FormatDataResponse, LockDataId,
 };
 use ironrdp_server::tokio_rustls::{rustls, TlsAcceptor};
 use ironrdp_server::{
@@ -137,12 +144,45 @@ impl RdpServerDisplay for Shared {
     }
 }
 
-/// The computer's clipboard: the text "copied" there, and the way to the
-/// viewer once one is connected.
+/// Files being taken from the viewer, one after another, a piece at a
+/// time.
+#[derive(Default)]
+struct Taking {
+    files: Vec<(String, u64)>,
+    /// The one being taken, and the number the viewer's offer is kept
+    /// under while it is.
+    index: usize,
+    kept: Option<u32>,
+    /// Its size is known; so much of it is here.
+    sized: bool,
+    size: u64,
+    position: u64,
+    sum: Sha256,
+    stream: u32,
+    /// Wait this long before asking for each piece.
+    wait: Duration,
+}
+
+impl std::fmt::Debug for Taking {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Taking({} of {})", self.index, self.files.len())
+    }
+}
+
+/// As much as a computer asks for at a time.
+const PIECE: u64 = 65536;
+
+/// The computer's clipboard: the text "copied" there, the files a viewer
+/// offers, and the way to the viewer once one is connected.
 #[derive(Clone, Debug, Default)]
 struct Clipboard {
     text: Arc<Mutex<Option<String>>>,
     to_viewer: Arc<Mutex<Option<UnboundedSender<ServerEvent>>>>,
+    /// It takes no files.
+    no_files: bool,
+    /// The viewer offers files, under this format.
+    offered: Arc<Mutex<Option<ClipboardFormatId>>>,
+    taking: Arc<Mutex<Taking>>,
 }
 
 impl Clipboard {
@@ -162,7 +202,60 @@ impl Clipboard {
     /// Text is copied on the computer: the viewer is told there is text.
     fn copy(&self, text: String) {
         *self.text.lock().unwrap() = Some(text);
+        *self.offered.lock().unwrap() = None;
         self.send(ClipboardMessage::SendInitiateCopy(self.formats()));
+    }
+
+    /// What the viewer offers is pasted on the computer: its list of
+    /// files is asked for, then each file.
+    fn paste(&self, wait: Duration) {
+        let offered = *self.offered.lock().unwrap();
+        match offered {
+            Some(format) => {
+                self.taking.lock().unwrap().wait = wait;
+                self.send(ClipboardMessage::SendInitiatePaste(format));
+            }
+            None => say("heard NothingToPaste"),
+        }
+    }
+
+    /// Ask for the next piece of the file being taken, or say all are in.
+    fn ask(&self, taking: &mut Taking) {
+        let Some((_, size)) = taking.files.get(taking.index) else {
+            say("heard PasteDone");
+            return;
+        };
+        std::thread::sleep(taking.wait);
+        taking.stream += 1;
+        let (flags, position, requested_size) = if taking.sized {
+            (FileContentsFlags::RANGE, taking.position, PIECE.min(size - taking.position) as u32)
+        } else {
+            (FileContentsFlags::SIZE, 0, 8)
+        };
+        self.send(ClipboardMessage::SendFileContentsRequest(FileContentsRequest {
+            stream_id: taking.stream,
+            index: taking.index as i32,
+            flags,
+            position,
+            requested_size,
+            data_id: taking.kept,
+        }));
+    }
+
+    /// The file being taken is over, well or not: on to the next.
+    fn file_over(&self, taking: &mut Taking, well: bool) {
+        let (name, size) = taking.files[taking.index].clone();
+        if well {
+            let sum: String = std::mem::take(&mut taking.sum).finalize().iter().map(|b| format!("{b:02x}")).collect();
+            say(&format!("heard File({name:?}, {size}, {sum})"));
+        } else {
+            taking.sum = Sha256::new();
+            say(&format!("heard FileFailed({name:?})"));
+        }
+        taking.index += 1;
+        taking.sized = false;
+        taking.position = 0;
+        self.ask(taking);
     }
 }
 
@@ -188,7 +281,13 @@ impl CliprdrBackend for Clipboard {
     }
 
     fn client_capabilities(&self) -> ClipboardGeneralCapabilityFlags {
-        ClipboardGeneralCapabilityFlags::empty()
+        if self.no_files {
+            return ClipboardGeneralCapabilityFlags::empty();
+        }
+        ClipboardGeneralCapabilityFlags::STREAM_FILECLIP_ENABLED
+            | ClipboardGeneralCapabilityFlags::FILECLIP_NO_FILE_PATHS
+            | ClipboardGeneralCapabilityFlags::HUGE_FILE_SUPPORT_ENABLED
+            | ClipboardGeneralCapabilityFlags::CAN_LOCK_CLIPDATA
     }
 
     fn on_ready(&mut self) {}
@@ -199,11 +298,35 @@ impl CliprdrBackend for Clipboard {
 
     fn on_process_negotiated_capabilities(&mut self, _capabilities: ClipboardGeneralCapabilityFlags) {}
 
-    // The viewer has text: ask for it at once.
+    // The viewer has text: ask for it at once. It has files: they wait
+    // until they are pasted.
     fn on_remote_copy(&mut self, available_formats: &[ClipboardFormat]) {
+        let files = available_formats
+            .iter()
+            .find(|f| f.name().is_some_and(|n| n.value() == ClipboardFormatName::FILE_LIST.value()))
+            .map(|f| f.id());
+        *self.offered.lock().unwrap() = files;
+        if files.is_some() {
+            say("heard Offer");
+        }
         if available_formats.iter().any(|f| f.id() == ClipboardFormatId::CF_UNICODETEXT) {
             self.send(ClipboardMessage::SendInitiatePaste(ClipboardFormatId::CF_UNICODETEXT));
         }
+    }
+
+    // The list of what was pasted: take the first file.
+    fn on_remote_file_list(&mut self, files: &[FileDescriptor], clip_data_id: Option<u32>) {
+        let files: Vec<(String, u64)> = files.iter().map(|f| (f.name.clone(), f.file_size.unwrap_or(0))).collect();
+        say(&format!("heard FileList({files:?})"));
+        let mut taking = self.taking.lock().unwrap();
+        *taking = Taking {
+            files,
+            kept: clip_data_id,
+            stream: taking.stream,
+            wait: taking.wait,
+            ..Taking::default()
+        };
+        self.ask(&mut taking);
     }
 
     fn on_format_data_request(&mut self, request: FormatDataRequest) {
@@ -223,7 +346,42 @@ impl CliprdrBackend for Clipboard {
     }
 
     fn on_file_contents_request(&mut self, _request: FileContentsRequest) {}
-    fn on_file_contents_response(&mut self, _response: FileContentsResponse<'_>) {}
+
+    fn on_file_contents_response(&mut self, response: FileContentsResponse<'_>) {
+        let mut taking = self.taking.lock().unwrap();
+        if taking.index >= taking.files.len() {
+            return;
+        }
+        if response.is_error() {
+            return self.file_over(&mut taking, false);
+        }
+        if !taking.sized {
+            let Ok(size) = response.data_as_size() else {
+                return self.file_over(&mut taking, false);
+            };
+            taking.sized = true;
+            taking.size = size;
+            // What the list said and what the file says must agree.
+            if size != taking.files[taking.index].1 {
+                return self.file_over(&mut taking, false);
+            }
+            if size == 0 {
+                return self.file_over(&mut taking, true);
+            }
+            return self.ask(&mut taking);
+        }
+        let piece = response.data();
+        if piece.is_empty() {
+            return self.file_over(&mut taking, false);
+        }
+        taking.sum.update(piece);
+        taking.position += piece.len() as u64;
+        if taking.position >= taking.size {
+            let whole = taking.position == taking.size;
+            return self.file_over(&mut taking, whole);
+        }
+        self.ask(&mut taking);
+    }
     fn on_lock(&mut self, _data_id: LockDataId) {}
     fn on_unlock(&mut self, _data_id: LockDataId) {}
 }
@@ -275,7 +433,10 @@ fn main() -> anyhow::Result<()> {
         fit: args.iter().any(|a| a == "--fit"),
     };
 
-    let clipboard = Clipboard::default();
+    let clipboard = Clipboard {
+        no_files: args.iter().any(|a| a == "--no-files"),
+        ..Clipboard::default()
+    };
     // What the tests (or a person) ask for; the end of the input ends it.
     {
         let shared = shared.clone();
@@ -295,6 +456,8 @@ fn main() -> anyhow::Result<()> {
                             shared.tick.store(n, Ordering::Release);
                         }
                     }
+                    ["paste"] => clipboard.paste(Duration::ZERO),
+                    ["paste", ms] => clipboard.paste(Duration::from_millis(ms.parse().unwrap_or(0))),
                     ["size", w, h] => {
                         if let (Ok(w), Ok(h)) = (w.parse(), h.parse()) {
                             *shared.size.lock().unwrap() = (w, h);

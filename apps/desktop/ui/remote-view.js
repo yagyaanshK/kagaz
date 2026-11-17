@@ -249,6 +249,10 @@ const KagazRemoteView = (() => {
     setChip(connected.millis);
     stage.focus();
     pushClipboard(true);
+    // Files the window was started to send (`kagaz remote send`).
+    invoke("remote_startup_files").then((paths) => {
+      if (paths && paths.length) sendFiles(paths);
+    }).catch(() => {});
     log(`open ${connected.info.speaks} ${connected.width}x${connected.height} over ${low(connected.path)} in ${connected.millis} ms`);
     if (hooks.connected) hooks.connected(state.device.id);
   }
@@ -297,19 +301,20 @@ const KagazRemoteView = (() => {
       $(id).disabled = !(on && has);
       $(id).title = on && !has ? without : title;
     };
-    set("rv-file", info && info.files, "Send a file", not("Sending files"));
+    set("rv-file", info && info.files, "Send files: they go to the device's clipboard, to be pasted there", not("Sending files"));
     set("rv-sound", info && info.sound, "The device's sound", not("The device's sound"));
     set("rv-screens", info && info.monitors, "Choose a monitor", not("Choosing a monitor"));
   }
 
   let toastTimer = 0;
-  function toast(text) {
+  function toast(text, stays) {
     const t = $("rv-toast");
     t.textContent = text;
     t.classList.remove("hidden");
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => t.classList.add("hidden"), 3500);
+    toastTimer = setTimeout(() => t.classList.add("hidden"), stays || 3500);
   }
+  const sentence = (e) => String(e).replace(/^./, (c) => c.toUpperCase()).replace(/\.?$/, ".");
 
   // ---------- the picture ----------
   function feed(m) {
@@ -350,7 +355,7 @@ const KagazRemoteView = (() => {
       else if (news.type === "clipboard") {
         toast(news.kept ? `Copied on ${cur.device.name}: ${news.characters} characters are on this computer's clipboard now.`
           : `Text was copied on ${cur.device.name}; the clipboard is not carried on this system yet.`);
-      }
+      } else if (news.type === "sending") sending(news);
     } else if (u8[0] === 3) {
       const w = dv.getUint16(4, true), h = dv.getUint16(6, true);
       const hx = dv.getUint16(8, true), hy = dv.getUint16(10, true);
@@ -546,12 +551,54 @@ const KagazRemoteView = (() => {
   async function pushClipboard(quietly) {
     if (!cur || cur.session == null) return;
     try {
-      const sent = await invoke("remote_clipboard_push", { session: cur.session });
+      const sent = await invoke("remote_clipboard_push", { session: cur.session, asked: !quietly });
       if (quietly) return;
       toast(sent == null ? "There is no text on this computer's clipboard."
         : `Offered ${sent} characters to ${cur.device.name}. Paste there to use them.`);
     } catch (e) {
-      if (!quietly) toast(String(e).replace(/^./, (c) => c.toUpperCase()) + ".");
+      if (!quietly) toast(sentence(e));
+    }
+  }
+
+  // ---------- files ----------
+  // Files go by the device's clipboard: Kagaz says which files there
+  // are, and the device reads them when they are pasted there. Without
+  // `paths` the person is asked which files.
+  async function sendFiles(paths) {
+    if (!cur || cur.session == null) return;
+    closePop();
+    try {
+      await invoke("remote_send_files", { session: cur.session, paths: paths || null });
+    } catch (e) {
+      toast(sentence(e));
+    }
+    stage.focus();
+  }
+
+  const size = (bytes) => (bytes < 1000 ? `${bytes} bytes` : bytes < 1e6 ? `${Math.round(bytes / 1000)} KB` : megabytes(bytes));
+  // How the files offered are getting on (see `Sending` in the core).
+  function sending(news) {
+    const there = cur.device.name;
+    if (news.state === "offered") {
+      const one = news.names.length === 1;
+      cur.offer = { waiting: true };
+      toast(`${one ? news.names[0] : `${news.names.length} files`} (${size(news.bytes)}) ${one ? "is" : "are"} on ${there}'s clipboard. `
+        + `Paste ${one ? "it" : "them"} there: open a folder and press Ctrl + V.`, 15000);
+      log(`files offered ${news.names.length}, ${news.bytes} bytes`);
+    } else if (news.state === "going") {
+      if (cur.offer) cur.offer.waiting = false;
+      toast(`Sending ${news.name}: ${Math.floor((news.sent / Math.max(news.size, 1)) * 100)}%`, 10000);
+    } else if (news.state === "taken") {
+      if (cur.offer) cur.offer.waiting = false;
+      toast(`${news.name} is on ${there}.`);
+      log(`file taken, ${news.size} bytes`);
+    } else if (news.state === "withdrawn") {
+      // Worth saying only while they were still waiting to be pasted.
+      if (cur.offer && cur.offer.waiting) toast("The files are no longer on offer: something else was copied since.");
+      cur.offer = null;
+    } else if (news.state === "failed") {
+      toast(sentence(news.why), 6000);
+      log("files not sent");
     }
   }
 
@@ -592,6 +639,8 @@ const KagazRemoteView = (() => {
     pushClipboard(false);
     stage.focus();
   });
+
+  $("rv-file").addEventListener("click", () => sendFiles());
 
   const megabytes = (bytes) => (bytes >= 1e9 ? `${(bytes / 1e9).toFixed(2)} GB` : `${(bytes / 1e6).toFixed(bytes >= 1e7 ? 0 : 1)} MB`);
   let lastReading = null;

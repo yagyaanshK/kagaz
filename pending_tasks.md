@@ -383,24 +383,45 @@ Plan: `docs/remote-connection.md` (agreed 2026-11-16).
       page. In `kagaz remote try`. Tested against `tools/rdp-test-server`
       (the library's server part showing the test card; a program of its
       own because it cannot share a build with the newest client parts).
-      **Not yet** against real Windows or GNOME, and not yet in the real
-      window. Computers only: phones come with step 2.
+      **Not yet** against real Windows or GNOME. In the real window
+      against the test server since 2026-11-17 (signed in, drawn to fit).
+      Computers only: phones come with step 2.
 - [x] **Step 1, Remote Desktop, clipboard text** both ways, in any
       script (2026-11-17): each side says it has text and hands it over
       when asked; Kagaz asks at once, so what is copied on the computer
       is on this device's clipboard without a further step. Tested
       against the test server, not yet against real Windows.
+- [x] **Step 1, Remote Desktop, sending files** (2026-11-17): by the
+      computer's clipboard, as Windows' own viewer does. Kagaz says which
+      files there are (names made fit for Windows, sizes, when last
+      changed; never where they are kept); the computer reads them piece
+      by piece when they are pasted there, and Kagaz tells how far each
+      has got. An offer the computer asked to keep stays to be had while
+      something else is copied; text already on the clipboard here does
+      not push the files aside, text the person asks to send does. In
+      the window: the Send files button and its notes. `kagaz remote
+      send` opens the window with the files on offer (pasting takes a
+      person), or stays in the terminal with `--here`. Tested against
+      the test server (which "pastes" on command and says the checksum
+      of what arrived), from the command line and in the real window
+      started by `kagaz remote send`. **Not yet** against real Windows
+      or GNOME; the file chooser behind the button was not pressed by
+      anyone yet. Whole folders are refused with a reason. Files from
+      the computer to here are not built (the library carries them).
 - [ ] **Step 1, Remote Desktop, what is left**: the H.264 picture (the fast one; needs the owner's choice of
       decoder for Ubuntu, the library brings none there); sound (needs
-      `libasound2-dev`); choosing a monitor; sending files (`kagaz remote
-      send`); a sign-in through a company domain (Kerberos) is refused
-      with a reason.
+      `libasound2-dev`); choosing a monitor (the owner to decide: over
+      Remote Desktop the session has one screen, made for the viewer);
+      whole folders, and files from the computer to here; a sign-in
+      through a company domain (Kerberos) is refused with a reason.
 - [x] **Step 1, the password in the system's password store** behind a
       Remember switch (2026-11-17): one entry per device under
       `app.kagaz.computers` (the owner's name for it), kept once the
       device accepted it, forgotten with the switch or the device. The
-      store's round trip is tested on Ubuntu; the whole flow in the real
-      window is not yet. The command line still asks each time.
+      store's round trip is tested on Ubuntu, and the real window signed
+      in to the test server with a remembered password (2026-11-17);
+      typing one and switching Remember on in the real window is not
+      tried yet. The command line still asks each time.
 - [ ] **Step 1, smaller things left in the viewer**: zoom beyond fit and
       own size; VNC over TLS (VeNCrypt), which some Linux VNC servers
       offer alone; the clipboard on Windows and macOS (comes with their

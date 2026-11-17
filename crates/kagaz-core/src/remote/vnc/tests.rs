@@ -315,6 +315,12 @@ fn copied_text_travels_both_ways_in_any_script() {
     assert!(until(|| server.heard().contains(&Heard::Text("and once more".into()))));
     let texts = server.heard().iter().filter(|h| matches!(h, Heard::Text(_))).count();
     assert_eq!(texts, 2);
+    // Files have no way there over VNC, and that is said.
+    session.send(Input::Files(vec!["report.pdf".into()]));
+    let none = Event::Sending(Sending::Failed {
+        why: "VNC carries no files".into(),
+    });
+    assert!(watch.until(|w| w.events.contains(&none)), "events: {:?}", watch.events);
 }
 
 #[test]

@@ -11,13 +11,13 @@ mod clip;
 
 use super::keys;
 use super::reach;
-use super::screen::{Event, Pointer, Rect, Screen};
+use super::screen::{Event, Pointer, Rect, Screen, Sending};
 use super::session::{
     buttons_for, Info, Input, InputSender, Numbers, OpenError, Session, SignIn, Trust, View, LEFT, MIDDLE, RIGHT,
 };
 use super::{Settings, Speaks};
 use ironrdp_blocking::Framed;
-use ironrdp_cliprdr::pdu::{ClipboardFormat, ClipboardFormatId, FormatDataResponse};
+use ironrdp_cliprdr::pdu::{ClipboardFormat, ClipboardFormatId, FileContentsResponse, FormatDataResponse};
 use ironrdp_cliprdr::CliprdrClient;
 use ironrdp_connector::connection_activation::{ConnectionActivationFactory, ConnectionActivationState};
 use ironrdp_connector::sspi::generator::NetworkRequest;
@@ -41,6 +41,7 @@ use ironrdp_session::{ActiveStage, ActiveStageBuilder, ActiveStageOutput};
 use std::collections::HashMap;
 use std::io::{self, Read, Write};
 use std::net::{Shutdown, SocketAddr, TcpStream};
+use std::sync::atomic::Ordering;
 use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant};
 
@@ -334,13 +335,26 @@ struct Running {
     /// Something was drawn since the last count.
     drew: bool,
     /// What the clipboard channel asked for and the session has yet to do.
-    clip_asked: clip::Queue,
-    /// The text copied here, to hand over when the computer asks.
-    clip_here: Option<String>,
+    clip: Arc<clip::Shared>,
+    /// What is here for the computer's clipboard.
+    here: Here,
+    /// The computer has been told of it.
+    here_said: bool,
     /// The text last seen, from either side: it is not sent back.
     clip_last: Option<String>,
+    /// Offers the computer asked to keep, by the number it gave each.
+    kept: HashMap<u32, Arc<clip::Offer>>,
+    /// When the viewer was last told how a file is getting on.
+    told: Option<Instant>,
     /// Keys that are down, to let go when the session closes.
     held: HashMap<String, FastPathInputEvent>,
+}
+
+/// What is here for the computer's clipboard: handed over when it asks.
+enum Here {
+    Nothing,
+    Text(String),
+    Files(Arc<clip::Offer>),
 }
 
 /// What the loop does next.
@@ -439,8 +453,9 @@ impl Running {
 
     /// Do what the clipboard channel asked for since the last look.
     fn clipboard(&mut self) -> Result<(), String> {
+        let carried = |e: &dyn std::fmt::Display| format!("the clipboard could not be carried ({e})");
         loop {
-            let Some(asked) = self.clip_asked.lock().unwrap_or_else(|e| e.into_inner()).pop_front() else {
+            let Some(asked) = self.clip.next() else {
                 return Ok(());
             };
             let text_format = [ClipboardFormat::new(ClipboardFormatId::CF_UNICODETEXT)];
@@ -448,42 +463,160 @@ impl Running {
                 continue;
             };
             let messages = match asked {
-                clip::Asked::List => channel.initiate_copy(if self.clip_here.is_some() { &text_format } else { &[] }),
-                clip::Asked::Fetch => channel.initiate_paste(ClipboardFormatId::CF_UNICODETEXT),
-                clip::Asked::Give(format) => channel.submit_format_data(match &self.clip_here {
-                    Some(text) if format == ClipboardFormatId::CF_UNICODETEXT => {
-                        FormatDataResponse::new_unicode_string(&clip::to_wire(text))
+                // Asked at the start, when only text can be said; files
+                // offered that early are said once the channel is ready.
+                clip::Asked::List => {
+                    let text = matches!(self.here, Here::Text(_));
+                    self.here_said = text;
+                    channel.initiate_copy(if text { &text_format } else { &[] }).map_err(|e| carried(&e))?
+                }
+                clip::Asked::Mine => {
+                    if self.here_said || !channel.is_ready() {
+                        continue;
                     }
-                    _ => FormatDataResponse::new_error(),
-                }),
+                    self.here_said = true;
+                    match &self.here {
+                        Here::Nothing => continue,
+                        Here::Text(_) => channel.initiate_copy(&text_format).map_err(|e| carried(&e))?,
+                        Here::Files(offer) => {
+                            let offered = if self.clip.files.load(Ordering::Acquire) {
+                                channel
+                                    .initiate_file_copy(offer.descriptors())
+                                    .map_err(|e| format!("the files could not be offered ({e})"))
+                            } else {
+                                Err("this device does not take files over its clipboard".to_string())
+                            };
+                            match offered {
+                                Ok(messages) => {
+                                    self.screen.post(Event::Sending(Sending::Offered {
+                                        names: offer.names(),
+                                        bytes: offer.bytes(),
+                                    }));
+                                    messages
+                                }
+                                Err(why) => {
+                                    self.here = Here::Nothing;
+                                    self.screen.post(Event::Sending(Sending::Failed { why }));
+                                    continue;
+                                }
+                            }
+                        }
+                    }
+                }
+                clip::Asked::Fetch => channel.initiate_paste(ClipboardFormatId::CF_UNICODETEXT).map_err(|e| carried(&e))?,
+                clip::Asked::Give(format) => channel
+                    .submit_format_data(match &self.here {
+                        Here::Text(text) if format == ClipboardFormatId::CF_UNICODETEXT => {
+                            FormatDataResponse::new_unicode_string(&clip::to_wire(text))
+                        }
+                        _ => FormatDataResponse::new_error(),
+                    })
+                    .map_err(|e| carried(&e))?,
                 clip::Asked::Text(text) => {
                     if self.clip_last.as_deref() != Some(&text) {
                         self.clip_last = Some(text.clone());
                         // What is here now is the computer's: no longer
                         // something to hand back to it.
-                        self.clip_here = None;
+                        self.withdraw();
                         self.screen.post(Event::Clipboard(text));
                     }
                     continue;
                 }
-            }
-            .map_err(|e| format!("the clipboard could not be carried ({e})"))?;
-            let frame = self
-                .stage
-                .process_svc_processor_messages(messages)
-                .map_err(|e| format!("the clipboard could not be carried ({e})"))?;
+                clip::Asked::Theirs => {
+                    if matches!(self.here, Here::Files(_)) {
+                        self.withdraw();
+                    }
+                    continue;
+                }
+                clip::Asked::Lock(number) => {
+                    if let (Here::Files(offer), true) = (&self.here, self.kept.len() < ironrdp_cliprdr::MAX_LOCKED_FILE_LISTS) {
+                        self.kept.insert(number, offer.clone());
+                    }
+                    continue;
+                }
+                clip::Asked::Unlock(number) => {
+                    self.kept.remove(&number);
+                    continue;
+                }
+                clip::Asked::Contents(request) => {
+                    // From the offer it asked to keep, else what is offered now.
+                    let offer = request.data_id.and_then(|number| self.kept.get(&number)).or(match &self.here {
+                        Here::Files(offer) => Some(offer),
+                        _ => None,
+                    });
+                    let (response, news) = match offer {
+                        Some(offer) => offer.answer(&request),
+                        None => (FileContentsResponse::new_error(request.stream_id), None),
+                    };
+                    match news {
+                        // Not each piece: a few times a second is enough to watch.
+                        Some(Sending::Going { .. })
+                            if self.told.is_some_and(|at| at.elapsed() < Duration::from_millis(200)) => {}
+                        Some(news) => {
+                            self.told = Some(Instant::now());
+                            self.screen.post(Event::Sending(news));
+                        }
+                        None => {}
+                    }
+                    channel.submit_file_contents(response).map_err(|e| carried(&e))?
+                }
+            };
+            let frame = self.stage.process_svc_processor_messages(messages).map_err(|e| carried(&e))?;
             self.write(&frame)?;
         }
     }
 
+    /// What was here for the computer is no longer on its clipboard.
+    fn withdraw(&mut self) {
+        if matches!(std::mem::replace(&mut self.here, Here::Nothing), Here::Files(_)) {
+            self.screen.post(Event::Sending(Sending::Withdrawn));
+        }
+        self.here_said = false;
+    }
+
     /// Text was copied here: tell the computer there is text to have.
-    fn copied_here(&mut self, text: &str) {
-        if self.clip_last.as_deref() == Some(text) {
+    /// The text last seen is not said again, unless the person asked and
+    /// something else is on offer now.
+    fn copied_here(&mut self, text: &str, asked: bool) {
+        let offered_now = matches!(&self.here, Here::Text(t) if t == text);
+        if self.clip_last.as_deref() == Some(text) && (offered_now || !asked) {
             return;
         }
+        self.withdraw();
         self.clip_last = Some(text.to_string());
-        self.clip_here = Some(text.to_string());
-        self.clip_asked.lock().unwrap_or_else(|e| e.into_inner()).push_back(clip::Asked::List);
+        self.here = Here::Text(text.to_string());
+        self.clip.ask(clip::Asked::Mine);
+    }
+
+    /// Files to send: tell the computer they are there to be pasted.
+    fn offer(&mut self, paths: &[std::path::PathBuf]) {
+        match clip::Offer::of(paths) {
+            Ok(offer) => {
+                self.withdraw();
+                self.here = Here::Files(Arc::new(offer));
+                self.clip.ask(clip::Asked::Mine);
+            }
+            Err(why) => self.screen.post(Event::Sending(Sending::Failed { why })),
+        }
+    }
+
+    /// The clipboard channel's housekeeping: offers the computer asked to
+    /// keep and then left alone are let go.
+    fn tidy_clipboard(&mut self) -> Result<(), String> {
+        let Some(channel) = self.stage.get_svc_processor_mut::<CliprdrClient>() else {
+            return Ok(());
+        };
+        let Ok(messages) = channel.drive_timeouts() else {
+            return Ok(());
+        };
+        let frame = self
+            .stage
+            .process_svc_processor_messages(messages)
+            .map_err(|e| format!("the clipboard could not be carried ({e})"))?;
+        if !frame.is_empty() {
+            self.write(&frame)?;
+        }
+        Ok(())
     }
 
     /// What the person did, as the events Remote Desktop has for it.
@@ -561,7 +694,9 @@ impl Running {
                     self.wanted = Some(fitting(*width, *height));
                 }
             }
-            Input::Clipboard(text) => self.copied_here(text),
+            Input::Clipboard(text) => self.copied_here(text, false),
+            Input::ClipboardAsked(text) => self.copied_here(text, true),
+            Input::Files(paths) => self.offer(paths),
             // The computer suits its picture to the link by itself.
             Input::Picture(_) => {}
             Input::Close => {}
@@ -606,6 +741,12 @@ fn run(mut s: Running, rx: mpsc::Receiver<Input>, mut waiter: waker::Waiter) -> 
             }
             let _ = s.connection.shutdown(Shutdown::Both);
             return "closed".into();
+        }
+        // What was copied or offered here goes to the clipboard channel
+        // before anything more is read from the computer, so that the
+        // channel and the session agree on what is here.
+        if let Err(why) = s.clipboard() {
+            return why;
         }
         if !events.is_empty() {
             let handled = s
@@ -667,6 +808,9 @@ fn run(mut s: Running, rx: mpsc::Receiver<Input>, mut waiter: waker::Waiter) -> 
             if let Some(delay) = measured_delay(&s.connection) {
                 s.numbers.set_delay(delay);
             }
+            if let Err(why) = s.tidy_clipboard() {
+                return why;
+            }
         }
         if quiet {
             waiter.wait(&s.connection, Duration::from_secs(1));
@@ -714,7 +858,7 @@ pub fn open(
     // Up to the point where both sides switch to TLS.
     let mut framed = Framed::new(counted);
     // With the channels for the clipboard and for asking for a new size.
-    let (clipboard, clip_asked) = clip::Backend::new();
+    let (clipboard, clip) = clip::Backend::new();
     let mut connector = ClientConnector::new(config(user.trim(), password, size, scale)?, local)
         .with_static_channel(CliprdrClient::new(Box::new(clipboard)))
         .with_static_channel(
@@ -807,9 +951,12 @@ pub fn open(
         wanted: None,
         buttons: 0,
         drew: false,
-        clip_asked,
-        clip_here: None,
+        clip,
+        here: Here::Nothing,
+        here_said: false,
         clip_last: None,
+        kept: HashMap::new(),
+        told: None,
         held: HashMap::new(),
     };
     {
@@ -828,7 +975,7 @@ pub fn open(
             name: identity.name.clone().unwrap_or_default(),
             encrypted: true,
             sound: false,
-            files: false,
+            files: true,
             monitors: false,
             resizes: fits,
             picture_setting: false,

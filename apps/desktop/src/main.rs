@@ -1628,7 +1628,8 @@ fn unix_now() -> i64 {
 
 /// `KAGAZ_OPEN=cameras` opens the window on the camera grid and starts it;
 /// `KAGAZ_OPEN=remote:<device>` on that computer's or phone's screen
-/// (`kagaz remote open` starts the window so).
+/// (`kagaz remote open` starts the window so; `kagaz remote send` adds
+/// `KAGAZ_SEND`, the files to offer once the session is open).
 #[tauri::command]
 fn startup_view() -> String {
     std::env::var("KAGAZ_OPEN").unwrap_or_default()
@@ -2038,6 +2039,8 @@ pub fn run() {
             remote_view::remote_painted,
             remote_view::remote_numbers,
             remote_view::remote_clipboard_push,
+            remote_view::remote_send_files,
+            remote_view::remote_startup_files,
             remote_view::remote_disconnect,
             fans::room_add,
             fans::room_rename,

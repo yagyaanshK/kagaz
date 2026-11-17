@@ -1,14 +1,14 @@
 //! `kagaz remote`: the computers and phones you added, every way to reach
 //! each and how it does now, a session with one told in numbers, clipboard
-//! text sent there, and the system's own ssh and scp over whichever path
-//! answers. The same list as the window's Computers & phones.
+//! text and files sent there, and the system's own ssh and scp over
+//! whichever path answers. The same list as the window's Computers & phones.
 
 use anyhow::{anyhow, bail, Context, Result};
 use clap::Subcommand;
 use kagaz_core::remote::tailscale::{self, Tailscale};
 use kagaz_core::remote::{
-    self, Answer, Device, Devices, Event, Input, LocateError, OpenError, PathKind, PathReport, PathTo, Piece, Session,
-    SignIn, Speaks, Trouble, Trust, Way,
+    self, Answer, Device, Devices, Event, Input, LocateError, OpenError, PathKind, PathReport, PathTo, Piece, Sending,
+    Session, SignIn, Speaks, Trouble, Trust, Way,
 };
 use std::time::{Duration, Instant};
 
@@ -86,6 +86,19 @@ pub enum RemoteAction {
     Clip {
         device: String,
         text: Option<String>,
+    },
+    /// Send files to a device: they go to its clipboard, to be pasted there (Remote Desktop)
+    Send {
+        device: String,
+        /// The files to send
+        #[arg(required = true)]
+        files: Vec<std::path::PathBuf>,
+        /// Stay in the terminal instead of opening the window: for a computer that someone sits at and pastes on
+        #[arg(long)]
+        here: bool,
+        /// With --here, how long to wait for the files to be pasted there
+        #[arg(long, default_value_t = 120)]
+        seconds: u64,
     },
     /// Serve a moving test card over VNC, to try the viewer without a real screen
     Pattern {
@@ -221,9 +234,15 @@ pub fn run(action: Option<RemoteAction>) -> Result<()> {
             println!("Forgot {}.", gone.name);
             Ok(())
         }
-        RemoteAction::Open { device } => open_window(&device),
+        RemoteAction::Open { device } => open_window(&device, &[]),
         RemoteAction::Try { device, seconds, picture } => try_session(&device, seconds, picture),
         RemoteAction::Clip { device, text } => clip(&device, text),
+        RemoteAction::Send {
+            device,
+            files,
+            here,
+            seconds,
+        } => send(&device, &files, here, seconds),
         RemoteAction::Pattern {
             port,
             size,
@@ -545,26 +564,127 @@ fn open_session(which: &str, picture: Option<u8>) -> Result<(Device, Answer, Ses
 }
 
 /// The Kagaz window, started on a device's screen. It is the program
-/// next to this one; the window does the connecting and the asking.
-fn open_window(which: &str) -> Result<()> {
+/// next to this one; the window does the connecting and the asking. With
+/// `files`, it offers those to the device once the session is open.
+fn open_window(which: &str, files: &[std::path::PathBuf]) -> Result<()> {
     let device = Devices::load(&list_path())?.find(which)?.clone();
-    if remote::session::way_for(&device).is_none() {
+    let Some(way) = remote::session::way_for(&device) else {
         bail!("{} has no way in that shows its screen (Remote Desktop or VNC)", device.name);
+    };
+    if !files.is_empty() && way.speaks != Speaks::Rdp {
+        bail!("{}", no_files_words(&device));
     }
     let name = if cfg!(windows) { "kagaz-desktop.exe" } else { "kagaz-desktop" };
     let window = std::env::current_exe().context("finding this program")?.with_file_name(name);
     if !window.exists() {
         bail!("the Kagaz window ({name}) is not next to this program, in {}", window.parent().map(|p| p.display().to_string()).unwrap_or_default());
     }
-    std::process::Command::new(&window)
-        .env("KAGAZ_OPEN", format!("remote:{}", device.id))
+    let mut start = std::process::Command::new(&window);
+    start.env("KAGAZ_OPEN", format!("remote:{}", device.id));
+    if !files.is_empty() {
+        let paths: Vec<String> = files.iter().map(|f| f.to_string_lossy().into_owned()).collect();
+        start.env("KAGAZ_SEND", serde_json::to_string(&paths)?);
+    }
+    start
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .spawn()
         .with_context(|| format!("starting {}", window.display()))?;
-    println!("Opening {} in the Kagaz window.", device.name);
+    if files.is_empty() {
+        println!("Opening {} in the Kagaz window.", device.name);
+    } else {
+        println!(
+            "Opening {} in the Kagaz window. Once it is connected the files are on its clipboard: paste them there \
+             (open a folder and press Ctrl + V).",
+            device.name
+        );
+    }
     Ok(())
+}
+
+/// Why files cannot go to a device that is reached over VNC, and what
+/// can be done instead.
+fn no_files_words(device: &Device) -> String {
+    let ssh = if device.way(Speaks::Ssh).is_some() {
+        format!(" It runs an SSH server: `kagaz remote copy {} <file> :<where there>` copies a file with that.", device.name)
+    } else {
+        String::new()
+    };
+    format!("{} is reached over VNC, which carries no files; Remote Desktop does.{ssh}", device.name)
+}
+
+fn size_words(bytes: u64) -> String {
+    match bytes {
+        0..=999 => format!("{bytes} bytes"),
+        1000..=999_999 => format!("{} KB", (bytes + 500) / 1000),
+        _ => megabytes(bytes),
+    }
+}
+
+/// Files to a device's clipboard. They are handed over when they are
+/// pasted there, which takes someone to paste: so the window opens on the
+/// device's screen with the files on offer. With `here` the session stays
+/// in the terminal instead, for a computer that someone sits at.
+fn send(which: &str, files: &[std::path::PathBuf], here: bool, seconds: u64) -> Result<()> {
+    let mut paths = Vec::new();
+    for file in files {
+        let about = std::fs::metadata(file).with_context(|| format!("{} cannot be read", file.display()))?;
+        if about.is_dir() {
+            bail!("{} is a folder; only files can be sent yet", file.display());
+        }
+        paths.push(std::fs::canonicalize(file).with_context(|| format!("{} cannot be read", file.display()))?);
+    }
+    if !here {
+        return open_window(which, &paths);
+    }
+    let (device, _, session) = open_session(which, None)?;
+    if !session.info.files {
+        bail!("{}", no_files_words(&device));
+    }
+    session.send(Input::Files(paths));
+    let end = Instant::now() + Duration::from_secs(seconds);
+    let mut waiting: Vec<String> = Vec::new();
+    let mut offered = false;
+    while Instant::now() < end {
+        session.screen.wait(Duration::from_millis(200));
+        for event in session.screen.take().events {
+            match event {
+                Event::Sending(Sending::Offered { names, bytes }) => {
+                    println!(
+                        "{} ({}) on {}'s clipboard. Kagaz stays connected for {seconds} seconds: paste there now \
+                         (open a folder and press Ctrl + V).",
+                        if names.len() == 1 { names[0].clone() } else { format!("{} files", names.len()) },
+                        size_words(bytes),
+                        device.name
+                    );
+                    waiting = names;
+                    offered = true;
+                }
+                Event::Sending(Sending::Going { name, sent, size }) => {
+                    println!("  {name}: {}%", sent * 100 / size.max(1));
+                }
+                Event::Sending(Sending::Taken { name, size }) => {
+                    println!("  {name}: all there ({})", size_words(size));
+                    waiting.retain(|n| *n != name);
+                }
+                Event::Sending(Sending::Withdrawn) => {
+                    bail!("something else was copied on {} before the files were all pasted", device.name)
+                }
+                Event::Sending(Sending::Failed { why }) => bail!("{why}"),
+                Event::Ended(why) => bail!("the session ended: {why}"),
+                _ => {}
+            }
+        }
+        if offered && waiting.is_empty() {
+            println!("Sent to {}.", device.name);
+            return Ok(());
+        }
+    }
+    if offered {
+        bail!("not pasted on {} within {seconds} seconds: {} not sent", device.name, waiting.join(", "));
+    }
+    bail!("the files could not be offered to {}", device.name)
 }
 
 fn picture_words(picture: u8) -> String {
@@ -620,6 +740,8 @@ fn try_session(which: &str, seconds: u64, picture: Option<u8>) -> Result<()> {
                     Event::Pointer(p) => println!("  its pointer is {} x {}", p.width, p.height),
                     Event::PointerDefault => println!("  its pointer is the ordinary arrow"),
                     Event::Bell => println!("  it rang its bell"),
+                    // Nothing is sent in a try.
+                    Event::Sending(_) => {}
                 }
             }
         }

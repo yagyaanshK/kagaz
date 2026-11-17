@@ -195,6 +195,7 @@ kagaz remote paths "Study laptop"
 kagaz remote ssh "Study laptop"
 kagaz remote open "My phone"
 kagaz remote try "My phone"
+kagaz remote send "Study laptop" report.pdf
 ```
 
 Your own computers and phones, and the fragile part of using one from
@@ -230,10 +231,18 @@ try` opens a session and tells it in numbers, a line a second (how often
 the picture came, how much travelled, the delay), without showing or
 keeping any picture. `remote clip` sends text to the device's clipboard
 (over Remote Desktop text is handed over when something is pasted there,
-so the command stays connected for half a minute). `remote pattern`
-serves a moving test card over VNC, to try the viewer without a real
-screen. Over Remote Desktop sound, sending files, choosing a monitor and
-the faster H.264 picture are not built yet. Both kinds of session are checked against test servers
+so the command stays connected for half a minute). `remote send` sends
+files over Remote Desktop, by the computer's clipboard: Kagaz says which
+files there are (their names and sizes, never where they are kept), and
+the computer reads them when they are pasted there, into whichever folder
+you paste. That takes someone to paste, so the command opens the window
+on the computer's screen with the files on offer; `--here` keeps it in
+the terminal instead, for a computer that someone sits at. VNC carries no
+files (`remote copy` does, where the device runs an SSH server). `remote
+pattern` serves a moving test card over VNC, to try the viewer without a
+real screen. Over Remote Desktop sound, choosing a monitor, sending whole
+folders and the faster H.264 picture are not built yet. Both kinds of
+session are checked against test servers
 that show a generated test card (for Remote Desktop,
 `tools/rdp-test-server`, which the tests start once it is built: `cargo
 build --manifest-path tools/rdp-test-server/Cargo.toml`), not yet against
@@ -380,9 +389,11 @@ clipboard, in any script. Over VNC the picture can be made sharper or
 smoother (by itself unless you choose). "Keep left click on the left" is for a device
 whose mouse buttons are swapped. With **Remember** the password is kept in
 the system's password store (never in Kagaz's own files) and used from
-then on; the device's page turns that off and forgets it. Over Remote
-Desktop sound, files and choosing a monitor are not built yet, and their
-buttons say so.
+then on; the device's page turns that off and forgets it. **Send files**
+(Remote Desktop) puts the files you choose on the computer's clipboard:
+paste there, in any folder, and they are copied over, with a note here of
+how far each has got. Over Remote Desktop sound and choosing a monitor
+are not built yet, and their buttons say so.
 
 Each page keeps its place: leave a printer's page with a scan under way
 for the cameras, and coming back finds the scan where it was. Camera

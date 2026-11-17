@@ -24,8 +24,17 @@ pub enum Input {
     /// A key went down or up; `key` and `code` as the page names them
     /// (see [`super::keys`]).
     Key { key: String, code: String, down: bool },
-    /// Text was copied here: offer it to the device.
+    /// The text on the clipboard here: offered to the device when it is
+    /// not the text last seen (so the same text is not offered over and
+    /// over, nor over files offered since).
     Clipboard(String),
+    /// The person asks for this text to be offered now, whatever was
+    /// offered before.
+    ClipboardAsked(String),
+    /// Offer these files to the device: they wait on its clipboard until
+    /// they are pasted there. How they get on comes back as
+    /// [`super::Event::Sending`].
+    Files(Vec<std::path::PathBuf>),
     /// Sharper (0) to smoother (10); none lets Kagaz follow the link.
     Picture(Option<u8>),
     /// The device has its mouse buttons swapped, or not after all.

@@ -16,7 +16,7 @@ pub mod encode;
 pub mod server;
 
 use super::keys;
-use super::screen::{Event, Rect, Screen};
+use super::screen::{Event, Rect, Screen, Sending};
 use super::session::{buttons_for, Info, Input, InputSender, Numbers, OpenError, Session, SignIn};
 use super::{Settings, Speaks};
 use decode::{bad, bytes_of, u16_of, u32_of, u8_of};
@@ -514,7 +514,10 @@ fn write_loop(rx: mpsc::Receiver<Input>, link: &Link, settings: &Settings) {
                         key_event(&mut out, keysym, *down);
                     }
                 }
-                Input::Clipboard(text) => link.clipboard_out(text, &mut out),
+                Input::Clipboard(text) | Input::ClipboardAsked(text) => link.clipboard_out(text, &mut out),
+                Input::Files(_) => link.screen.post(Event::Sending(Sending::Failed {
+                    why: "VNC carries no files".into(),
+                })),
                 Input::Picture(p) => picture = *p,
                 Input::SwappedButtons(now) => swapped = *now,
                 // A VNC server's screen is the size it is.

@@ -21,7 +21,7 @@ pub mod tailscale;
 pub mod vnc;
 
 pub use reach::{check, detect, reach, search, Answer, Found, PathReport, Seen, Trouble};
-pub use screen::{Event, Piece, Pointer, Rect, Screen, Taken};
+pub use screen::{Event, Piece, Pointer, Rect, Screen, Sending, Taken};
 pub use session::{Info, Input, InputSender, OpenError, Reading, Session, SignIn, Trust, View};
 pub use store::{Device, Devices, Identity, PathKind, PathTo, Settings, StoreError};
 
