@@ -3,11 +3,17 @@
 //! and talk to it over its standard input and output; it can also be run
 //! by hand to try the viewer.
 //!
-//!   kagaz-rdp-test-server [--port N] [--size 1280x720] [--fit] [--no-files] [--user asha] [--password sesame]
+//!   kagaz-rdp-test-server [--port N] [--size 1280x720] [--fit] [--h264] [--no-files] [--user asha] [--password sesame]
 //!
 //! With `--fit` its screen takes the size the viewer asks for, at the
 //! start and whenever the viewer's size changes, as a real computer's
-//! does. With `--no-files` it takes no files over its clipboard.
+//! does. With `--no-files` it takes no files over its clipboard. With
+//! `--h264` the card goes as H.264 through the newer picture's channel
+//! (the graphics pipeline) and never as plain bitmaps; it says `heard
+//! PipelineReady(<what the two agreed on>)`, `heard Frame(<tick>,
+//! <bytes>)` for each picture sent and `heard FrameAck` for each the
+//! viewer says it has drawn. With `rate <n>` on its input the card moves
+//! by itself, n ticks a second (0 stops it).
 //!
 //! It says `listening <address>` and `fingerprint <sha-256 of its
 //! certificate>`, then `heard <what a viewer did>` for every key and
@@ -34,12 +40,17 @@ use ironrdp_cliprdr::pdu::{
     ClipboardFormat, ClipboardFormatId, ClipboardFormatName, ClipboardGeneralCapabilityFlags, FileContentsFlags,
     FileContentsRequest, FileContentsResponse, FileDescriptor, FormatDataRequest, FormatDataResponse, LockDataId,
 };
+use ironrdp_egfx::pdu::{Avc420Region, CapabilitiesAdvertisePdu, CapabilitySet};
+use ironrdp_egfx::server::{GraphicsPipelineHandler, GraphicsPipelineServer};
 use ironrdp_server::tokio_rustls::{rustls, TlsAcceptor};
 use ironrdp_server::{
-    BitmapUpdate, CliprdrServerFactory, Credentials, DesktopSize, DisplayUpdate, KeyboardEvent, MouseEvent,
-    PixelFormat, RdpServer, RdpServerDisplay, RdpServerDisplayUpdates, RdpServerInputHandler, ServerEvent,
-    ServerEventSender,
+    BitmapUpdate, CliprdrServerFactory, Credentials, DesktopSize, DisplayUpdate, EgfxServerMessage, GfxDvcBridge,
+    GfxServerFactory, GfxServerHandle, KeyboardEvent, MouseEvent, PixelFormat, RdpServer, RdpServerDisplay,
+    RdpServerDisplayUpdates, RdpServerInputHandler, ServerEvent, ServerEventSender,
 };
+use openh264::encoder::{BitRate, Encoder, EncoderConfig, FrameRate, QpRange, RateControlMode, UsageType};
+use openh264::formats::YUVBuffer;
+use openh264::OpenH264API;
 use tokio::sync::mpsc::UnboundedSender;
 use sha2::{Digest, Sha256};
 use std::io::{BufRead, Write};
@@ -60,6 +71,9 @@ struct Shared {
     size: Arc<Mutex<(u16, u16)>>,
     /// Take the size the viewer asks for.
     fit: bool,
+    /// The card goes as H.264 through the graphics pipeline, not as
+    /// plain bitmaps.
+    h264: bool,
 }
 
 impl RdpServerInputHandler for Shared {
@@ -92,7 +106,7 @@ impl RdpServerDisplayUpdates for Updates {
                     height: size.1,
                 })));
             }
-            if self.sent != Some((tick, size)) {
+            if !self.shared.h264 && self.sent != Some((tick, size)) {
                 self.sent = Some((tick, size));
                 let (width, height) = size;
                 return Ok(Some(DisplayUpdate::Bitmap(BitmapUpdate {
@@ -141,6 +155,185 @@ impl RdpServerDisplay for Shared {
             sent: None,
             size,
         }))
+    }
+}
+
+/// The newer picture's channel: the way to it once a viewer has opened
+/// it, and the way to the viewer.
+#[derive(Clone, Default)]
+struct Pipeline {
+    handle: Arc<Mutex<Option<GfxServerHandle>>>,
+    to_viewer: Arc<Mutex<Option<UnboundedSender<ServerEvent>>>>,
+}
+
+/// What the channel tells of: what the two agreed on, and each picture
+/// the viewer says it has drawn.
+struct PipelineEvents;
+
+impl GraphicsPipelineHandler for PipelineEvents {
+    fn capabilities_advertise(&mut self, _pdu: &CapabilitiesAdvertisePdu) {}
+
+    fn on_ready(&mut self, negotiated: &CapabilitySet) {
+        let name = format!("{negotiated:?}");
+        say(&format!("heard PipelineReady({})", name.split([' ', '{']).next().unwrap_or("")));
+    }
+
+    fn on_frame_ack(&mut self, _frame_id: u32, _queue_depth: u32, _total_frames_decoded: u32) {
+        say("heard FrameAck");
+    }
+}
+
+impl ServerEventSender for Pipeline {
+    fn set_sender(&mut self, sender: UnboundedSender<ServerEvent>) {
+        *self.to_viewer.lock().unwrap() = Some(sender);
+    }
+}
+
+impl GfxServerFactory for Pipeline {
+    fn build_gfx_handler(&self) -> Box<dyn GraphicsPipelineHandler> {
+        Box::new(PipelineEvents)
+    }
+
+    fn build_server_with_handle(&self) -> Option<(GfxDvcBridge, GfxServerHandle)> {
+        let server: GfxServerHandle = Arc::new(Mutex::new(GraphicsPipelineServer::new(Box::new(PipelineEvents))));
+        *self.handle.lock().unwrap() = Some(server.clone());
+        Some((GfxDvcBridge::new(server.clone()), server))
+    }
+}
+
+/// The card's colours as H.264 carries them over Remote Desktop: full
+/// range, by the HD (BT.709) weights, colour at half the size each way.
+/// A picture of odd size gets its last row or column once more.
+fn card_planes(width: u16, height: u16, tick: u32) -> (YUVBuffer, usize, usize) {
+    let rgba = pattern::card(width, height, tick);
+    let (w, h) = (width as usize, height as usize);
+    let (ew, eh) = (w + (w & 1), h + (h & 1));
+    let at = |x: usize, y: usize| {
+        let i = (y.min(h - 1) * w + x.min(w - 1)) * 4;
+        (rgba[i] as f32, rgba[i + 1] as f32, rgba[i + 2] as f32)
+    };
+    let mut planes = vec![0u8; ew * eh * 3 / 2];
+    let (luma, chroma) = planes.split_at_mut(ew * eh);
+    let (cb, cr) = chroma.split_at_mut(ew * eh / 4);
+    for y in 0..eh {
+        for x in 0..ew {
+            let (r, g, b) = at(x, y);
+            luma[y * ew + x] = (0.2126 * r + 0.7152 * g + 0.0722 * b).round().clamp(0.0, 255.0) as u8;
+        }
+    }
+    for y in 0..eh / 2 {
+        for x in 0..ew / 2 {
+            let (mut u, mut v) = (0.0, 0.0);
+            for (dx, dy) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
+                let (r, g, b) = at(x * 2 + dx, y * 2 + dy);
+                let luma = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+                u += (b - luma) / 1.8556 + 128.0;
+                v += (r - luma) / 1.5748 + 128.0;
+            }
+            cb[y * (ew / 2) + x] = (u / 4.0).round().clamp(0.0, 255.0) as u8;
+            cr[y * (ew / 2) + x] = (v / 4.0).round().clamp(0.0, 255.0) as u8;
+        }
+    }
+    (YUVBuffer::from_vec(planes, ew, eh), ew, eh)
+}
+
+/// Sends the card as H.264 whenever its tick or the screen's size
+/// changes, once a viewer has opened the newer picture's channel.
+fn pump(shared: Shared, pipeline: Pipeline) {
+    let began = std::time::Instant::now();
+    let mut handle_seen: Option<GfxServerHandle> = None;
+    let mut surface: Option<(u16, (u16, u16))> = None;
+    let mut encoder: Option<Encoder> = None;
+    let mut sent: Option<(u32, (u16, u16))> = None;
+    let mut size_changed: Option<std::time::Instant> = None;
+    let mut refused = false;
+    loop {
+        std::thread::sleep(Duration::from_millis(5));
+        let Some(handle) = pipeline.handle.lock().unwrap().clone() else { continue };
+        // Another viewer, another channel: start over.
+        if !handle_seen.as_ref().is_some_and(|seen| Arc::ptr_eq(seen, &handle)) {
+            handle_seen = Some(handle.clone());
+            (surface, encoder, sent, size_changed, refused) = (None, None, None, None, false);
+        }
+        let mut gfx = handle.lock().unwrap();
+        if !gfx.is_ready() {
+            continue;
+        }
+        if !gfx.supports_avc420() {
+            if !refused {
+                say("heard NoH264");
+                refused = true;
+            }
+            continue;
+        }
+        let size = *shared.size.lock().unwrap();
+        let tick = shared.tick.load(Ordering::Acquire);
+        if surface.map(|(_, of)| of) != Some(size) {
+            // After a change of size the viewer and the computer start
+            // the screen over; the pipeline follows a moment later, as a
+            // real computer's does.
+            if surface.is_some() {
+                let since = *size_changed.get_or_insert_with(std::time::Instant::now);
+                if since.elapsed() < Duration::from_millis(400) {
+                    continue;
+                }
+                gfx.resize(size.0, size.1);
+            } else {
+                gfx.set_output_dimensions(size.0, size.1);
+            }
+            size_changed = None;
+            let Some(id) = gfx.create_surface(size.0, size.1) else { continue };
+            gfx.map_surface_to_output(id, 0, 0);
+            surface = Some((id, size));
+            encoder = None;
+            sent = None;
+        }
+        let Some((id, _)) = surface else { continue };
+        if sent != Some((tick, size)) {
+            let (planes, _, _) = card_planes(size.0, size.1, tick);
+            let made = encoder.get_or_insert_with(|| {
+                let config = EncoderConfig::new()
+                    .usage_type(UsageType::ScreenContentRealTime)
+                    .rate_control_mode(RateControlMode::Off)
+                    .qp(QpRange::new(8, 18))
+                    .bitrate(BitRate::from_bps(40_000_000))
+                    .max_frame_rate(FrameRate::from_hz(60.0))
+                    .skip_frames(false);
+                Encoder::with_api_config(OpenH264API::from_source(), config).expect("the encoder starts")
+            });
+            let picture = match made.encode(&planes) {
+                Ok(bits) => bits.to_vec(),
+                Err(e) => {
+                    say(&format!("ended the encoder failed: {e}"));
+                    continue;
+                }
+            };
+            if picture.is_empty() {
+                // Nothing changed for the encoder: nothing to send.
+                sent = Some((tick, size));
+                continue;
+            }
+            let region = Avc420Region::full_frame(size.0, size.1, 18);
+            // None while the viewer is behind with its acknowledgements:
+            // tried again on the next round.
+            if gfx.send_avc420_frame(id, &picture, &[region], began.elapsed().as_millis() as u32).is_some() {
+                sent = Some((tick, size));
+                say(&format!("heard Frame({tick}, {})", picture.len()));
+            }
+        }
+        if gfx.has_pending_output() {
+            let Some(channel) = gfx.channel_id() else { continue };
+            let messages = gfx.drain_output();
+            drop(gfx);
+            match ironrdp_dvc::encode_dvc_messages(channel, messages, ironrdp_svc::ChannelFlags::empty()) {
+                Ok(messages) => {
+                    if let Some(sender) = pipeline.to_viewer.lock().unwrap().as_ref() {
+                        let _ = sender.send(ServerEvent::Egfx(EgfxServerMessage::SendMessages { messages }));
+                    }
+                }
+                Err(e) => say(&format!("ended the pipeline's messages could not be packed: {e}")),
+            }
+        }
     }
 }
 
@@ -431,7 +624,27 @@ fn main() -> anyhow::Result<()> {
         tick: Arc::new(AtomicU32::new(0)),
         size: Arc::new(Mutex::new((width, height))),
         fit: args.iter().any(|a| a == "--fit"),
+        h264: args.iter().any(|a| a == "--h264"),
     };
+    let pipeline = Pipeline::default();
+    if shared.h264 {
+        let (shared, pipeline) = (shared.clone(), pipeline.clone());
+        std::thread::spawn(move || pump(shared, pipeline));
+    }
+    // The card moving by itself, so many ticks a second.
+    let rate = Arc::new(AtomicU32::new(0));
+    {
+        let (shared, rate) = (shared.clone(), rate.clone());
+        std::thread::spawn(move || loop {
+            match rate.load(Ordering::Acquire) {
+                0 => std::thread::sleep(Duration::from_millis(50)),
+                hz => {
+                    std::thread::sleep(Duration::from_micros(1_000_000 / hz as u64));
+                    shared.tick.fetch_add(1, Ordering::AcqRel);
+                }
+            }
+        });
+    }
 
     let clipboard = Clipboard {
         no_files: args.iter().any(|a| a == "--no-files"),
@@ -441,6 +654,7 @@ fn main() -> anyhow::Result<()> {
     {
         let shared = shared.clone();
         let clipboard = clipboard.clone();
+        let rate = rate.clone();
         std::thread::spawn(move || {
             for line in std::io::stdin().lock().lines() {
                 let Ok(line) = line else { break };
@@ -456,6 +670,7 @@ fn main() -> anyhow::Result<()> {
                             shared.tick.store(n, Ordering::Release);
                         }
                     }
+                    ["rate", hz] => rate.store(hz.parse().unwrap_or(0), Ordering::Release),
                     ["paste"] => clipboard.paste(Duration::ZERO),
                     ["paste", ms] => clipboard.paste(Duration::from_millis(ms.parse().unwrap_or(0))),
                     ["size", w, h] => {
@@ -471,6 +686,7 @@ fn main() -> anyhow::Result<()> {
     }
 
     let fit = shared.fit;
+    let h264 = shared.h264;
     let fingerprint: String = Sha256::digest(&der).iter().map(|b| format!("{b:02x}")).collect();
     let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
     runtime.block_on(async move {
@@ -481,6 +697,7 @@ fn main() -> anyhow::Result<()> {
             .with_input_handler(shared.clone())
             .with_display_handler(shared)
             .with_cliprdr_factory(Some(Box::new(clipboard)))
+            .with_gfx_factory(if h264 { Some(Box::new(pipeline)) } else { None })
             .with_sound_factory(None)
             .with_honor_client_desktop_size(fit)
             .build();

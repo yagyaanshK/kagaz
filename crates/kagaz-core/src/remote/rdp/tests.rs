@@ -410,6 +410,104 @@ fn the_screen_is_drawn_to_fit_the_viewer_and_follows_it() {
     }
 }
 
+/// As close as H.264 keeps the card on average: it carries colour at
+/// half the size, which costs the card's fine stripes and sharp edges.
+const CLOSE: f64 = 12.0;
+
+/// How far the whole picture is from the card, on average.
+fn card_apart(session: &Session, width: u16, height: u16, tick: u32) -> f64 {
+    let (w, h, rgba) = session.screen.snapshot();
+    if (w, h) != (width, height) {
+        return 255.0;
+    }
+    apart(&rgba, &pattern::card(width, height, tick))
+}
+
+#[test]
+fn the_newer_picture_arrives_as_h264_and_each_frame_is_acknowledged() {
+    let Some(mut server) = serve_with(320, 240, &["--h264"]) else { return };
+    let session = connect(&server, Some("asha"), Some("sesame"), &Trust::default()).unwrap();
+    // The card, close to what was sent: H.264 keeps colour at half the
+    // size, so the edges between colours give a little.
+    assert!(
+        until(|| card_apart(&session, 320, 240, 0) < CLOSE),
+        "apart {} at size {:?}, heard {:?}",
+        card_apart(&session, 320, 240, 0),
+        session.screen.size(),
+        server.heard()
+    );
+    let heard = server.heard();
+    assert!(heard.iter().any(|h| h.starts_with("PipelineReady(V10")), "heard {heard:?}");
+    assert!(heard.iter().any(|h| h.starts_with("Frame(0, ")), "heard {heard:?}");
+    assert!(until(|| server.heard().contains(&"FrameAck".to_string())), "heard {:?}", server.heard());
+    // It moves: the next picture is the card at that tick, not the first.
+    server.tick(40);
+    assert!(until(|| card_apart(&session, 320, 240, 40) < CLOSE), "apart {}", card_apart(&session, 320, 240, 40));
+    eprintln!(
+        "h264: {:.2} from the card it shows, {:.2} from the card before, bars {:.2}",
+        card_apart(&session, 320, 240, 40),
+        card_apart(&session, 320, 240, 0),
+        bars_apart(&session, &pattern::card(320, 240, 40), 320)
+    );
+    assert!(card_apart(&session, 320, 240, 0) > 2.0 * card_apart(&session, 320, 240, 40));
+    // The flat colours come out as they went in: the right colour rule.
+    assert!(bars_apart(&session, &pattern::card(320, 240, 40), 320) < 3.0);
+    // How it travelled is told, for the log.
+    let via = session.numbers.via();
+    assert!(via.starts_with("newer picture 10.") && via.contains("H.264"), "via {via}");
+    assert!(session.numbers.read().work > 0 || session.numbers.read().updates > 0);
+    // And the mouse arrives as before.
+    session.send(Input::Pointer { x: 30, y: 40, buttons: 0 });
+    assert!(until(|| server.heard().iter().any(|h| h == "Move { x: 30, y: 40 }")), "heard {:?}", server.heard());
+}
+
+#[test]
+fn the_newer_picture_follows_the_viewers_size() {
+    let Some(server) = serve_with(320, 240, &["--h264", "--fit"]) else { return };
+    let sign_in = SignIn {
+        user: Some("asha".into()),
+        password: Some("sesame".into()),
+    };
+    // An odd height: H.264 itself only does even ones.
+    let view = View {
+        width: 400,
+        height: 301,
+        scale: 100,
+    };
+    let session =
+        open(server.addr, &sign_in, &Settings::default(), &Trust::default(), Some(view), Duration::from_secs(10)).unwrap();
+    assert!(until(|| card_apart(&session, 400, 301, 0) < CLOSE), "size {:?}, heard {:?}", session.screen.size(), server.heard());
+    for (width, height) in [(640u16, 480u16), (360, 260)] {
+        session.send(Input::Resize { width, height });
+        assert!(
+            until(|| card_apart(&session, width, height, 0) < CLOSE),
+            "wanted {width}x{height}: apart {} at size {:?}, heard {:?}",
+            card_apart(&session, width, height, 0),
+            session.screen.size(),
+            server.heard()
+        );
+    }
+}
+
+#[test]
+fn the_older_picture_is_used_when_asked_for() {
+    let Some(server) = serve_with(320, 240, &["--h264"]) else { return };
+    let sign_in = SignIn {
+        user: Some("asha".into()),
+        password: Some("sesame".into()),
+    };
+    let older = Settings {
+        older_picture: true,
+        ..Settings::default()
+    };
+    let session = open(server.addr, &sign_in, &older, &Trust::default(), None, Duration::from_secs(10)).unwrap();
+    assert_eq!(session.numbers.via(), "older picture");
+    // This test server sends nothing but H.264, so no picture comes; the
+    // channel for it is never opened.
+    std::thread::sleep(Duration::from_millis(600));
+    assert!(!server.heard().iter().any(|h| h.starts_with("PipelineReady")), "heard {:?}", server.heard());
+}
+
 #[test]
 fn its_own_size_is_kept_when_the_person_asks_for_that() {
     let Some(server) = serve_with(320, 240, &["--fit"]) else { return };

@@ -454,10 +454,24 @@ const KagazRemote = (() => {
         keepSettings();
       });
       sizeRow.append(sizeLabel, size);
-      screen.append(sizeRow, el("p", "muted small", "The computer suits its picture to the connection by itself. Sound, sending files and choosing a monitor are not built yet."));
+      // Remote Desktop's newer picture (H.264 and its companions) is
+      // used unless it comes out wrong on this computer.
+      const olderRow = el("div", "set-row");
+      const olderLabel = el("label", "switch wrap");
+      const older = el("input");
+      older.type = "checkbox";
+      older.checked = !!settings.older_picture;
+      olderLabel.append(older, " Use the older picture", el("small", "muted", "Slower and heavier on the connection. For a computer whose screen comes out wrong or stays black otherwise. Takes effect at the next connection."));
+      older.addEventListener("change", () => {
+        if (older.checked) settings.older_picture = true;
+        else delete settings.older_picture;
+        keepSettings();
+      });
+      olderRow.append(olderLabel);
+      screen.append(sizeRow, olderRow, el("p", "muted small", "The computer suits its picture to the connection by itself, and shows one screen, made for this window. Its sound is not built yet."));
     } else {
       screen.append(picRow, autoRow);
-      if (canConnect(d)) screen.append(el("p", "muted small", "Over VNC the device's whole screen is shown at its own size, fitted to the window. Sound, files and choosing a monitor need Remote Desktop."));
+      if (canConnect(d)) screen.append(el("p", "muted small", "Over VNC the device's whole screen is shown at its own size, fitted to the window. Sound and files need Remote Desktop."));
     }
 
     const mouse = el("section", "set-section");

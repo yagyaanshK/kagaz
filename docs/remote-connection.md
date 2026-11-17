@@ -56,8 +56,11 @@ the other kinds: saved devices, Found nearby, Add.
   and scaling (a per-device switch keeps the remote's own size); VNC is
   scaled to fit, with zoom. One slider from Sharper to Smoother, automatic
   by default, with the measured delay shown. Clipboard text both ways;
-  sound, choosing a monitor and sending files over RDP (VNC has none of
-  the three, and Kagaz says so). A per-computer switch keeps left click
+  sound and sending files over RDP (VNC has neither, and Kagaz says
+  so). Choosing a monitor was dropped on 2026-11-17: over RDP the
+  computer makes one screen for the viewer. The picture comes by RDP's
+  graphics pipeline, H.264 decoded by OpenH264 built in from source
+  (chosen 2026-11-17), with the older picture as a per-computer switch. A per-computer switch keeps left click
   left where the remote computer has its mouse buttons swapped.
 - **Trust.** A computer's RDP certificate is remembered at the first
   connection and a change is warned about. VNC outside Tailscale shows

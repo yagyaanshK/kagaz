@@ -57,6 +57,10 @@ ironrdp-core = "0.3"
 ironrdp-dvc = "0.10"
 ironrdp-displaycontrol = "0.10"
 ironrdp-cliprdr = "0.9"
+# The newer picture (the graphics pipeline): its H.264 pictures are
+# decoded by OpenH264 (BSD-2-Clause), built into Kagaz from its source,
+# the owner's choice (2026-11-17).
+ironrdp-egfx = { version = "0.5", features = ["openh264-bundled"] }
 x509-cert = { version = "0.2", default-features = false, features = ["std"] }
 
 [target.'cfg(not(target_os = "android"))'.dependencies]

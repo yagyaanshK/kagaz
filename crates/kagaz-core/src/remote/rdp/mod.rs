@@ -29,6 +29,9 @@ use ironrdp_connector::{
 use ironrdp_core::WriteBuf;
 use ironrdp_displaycontrol::client::DisplayControlClient;
 use ironrdp_dvc::DrdynvcClient;
+use ironrdp_egfx::client::{BitmapUpdate, GraphicsPipelineClient, GraphicsPipelineHandler};
+use ironrdp_egfx::decode::{H264Decoder, OpenH264Decoder};
+use ironrdp_egfx::pdu::{CapabilitySet, Codec1Type};
 use ironrdp_graphics::image_processing::PixelFormat;
 use ironrdp_pdu::gcc::{ConnectionType, KeyboardType};
 use ironrdp_pdu::geometry::InclusiveRectangle;
@@ -104,7 +107,7 @@ impl NetworkClient for NoDirectory {
     }
 }
 
-fn config(user: &str, password: &str, size: (u16, u16), scale: u32) -> Result<Config, OpenError> {
+fn config(user: &str, password: &str, size: (u16, u16), scale: u32, newer_picture: bool) -> Result<Config, OpenError> {
     // "DOMAIN\user" names a domain; a plain name signs in to the computer.
     let (domain, username) = match user.split_once('\\') {
         Some((domain, name)) if !domain.is_empty() => (Some(domain.to_string()), name.to_string()),
@@ -173,8 +176,63 @@ fn config(user: &str, password: &str, size: (u16, u16), scale: u32) -> Result<Co
         enable_server_pointer: true,
         pointer_software_rendering: false,
         multitransport_flags: None,
-        support_dyn_vc_gfx_protocol: false,
+        // The newer picture, where its channel is there to take it.
+        support_dyn_vc_gfx_protocol: newer_picture,
     })
+}
+
+/// Watches the newer picture's channel (the graphics pipeline) to tell
+/// how the picture travels: which version the two agreed on, and how
+/// many areas came by each way of packing them.
+struct Watching {
+    numbers: Arc<Numbers>,
+    agreed: String,
+    /// Areas by codec, in the order first seen.
+    areas: Vec<(&'static str, u64)>,
+    frames: u64,
+}
+
+impl Watching {
+    fn tell(&self) {
+        let mut via = format!("newer picture {}", self.agreed);
+        for (codec, count) in &self.areas {
+            via.push_str(&format!(", {codec} {count}"));
+        }
+        via.push_str(&format!(", {} frames", self.frames));
+        self.numbers.set_via(via);
+    }
+}
+
+impl GraphicsPipelineHandler for Watching {
+    fn on_capabilities_confirmed(&mut self, caps: &CapabilitySet) {
+        // "V10_7 { flags: … }" as "10.7".
+        let name = format!("{caps:?}");
+        let version = name.split([' ', '{']).next().unwrap_or("").trim_start_matches('V').replace('_', ".");
+        self.agreed = version;
+        self.tell();
+    }
+
+    fn on_bitmap_updated(&mut self, update: &BitmapUpdate) {
+        let codec = match update.codec_id {
+            Codec1Type::Avc420 => "H.264",
+            Codec1Type::Avc444 | Codec1Type::Avc444v2 => "H.264 full colour",
+            Codec1Type::ClearCodec => "text",
+            Codec1Type::RemoteFx => "RemoteFX",
+            Codec1Type::Planar => "planar",
+            Codec1Type::Alpha => "alpha",
+            // What the progressive codec hands over once it is decoded.
+            Codec1Type::Uncompressed => "plain or progressive",
+        };
+        match self.areas.iter_mut().find(|(name, _)| *name == codec) {
+            Some((_, count)) => *count += 1,
+            None => self.areas.push((codec, 1)),
+        }
+    }
+
+    fn on_frame_complete(&mut self, _frame_id: u32) {
+        self.frames += 1;
+        self.tell();
+    }
 }
 
 /// Why the computer turned the connection down, in words a person can
@@ -374,6 +432,11 @@ impl Running {
             match out {
                 ActiveStageOutput::ResponseFrame(frame) => self.write(&frame)?,
                 ActiveStageOutput::GraphicsUpdate(area) => {
+                    // The newer picture says its screen's size by itself.
+                    let size = (self.image.width(), self.image.height());
+                    if self.screen.size() != size {
+                        self.screen.resize(size.0, size.1);
+                    }
                     let (rect, rgba) = pixels(&self.image, &area);
                     if !rect.is_empty() {
                         self.screen.put(rect, &rgba);
@@ -773,11 +836,13 @@ fn run(mut s: Running, rx: mpsc::Receiver<Input>, mut waiter: waker::Waiter) -> 
                 Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => return "the device closed the connection".into(),
                 Err(_) => return "the connection to the device broke".into(),
             };
+            let working = Instant::now();
             let handled = s
                 .stage
                 .process(&mut s.image, action, &payload, s.framed.last_read_at())
                 .map_err(|e| format!("the device sent something Kagaz could not read ({e})"))
                 .and_then(|outputs| s.outputs(outputs));
+            s.numbers.add_work(working.elapsed());
             match handled {
                 Ok(Next::Go) => {}
                 Ok(Next::End(why)) | Err(why) => return why,
@@ -859,11 +924,27 @@ pub fn open(
     let mut framed = Framed::new(counted);
     // With the channels for the clipboard and for asking for a new size.
     let (clipboard, clip) = clip::Backend::new();
-    let mut connector = ClientConnector::new(config(user.trim(), password, size, scale)?, local)
+    // And, unless the older picture was asked for, with the channel the
+    // newer one comes through: H.264 decoded by OpenH264, the text and
+    // picture codecs beside it, each frame acknowledged so that the
+    // computer sends as fast as this side keeps up.
+    let newer_picture = !settings.older_picture;
+    let mut dynamic = DrdynvcClient::new().with_dynamic_channel(DisplayControlClient::new(|_| Ok(Vec::new())));
+    if newer_picture {
+        let decoder = OpenH264Decoder::new().ok().map(|d| Box::new(d) as Box<dyn H264Decoder>);
+        let watching = Watching {
+            numbers: numbers.clone(),
+            agreed: String::new(),
+            areas: Vec::new(),
+            frames: 0,
+        };
+        dynamic = dynamic.with_dynamic_channel(GraphicsPipelineClient::new(Box::new(watching), decoder));
+    } else {
+        numbers.set_via("older picture".into());
+    }
+    let mut connector = ClientConnector::new(config(user.trim(), password, size, scale, newer_picture)?, local)
         .with_static_channel(CliprdrClient::new(Box::new(clipboard)))
-        .with_static_channel(
-            DrdynvcClient::new().with_dynamic_channel(DisplayControlClient::new(|_| Ok(Vec::new()))),
-        );
+        .with_static_channel(dynamic);
     let should_upgrade = ironrdp_blocking::connect_begin(&mut framed, &mut connector).map_err(refusal)?;
 
     // TLS: the computer shows its certificate. It is compared with the

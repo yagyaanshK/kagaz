@@ -326,7 +326,10 @@ const KagazRemoteView = (() => {
     };
     set("rv-file", info && info.files, "Send files: they go to the device's clipboard, to be pasted there", not("Sending files"));
     set("rv-sound", info && info.sound, "The device's sound", not("The device's sound"));
-    set("rv-screens", info && info.monitors, "Choose a monitor", not("Choosing a monitor"));
+    // No kind of session has monitors to choose from yet: Remote Desktop
+    // makes one screen for this window, VNC shows the device's as it is.
+    $("rv-screens").classList.toggle("hidden", !(info && info.monitors));
+    set("rv-screens", info && info.monitors, "Choose a monitor", "");
   }
 
   let toastTimer = 0;
@@ -753,14 +756,19 @@ const KagazRemoteView = (() => {
   // paint, how much reached the page.
   setInterval(() => {
     if (!cur || cur.session == null) return;
-    const now = { at: performance.now(), frames: cur.frames, paintMs: cur.paintMs, bytes: cur.bytes };
+    const now = { at: performance.now(), frames: cur.frames, paintMs: cur.paintMs, bytes: cur.bytes, work: lastReading ? lastReading.work : null };
     const was = cur.told;
     cur.told = now;
     if (!was || now.frames === was.frames) return;
     const seconds = (now.at - was.at) / 1000;
     const frames = now.frames - was.frames;
+    // And from the session itself: how much of each second went into
+    // what the device sent (decoding its picture), and how that came.
+    const r = lastReading;
+    const work = r && was.work != null && r.work >= was.work ? `, ${Math.round((r.work - was.work) / seconds)} ms of work a second` : "";
     log(`${(frames / seconds).toFixed(1)} updates/s, ${((now.paintMs - was.paintMs) / frames).toFixed(2)} ms to paint one, `
-      + `${((now.bytes - was.bytes) / seconds / 1e6).toFixed(1)} MB/s to the page, delay ${lastReading && lastReading.delay != null ? lastReading.delay + " ms" : "unknown"}`);
+      + `${((now.bytes - was.bytes) / seconds / 1e6).toFixed(1)} MB/s to the page, delay ${r && r.delay != null ? r.delay + " ms" : "unknown"}${work}`
+      + (r && r.via ? `; ${r.via}` : ""));
   }, 5000);
 
   $("rv-full").addEventListener("click", () => {

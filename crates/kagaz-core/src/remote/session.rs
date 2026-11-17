@@ -188,6 +188,10 @@ pub struct Numbers {
     updates: AtomicU64,
     /// The picture setting in use: 0 sharpest, 10 smoothest.
     picture: AtomicU32,
+    /// Microseconds spent on what the device sent (its picture, mostly).
+    work: AtomicU64,
+    /// How the picture travels, in a few words.
+    via: std::sync::Mutex<String>,
 }
 
 impl Default for Numbers {
@@ -199,6 +203,8 @@ impl Default for Numbers {
             sent: AtomicU64::new(0),
             updates: AtomicU64::new(0),
             picture: AtomicU32::new(0),
+            work: AtomicU64::new(0),
+            via: std::sync::Mutex::new(String::new()),
         }
     }
 }
@@ -213,6 +219,8 @@ pub struct Reading {
     /// Times the picture was brought up to date.
     pub updates: u64,
     pub picture: u8,
+    /// Milliseconds this device spent on what arrived, since the start.
+    pub work: u64,
 }
 
 impl Numbers {
@@ -225,7 +233,14 @@ impl Numbers {
             sent: self.sent.load(Ordering::Relaxed),
             updates: self.updates.load(Ordering::Relaxed),
             picture: self.picture.load(Ordering::Relaxed) as u8,
+            work: self.work.load(Ordering::Relaxed) / 1000,
         }
+    }
+
+    /// How the picture travels ("H.264 12, text 40"), where the session
+    /// knows; empty where it does not.
+    pub fn via(&self) -> String {
+        self.via.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
     pub(crate) fn set_delay(&self, millis: u32) {
@@ -239,6 +254,12 @@ impl Numbers {
     }
     pub(crate) fn add_update(&self) {
         self.updates.fetch_add(1, Ordering::Relaxed);
+    }
+    pub(crate) fn add_work(&self, spent: Duration) {
+        self.work.fetch_add(spent.as_micros() as u64, Ordering::Relaxed);
+    }
+    pub(crate) fn set_via(&self, via: String) {
+        *self.via.lock().unwrap_or_else(|e| e.into_inner()) = via;
     }
     pub(crate) fn set_picture(&self, picture: u8) {
         self.picture.store(picture as u32, Ordering::Relaxed);

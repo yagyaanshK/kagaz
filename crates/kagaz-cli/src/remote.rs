@@ -751,12 +751,13 @@ fn try_session(which: &str, seconds: u64, picture: Option<u8>) -> Result<()> {
         // Desktop computer chooses for itself.
         let picture = if session.info.picture_setting { format!("  picture {}", picture_words(now.picture)) } else { String::new() };
         println!(
-            "{second:>3} s  {:>3} updates  {:>4} areas ({} moved)  {:>5.1} screens painted  {:>6.2} Mbit/s  delay {}{picture}",
+            "{second:>3} s  {:>3} updates  {:>4} areas ({} moved)  {:>5.1} screens painted  {:>6.2} Mbit/s  {:>4} ms of work  delay {}{picture}",
             now.updates - last.updates,
             pieces,
             moves,
             pixels as f64 / whole as f64,
             (now.received - last.received) as f64 * 8.0 / 1e6,
+            now.work - last.work,
             now.delay.map_or("not measured yet".into(), |d| format!("{d} ms")),
         );
         last = now;
@@ -773,6 +774,11 @@ fn try_session(which: &str, seconds: u64, picture: Option<u8>) -> Result<()> {
         megabytes(all.received),
         megabytes(all.sent)
     );
+    // Which of Remote Desktop's pictures came, and by which codecs.
+    let via = session.numbers.via();
+    if !via.is_empty() {
+        println!("the picture came as: {via}");
+    }
     Ok(())
 }
 

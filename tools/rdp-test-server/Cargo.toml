@@ -16,7 +16,12 @@ license = "LicenseRef-KGZ-1.2.0"
 [workspace]
 
 [dependencies]
-ironrdp-server = { version = "0.13", default-features = false }
+ironrdp-server = { version = "0.13", default-features = false, features = ["egfx"] }
+# The newer picture: the card as H.264, encoded here by OpenH264.
+ironrdp-egfx = "0.3"
+ironrdp-dvc = "0.8"
+ironrdp-svc = "0.8"
+openh264 = "0.9"
 ironrdp-displaycontrol = "0.8"
 ironrdp-cliprdr = "0.7"
 ironrdp-core = "0.2"

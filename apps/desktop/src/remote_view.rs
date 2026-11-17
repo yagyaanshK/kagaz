@@ -438,8 +438,20 @@ pub fn remote_painted(viewers: tauri::State<'_, Viewers>, session: u64) -> Resul
 
 /// The session in numbers: the delay, what travelled, the picture setting.
 #[tauri::command]
-pub fn remote_numbers(viewers: tauri::State<'_, Viewers>, session: u64) -> Result<Reading, String> {
-    viewers.with(session, |open| open.numbers.read())
+pub fn remote_numbers(viewers: tauri::State<'_, Viewers>, session: u64) -> Result<Told, String> {
+    viewers.with(session, |open| Told {
+        reading: open.numbers.read(),
+        via: open.numbers.via(),
+    })
+}
+
+/// The numbers, and in a few words how the picture travels (which of
+/// Remote Desktop's pictures, by which codecs), where the session knows.
+#[derive(Serialize)]
+pub struct Told {
+    #[serde(flatten)]
+    reading: Reading,
+    via: String,
 }
 
 /// Offer what is on this computer's clipboard to the device. Says how

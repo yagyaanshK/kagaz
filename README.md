@@ -222,7 +222,12 @@ from the IronRDP library; the session is Kagaz's own: the certificate the
 computer shows is remembered at the first connection and compared every
 time after, before anything of the sign-in is sent, and another one stops
 the connection until you say to take it. The computer draws its screen at
-the viewer's size. VNC is spoken by Kagaz itself, and protects nothing by
+the viewer's size. The picture comes the newer way Remote Desktop has
+(its graphics pipeline: H.264 for what moves, lossless codecs for text,
+each frame acknowledged so that the computer sends as fast as Kagaz keeps
+up); H.264 is decoded by OpenH264 (BSD-2-Clause), built into Kagaz from
+its source. A computer whose screen comes out wrong that way can be set
+to the older picture on its page. VNC is spoken by Kagaz itself, and protects nothing by
 itself, so Kagaz says "not encrypted on this network" unless the session
 travels through Tailscale.
 
@@ -240,12 +245,15 @@ on the computer's screen with the files on offer; `--here` keeps it in
 the terminal instead, for a computer that someone sits at. VNC carries no
 files (`remote copy` does, where the device runs an SSH server). `remote
 pattern` serves a moving test card over VNC, to try the viewer without a
-real screen. Over Remote Desktop sound, choosing a monitor, sending whole
-folders and the faster H.264 picture are not built yet. Both kinds of
-session are checked against test servers
+real screen. Over Remote Desktop sound and sending whole folders are not
+built yet; there are no monitors to choose from, as the computer makes
+one screen for the viewer. `remote try` ends by saying how the picture
+came (which codecs, how many frames) and tells each second how much work
+decoding it was. Both kinds of session are checked against test servers
 that show a generated test card (for Remote Desktop,
 `tools/rdp-test-server`, which the tests start once it is built: `cargo
-build --manifest-path tools/rdp-test-server/Cargo.toml`), not yet against
+build --manifest-path tools/rdp-test-server/Cargo.toml`; with `--h264` it
+sends the card as H.264), not yet against
 a real computer or phone. The list lives in `~/.config/kagaz/remote.toml`;
 passwords are never in it. Plan:
 [docs/remote-connection.md](docs/remote-connection.md).
@@ -395,8 +403,8 @@ the system's password store (never in Kagaz's own files) and used from
 then on; the device's page turns that off and forgets it. **Send files**
 (Remote Desktop) puts the files you choose on the computer's clipboard:
 paste there, in any folder, and they are copied over, with a note here of
-how far each has got. Over Remote Desktop sound and choosing a monitor
-are not built yet, and their buttons say so.
+how far each has got. Over Remote Desktop sound is not built yet, and its
+button says so.
 
 Each page keeps its place: leave a printer's page with a scan under way
 for the cameras, and coming back finds the scan where it was. Camera

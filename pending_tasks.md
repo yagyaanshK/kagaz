@@ -421,12 +421,34 @@ Plan: `docs/remote-connection.md` (agreed 2026-11-16).
       or GNOME; the file chooser behind the button was not pressed by
       anyone yet. Whole folders are refused with a reason. Files from
       the computer to here are not built (the library carries them).
-- [ ] **Step 1, Remote Desktop, what is left**: the H.264 picture (the fast one; needs the owner's choice of
-      decoder for Ubuntu, the library brings none there); sound (needs
-      `libasound2-dev`); choosing a monitor (the owner to decide: over
-      Remote Desktop the session has one screen, made for the viewer);
-      whole folders, and files from the computer to here; a sign-in
-      through a company domain (Kerberos) is refused with a reason.
+- [x] **Step 1, Remote Desktop, the newer picture with H.264**
+      (2026-11-17): the library's graphics pipeline channel (H.264 in
+      both its forms, the text codec, RemoteFX and its progressive form,
+      planar; frames acknowledged) under Kagaz's session, with OpenH264
+      built in from source, the owner's choice. The picture's size
+      follows the pipeline's own word. "Use the older picture" on a
+      computer's page turns it off for that computer. The log and
+      `kagaz remote try` say how the picture came and how much work it
+      was. The test server sends the card as H.264 (`--h264`, encoded by
+      OpenH264 with Remote Desktop's colour rule) and tells each
+      acknowledgement. Measured against it at 1920x1080, full frames:
+      about 19 ms of work a frame here, 0.15 Mbit/s where the older
+      picture took megabytes. **Not yet** against real Windows, which
+      chooses its codecs itself (H.264 for all of the screen only when
+      its policy says so; else H.264 for video and the others for the
+      rest): the log will tell which came. OpenH264 was built without
+      its assembly, as `nasm` is not installed here: `sudo apt install
+      nasm` and a rebuild make decoding faster.
+- [x] **Choosing a monitor** dropped for Remote Desktop (the owner,
+      2026-11-17): the computer makes one screen for the viewer. The
+      button shows only for a kind of session that has monitors, which
+      none has yet.
+- [ ] **Step 1, Remote Desktop, what is left**: sound (needs
+      `libasound2-dev`); whole folders, and files from the computer to
+      here; a sign-in through a company domain (Kerberos) is refused
+      with a reason; decoding on a thread of its own if a real computer
+      shows it holding up the keys; the "Third-party licences" page in
+      About, now owed for OpenH264's notice as well.
 - [x] **Step 1, the password in the system's password store** behind a
       Remember switch (2026-11-17): one entry per device under
       `app.kagaz.computers` (the owner's name for it), kept once the

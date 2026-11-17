@@ -140,6 +140,11 @@ pub struct Settings {
     /// Do not play the device's sound here.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub mute: bool,
+    /// Remote Desktop's older picture (changed areas as plain bitmaps)
+    /// instead of the newer one (H.264 and its companions, each frame
+    /// acknowledged): for a computer whose picture comes out wrong.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub older_picture: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
