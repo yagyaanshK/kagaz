@@ -383,9 +383,22 @@ Plan: `docs/remote-connection.md` (agreed 2026-11-16).
       page. In `kagaz remote try`. Tested against `tools/rdp-test-server`
       (the library's server part showing the test card; a program of its
       own because it cannot share a build with the newest client parts).
-      **Not yet** against real Windows or GNOME. In the real window
-      against the test server since 2026-11-17 (signed in, drawn to fit).
-      Computers only: phones come with step 2.
+      In the real window against the test server since 2026-11-17
+      (signed in, drawn to fit). **On the owner's real Windows PC the
+      same day**: signed in, picture and typing right, full screen sharp,
+      left kept left as meant; about 10 to 19 updates a second while
+      things moved, 28 to 50 ms delay on the local network. Not yet
+      GNOME. Computers only: phones come with step 2.
+- [x] **Step 1, the viewer after the first real session** (2026-11-17):
+      its bar is Kagaz's green (the owner's ask: told apart from the
+      device's screen under it); a call at the door, or any other page,
+      no longer leaves the viewer's bar and full-window layout behind:
+      the session goes on, its bar steps aside and Computers leads back.
+      The log now says the size asked for and the size the device took.
+- [ ] **To hear from the owner on the real Windows PC**: whether a
+      window made smaller is redrawn sharp (it looked soft once, while
+      the page was stuck behind a call; the log's size lines will tell);
+      sending files; the certificate card; Remember typed in the window.
 - [x] **Step 1, Remote Desktop, clipboard text** both ways, in any
       script (2026-11-17): each side says it has text and hands it over
       when asked; Kagaz asks at once, so what is copied on the computer

@@ -65,6 +65,11 @@
 .bar-btn[aria-expanded="true"] { background: var(--accent-soft, rgba(47, 111, 78, 0.14)); color: var(--accent); }
 /* The system's own bar is short on a phone: the tools move under the picture. */
 [data-layout="bar"][data-view="viewer"] .bar-actions .bar-btn { display: none; }
+/* The viewer's bar in Kagaz's green (the owner's ask after the first real
+   session, 2026-11-17): told apart from the device's screen under it. */
+[data-view="viewer"] #bar { background: var(--accent); color: var(--accent-text); }
+[data-view="viewer"] #bar .bar-btn, [data-view="viewer"] #bar .bar-back { color: inherit; background: none; box-shadow: none; }
+[data-view="viewer"] #bar .rc-chip { color: inherit; border-color: color-mix(in srgb, currentColor 45%, transparent); }
 .rc-touchbar { display: none; }
 [data-layout="bar"] .rc-touchbar { display: flex; justify-content: space-around; flex: none; padding: 6px 4px calc(6px + env(safe-area-inset-bottom)); background: var(--bar-bg, var(--bg)); border-top: 1px solid var(--line); }
 .rc-touchbar button { flex-direction: column; gap: 2px; min-width: 64px; min-height: 48px; border: none; background: none; font-size: 11px; color: var(--text); }

@@ -277,6 +277,29 @@ const KagazRemoteView = (() => {
     if (hooks.closed) hooks.closed();
   }
 
+  // Another page of Kagaz came on screen (a call at the door, the person
+  // went to look at something) or this one is back. The session goes on
+  // meanwhile; its bar, its keys and its hold on the whole window step
+  // aside, and return with the person.
+  function shown(on) {
+    if (!cur || on === !cur.away) return;
+    cur.away = !on;
+    if (on) {
+      document.documentElement.dataset.viewer = "on";
+      $("bar-remote").classList.remove("hidden");
+      stageResized();
+      stage.focus();
+      log("back on screen");
+    } else {
+      releaseKeys(cur);
+      closePop();
+      if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(() => {});
+      delete document.documentElement.dataset.viewer;
+      $("bar-remote").classList.add("hidden");
+      log("another page on screen; the session goes on");
+    }
+  }
+
   // ---------- the bar's chip and tools ----------
   function setChip(millis) {
     const chip = $("rv-chip");
@@ -364,6 +387,7 @@ const KagazRemoteView = (() => {
   }
 
   function resize(w, h) {
+    log(`its screen is ${w}x${h}; the viewer has room for ${view().slice(0, 2).join("x")}`);
     cur.width = w;
     cur.height = h;
     canvas.width = w;
@@ -398,6 +422,7 @@ const KagazRemoteView = (() => {
       if (cur.asked && now[0] === cur.asked[0] && now[1] === cur.asked[1]) return;
       if (now[0] < 200 || now[1] < 200) return;
       cur.asked = now;
+      log(`asked for ${now[0]}x${now[1]}`);
       did({ t: "resize", width: now[0], height: now[1] }, true);
     }, 350);
   }
@@ -759,5 +784,5 @@ const KagazRemoteView = (() => {
     if (ev.target === stage) closePop();
   });
 
-  return { open, close, isOpen: () => !!cur };
+  return { open, close, shown, isOpen: () => !!cur };
 })();

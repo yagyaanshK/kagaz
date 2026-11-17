@@ -721,6 +721,9 @@ function selectCategory(cat) {
   // Away from the cameras their pictures stop (sparing the connection);
   // downloads go on. They come back where they were.
   if (was === "cameras" && cat !== "cameras") holdCameras();
+  // A session with a computer or phone goes on while another page shows
+  // (a call at the door); its bar and full-window layout wait for it.
+  if (typeof KagazRemoteView !== "undefined") KagazRemoteView.shown(cat === "remote");
   // Back from any page goes to Home.
   KagazNav.root(cat === "home" ? null : cat, () => selectCategory("home"));
   // The sidebar and the bottom bar mark the section on screen, and only it

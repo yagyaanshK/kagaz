@@ -380,7 +380,10 @@ opens its page: every way to reach it with how each does, more addresses,
 **Connect** turns the window into the device's screen, over Remote Desktop
 or VNC: the mouse, the wheel and the keys go there, and the bar shows how
 the session travels and its delay, with tools to send keys such as Ctrl +
-Alt + Del and for full screen. A Remote Desktop computer draws its screen
+Alt + Del and for full screen. That bar is Kagaz's green while a device's
+screen shows, so that it is told apart from the device's own screen under
+it. If another page comes on screen meanwhile (a call at the door), the
+session goes on and Computers leads back to it. A Remote Desktop computer draws its screen
 at the window's size and again when the window changes (or at a fixed
 size, scaled, if you choose that on its page); it asks who signs in, and
 if it ever shows another certificate than the one remembered, Kagaz stops

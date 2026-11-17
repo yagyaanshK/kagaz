@@ -394,6 +394,20 @@ fn the_screen_is_drawn_to_fit_the_viewer_and_follows_it() {
     // And the mouse still arrives after the screen started over.
     session.send(Input::Pointer { x: 700, y: 450, buttons: 0 });
     assert!(until(|| server.heard().iter().any(|h| h == "Move { x: 700, y: 450 }")), "heard {:?}", server.heard());
+    // Made smaller again (full screen left), and then changed twice in
+    // a row: each time the screen follows, down to the last size.
+    for sizes in [&[(500u16, 320u16)][..], &[(900, 600), (420, 300)]] {
+        for (width, height) in sizes {
+            session.send(Input::Resize { width: *width, height: *height });
+        }
+        let (width, height) = *sizes.last().unwrap();
+        let card = pattern::card(width, height, 0);
+        assert!(
+            until(|| session.screen.size() == (width, height) && bars_apart(&session, &card, width) < 6.0),
+            "wanted {width}x{height}, size {:?}",
+            session.screen.size()
+        );
+    }
 }
 
 #[test]
