@@ -2040,6 +2040,7 @@ pub fn run() {
             remote_view::remote_numbers,
             remote_view::remote_clipboard_push,
             remote_view::remote_send_files,
+            remote_view::remote_fullscreen,
             remote_view::remote_startup_files,
             remote_view::remote_disconnect,
             fans::room_add,

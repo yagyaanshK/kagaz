@@ -14,7 +14,8 @@ use super::keys;
 use super::reach;
 use super::screen::{Event, Pointer, Rect, Screen, Sending};
 use super::session::{
-    buttons_for, Info, Input, InputSender, Numbers, OpenError, Session, SignIn, Trust, View, LEFT, MIDDLE, RIGHT,
+    buttons_for, Info, Input, InputSender, Numbers, OpenError, Session, SignIn, Trust, View, BACK, FORWARD, LEFT,
+    MIDDLE, RIGHT,
 };
 use super::{Settings, Speaks};
 use ironrdp_blocking::Framed;
@@ -36,8 +37,9 @@ use ironrdp_egfx::pdu::{CapabilitySet, Codec1Type};
 use ironrdp_graphics::image_processing::PixelFormat;
 use ironrdp_pdu::gcc::{ConnectionType, KeyboardType};
 use ironrdp_pdu::geometry::InclusiveRectangle;
-use ironrdp_pdu::input::fast_path::{FastPathInputEvent, KeyboardFlags};
+use ironrdp_pdu::input::fast_path::{FastPathInputEvent, KeyboardFlags, SynchronizeFlags};
 use ironrdp_pdu::input::mouse::{MousePdu, PointerFlags};
+use ironrdp_pdu::input::mouse_x::{MouseXPdu, PointerXFlags};
 use ironrdp_pdu::rdp::capability_sets::{client_codecs_capabilities, MajorPlatformType, RailSupportLevel};
 use ironrdp_pdu::rdp::client_info::{CompressionType, PerformanceFlags, TimezoneInfo};
 use ironrdp_session::image::DecodedImage;
@@ -45,6 +47,7 @@ use ironrdp_session::{ActiveStage, ActiveStageBuilder, ActiveStageOutput};
 use std::collections::HashMap;
 use std::io::{self, Read, Write};
 use std::net::{Shutdown, SocketAddr, TcpStream};
+use ironrdp_rdpdr::{NoopRdpdrBackend, Rdpdr};
 use ironrdp_rdpsnd::client::{Rdpsnd, RdpsndDvcState};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc};
@@ -719,7 +722,25 @@ impl Running {
                         out.push(mouse(flag | down, *x, *y, 0));
                     }
                 }
+                // The side buttons have an event of their own.
+                for (bit, flag) in [(BACK, PointerXFlags::BUTTON1), (FORWARD, PointerXFlags::BUTTON2)] {
+                    if (now ^ self.buttons) & bit != 0 {
+                        let down = if now & bit != 0 { PointerXFlags::DOWN } else { PointerXFlags::empty() };
+                        out.push(FastPathInputEvent::MouseEventEx(MouseXPdu {
+                            flags: flag | down,
+                            x_position: *x,
+                            y_position: *y,
+                        }));
+                    }
+                }
                 self.buttons = now;
+            }
+            Input::Locks { caps, num, scroll } => {
+                let mut flags = SynchronizeFlags::empty();
+                flags.set(SynchronizeFlags::CAPS_LOCK, *caps);
+                flags.set(SynchronizeFlags::NUM_LOCK, *num);
+                flags.set(SynchronizeFlags::SCROLL_LOCK, *scroll);
+                out.push(FastPathInputEvent::SyncEvent(flags));
             }
             Input::Wheel { x, y, up, right } => {
                 // A notch is 120 units; down and left are "negative".
@@ -971,8 +992,13 @@ pub fn open(
             .with_static_channel(CliprdrClient::new(Box::new(clipboard)))
             .with_static_channel(dynamic);
     if with_sound {
+        // Windows starts its sound only for a viewer that also offers the
+        // channel for redirected devices (drives, printers), and that
+        // channel in turn only with the sound's: here it carries no
+        // device at all.
         connector = connector
-            .with_static_channel(Rdpsnd::new(Box::new(sound::Sound::new("older channel", quiet.clone(), numbers.clone()))));
+            .with_static_channel(Rdpsnd::new(Box::new(sound::Sound::new("older channel", quiet.clone(), numbers.clone()))))
+            .with_static_channel(Rdpdr::new(Box::new(NoopRdpdrBackend), "Kagaz".into()));
     }
     let should_upgrade = ironrdp_blocking::connect_begin(&mut framed, &mut connector).map_err(refusal)?;
 

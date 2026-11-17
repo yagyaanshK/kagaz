@@ -13,6 +13,10 @@ use std::time::{Duration, Instant};
 pub const LEFT: u8 = 1;
 pub const MIDDLE: u8 = 2;
 pub const RIGHT: u8 = 4;
+/// The mouse's side buttons (back and forward in a browser), where a
+/// session carries them.
+pub const BACK: u8 = 8;
+pub const FORWARD: u8 = 16;
 
 /// What the person does, on its way to the device.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -37,6 +41,9 @@ pub enum Input {
     Files(Vec<std::path::PathBuf>),
     /// Sharper (0) to smoother (10); none lets Kagaz follow the link.
     Picture(Option<u8>),
+    /// The lock keys as they are on this keyboard: a device that can sets
+    /// its own to match, so that capitals here are capitals there.
+    Locks { caps: bool, num: bool, scroll: bool },
     /// The device has its mouse buttons swapped, or not after all.
     SwappedButtons(bool),
     /// Play the device's sound here, or not, for now (a session that

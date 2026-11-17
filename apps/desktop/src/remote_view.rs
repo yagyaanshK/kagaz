@@ -407,6 +407,8 @@ pub enum Did {
     Swapped { on: bool },
     /// Play the device's sound here, or not, for now.
     Sound { on: bool },
+    /// The lock keys as they are on this keyboard.
+    Locks { caps: bool, num: bool, scroll: bool },
     /// The viewer is this size now, in pixels.
     Resize { width: u16, height: u16 },
 }
@@ -422,6 +424,7 @@ pub fn remote_input(viewers: tauri::State<'_, Viewers>, session: u64, did: Vec<D
                 Did::Picture { value } => Input::Picture(value.map(|v| v.min(10))),
                 Did::Swapped { on } => Input::SwappedButtons(on),
                 Did::Sound { on } => Input::Sound(on),
+                Did::Locks { caps, num, scroll } => Input::Locks { caps, num, scroll },
                 Did::Resize { width, height } => Input::Resize { width, height },
             });
         }
@@ -504,6 +507,27 @@ pub async fn remote_send_files(app: AppHandle, session: u64, paths: Option<Vec<S
         Ok(count)
     })
     .await
+}
+
+/// The whole of this screen for the window, or back to a window; without
+/// `on`, whether it has the whole screen now. The window's own full
+/// screen, not the page's: a page's full screen ends with Esc, which in a
+/// session belongs to the device.
+#[tauri::command]
+pub fn remote_fullscreen(window: tauri::WebviewWindow, on: Option<bool>) -> Result<bool, String> {
+    #[cfg(desktop)]
+    {
+        if let Some(on) = on {
+            window.set_fullscreen(on).map_err(|e| e.to_string())?;
+            return Ok(on);
+        }
+        window.is_fullscreen().map_err(|e| e.to_string())
+    }
+    #[cfg(not(desktop))]
+    {
+        let _ = (window, on);
+        Err("a phone's window has the whole screen already".into())
+    }
 }
 
 /// Files the window was started to send (`kagaz remote send` starts it

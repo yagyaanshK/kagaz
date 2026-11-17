@@ -64,6 +64,9 @@ ironrdp-egfx = { version = "0.5", features = ["openh264-bundled"] }
 # The computer's sound: the library's channel for it; its player is
 # below, by system.
 ironrdp-rdpsnd = "0.11"
+# Windows starts its sound only for a viewer that also offers the channel
+# for redirected devices; Kagaz offers it with no device on it.
+ironrdp-rdpdr = "0.9"
 x509-cert = { version = "0.2", default-features = false, features = ["std"] }
 
 [target.'cfg(not(target_os = "android"))'.dependencies]

@@ -270,7 +270,7 @@ const KagazRemoteView = (() => {
     }
     closePop();
     hideCard();
-    if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(() => {});
+    fullScreen(false);
     delete document.documentElement.dataset.viewer;
     $("bar-remote").classList.add("hidden");
     canvas.classList.add("hidden");
@@ -297,7 +297,7 @@ const KagazRemoteView = (() => {
       closePop();
       // Its sound waits too: a call at the door is not talked over.
       if (cur.info && cur.info.sound && !cur.soundOff) did({ t: "sound", on: false }, true);
-      if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(() => {});
+      fullScreen(false);
       delete document.documentElement.dataset.viewer;
       $("bar-remote").classList.add("hidden");
       log("another page on screen; the session goes on");
@@ -444,6 +444,7 @@ const KagazRemoteView = (() => {
       const now = view();
       if (cur.asked && now[0] === cur.asked[0] && now[1] === cur.asked[1]) return;
       if (now[0] < 200 || now[1] < 200) return;
+      fullScreenNow();
       cur.asked = now;
       log(`asked for ${now[0]}x${now[1]}`);
       did({ t: "resize", width: now[0], height: now[1] }, true);
@@ -508,10 +509,29 @@ const KagazRemoteView = (() => {
     return { x: Math.min(Math.max(x, 0), cur.width - 1), y: Math.min(Math.max(y, 0), cur.height - 1) };
   }
   // The page counts left, right, middle; a session left, middle, right.
-  const held = (ev) => (ev.buttons & 1 ? LEFT : 0) | (ev.buttons & 4 ? MIDDLE : 0) | (ev.buttons & 2 ? RIGHT : 0);
+  // The side buttons (back, forward) go to the device too, where its
+  // kind of session carries them.
+  const held = (ev) => (ev.buttons & 1 ? LEFT : 0) | (ev.buttons & 4 ? MIDDLE : 0) | (ev.buttons & 2 ? RIGHT : 0)
+    | (ev.buttons & 8 ? 8 : 0) | (ev.buttons & 16 ? 16 : 0);
+
+  // Caps Lock, Num Lock and Scroll Lock as they are on this keyboard:
+  // told to the device when they differ from what it was last told (they
+  // can change while the person is elsewhere), so that capitals here are
+  // capitals there. Not in the middle of a held key, nor from a lock
+  // key's own press, whose state is in between.
+  const LOCKS = ["CapsLock", "NumLock", "ScrollLock"];
+  function locks(ev) {
+    if (!cur || cur.session == null || !cur.info || cur.info.speaks !== "rdp" || !ev.getModifierState) return;
+    if (cur.held.size || LOCKS.includes(ev.code)) return;
+    const now = LOCKS.map((k) => ev.getModifierState(k));
+    if (cur.locks && now.every((on, i) => on === cur.locks[i])) return;
+    cur.locks = now;
+    did({ t: "locks", caps: now[0], num: now[1], scroll: now[2] }, true);
+  }
 
   function pointer(ev, now) {
     if (!cur || cur.session == null) return;
+    locks(ev);
     const p = at(ev);
     cur.buttons = held(ev);
     // Of moves waiting to go, only the last matters.
@@ -533,6 +553,15 @@ const KagazRemoteView = (() => {
   canvas.addEventListener("pointercancel", (ev) => pointer(ev, true));
   canvas.addEventListener("pointerenter", () => pushClipboard(true));
   canvas.addEventListener("contextmenu", (ev) => ev.preventDefault());
+  // Over the device's screen the mouse's back button is the device's:
+  // it does not step back in Kagaz (nav.js), which would end the session.
+  for (const kind of ["mousedown", "mouseup", "auxclick"]) {
+    canvas.addEventListener(kind, (ev) => {
+      if (ev.button < 3) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+    });
+  }
 
   // The wheel: a notch for every hundred pixels a touchpad or wheel says.
   let wheelY = 0, wheelX = 0;
@@ -556,6 +585,7 @@ const KagazRemoteView = (() => {
     if (!cur || cur.session == null || ev.isComposing) return;
     ev.preventDefault();
     ev.stopPropagation();
+    if (down && !ev.repeat) locks(ev);
     const id = ev.code || ev.key;
     if (down) cur.held.set(id, { key: ev.key, code: ev.code });
     else cur.held.delete(id);
@@ -803,19 +833,46 @@ const KagazRemoteView = (() => {
       + (r && r.sound_via ? `; sound by the ${r.sound_via}` : ""));
   }, 5000);
 
+  // Full screen is the window's own, not the page's: a page's full
+  // screen ends with Esc, and Esc in a session belongs to the device.
+  // Where the window cannot (a browser in the tests), the page's serves.
+  let full = false;
+  function fullIcon() {
+    setIcon($("rv-full").querySelector(".ic"), full ? "unfull" : "full");
+    $("rv-full").title = full ? "Leave full screen" : "Full screen";
+    $("rv-full").setAttribute("aria-label", $("rv-full").title);
+  }
+  async function fullScreen(on) {
+    if (on === full) return;
+    try {
+      full = await invoke("remote_fullscreen", { on });
+    } catch (e) {
+      const root = document.documentElement;
+      try {
+        if (on && root.requestFullscreen) await root.requestFullscreen();
+        else if (!on && document.fullscreenElement) await document.exitFullscreen();
+        full = on;
+      } catch (e2) {
+        if (on) toast("Full screen is not available here.");
+      }
+    }
+    fullIcon();
+  }
+  // The system may take the window out of full screen by itself.
+  async function fullScreenNow() {
+    try {
+      full = await invoke("remote_fullscreen", { on: null });
+    } catch (e) {
+      full = !!document.fullscreenElement;
+    }
+    fullIcon();
+  }
   $("rv-full").addEventListener("click", () => {
     closePop();
-    const root = document.documentElement;
-    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
-    else if (root.requestFullscreen) root.requestFullscreen().catch(() => toast("Full screen is not available here."));
+    fullScreen(!full);
     stage.focus();
   });
-  document.addEventListener("fullscreenchange", () => {
-    const on = !!document.fullscreenElement;
-    setIcon($("rv-full").querySelector(".ic"), on ? "unfull" : "full");
-    $("rv-full").title = on ? "Leave full screen" : "Full screen";
-    $("rv-full").setAttribute("aria-label", $("rv-full").title);
-  });
+  document.addEventListener("fullscreenchange", fullScreenNow);
 
   // A narrow window's tools under the picture do what the bar's do.
   document.querySelectorAll("#rv-touchbar button").forEach((b) => b.addEventListener("click", () => $(b.dataset.tool).click()));

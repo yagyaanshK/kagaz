@@ -17,7 +17,9 @@ pub mod server;
 
 use super::keys;
 use super::screen::{Event, Rect, Screen, Sending};
-use super::session::{buttons_for, Info, Input, InputSender, Numbers, OpenError, Session, SignIn};
+use super::session::{
+    buttons_for, Info, Input, InputSender, Numbers, OpenError, Session, SignIn, LEFT, MIDDLE, RIGHT,
+};
 use super::{Settings, Speaks};
 use decode::{bad, bytes_of, u16_of, u32_of, u8_of};
 use des::cipher::generic_array::GenericArray;
@@ -487,7 +489,9 @@ fn write_loop(rx: mpsc::Receiver<Input>, link: &Link, settings: &Settings) {
                     if matches!(batch.get(i + 1), Some(Input::Pointer { buttons: next, .. }) if next == now) {
                         continue;
                     }
-                    buttons = buttons_for(*now, swapped);
+                    // The three buttons VNC has; its further ones are the
+                    // wheel's.
+                    buttons = buttons_for(*now & (LEFT | MIDDLE | RIGHT), swapped);
                     pointer_event(&mut out, buttons, *x, *y);
                 }
                 Input::Wheel { x, y, up, right } => {
@@ -523,6 +527,8 @@ fn write_loop(rx: mpsc::Receiver<Input>, link: &Link, settings: &Settings) {
                 // A VNC server's screen is the size it is, and it sends
                 // no sound.
                 Input::Resize { .. } | Input::Sound(_) => {}
+                // VNC has no word for the lock keys' state.
+                Input::Locks { .. } => {}
                 Input::Close => close = true,
             }
         }

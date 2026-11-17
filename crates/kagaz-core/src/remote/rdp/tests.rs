@@ -515,6 +515,35 @@ fn the_older_picture_is_used_when_asked_for() {
 }
 
 #[test]
+fn the_side_buttons_and_the_lock_keys_arrive() {
+    let Some(server) = serve(64, 64) else { return };
+    let session = connect(&server, Some("asha"), Some("sesame"), &Trust::default()).unwrap();
+    // The mouse's back button, then its forward one, each down and up.
+    for buttons in [BACK, 0, FORWARD, 0] {
+        session.send(Input::Pointer { x: 9, y: 9, buttons });
+    }
+    // The lock keys as they are here: Caps Lock on, the others off.
+    session.send(Input::Locks {
+        caps: true,
+        num: false,
+        scroll: false,
+    });
+    // The test server's library reads the side buttons' own event as its
+    // first and second button and names them left and right; no left or
+    // right click was sent here, so these can only be the side buttons.
+    let want = ["LeftPressed", "LeftReleased", "RightPressed", "RightReleased"];
+    assert!(
+        until(|| {
+            let heard = server.heard();
+            let got: Vec<&String> = heard.iter().filter(|h| h.ends_with("Pressed") || h.ends_with("Released")).collect();
+            got == want && heard.iter().any(|h| h.starts_with("Synchronize(") && h.contains("CAPS_LOCK") && !h.contains("NUM_LOCK"))
+        }),
+        "heard {:?}",
+        server.heard()
+    );
+}
+
+#[test]
 fn the_computers_sound_arrives_whole() {
     let Some(mut server) = serve_with(64, 64, &["--sound"]) else { return };
     let session = connect(&server, Some("asha"), Some("sesame"), &Trust::default()).unwrap();
