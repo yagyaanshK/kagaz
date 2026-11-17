@@ -3,15 +3,24 @@
 //! a device is remembered with every way to it (its addresses on the local
 //! network, its name, its Tailscale address, "the gateway" when it is a
 //! phone sharing its hotspot), all of them are tried at once, and the first
-//! to answer is used. The sessions themselves (RDP, VNC) sit on top.
+//! to answer is used. A session (`session`; VNC so far, Remote Desktop
+//! next) then brings the device's screen into a shared `screen` and takes
+//! the mouse and keyboard there.
 //!
 //! Plan and limits: `docs/remote-connection.md`.
 
+pub mod keys;
+pub mod pattern;
 pub mod reach;
+pub mod screen;
+pub mod session;
 pub mod store;
 pub mod tailscale;
+pub mod vnc;
 
 pub use reach::{check, detect, reach, search, Answer, Found, PathReport, Seen, Trouble};
+pub use screen::{Event, Piece, Pointer, Rect, Screen, Taken};
+pub use session::{Info, Input, OpenError, Reading, Session, SignIn};
 pub use store::{Device, Devices, Identity, PathKind, PathTo, Settings, StoreError};
 
 use serde::{Deserialize, Serialize};

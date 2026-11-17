@@ -1,15 +1,16 @@
 //! `kagaz remote`: the computers and phones you added, every way to reach
-//! each and how it does now, and the system's own ssh and scp over
-//! whichever path answers. The same list as the window's Computers &
-//! phones.
+//! each and how it does now, a session with one told in numbers, clipboard
+//! text sent there, and the system's own ssh and scp over whichever path
+//! answers. The same list as the window's Computers & phones.
 
 use anyhow::{anyhow, bail, Context, Result};
 use clap::Subcommand;
 use kagaz_core::remote::tailscale::{self, Tailscale};
 use kagaz_core::remote::{
-    self, Answer, Device, Devices, LocateError, PathKind, PathReport, PathTo, Speaks, Trouble, Way,
+    self, Answer, Device, Devices, Event, Input, LocateError, OpenError, PathKind, PathReport, PathTo, Piece, Session,
+    SignIn, Speaks, Trouble, Way,
 };
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 #[derive(Subcommand)]
 pub enum RemoteAction {
@@ -69,6 +70,38 @@ pub enum RemoteAction {
     Rename { device: String, name: String },
     /// Stop remembering a device
     Forget { device: String },
+    /// Open a session with a device and tell it in numbers; no picture is shown or kept
+    Try {
+        device: String,
+        /// How long to watch it
+        #[arg(long, default_value_t = 5)]
+        seconds: u64,
+        /// Sharper (0) to smoother (10); without it Kagaz follows the link
+        #[arg(long)]
+        picture: Option<u8>,
+    },
+    /// Send text to a device's clipboard (the text, or what is piped in)
+    Clip {
+        device: String,
+        text: Option<String>,
+    },
+    /// Serve a moving test card over VNC, to try the viewer without a real screen
+    Pattern {
+        #[arg(long, default_value_t = 5901)]
+        port: u16,
+        /// Width and height, as 1280x720
+        #[arg(long, default_value = "1280x720")]
+        size: String,
+        /// Ask viewers for this VNC password
+        #[arg(long)]
+        password: Option<String>,
+        /// How many times a second the card moves; 0 keeps it still
+        #[arg(long, default_value_t = 30)]
+        rate: u32,
+        /// Let other devices on the network connect, not only this computer
+        #[arg(long)]
+        open: bool,
+    },
     /// The system's ssh to the device, over whichever path answers
     Ssh {
         device: String,
@@ -186,6 +219,15 @@ pub fn run(action: Option<RemoteAction>) -> Result<()> {
             println!("Forgot {}.", gone.name);
             Ok(())
         }
+        RemoteAction::Try { device, seconds, picture } => try_session(&device, seconds, picture),
+        RemoteAction::Clip { device, text } => clip(&device, text),
+        RemoteAction::Pattern {
+            port,
+            size,
+            password,
+            rate,
+            open,
+        } => pattern(port, &size, password, rate, open),
         RemoteAction::Ssh { device, command } => ssh(&device, &command),
         RemoteAction::Copy { device, from, to } => copy(&device, &from, &to),
     }
@@ -424,6 +466,214 @@ fn locate_ssh(which: &str) -> Result<(Device, Answer)> {
     }
 }
 
+/// Reach a device the way that shows its screen, and open a session
+/// there; a password is asked for when the device wants one.
+fn open_session(which: &str, picture: Option<u8>) -> Result<(Device, Answer, Session)> {
+    let list = list_path();
+    let device = Devices::load(&list)?.find(which)?.clone();
+    let Some(way) = device.screen_way() else {
+        bail!("{} has no way in that shows its screen (Remote Desktop or VNC)", device.name);
+    };
+    let (device, answer) = match remote::locate(&list, &device.id, way.speaks, QUICK) {
+        Ok(found) => found,
+        Err(LocateError::NotReached(n)) => bail!("{} is out of reach: {}", device.name, n.why),
+        Err(e) => return Err(e.into()),
+    };
+    let mut settings = device.settings.clone();
+    if picture.is_some() {
+        settings.picture = picture.map(|p| p.min(10));
+    }
+    let mut sign_in = SignIn {
+        user: device.user.clone(),
+        password: None,
+    };
+    loop {
+        match remote::session::open(answer.addr, answer.way, &sign_in, &settings, Duration::from_secs(10)) {
+            Ok(session) => return Ok((device, answer, session)),
+            Err(OpenError::NeedsPassword) => {
+                sign_in.password = Some(crate::prompt_secret(&format!("Password for {} (not shown): ", device.name))?);
+            }
+            Err(OpenError::WrongPassword) => {
+                sign_in.password = Some(crate::prompt_secret("That was not it. Password (not shown): ")?);
+            }
+            Err(e) => bail!("{}: {e}", device.name),
+        }
+    }
+}
+
+fn picture_words(picture: u8) -> String {
+    match picture {
+        0 => "sharpest".into(),
+        10 => "smoothest".into(),
+        n => format!("{n} of 10 towards smoother"),
+    }
+}
+
+fn megabytes(bytes: u64) -> String {
+    format!("{:.1} MB", bytes as f64 / 1e6)
+}
+
+/// A session in numbers, a line a second: how often the picture came,
+/// how much of the screen changed, how much travelled, the delay.
+fn try_session(which: &str, seconds: u64, picture: Option<u8>) -> Result<()> {
+    let (device, answer, session) = open_session(which, picture)?;
+    let (width, height) = session.screen.size();
+    println!(
+        "{} · {} over {} at {}",
+        device.name,
+        answer.way.words(),
+        device.paths[answer.path].kind.label().to_lowercase(),
+        answer.addr
+    );
+    let name = if session.info.name.is_empty() { String::new() } else { format!(", \"{}\"", session.info.name) };
+    println!("screen {width} x {height}{name}");
+    if !session.info.encrypted && device.paths[answer.path].kind != PathKind::Tailscale {
+        println!("not encrypted on this network: the screen and what is typed can be read by others on it");
+    }
+    let started = Instant::now();
+    let mut last = session.numbers.read();
+    let mut ended = None;
+    for second in 1..=seconds.max(1) {
+        let until = started + Duration::from_secs(second);
+        let (mut pieces, mut moves, mut pixels) = (0u32, 0u32, 0u64);
+        while Instant::now() < until && ended.is_none() {
+            session.screen.wait(until.saturating_duration_since(Instant::now()).min(Duration::from_millis(50)));
+            let taken = session.screen.take();
+            for piece in &taken.pieces {
+                pieces += 1;
+                match piece {
+                    Piece::Picture { rect, .. } => pixels += rect.area(),
+                    Piece::Move { .. } => moves += 1,
+                    Piece::Size { .. } => {}
+                }
+            }
+            for event in taken.events {
+                match event {
+                    Event::Ended(why) => ended = Some(why),
+                    Event::Clipboard(text) => println!("  the device copied {} characters", text.chars().count()),
+                    Event::Pointer(p) => println!("  its pointer is {} x {}", p.width, p.height),
+                    Event::Bell => println!("  it rang its bell"),
+                }
+            }
+        }
+        let now = session.numbers.read();
+        let whole = (width as u64 * height as u64).max(1);
+        println!(
+            "{second:>3} s  {:>3} updates  {:>4} areas ({} moved)  {:>5.1} screens painted  {:>6.2} Mbit/s  delay {}  picture {}",
+            now.updates - last.updates,
+            pieces,
+            moves,
+            pixels as f64 / whole as f64,
+            (now.received - last.received) as f64 * 8.0 / 1e6,
+            now.delay.map_or("not measured yet".into(), |d| format!("{d} ms")),
+            picture_words(now.picture),
+        );
+        last = now;
+        if let Some(why) = &ended {
+            println!("the session ended: {why}");
+            break;
+        }
+    }
+    let all = session.numbers.read();
+    println!(
+        "{} updates in {:.1} s, {} received, {} sent",
+        all.updates,
+        all.seconds,
+        megabytes(all.received),
+        megabytes(all.sent)
+    );
+    Ok(())
+}
+
+/// Text to a device's clipboard: the argument, or what is piped in.
+fn clip(which: &str, text: Option<String>) -> Result<()> {
+    let text = match text {
+        Some(t) => t,
+        None => {
+            let mut all = String::new();
+            std::io::Read::read_to_string(&mut std::io::stdin(), &mut all).context("reading the text to send")?;
+            all
+        }
+    };
+    if text.is_empty() {
+        bail!("there is no text to send");
+    }
+    let (device, _, session) = open_session(which, None)?;
+    // A moment for the device to say how it takes clipboard text, then
+    // the text, then a moment for it to leave.
+    std::thread::sleep(Duration::from_millis(400));
+    let before = session.numbers.read().sent;
+    session.send(Input::Clipboard(text.clone()));
+    let end = Instant::now() + Duration::from_secs(3);
+    while session.numbers.read().sent == before && Instant::now() < end {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    if session.numbers.read().sent == before {
+        bail!("the text did not leave for {}", device.name);
+    }
+    std::thread::sleep(Duration::from_millis(300));
+    println!("Sent {} characters to {}'s clipboard.", text.chars().count(), device.name);
+    if session.info.speaks == Speaks::Vnc {
+        println!("VNC gives no word back on whether it was taken; some VNC servers keep plain letters only.");
+    }
+    Ok(())
+}
+
+fn parse_size(size: &str) -> Result<(u16, u16)> {
+    let (w, h) = size
+        .split_once(['x', 'X', '×'])
+        .ok_or_else(|| anyhow!("a size is a width and a height, as 1280x720"))?;
+    let (w, h): (u16, u16) = (w.trim().parse()?, h.trim().parse()?);
+    if !(16..=8192).contains(&w) || !(16..=8192).contains(&h) {
+        bail!("a size between 16x16 and 8192x8192");
+    }
+    Ok((w, h))
+}
+
+/// The test card over VNC until Ctrl+C.
+fn pattern(port: u16, size: &str, password: Option<String>, rate: u32, open: bool) -> Result<()> {
+    use kagaz_core::remote::vnc::server::{Heard, Options, Server};
+    let (width, height) = parse_size(size)?;
+    let host = if open { "0.0.0.0" } else { "127.0.0.1" };
+    let listener = std::net::TcpListener::bind((host, port)).with_context(|| format!("port {port} is taken"))?;
+    let server = Server::start(
+        listener,
+        Options {
+            width,
+            height,
+            password,
+            ticks_per_second: rate.min(120),
+            ..Options::default()
+        },
+    )?;
+    println!("A test card of {width} x {height} over VNC on port {port}; Ctrl+C stops it.");
+    println!("Add it once with: kagaz remote add 127.0.0.1 --vnc {port} --name \"Test card\"");
+    if open {
+        println!("Other devices on this network can connect to it too, and VNC is not encrypted.");
+    }
+    println!("A press shows as a square: red for the left button, green the middle, blue the right.");
+    // What viewers do, in a line each time it changes kind.
+    let mut told = 0;
+    loop {
+        std::thread::sleep(Duration::from_millis(500));
+        let heard = server.heard();
+        let (mut moves, mut presses, mut keys, mut texts) = (0, 0, 0, 0);
+        for h in &heard[told..] {
+            match h {
+                Heard::Pointer { buttons: 0, .. } => moves += 1,
+                Heard::Pointer { .. } => presses += 1,
+                Heard::Key { .. } => keys += 1,
+                Heard::Text(_) => texts += 1,
+                Heard::Encodings(_) => println!("a viewer connected"),
+            }
+        }
+        told = heard.len();
+        if moves + presses + keys + texts > 0 {
+            println!("heard {moves} pointer moves, {presses} with a button down, {keys} key events, {texts} clipboard texts");
+        }
+    }
+}
+
 /// One known-hosts entry per device, whichever address it is reached at.
 fn host_key_alias(d: &Device) -> String {
     format!("HostKeyAlias=kagaz-{}", d.id)
@@ -499,6 +749,22 @@ mod tests {
         assert_eq!(host, "192.0.2.20");
         assert_eq!(name.as_deref(), Some("Study laptop"));
         assert_eq!((rdp, vnc, ssh), (Some(3389), Some(5901), None));
+    }
+
+    #[test]
+    fn a_size_is_a_width_and_a_height() {
+        assert_eq!(parse_size("1280x720").unwrap(), (1280, 720));
+        assert_eq!(parse_size("360 X 800").unwrap(), (360, 800));
+        assert!(parse_size("1280").is_err());
+        assert!(parse_size("4x4").is_err());
+        assert!(parse_size("99999x720").is_err());
+    }
+
+    #[test]
+    fn the_picture_setting_in_words() {
+        assert_eq!(picture_words(0), "sharpest");
+        assert_eq!(picture_words(10), "smoothest");
+        assert_eq!(picture_words(4), "4 of 10 towards smoother");
     }
 
     #[test]

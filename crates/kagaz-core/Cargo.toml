@@ -35,6 +35,8 @@ tar = "0.4"
 url = "2"
 aes = "0.8"
 cbc = { version = "0.1", features = ["alloc"] }
+# A VNC password's challenge and response.
+des = "0.8"
 num-bigint = "0.4"
 x25519-dalek = { version = "2", features = ["static_secrets"] }
 chacha20 = "0.9"
