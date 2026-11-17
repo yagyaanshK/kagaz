@@ -368,12 +368,29 @@ Plan: `docs/remote-connection.md` (agreed 2026-11-16).
       keyboard there, clipboard, turning the phone), a Mac's Screen
       Sharing, how the automatic picture setting behaves on a slow link
       (it goes by the measured delay alone).
-- [ ] **Step 1, Remote Desktop sessions** (IronRDP with Kagaz's own check
-      of the certificate): the picture at the window's size, sound,
-      monitors, files (`kagaz remote send`). Waits on the Step 0 trial
-      against real Windows and on a choice of H.264 decoder for Ubuntu
-      (the library has a place for one and brings none); sound needs
-      `libasound2-dev`.
+- [x] **Step 1, Remote Desktop sessions, the base** (2026-11-17):
+      IronRDP's newest parts under Kagaz's own session (one thread, woken
+      by input): the certificate compared with the one remembered before
+      the sign-in is sent, and a changed one is no longer taken on
+      silently by a check either; network-level sign-in with the user
+      name and password; the picture as changed areas; the pointer's
+      shape; mouse, wheel and keys by their scancodes (letters without a
+      key as Unicode); left kept left; the screen drawn at the viewer's
+      size and scale at the start and again when the window changes
+      (Display Control), or a fixed 1920x1080 when asked; the delay read
+      from the connection (Linux). In the window: the user name on the
+      sign-in card, the certificate card, the size choice on the device's
+      page. In `kagaz remote try`. Tested against `tools/rdp-test-server`
+      (the library's server part showing the test card; a program of its
+      own because it cannot share a build with the newest client parts).
+      **Not yet** against real Windows or GNOME, and not yet in the real
+      window. Computers only: phones come with step 2.
+- [ ] **Step 1, Remote Desktop, what is left**: clipboard text both ways;
+      the H.264 picture (the fast one; needs the owner's choice of
+      decoder for Ubuntu, the library brings none there); sound (needs
+      `libasound2-dev`); choosing a monitor; sending files (`kagaz remote
+      send`); a sign-in through a company domain (Kerberos) is refused
+      with a reason.
 - [x] **Step 1, the password in the system's password store** behind a
       Remember switch (2026-11-17): one entry per device under
       `app.kagaz.computers` (the owner's name for it), kept once the

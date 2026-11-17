@@ -2032,7 +2032,7 @@ pub fn run() {
             remote::remote_path_remove,
             remote::remote_settings,
             remote::remote_remember,
-            remote::remote_can_remember,
+            remote::remote_abilities,
             remote_view::remote_connect,
             remote_view::remote_input,
             remote_view::remote_painted,

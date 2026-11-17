@@ -274,10 +274,20 @@ pub fn remote_forget(id: String) -> Result<Devices, String> {
     Ok(devices)
 }
 
-/// Can this build keep a password in the system's password store?
+/// What this build can do: keep a password in the system's password
+/// store, and open Remote Desktop sessions (VNC it always can).
+#[derive(Debug, Clone, Serialize)]
+pub struct Abilities {
+    pub remember: bool,
+    pub rdp: bool,
+}
+
 #[tauri::command]
-pub fn remote_can_remember() -> bool {
-    super::remote_vault::SUPPORTED
+pub fn remote_abilities() -> Abilities {
+    Abilities {
+        remember: super::remote_vault::SUPPORTED,
+        rdp: remote::session::RDP_HERE,
+    }
 }
 
 /// Remember this device's password from now on, or stop and forget the

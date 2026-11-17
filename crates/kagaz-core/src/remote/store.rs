@@ -420,8 +420,21 @@ impl Devices {
             return false;
         }
         let changed = matches!((&d.identity.certificate, &seen.certificate), (Some(a), Some(b)) if a != b);
-        d.identity = seen.clone();
+        // Another certificate than the one remembered is not taken on
+        // here: the person is asked when they connect (`trust_identity`).
+        if !changed {
+            d.identity = seen.clone();
+        }
         changed
+    }
+
+    /// The person accepted the certificate the device shows now.
+    pub fn trust_identity(&mut self, id: &str, seen: &Identity) {
+        if let Some(d) = self.devices.iter_mut().find(|d| d.id == id) {
+            if !seen.is_empty() {
+                d.identity = seen.clone();
+            }
+        }
     }
 }
 
@@ -535,7 +548,13 @@ mod tests {
         let mut all = Devices::default();
         let id = all.add(laptop()).unwrap();
         assert!(!all.note_identity(&id, &first));
+        // Another certificate is noticed every time and not taken on...
         assert!(all.note_identity(&id, &renewed));
+        assert!(all.note_identity(&id, &renewed));
+        assert_eq!(all.devices[0].identity, first);
+        // ...until the person says so.
+        all.trust_identity(&id, &renewed);
+        assert_eq!(all.devices[0].identity, renewed);
         assert!(!all.note_identity(&id, &renewed));
     }
 

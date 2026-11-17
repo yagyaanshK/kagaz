@@ -213,20 +213,32 @@ computer; nothing is changed there). `remote ssh` and `remote copy` run
 the system's own ssh and scp over the working path, with one known-hosts
 entry per device whichever address it has.
 
-A device that speaks VNC (a phone running a VNC server, a Mac's Screen
-Sharing with a VNC password, a Linux computer's VNC) can be seen and used
-from here; VNC is spoken by Kagaz itself. `remote open` starts the Kagaz
-window on the device's screen. `remote try` opens a session and tells it
-in numbers, a line a second (how often the picture came, how much
-travelled, the delay), without showing or keeping any picture. `remote
-clip` sends text to the device's clipboard. `remote pattern` serves a
-moving test card over VNC, to try the viewer without a real screen. VNC
-protects nothing by itself, so Kagaz says "not encrypted on this network"
-unless the session travels through Tailscale. Remote Desktop sessions come
-next (plan: [docs/remote-connection.md](docs/remote-connection.md)).
-Checked against the test card only so far, not against a phone's or a
-computer's VNC server. The list lives in `~/.config/kagaz/remote.toml`;
-passwords are never in it.
+A device's screen can be seen and used from here over Remote Desktop (a
+Windows computer, GNOME's own remote access) or VNC (a phone running a VNC
+server, a Mac's Screen Sharing with a VNC password, a Linux computer's
+VNC). Remote Desktop is used where a device speaks both. Its parts come
+from the IronRDP library; the session is Kagaz's own: the certificate the
+computer shows is remembered at the first connection and compared every
+time after, before anything of the sign-in is sent, and another one stops
+the connection until you say to take it. The computer draws its screen at
+the viewer's size. VNC is spoken by Kagaz itself, and protects nothing by
+itself, so Kagaz says "not encrypted on this network" unless the session
+travels through Tailscale.
+
+`remote open` starts the Kagaz window on the device's screen. `remote
+try` opens a session and tells it in numbers, a line a second (how often
+the picture came, how much travelled, the delay), without showing or
+keeping any picture. `remote clip` sends text to a VNC device's
+clipboard. `remote pattern` serves a moving test card over VNC, to try
+the viewer without a real screen. Over Remote Desktop the clipboard,
+sound, sending files, choosing a monitor and the faster H.264 picture are
+not built yet. Both kinds of session are checked against test servers
+that show a generated test card (for Remote Desktop,
+`tools/rdp-test-server`, which the tests start once it is built: `cargo
+build --manifest-path tools/rdp-test-server/Cargo.toml`), not yet against
+a real computer or phone. The list lives in `~/.config/kagaz/remote.toml`;
+passwords are never in it. Plan:
+[docs/remote-connection.md](docs/remote-connection.md).
 
 ```
 kagaz tapo login
@@ -355,18 +367,21 @@ screen and the devices in your Tailscale that are not added yet. **Add**
 takes one of those or an address, asks the device what it speaks, and
 opens its page: every way to reach it with how each does, more addresses,
 "It also shares its hotspot" for a phone, what it is and who signs in.
-**Connect** turns the window into the screen of a device that speaks VNC:
-the mouse, the wheel and the keys go there, text copied on either side is
-on the other's clipboard, and the bar shows how the session travels and
-its delay, with tools to send keys such as Ctrl + Alt + Del, to make the
-picture sharper or smoother (by itself unless you choose), and for full
-screen. "Keep left click on the left" is for a device whose mouse buttons
-are swapped. A password is asked for when the device wants one, and with
-**Remember** it is kept in the system's password store (never in Kagaz's
-own files) and used from then on; the device's page turns that off and
-forgets it. A device that
-speaks only Remote Desktop says that its sessions are still being built
-rather than offering a Connect that fails.
+**Connect** turns the window into the device's screen, over Remote Desktop
+or VNC: the mouse, the wheel and the keys go there, and the bar shows how
+the session travels and its delay, with tools to send keys such as Ctrl +
+Alt + Del and for full screen. A Remote Desktop computer draws its screen
+at the window's size and again when the window changes (or at a fixed
+size, scaled, if you choose that on its page); it asks who signs in, and
+if it ever shows another certificate than the one remembered, Kagaz stops
+and asks before signing in. Over VNC, text copied on either side is on the
+other's clipboard, and the picture can be made sharper or smoother (by
+itself unless you choose). "Keep left click on the left" is for a device
+whose mouse buttons are swapped. With **Remember** the password is kept in
+the system's password store (never in Kagaz's own files) and used from
+then on; the device's page turns that off and forgets it. Over Remote
+Desktop the clipboard, sound, files and choosing a monitor are not built
+yet, and their buttons say so.
 
 Each page keeps its place: leave a printer's page with a scan under way
 for the cameras, and coming back finds the scan where it was. Camera

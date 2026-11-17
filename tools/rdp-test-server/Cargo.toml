@@ -1,0 +1,30 @@
+# A Remote Desktop server that shows Kagaz's generated test card, for the
+# tests of kagaz-core's `remote::rdp` (which start it) and for trying the
+# viewer without a real computer. It is a program of its own, outside the
+# workspace: the library's server part and its newest client parts pin
+# different versions of one dependency and cannot share a build.
+#
+#   cargo build --manifest-path tools/rdp-test-server/Cargo.toml
+[package]
+name = "kagaz-rdp-test-server"
+description = "A Remote Desktop server showing Kagaz's test card, for tests"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "LicenseRef-KGZ-1.2.0"
+
+[workspace]
+
+[dependencies]
+ironrdp-server = { version = "0.13", default-features = false }
+ironrdp-displaycontrol = "0.8"
+tokio = { version = "1", features = ["rt", "net", "time"] }
+rcgen = { version = "0.14", default-features = false, features = ["aws_lc_rs"] }
+x509-cert = { version = "0.2", default-features = false, features = ["std"] }
+sha2 = "0.10"
+async-trait = "0.1"
+anyhow = "1"
+
+[profile.dev]
+debug = false
+opt-level = 2

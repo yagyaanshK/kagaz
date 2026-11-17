@@ -8,7 +8,7 @@ use clap::Subcommand;
 use kagaz_core::remote::tailscale::{self, Tailscale};
 use kagaz_core::remote::{
     self, Answer, Device, Devices, Event, Input, LocateError, OpenError, PathKind, PathReport, PathTo, Piece, Session,
-    SignIn, Speaks, Trouble, Way,
+    SignIn, Speaks, Trouble, Trust, Way,
 };
 use std::time::{Duration, Instant};
 
@@ -490,9 +490,49 @@ fn open_session(which: &str, picture: Option<u8>) -> Result<(Device, Answer, Ses
         user: device.user.clone(),
         password: None,
     };
+    let mut trust = Trust {
+        known: device.identity.certificate.clone(),
+        accept_new: false,
+    };
     loop {
-        match remote::session::open(answer.addr, answer.way, &sign_in, &settings, Duration::from_secs(10)) {
-            Ok(session) => return Ok((device, answer, session)),
+        match remote::session::open(answer.addr, answer.way, &sign_in, &settings, &trust, None, Duration::from_secs(10)) {
+            Ok(session) => {
+                // Who signed in and the certificate it showed are the
+                // device's from now on.
+                let (user, seen, accepted) = (sign_in.user.clone(), session.info.identity.clone(), trust.accept_new);
+                let _ = Devices::update(&list, |d| {
+                    if let Some(seen) = &seen {
+                        if accepted {
+                            d.trust_identity(&device.id, seen);
+                        } else {
+                            d.note_identity(&device.id, seen);
+                        }
+                    }
+                    if let Some(dev) = d.devices.iter_mut().find(|x| x.id == device.id) {
+                        if user.is_some() {
+                            dev.user = user.clone();
+                        }
+                    }
+                    Ok(())
+                });
+                return Ok((device, answer, session));
+            }
+            Err(OpenError::NeedsUser) => {
+                sign_in.user = Some(crate::prompt(&format!("User name on {}: ", device.name))?);
+                sign_in.password = Some(crate::prompt_secret("Password (not shown): ")?);
+            }
+            Err(OpenError::CertificateChanged) => {
+                println!(
+                    "{} shows another certificate than the one remembered. Windows renews its certificate about twice \
+                     a year, and a reinstalled computer has a new one; it also happens when another device answers in \
+                     its place.",
+                    device.name
+                );
+                if !crate::prompt("Connect and remember the new one? [y/N] ")?.eq_ignore_ascii_case("y") {
+                    bail!("not connected");
+                }
+                trust.accept_new = true;
+            }
             Err(OpenError::NeedsPassword) => {
                 sign_in.password = Some(crate::prompt_secret(&format!("Password for {} (not shown): ", device.name))?);
             }
@@ -578,21 +618,24 @@ fn try_session(which: &str, seconds: u64, picture: Option<u8>) -> Result<()> {
                     Event::Ended(why) => ended = Some(why),
                     Event::Clipboard(text) => println!("  the device copied {} characters", text.chars().count()),
                     Event::Pointer(p) => println!("  its pointer is {} x {}", p.width, p.height),
+                    Event::PointerDefault => println!("  its pointer is the ordinary arrow"),
                     Event::Bell => println!("  it rang its bell"),
                 }
             }
         }
         let now = session.numbers.read();
         let whole = (width as u64 * height as u64).max(1);
+        // Sharper or smoother is said where it can be chosen; a Remote
+        // Desktop computer chooses for itself.
+        let picture = if session.info.picture_setting { format!("  picture {}", picture_words(now.picture)) } else { String::new() };
         println!(
-            "{second:>3} s  {:>3} updates  {:>4} areas ({} moved)  {:>5.1} screens painted  {:>6.2} Mbit/s  delay {}  picture {}",
+            "{second:>3} s  {:>3} updates  {:>4} areas ({} moved)  {:>5.1} screens painted  {:>6.2} Mbit/s  delay {}{picture}",
             now.updates - last.updates,
             pieces,
             moves,
             pixels as f64 / whole as f64,
             (now.received - last.received) as f64 * 8.0 / 1e6,
             now.delay.map_or("not measured yet".into(), |d| format!("{d} ms")),
-            picture_words(now.picture),
         );
         last = now;
         if let Some(why) = &ended {

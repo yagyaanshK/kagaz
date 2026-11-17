@@ -2,8 +2,9 @@
 // reach it and how it does now; the ones nearby, not added yet (on this
 // network, in Tailscale); Add; and one device's page with its paths and
 // its settings. Connect opens the viewer (remote-view.js) on a device that
-// speaks VNC; Remote Desktop sessions are not built yet, and a device that
-// speaks only that says so instead of offering a Connect that fails.
+// speaks Remote Desktop or VNC; where this build has no Remote Desktop
+// sessions (a phone, so far) a device that speaks only that says so
+// instead of offering a Connect that fails.
 // Uses app.js's globals: $, invoke; ask.js's KagazAsk; icons.js; nav.js.
 
 const KagazRemote = (() => {
@@ -16,6 +17,7 @@ const KagazRemote = (() => {
   let openId = null; // the device whose page is open
   let viewId = null; // the device whose screen is shown
   let canRemember = false; // this system has a password store Kagaz can use
+  let canRdp = false; // this build opens Remote Desktop sessions
 
   function el(tag, cls, text) {
     const e = document.createElement(tag);
@@ -80,9 +82,10 @@ const KagazRemote = (() => {
   }
 
   // ---------- connecting ----------
-  // Can a session be opened with it today? VNC, yes.
-  const canConnect = (d) => d.ways.some((w) => w.speaks === "vnc");
-  const NOT_YET = "Remote Desktop sessions are being built. A device that speaks VNC can be connected to now.";
+  // Can a session be opened with it from here?
+  const canConnect = (d) => d.ways.some((w) => w.speaks === "vnc" || (canRdp && w.speaks === "rdp"));
+  const overRdp = (d) => canRdp && d.ways.some((w) => w.speaks === "rdp");
+  const NOT_YET = "Remote Desktop sessions are not on this kind of device yet. A device that speaks VNC can be connected to.";
 
   function connect(id) {
     const d = data.devices.find((x) => x.id === id);
@@ -90,6 +93,7 @@ const KagazRemote = (() => {
     viewId = id;
     KagazRemoteView.open(d, {
       canRemember,
+      canRdp,
       show() {
         showView("viewer");
         KagazNav.push("remote-viewer", () => KagazRemoteView.close());
@@ -429,8 +433,32 @@ const KagazRemote = (() => {
     };
     range.addEventListener("change", keepPicture);
     auto.addEventListener("change", keepPicture);
-    screen.append(picRow, autoRow);
-    if (canConnect(d)) screen.append(el("p", "muted small", "Over VNC the device's whole screen is shown at its own size, fitted to the window. Sound, files and choosing a monitor need Remote Desktop."));
+    if (overRdp(d)) {
+      // Remote Desktop draws its screen for the viewer, and suits the
+      // picture to the connection by itself.
+      screen.replaceChildren(el("h3", "", "Screen"));
+      const sizeRow = el("div", "set-row");
+      const sizeLabel = el("label", "", "Size");
+      sizeLabel.htmlFor = "remote-size";
+      const size = el("select");
+      size.id = "remote-size";
+      for (const [v, w] of [["", "Fit this window, sharp"], ["own", "A fixed size (1920 × 1080), scaled to the window"]]) {
+        const o = el("option", "", w);
+        o.value = v;
+        o.selected = (settings.own_size ? "own" : "") === v;
+        size.append(o);
+      }
+      size.addEventListener("change", () => {
+        if (size.value) settings.own_size = true;
+        else delete settings.own_size;
+        keepSettings();
+      });
+      sizeRow.append(sizeLabel, size);
+      screen.append(sizeRow, el("p", "muted small", "The computer suits its picture to the connection by itself. Sound, sending files and choosing a monitor are not built yet."));
+    } else {
+      screen.append(picRow, autoRow);
+      if (canConnect(d)) screen.append(el("p", "muted small", "Over VNC the device's whole screen is shown at its own size, fitted to the window. Sound, files and choosing a monitor need Remote Desktop."));
+    }
 
     const mouse = el("section", "set-section");
     mouse.append(el("h3", "", "Mouse"));
@@ -543,7 +571,12 @@ const KagazRemote = (() => {
 
   // ---------- the page ----------
   async function show() {
-    invoke("remote_can_remember").then((can) => (canRemember = !!can)).catch(() => {});
+    invoke("remote_abilities").then((can) => {
+      const changed = canRdp !== !!can.rdp;
+      canRemember = !!can.remember;
+      canRdp = !!can.rdp;
+      if (changed) renderList();
+    }).catch(() => {});
     try {
       data = (await invoke("remote_saved")) || data;
     } catch (e) {
@@ -558,7 +591,9 @@ const KagazRemote = (() => {
   // named by its id, its name or the start of its name.
   async function connectTo(which) {
     try {
-      canRemember = !!(await invoke("remote_can_remember"));
+      const can = await invoke("remote_abilities");
+      canRemember = !!can.remember;
+      canRdp = !!can.rdp;
     } catch (e) {}
     try {
       data = (await invoke("remote_saved")) || data;

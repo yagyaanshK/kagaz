@@ -17,7 +17,7 @@ pub mod server;
 
 use super::keys;
 use super::screen::{Event, Rect, Screen};
-use super::session::{buttons_for, Info, Input, Numbers, OpenError, Session, SignIn};
+use super::session::{buttons_for, Info, Input, InputSender, Numbers, OpenError, Session, SignIn};
 use super::{Settings, Speaks};
 use decode::{bad, bytes_of, u16_of, u32_of, u8_of};
 use des::cipher::generic_array::GenericArray;
@@ -517,6 +517,8 @@ fn write_loop(rx: mpsc::Receiver<Input>, link: &Link, settings: &Settings) {
                 Input::Clipboard(text) => link.clipboard_out(text, &mut out),
                 Input::Picture(p) => picture = *p,
                 Input::SwappedButtons(now) => swapped = *now,
+                // A VNC server's screen is the size it is.
+                Input::Resize { .. } => {}
                 Input::Close => close = true,
             }
         }
@@ -626,10 +628,12 @@ pub fn open(addr: SocketAddr, sign_in: &SignIn, settings: &Settings, timeout: Du
             files: false,
             monitors: false,
             resizes: false,
+            picture_setting: true,
+            identity: None,
         },
         screen,
         numbers,
-        input,
+        input: InputSender::new(input, None),
     })
 }
 

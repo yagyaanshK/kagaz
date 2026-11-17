@@ -194,10 +194,7 @@ fn see_rdp(stream: &mut TcpStream, addr: SocketAddr) -> Result<Seen, Trouble> {
         && u32::from_le_bytes([body[11], body[12], body[13], body[14]]) & (PROTOCOL_SSL | PROTOCOL_HYBRID) != 0;
     if chose_tls {
         if let Some(der) = certificate(stream, addr) {
-            seen.identity = Identity {
-                name: common_name(&der),
-                certificate: Some(hex(&Sha256::digest(&der))),
-            };
+            seen.identity = identity_of(&der);
         }
     }
     Ok(seen)
@@ -207,14 +204,13 @@ fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
-/// Shake hands over TLS just far enough to be shown the certificate. Any
-/// certificate is taken: this is how the device introduces itself, and
-/// what Kagaz remembers and compares is the certificate itself.
-fn certificate(stream: &mut TcpStream, addr: SocketAddr) -> Option<Vec<u8>> {
+/// A TLS setup that takes whatever certificate is shown, its signature
+/// still checked. Remote Desktop servers sign their own certificates, so
+/// trust comes from remembering the certificate, not from an authority.
+pub(crate) fn any_certificate_tls() -> Option<Arc<rustls::ClientConfig>> {
     use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
     use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
     use rustls::{DigitallySignedStruct, SignatureScheme};
-
     #[derive(Debug)]
     struct Shown(Arc<rustls::crypto::CryptoProvider>);
     impl ServerCertVerifier for Shown {
@@ -256,8 +252,25 @@ fn certificate(stream: &mut TcpStream, addr: SocketAddr) -> Option<Vec<u8>> {
         .dangerous()
         .with_custom_certificate_verifier(Arc::new(Shown(provider)))
         .with_no_client_auth();
+    Some(Arc::new(config))
+}
+
+/// Who a certificate says the device is: its name and its fingerprint.
+pub(crate) fn identity_of(der: &[u8]) -> Identity {
+    Identity {
+        name: common_name(der),
+        certificate: Some(hex(&Sha256::digest(der))),
+    }
+}
+
+/// Shake hands over TLS just far enough to be shown the certificate. Any
+/// certificate is taken: this is how the device introduces itself, and
+/// what Kagaz remembers and compares is the certificate itself.
+fn certificate(stream: &mut TcpStream, addr: SocketAddr) -> Option<Vec<u8>> {
+    use rustls::pki_types::ServerName;
+    let config = any_certificate_tls()?;
     let name = ServerName::IpAddress(addr.ip().into());
-    let mut conn = rustls::ClientConnection::new(Arc::new(config), name).ok()?;
+    let mut conn = rustls::ClientConnection::new(config, name).ok()?;
     while conn.is_handshaking() {
         if conn.peer_certificates().is_some() {
             break;

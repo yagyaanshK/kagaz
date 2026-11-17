@@ -4,6 +4,8 @@ members = ["crates/kagaz-core", "crates/kagaz-cli", "apps/desktop"]
 # The desktop app needs system libraries (webkit2gtk, gtk); plain `cargo build`
 # and `cargo test` stay on the core and the CLI.
 default-members = ["crates/kagaz-core", "crates/kagaz-cli"]
+# Programs of their own, each with its own lock file (see their manifests).
+exclude = ["tools/rdp-test-server"]
 
 [workspace.package]
 version = "0.1.0"

@@ -97,7 +97,10 @@ pub struct Pointer {
 pub enum Event {
     /// Text was copied on the device.
     Clipboard(String),
+    /// The pointer's shape; of no size when the device hides it.
     Pointer(Pointer),
+    /// The device shows its ordinary arrow again.
+    PointerDefault,
     Bell,
     /// The session is over, and why.
     Ended(String),

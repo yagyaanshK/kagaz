@@ -45,6 +45,18 @@ salsa20 = "0.10"
 # USB printers and scanners: computers only (a phone has no such port use).
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 nusb = "0.2"
+# Remote Desktop sessions (IronRDP's parts, MIT or Apache-2.0), on
+# computers for now; the phone's viewer comes with step 2 of
+# docs/remote-connection.md.
+ironrdp-connector = "0.12"
+ironrdp-session = "0.13"
+ironrdp-blocking = "0.12"
+ironrdp-pdu = "0.11"
+ironrdp-graphics = "0.11"
+ironrdp-core = "0.3"
+ironrdp-dvc = "0.10"
+ironrdp-displaycontrol = "0.10"
+x509-cert = { version = "0.2", default-features = false, features = ["std"] }
 
 [target.'cfg(not(target_os = "android"))'.dependencies]
 # Atomberg fans over this computer's Bluetooth LE adapter (Linux through

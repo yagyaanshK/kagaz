@@ -74,7 +74,7 @@ const KagazRemoteView = (() => {
       list,
       buttons(
         button("", "Edit its addresses", () => close()),
-        button("accent", "Try again", () => connect(null)),
+        button("accent", "Try again", () => connect()),
       ),
     );
   }
@@ -83,7 +83,7 @@ const KagazRemoteView = (() => {
     showCard(
       el("h3", "", `Could not connect to ${d.name}`),
       el("p", "", why),
-      buttons(button("", "Back", () => close()), button("accent", "Try again", () => connect(null))),
+      buttons(button("", "Back", () => close()), button("accent", "Try again", () => connect())),
     );
   }
 
@@ -91,15 +91,29 @@ const KagazRemoteView = (() => {
     showCard(
       el("h3", "", `The session with ${d.name} ended`),
       el("p", "", why.charAt(0).toUpperCase() + why.slice(1) + "."),
-      buttons(button("", "Back", () => close()), button("accent", "Connect again", () => connect(null))),
+      buttons(button("", "Back", () => close()), button("accent", "Connect again", () => connect())),
     );
   }
+
+  // A session with this device goes over Remote Desktop where it speaks
+  // that and this build has it, else over VNC (as the core chooses).
+  const overRdp = (d) => !!hooks.canRdp && d.ways.some((w) => w.speaks === "rdp");
 
   // `wrong`: false the first time, "typed" or "remembered" after a
   // password that the device did not accept.
   function passwordCard(d, wrong) {
-    const vnc = (d.ways.find((w) => w.speaks !== "ssh") || {}).speaks === "vnc";
+    const vnc = !overRdp(d);
     const form = el("form", "rc-form");
+    // Remote Desktop signs in to an account: who, and the password.
+    const userLabel = el("label", "", "User name");
+    const user = el("input");
+    user.type = "text";
+    user.autocomplete = "username";
+    user.autocapitalize = "none";
+    user.spellcheck = false;
+    user.value = (cur && cur.last && cur.last.user) || d.user || "";
+    userLabel.append(user);
+    if (!vnc) form.append(userLabel);
     const label = el("label", "", "Password");
     // The app's own Show button joins every password field (reveal.js).
     const input = el("input");
@@ -107,7 +121,8 @@ const KagazRemoteView = (() => {
     input.autocomplete = "current-password";
     input.setAttribute("aria-describedby", "rv-pass-hint");
     label.append(input);
-    const hint = el("small", "muted", vnc ? "A VNC password: only its first eight letters count." : "");
+    const hint = el("small", "muted", vnc ? "A VNC password: only its first eight letters count."
+      : "The account on that computer, as you sign in to it there.");
     hint.id = "rv-pass-hint";
     // Kept in the system's password store, never in Kagaz's own files.
     const keepLabel = el("label", "switch wrap");
@@ -122,15 +137,31 @@ const KagazRemoteView = (() => {
     form.append(buttons(button("", "Cancel", () => close()), go));
     form.addEventListener("submit", (ev) => {
       ev.preventDefault();
+      if (!vnc && !user.value.trim()) return user.focus();
       if (!input.value) return input.focus();
       d.remember = keep.checked;
-      connect(input.value, hooks.canRemember ? keep.checked : null);
+      connect({ user: vnc ? null : user.value.trim(), password: input.value, remember: hooks.canRemember ? keep.checked : null });
     });
     const say = el("p", wrong ? "rc-wrong" : "muted", wrong === "remembered" ? "The device did not accept the remembered password."
-      : wrong ? "The device did not accept that password." : `${d.name} asks for a password.`);
+      : wrong ? (vnc ? "The device did not accept that password." : "The computer did not accept that user name and password.")
+        : vnc ? `${d.name} asks for a password.` : `${d.name} asks who signs in.`);
     say.setAttribute("role", "status");
     showCard(el("h3", "", `Sign in to ${d.name}`), say, form);
-    input.focus();
+    (!vnc && !user.value ? user : input).focus();
+  }
+
+  // The computer shows another certificate than the one remembered: the
+  // person decides, before anything of the sign-in is sent.
+  function certificateCard(d) {
+    showCard(
+      el("h3", "", `${d.name} shows another certificate`),
+      el("p", "", "It is not the one Kagaz remembered for this computer. Windows renews its certificate about twice a year, and a reinstalled computer has a new one. It also happens when another device answers in its place."),
+      el("p", "muted", "If you did not expect this, cancel and check the computer and its address."),
+      buttons(
+        button("", "Cancel", () => close()),
+        button("accent", "Connect and remember the new one", () => connect({ ...(cur.last || {}), accept_certificate: true })),
+      ),
+    );
   }
 
   // ---------- opening and closing ----------
@@ -146,12 +177,23 @@ const KagazRemoteView = (() => {
     setTools(null);
     setChip(null);
     if (hooks.show) hooks.show();
-    connect(null);
+    connect();
   }
 
-  // `remember`: with a typed password, whether to keep it once accepted.
-  async function connect(password, remember) {
+  // The viewer as the device should draw for it: the stage in the
+  // screen's own pixels, and how many of them make a point, in percent.
+  function view() {
+    const dpr = window.devicePixelRatio || 1;
+    return [Math.round(stage.clientWidth * dpr), Math.round(stage.clientHeight * dpr), Math.round(dpr * 100)];
+  }
+
+  // `asking`: what the person typed, if the device asked: `user`,
+  // `password`, `remember` (keep the password once accepted), and
+  // `accept_certificate` after they took a changed certificate.
+  async function connect(asking) {
     if (!cur) return;
+    asking = asking || {};
+    cur.last = asking;
     const mine = ++attempt;
     const state = cur;
     if (state.session != null) {
@@ -166,11 +208,22 @@ const KagazRemoteView = (() => {
     };
     let connected;
     try {
-      connected = await invoke("remote_connect", { id: state.device.id, password: password || null, remember: remember == null ? null : remember, channel });
+      connected = await invoke("remote_connect", {
+        id: state.device.id,
+        asking: {
+          user: asking.user || null,
+          password: asking.password || null,
+          remember: asking.remember == null ? null : asking.remember,
+          accept_certificate: !!asking.accept_certificate,
+          view: view(),
+        },
+        channel,
+      });
     } catch (failed) {
       if (cur !== state || attempt !== mine) return;
       const f = typeof failed === "object" && failed ? failed : { kind: "other", why: String(failed) };
-      if (f.kind === "password") passwordCard(state.device, false);
+      if (f.kind === "password" || f.kind === "user") passwordCard(state.device, false);
+      else if (f.kind === "certificate") certificateCard(state.device);
       else if (f.kind === "wrong-password") passwordCard(state.device, f.remembered ? "remembered" : "typed");
       else if (f.kind === "unreachable") lostCard(state.device, f);
       else failedCard(state.device, f.why || String(failed));
@@ -187,6 +240,8 @@ const KagazRemoteView = (() => {
     state.protected = connected.protected;
     state.settings = connected.settings || {};
     state.since = performance.now();
+    state.last = null; // nothing typed is kept once it has been used
+    state.asked = view();
     for (; state.owed > 0; state.owed--) invoke("remote_painted", { session: state.session }).catch(() => {});
     hideCard();
     $("rv-banner").classList.toggle("hidden", connected.protected);
@@ -236,7 +291,8 @@ const KagazRemoteView = (() => {
     const on = !!info;
     for (const id of ["rv-keys", "rv-clip", "rv-picture", "rv-full"]) $(id).disabled = !on;
     document.querySelectorAll("#rv-touchbar button").forEach((b) => (b.disabled = !on));
-    const not = (what) => `${what}: VNC carries none of this; the device needs Remote Desktop for it`;
+    const not = (what) => (info && info.speaks === "rdp" ? `${what} over Remote Desktop is not built yet`
+      : `${what}: VNC carries none of this; the device needs Remote Desktop for it`);
     const set = (id, has, title, without) => {
       $(id).disabled = !(on && has);
       $(id).title = on && !has ? without : title;
@@ -290,6 +346,7 @@ const KagazRemoteView = (() => {
         return;
       }
       if (news.type === "ended") ended(news.why);
+      else if (news.type === "pointer-default") canvas.style.cursor = "default";
       else if (news.type === "clipboard") {
         toast(news.kept ? `Copied on ${cur.device.name}: ${news.characters} characters are on this computer's clipboard now.`
           : `Text was copied on ${cur.device.name}; the clipboard is not carried on this system yet.`);
@@ -324,7 +381,23 @@ const KagazRemoteView = (() => {
     canvas.style.width = `${Math.max(1, Math.round(w * scale))}px`;
     canvas.style.height = `${Math.max(1, Math.round(h * scale))}px`;
   }
-  new ResizeObserver(fit).observe(stage);
+  // The window changed size: fit the picture now, and a moment after the
+  // last change ask a device that can to draw its screen at the new size.
+  let resizing = 0;
+  function stageResized() {
+    fit();
+    clearTimeout(resizing);
+    resizing = setTimeout(() => {
+      if (!cur || cur.session == null || !cur.info || !cur.info.resizes) return;
+      const now = view();
+      if (cur.asked && now[0] === cur.asked[0] && now[1] === cur.asked[1]) return;
+      if (now[0] < 200 || now[1] < 200) return;
+      cur.asked = now;
+      did({ t: "resize", width: now[0], height: now[1] }, true);
+    }, 350);
+  }
+  new ResizeObserver(stageResized).observe(stage);
+  window.addEventListener("resize", stageResized);
 
   // The device's pointer, drawn here so that it moves at once.
   function pointerShape(w, h, hx, hy, rgba) {
@@ -576,10 +649,13 @@ const KagazRemoteView = (() => {
       stage.classList.toggle("own-size", own.checked);
       fit();
     });
-    const note = el("p", "muted", cur.info && cur.info.speaks === "vnc"
+    const chooses = !cur.info || cur.info.picture_setting;
+    const note = el("p", "muted", chooses
       ? "Smoother lets the device send areas of many colours as JPEG, when its VNC server can."
-      : "");
-    if (openPop("rv-picture", "picture", [el("strong", "", "Picture"), slider, autoLabel, sizeLabel, line, note])) {
+      : "Over Remote Desktop the computer suits its picture to the connection by itself, and draws its screen at this window's size.");
+    // What cannot be chosen here is not offered.
+    const parts = chooses ? [slider, autoLabel, sizeLabel] : [];
+    if (openPop("rv-picture", "picture", [el("strong", "", "Picture"), ...parts, line, note])) {
       pop.removeAttribute("role");
       pop._show = show;
     }

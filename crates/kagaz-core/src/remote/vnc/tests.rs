@@ -393,7 +393,11 @@ fn the_end_is_told_with_its_reason() {
 
 #[test]
 fn nothing_listening_is_an_error_in_words() {
-    let free = TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap();
+    // A port that is taken but not listened on: nothing else can come to
+    // listen there while the test runs.
+    let held = socket2::Socket::new(socket2::Domain::IPV4, socket2::Type::STREAM, None).unwrap();
+    held.bind(&"127.0.0.1:0".parse::<SocketAddr>().unwrap().into()).unwrap();
+    let free = held.local_addr().unwrap().as_socket().unwrap();
     let got = open(free, &SignIn::default(), &Settings::default(), Duration::from_secs(2));
     match got {
         Err(OpenError::Other(why)) => assert_eq!(why, "nothing answers there"),

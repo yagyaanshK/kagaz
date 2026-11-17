@@ -1,9 +1,9 @@
 //! A session with a device: its screen arriving, the mouse and keyboard
 //! going there. The same for every protocol; what speaks it is in `vnc`
-//! (and Remote Desktop next).
+//! and `rdp`.
 
 use super::screen::Screen;
-use super::{Device, Settings, Speaks, Way};
+use super::{Device, Identity, Settings, Speaks, Way};
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{mpsc, Arc};
@@ -30,7 +30,51 @@ pub enum Input {
     Picture(Option<u8>),
     /// The device has its mouse buttons swapped, or not after all.
     SwappedButtons(bool),
+    /// The viewer is this size now, in pixels: a device that can redraws
+    /// its screen to fit.
+    Resize { width: u16, height: u16 },
     Close,
+}
+
+/// Where what the person does is handed in; it can be held anywhere.
+#[derive(Clone)]
+pub struct InputSender {
+    tx: mpsc::Sender<Input>,
+    /// Rouses a session that waits on its connection, not on this.
+    wake: Option<Arc<dyn Fn() + Send + Sync>>,
+}
+
+impl InputSender {
+    pub(crate) fn new(tx: mpsc::Sender<Input>, wake: Option<Arc<dyn Fn() + Send + Sync>>) -> InputSender {
+        InputSender { tx, wake }
+    }
+
+    /// Hand something on to the device; quietly nothing once it has ended.
+    pub fn send(&self, input: Input) {
+        let _ = self.tx.send(input);
+        if let Some(wake) = &self.wake {
+            wake();
+        }
+    }
+}
+
+/// The viewer the screen will be shown in: its size in pixels and how
+/// many of them make one point of its screen, in percent (200 on a
+/// screen twice as fine). A device that can draws its screen to fit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct View {
+    pub width: u16,
+    pub height: u16,
+    pub scale: u32,
+}
+
+/// What is known of the device's certificate before a session opens.
+#[derive(Debug, Clone, Default)]
+pub struct Trust {
+    /// The fingerprint of the certificate it showed before, if any.
+    pub known: Option<String>,
+    /// The person has seen that it changed and wants the new one.
+    pub accept_new: bool,
 }
 
 /// With the device's buttons swapped, send the other one, so that a left
@@ -71,6 +115,13 @@ pub enum OpenError {
     /// The device asks for a password and none was given.
     #[error("it asks for a password")]
     NeedsPassword,
+    /// It wants to know who signs in.
+    #[error("it asks for a user name and a password")]
+    NeedsUser,
+    /// It shows another certificate than the one remembered: renewed, or
+    /// another device in its place.
+    #[error("it shows another certificate than before")]
+    CertificateChanged,
     #[error("it did not accept the password")]
     WrongPassword,
     /// It turned the connection down, in its own words.
@@ -109,6 +160,12 @@ pub struct Info {
     pub monitors: bool,
     /// The device redraws at the viewer's size when asked to.
     pub resizes: bool,
+    /// Sharper or smoother can be chosen here (else the device decides).
+    pub picture_setting: bool,
+    /// Who the device's certificate says it is, where the session has one:
+    /// to remember, and to compare the next time.
+    #[serde(skip)]
+    pub identity: Option<Identity>,
 }
 
 /// The session in numbers, kept up to date as it runs.
@@ -184,17 +241,17 @@ pub struct Session {
     pub info: Info,
     pub screen: Arc<Screen>,
     pub numbers: Arc<Numbers>,
-    pub(crate) input: mpsc::Sender<Input>,
+    pub(crate) input: InputSender,
 }
 
 impl Session {
     /// Hand something on to the device; quietly nothing once it has ended.
     pub fn send(&self, input: Input) {
-        let _ = self.input.send(input);
+        self.input.send(input);
     }
 
     /// A handle that sends to this session from elsewhere.
-    pub fn sender(&self) -> mpsc::Sender<Input> {
+    pub fn sender(&self) -> InputSender {
         self.input.clone()
     }
 
@@ -209,12 +266,17 @@ impl Drop for Session {
     }
 }
 
-/// The way into a device that a session opens through: VNC where the
-/// device speaks it, while Remote Desktop sessions are not built; then
-/// Remote Desktop, which says so when tried.
+/// The way into a device that a session opens through: Remote Desktop
+/// where the device speaks it (it carries more and protects itself), else
+/// VNC. A phone or tablet has no Remote Desktop sessions yet, so there it
+/// is VNC first.
 pub fn way_for(device: &Device) -> Option<Way> {
-    device.way(Speaks::Vnc).or_else(|| device.way(Speaks::Rdp))
+    let order = if RDP_HERE { [Speaks::Rdp, Speaks::Vnc] } else { [Speaks::Vnc, Speaks::Rdp] };
+    order.iter().find_map(|s| device.way(*s))
 }
+
+/// Does this build open Remote Desktop sessions?
+pub const RDP_HERE: bool = cfg!(not(any(target_os = "android", target_os = "ios")));
 
 /// Open a session at an address that answered (see [`super::reach`]).
 pub fn open(
@@ -222,13 +284,21 @@ pub fn open(
     way: Way,
     sign_in: &SignIn,
     settings: &Settings,
+    trust: &Trust,
+    view: Option<View>,
     timeout: Duration,
 ) -> Result<Session, OpenError> {
     match way.speaks {
         Speaks::Vnc => super::vnc::open(addr, sign_in, settings, timeout),
-        Speaks::Rdp => Err(OpenError::Unsupported(
-            "Remote Desktop sessions are not built yet; VNC is".into(),
-        )),
+        #[cfg(not(any(target_os = "android", target_os = "ios")))]
+        Speaks::Rdp => super::rdp::open(addr, sign_in, settings, trust, view, timeout),
+        #[cfg(any(target_os = "android", target_os = "ios"))]
+        Speaks::Rdp => {
+            let _ = (trust, view);
+            Err(OpenError::Unsupported(
+                "Remote Desktop sessions are not on phones yet; a device that speaks VNC can be connected to".into(),
+            ))
+        }
         Speaks::Ssh => Err(OpenError::Unsupported("SSH shows no screen".into())),
     }
 }
@@ -247,14 +317,15 @@ mod tests {
     }
 
     #[test]
-    fn a_session_goes_through_vnc_while_remote_desktop_is_not_built() {
+    fn a_session_goes_through_remote_desktop_where_the_device_speaks_it() {
         let mut d = Device {
-            ways: vec![Way::new(Speaks::Ssh), Way::new(Speaks::Rdp)],
+            ways: vec![Way::new(Speaks::Ssh), Way { speaks: Speaks::Vnc, port: 5901 }],
             ..Device::default()
         };
-        assert_eq!(way_for(&d).map(|w| w.speaks), Some(Speaks::Rdp));
-        d.ways.push(Way { speaks: Speaks::Vnc, port: 5901 });
         assert_eq!(way_for(&d), Some(Way { speaks: Speaks::Vnc, port: 5901 }));
+        d.ways.push(Way::new(Speaks::Rdp));
+        let first = if RDP_HERE { Speaks::Rdp } else { Speaks::Vnc };
+        assert_eq!(way_for(&d).map(|w| w.speaks), Some(first));
         d.ways.truncate(1);
         assert_eq!(way_for(&d), None);
     }

@@ -11,7 +11,8 @@
 //!      of 16 bytes each (kind, 3 unused, x, y, width, height, from x,
 //!      from y, all u16) followed, for a picture, by its RGBA pixels.
 //!      Piece kinds: 1 the screen's size, 2 a picture, 3 a move.
-//!   2  news as JSON: {"type": "clipboard" | "bell" | "ended", ...}
+//!   2  news as JSON: {"type": "clipboard" | "bell" | "pointer-default" |
+//!      "ended", ...}
 //!   3  the pointer's shape: 3 unused, width, height, hot x, hot y (u16),
 //!      then its RGBA pixels.
 //! Numbers are little-endian.
@@ -20,7 +21,10 @@ use super::blocking;
 use super::remote::{path_states, PathState};
 use super::remote_vault as vault;
 use kagaz_core::remote::session::{self, Numbers, Reading};
-use kagaz_core::remote::{self, Devices, Event, Info, Input, LocateError, OpenError, PathKind, Piece, Rect, Settings, SignIn};
+use kagaz_core::remote::{
+    self, Devices, Event, Info, Input, InputSender, LocateError, OpenError, PathKind, Piece, Rect, Settings, SignIn, Trust,
+    View,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -33,7 +37,7 @@ use tauri::{AppHandle, Manager};
 const AHEAD: u32 = 2;
 
 struct Open {
-    input: mpsc::Sender<Input>,
+    input: InputSender,
     numbers: Arc<Numbers>,
     /// Pictures sent that the page has not painted yet.
     unpainted: Arc<(Mutex<u32>, Condvar)>,
@@ -60,6 +64,10 @@ impl Viewers {
 pub enum Failed {
     /// The device asks for a password.
     Password,
+    /// It asks who signs in: a user name and a password.
+    User,
+    /// It shows another certificate than the one remembered.
+    Certificate,
     /// `remembered`: it was the one from the password store.
     WrongPassword { remembered: bool },
     /// No path answered: why, and how each did.
@@ -212,6 +220,7 @@ fn forward(app: AppHandle, id: u64, session: remote::Session, channel: Channel<I
                         (news_packet(news), false)
                     }
                     Event::Pointer(p) => (pointer_packet(&p), false),
+                    Event::PointerDefault => (news_packet(serde_json::json!({ "type": "pointer-default" })), false),
                     Event::Bell => (news_packet(serde_json::json!({ "type": "bell" })), false),
                     Event::Ended(why) => (news_packet(serde_json::json!({ "type": "ended", "why": why })), true),
                 };
@@ -228,16 +237,34 @@ fn forward(app: AppHandle, id: u64, session: remote::Session, channel: Channel<I
     });
 }
 
+/// What the page says when it asks for a session.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct Asking {
+    /// Typed by the person, when the device asked.
+    #[serde(default)]
+    pub user: Option<String>,
+    #[serde(default)]
+    pub password: Option<String>,
+    /// With a typed password: keep it in the system's password store if
+    /// it is accepted (true), or stop keeping one (false).
+    #[serde(default)]
+    pub remember: Option<bool>,
+    /// The person has seen that the certificate changed and takes the
+    /// new one.
+    #[serde(default)]
+    pub accept_certificate: bool,
+    /// The viewer: its size in pixels and its scale in percent.
+    #[serde(default)]
+    pub view: Option<(u16, u16, u32)>,
+}
+
 /// Reach a saved device and open a session with it; its picture then
 /// arrives on `channel`.
 #[tauri::command]
 pub async fn remote_connect(
     app: AppHandle,
     id: String,
-    password: Option<String>,
-    // With a typed password: keep it in the system's password store if it
-    // is accepted (true), or stop keeping one (false).
-    remember: Option<bool>,
+    asking: Asking,
     channel: Channel<InvokeResponseBody>,
 ) -> Result<Connected, Failed> {
     tauri::async_runtime::spawn_blocking(move || {
@@ -261,7 +288,15 @@ pub async fn remote_connect(
             }
             Err(e) => return Err(Failed::other(e)),
         };
+        let Asking {
+            user,
+            password,
+            remember,
+            accept_certificate,
+            view,
+        } = asking;
         let typed = password.filter(|p| !p.is_empty());
+        let typed_user = user.map(|u| u.trim().to_string()).filter(|u| !u.is_empty());
         // Nothing typed: the remembered one, if the person asked for that
         // and the store can be reached.
         let kept = match &typed {
@@ -270,15 +305,49 @@ pub async fn remote_connect(
         };
         let remembered = kept.is_some();
         let sign_in = SignIn {
-            user: device.user.clone(),
+            user: typed_user.clone().or(device.user.clone()),
             password: typed.clone().or(kept),
         };
-        let session = session::open(answer.addr, answer.way, &sign_in, &device.settings, Duration::from_secs(10))
-            .map_err(|e| match e {
-                OpenError::NeedsPassword => Failed::Password,
-                OpenError::WrongPassword => Failed::WrongPassword { remembered },
-                other => Failed::other(format!("{}: {other}", device.name)),
-            })?;
+        let trust = Trust {
+            known: device.identity.certificate.clone(),
+            accept_new: accept_certificate,
+        };
+        let view = view.map(|(width, height, scale)| View { width, height, scale });
+        let session = session::open(
+            answer.addr,
+            answer.way,
+            &sign_in,
+            &device.settings,
+            &trust,
+            view,
+            Duration::from_secs(10),
+        )
+        .map_err(|e| match e {
+            OpenError::NeedsPassword => Failed::Password,
+            OpenError::NeedsUser => Failed::User,
+            OpenError::WrongPassword => Failed::WrongPassword { remembered },
+            OpenError::CertificateChanged => Failed::Certificate,
+            other => Failed::other(format!("{}: {other}", device.name)),
+        })?;
+        // It let the person in: who signed in is the device's from now
+        // on, and the certificate it showed is the one to expect (the
+        // first, or the new one the person took).
+        let seen = session.info.identity.clone();
+        if typed_user.is_some() || seen.is_some() {
+            let _ = Devices::update(&list, |d| {
+                if let Some(seen) = &seen {
+                    if accept_certificate {
+                        d.trust_identity(&device.id, seen);
+                    } else {
+                        d.note_identity(&device.id, seen);
+                    }
+                }
+                if let (Some(user), Some(dev)) = (&typed_user, d.devices.iter_mut().find(|x| x.id == device.id)) {
+                    dev.user = Some(user.clone());
+                }
+                Ok(())
+            });
+        }
         // It was accepted: keep it, or stop keeping one, as asked.
         if let (Some(password), Some(keep)) = (&typed, remember) {
             let stored = if keep { vault::set(&device.id, password) } else { vault::forget(&device.id) };
@@ -331,18 +400,21 @@ pub enum Did {
     Picture { value: Option<u8> },
     /// The device has its mouse buttons swapped.
     Swapped { on: bool },
+    /// The viewer is this size now, in pixels.
+    Resize { width: u16, height: u16 },
 }
 
 #[tauri::command]
 pub fn remote_input(viewers: tauri::State<'_, Viewers>, session: u64, did: Vec<Did>) -> Result<(), String> {
     viewers.with(session, |open| {
         for d in did {
-            let _ = open.input.send(match d {
+            open.input.send(match d {
                 Did::Pointer { x, y, buttons } => Input::Pointer { x, y, buttons },
                 Did::Wheel { x, y, up, right } => Input::Wheel { x, y, up, right },
                 Did::Key { key, code, down } => Input::Key { key, code, down },
                 Did::Picture { value } => Input::Picture(value.map(|v| v.min(10))),
                 Did::Swapped { on } => Input::SwappedButtons(on),
+                Did::Resize { width, height } => Input::Resize { width, height },
             });
         }
     })
@@ -377,9 +449,7 @@ pub async fn remote_clipboard_push(app: AppHandle, session: u64) -> Result<Optio
             return Ok(None);
         };
         let characters = text.chars().count();
-        app.state::<Viewers>().with(session, |open| {
-            let _ = open.input.send(Input::Clipboard(text));
-        })?;
+        app.state::<Viewers>().with(session, |open| open.input.send(Input::Clipboard(text)))?;
         Ok(Some(characters))
     })
     .await
@@ -390,7 +460,7 @@ pub fn remote_disconnect(viewers: tauri::State<'_, Viewers>, session: u64) {
     if let Ok(mut list) = viewers.list.lock() {
         if let Some(open) = list.remove(&session) {
             open.stop.store(true, Ordering::Release);
-            let _ = open.input.send(Input::Close);
+            open.input.send(Input::Close);
             open.unpainted.1.notify_all();
         }
     }
@@ -430,10 +500,14 @@ mod tests {
     fn what_the_page_did_reads_from_its_json() {
         let did: Vec<Did> = serde_json::from_str(
             r#"[{"t":"pointer","x":3,"y":4,"buttons":1},{"t":"key","key":"a","code":"KeyA","down":true},
-                {"t":"wheel","x":1,"y":2,"up":-1,"right":0},{"t":"picture","value":null},{"t":"swapped","on":true}]"#,
+                {"t":"wheel","x":1,"y":2,"up":-1,"right":0},{"t":"picture","value":null},{"t":"swapped","on":true},
+                {"t":"resize","width":1280,"height":700}]"#,
         )
         .unwrap();
-        assert_eq!(did.len(), 5);
+        assert_eq!(did.len(), 6);
+        let asking: Asking = serde_json::from_str(r#"{"password":"x","view":[1280,700,200]}"#).unwrap();
+        assert_eq!(asking.view, Some((1280, 700, 200)));
+        assert!(!asking.accept_certificate && asking.user.is_none());
         assert!(matches!(did[3], Did::Picture { value: None }));
     }
 
