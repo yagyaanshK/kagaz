@@ -226,7 +226,8 @@ the viewer's size. The picture comes the newer way Remote Desktop has
 (its graphics pipeline: H.264 for what moves, lossless codecs for text,
 each frame acknowledged so that the computer sends as fast as Kagaz keeps
 up); H.264 is decoded by OpenH264 (BSD-2-Clause), built into Kagaz from
-its source. A computer whose screen comes out wrong that way can be set
+its source (with `nasm` on the building computer, or named by `NASM`,
+its fast routines are built in; without, it works, slower). A computer whose screen comes out wrong that way can be set
 to the older picture on its page. VNC is spoken by Kagaz itself, and protects nothing by
 itself, so Kagaz says "not encrypted on this network" unless the session
 travels through Tailscale.

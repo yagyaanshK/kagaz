@@ -296,6 +296,29 @@ impl Screen {
         s.dirty(c);
     }
 
+    /// An area taken over from another picture of the whole screen, at
+    /// the same place there (`stride` bytes a row), made opaque. What
+    /// falls outside either picture is left out.
+    pub fn put_from(&self, rect: Rect, whole: &[u8], stride: usize) {
+        let mut s = self.lock();
+        let c = rect.within(s.width, s.height);
+        let bytes = c.width as usize * 4;
+        if c.is_empty() || stride < c.right() as usize * 4 || whole.len() < (c.bottom() as usize - 1) * stride + c.right() as usize * 4 {
+            return;
+        }
+        let own = s.width as usize * 4;
+        for row in c.y as usize..c.bottom() as usize {
+            let from = row * stride + c.x as usize * 4;
+            let to = row * own + c.x as usize * 4;
+            let line = &mut s.rgba[to..to + bytes];
+            line.copy_from_slice(&whole[from..from + bytes]);
+            for p in line.as_chunks_mut::<4>().0 {
+                p[3] = 255;
+            }
+        }
+        s.dirty(c);
+    }
+
     /// One colour over an area.
     pub fn fill(&self, rect: Rect, rgb: [u8; 3]) {
         let mut s = self.lock();
@@ -517,6 +540,41 @@ mod tests {
         assert_eq!(shown.rgba, screen.snapshot().2);
         assert!(!screen.wait(Duration::from_millis(1)));
         assert!(screen.take().is_empty());
+    }
+
+    #[test]
+    fn an_area_is_taken_over_from_a_whole_picture_and_made_opaque() {
+        let screen = Screen::new();
+        screen.resize(6, 4);
+        // A whole picture with rows longer than the screen's (padding at
+        // each row's end), every pixel see-through and telling its place.
+        let stride = 6 * 4 + 8;
+        let mut whole = vec![0u8; stride * 4];
+        for y in 0..4 {
+            for x in 0..6 {
+                whole[y * stride + x * 4..][..4].copy_from_slice(&[x as u8, y as u8, 7, 0]);
+            }
+        }
+        screen.put_from(Rect::new(2, 1, 3, 2), &whole, stride);
+        let (_, _, rgba) = screen.snapshot();
+        for y in 0..4usize {
+            for x in 0..6usize {
+                let inside = (2..5).contains(&x) && (1..3).contains(&y);
+                let want = if inside { [x as u8, y as u8, 7, 255] } else { [0, 0, 0, 255] };
+                let got = &rgba[(y * 6 + x) * 4..][..4];
+                // Outside the area the screen is as it was.
+                assert_eq!(got[..3], want[..3], "at {x},{y}");
+                if inside {
+                    assert_eq!(got[3], 255);
+                }
+            }
+        }
+        // Past the screen's edge is left out; a picture too short for
+        // the area is not read at all.
+        screen.put_from(Rect::new(4, 3, 9, 9), &whole, stride);
+        assert_eq!(&screen.snapshot().2[(3 * 6 + 5) * 4..][..3], &[5, 3, 7]);
+        screen.put_from(Rect::new(0, 0, 6, 4), &whole[..stride * 2], stride);
+        assert_eq!(&screen.snapshot().2[..3], &[0, 0, 0]);
     }
 
     #[test]

@@ -436,9 +436,13 @@ Plan: `docs/remote-connection.md` (agreed 2026-11-16).
       picture took megabytes. **Not yet** against real Windows, which
       chooses its codecs itself (H.264 for all of the screen only when
       its policy says so; else H.264 for video and the others for the
-      rest): the log will tell which came. OpenH264 was built without
-      its assembly, as `nasm` is not installed here: `sudo apt install
-      nasm` and a rebuild make decoding faster.
+      rest): the log will tell which came. OpenH264's fast routines
+      need `nasm` when Kagaz is built (it falls back to plain C without
+      saying so): on the building computer it is unpacked without root,
+      outside the system, and found through cargo's `NASM` setting,
+      since 2026-11-18. Most of a full frame's work turned out to be
+      moving the picture, not decoding it: one copy on Kagaz's side was
+      taken out.
 - [x] **Choosing a monitor** dropped for Remote Desktop (the owner,
       2026-11-17): the computer makes one screen for the viewer. The
       button shows only for a kind of session that has monitors, which

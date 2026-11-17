@@ -257,27 +257,16 @@ fn refusal(e: ironrdp_connector::ConnectorError) -> OpenError {
     }
 }
 
-/// The picture's pixels for one changed area, made opaque.
-fn pixels(image: &DecodedImage, r: &InclusiveRectangle) -> (Rect, Vec<u8>) {
+/// One changed area of the picture, kept within it.
+fn area_of(image: &DecodedImage, r: &InclusiveRectangle) -> Rect {
     let width = image.width();
     let height = image.height();
     let right = r.right.min(width.saturating_sub(1));
     let bottom = r.bottom.min(height.saturating_sub(1));
     if width == 0 || height == 0 || r.left > right || r.top > bottom {
-        return (Rect::default(), Vec::new());
+        return Rect::default();
     }
-    let rect = Rect::new(r.left, r.top, right - r.left + 1, bottom - r.top + 1);
-    let data = image.data();
-    let stride = image.stride();
-    let mut out = Vec::with_capacity(rect.area() as usize * 4);
-    for row in rect.y as usize..rect.y as usize + rect.height as usize {
-        let at = row * stride + rect.x as usize * 4;
-        out.extend_from_slice(&data[at..at + rect.width as usize * 4]);
-    }
-    for p in out.as_chunks_mut::<4>().0 {
-        p[3] = 255;
-    }
-    (rect, out)
+    Rect::new(r.left, r.top, right - r.left + 1, bottom - r.top + 1)
 }
 
 /// A way to rouse the session's thread while it waits on the connection.
@@ -437,9 +426,9 @@ impl Running {
                     if self.screen.size() != size {
                         self.screen.resize(size.0, size.1);
                     }
-                    let (rect, rgba) = pixels(&self.image, &area);
+                    let rect = area_of(&self.image, &area);
                     if !rect.is_empty() {
-                        self.screen.put(rect, &rgba);
+                        self.screen.put_from(rect, self.image.data(), self.image.stride());
                         self.drew = true;
                     }
                 }
