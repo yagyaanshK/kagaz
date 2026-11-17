@@ -252,6 +252,8 @@ pub fn remote_add(new: NewDevice) -> Result<Added, String> {
         paths,
         identity: new.found.identity,
         user: new.user.filter(|u| !u.trim().is_empty()),
+        // Offered ticked the first time a password is asked for.
+        remember: super::remote_vault::SUPPORTED,
         ..Default::default()
     };
     let (id, devices) = update(|d| d.add(device))?;
@@ -265,7 +267,37 @@ pub fn remote_rename(id: String, name: String) -> Result<Devices, String> {
 
 #[tauri::command]
 pub fn remote_forget(id: String) -> Result<Devices, String> {
-    update(|d| d.forget(&id).map(|_| ())).map(|(_, d)| d)
+    let (gone, devices) = update(|d| d.forget(&id))?;
+    // Its password goes with it; a store that cannot be reached now does
+    // not keep the device.
+    let _ = super::remote_vault::forget(&gone.id);
+    Ok(devices)
+}
+
+/// Can this build keep a password in the system's password store?
+#[tauri::command]
+pub fn remote_can_remember() -> bool {
+    super::remote_vault::SUPPORTED
+}
+
+/// Remember this device's password from now on, or stop and forget the
+/// one that is kept.
+#[tauri::command]
+pub async fn remote_remember(id: String, on: bool) -> Result<Devices, String> {
+    blocking(move || {
+        let (id, devices) = update(|d| {
+            let id = d.find(&id)?.id.clone();
+            if let Some(dev) = d.devices.iter_mut().find(|x| x.id == id) {
+                dev.remember = on;
+            }
+            Ok(id)
+        })?;
+        if !on {
+            super::remote_vault::forget(&id)?;
+        }
+        Ok(devices)
+    })
+    .await
 }
 
 /// One more way to reach a device; `host` empty for "its hotspot".

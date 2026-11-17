@@ -374,9 +374,12 @@ Plan: `docs/remote-connection.md` (agreed 2026-11-16).
       against real Windows and on a choice of H.264 decoder for Ubuntu
       (the library has a place for one and brings none); sound needs
       `libasound2-dev`.
-- [ ] **Step 1, the password in the system's password store** behind a
-      Remember switch: needs the store's entry name from the owner. Until
-      then the viewer asks each time and says so.
+- [x] **Step 1, the password in the system's password store** behind a
+      Remember switch (2026-11-17): one entry per device under
+      `app.kagaz.computers` (the owner's name for it), kept once the
+      device accepted it, forgotten with the switch or the device. The
+      store's round trip is tested on Ubuntu; the whole flow in the real
+      window is not yet. The command line still asks each time.
 - [ ] **Step 1, smaller things left in the viewer**: zoom beyond fit and
       own size; VNC over TLS (VeNCrypt), which some Linux VNC servers
       offer alone; the clipboard on Windows and macOS (comes with their

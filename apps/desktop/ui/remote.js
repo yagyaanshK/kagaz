@@ -15,6 +15,7 @@ const KagazRemote = (() => {
   let lastLook = 0;
   let openId = null; // the device whose page is open
   let viewId = null; // the device whose screen is shown
+  let canRemember = false; // this system has a password store Kagaz can use
 
   function el(tag, cls, text) {
     const e = document.createElement(tag);
@@ -88,6 +89,7 @@ const KagazRemote = (() => {
     if (!d || KagazRemoteView.isOpen()) return;
     viewId = id;
     KagazRemoteView.open(d, {
+      canRemember,
       show() {
         showView("viewer");
         KagazNav.push("remote-viewer", () => KagazRemoteView.close());
@@ -467,6 +469,9 @@ const KagazRemote = (() => {
     pathButtons.append(again);
     paths.append(pathButtons);
 
+    const signIn = el("section", "set-section");
+    signIn.append(el("h3", "", "Sign-in"));
+
     const about = el("section", "set-section");
     about.append(el("h3", "", "About it"));
     const shapeRow = el("div", "set-row");
@@ -494,7 +499,19 @@ const KagazRemote = (() => {
     const keep = () => save(() => invoke("remote_settings", { id: d.id, settings: d.settings || {}, user: user.value, shape: shape.value }), "Could not save it");
     shape.addEventListener("change", keep);
     user.addEventListener("change", keep);
-    about.append(shapeRow, userRow);
+    about.append(shapeRow);
+    signIn.append(userRow);
+    if (canRemember) {
+      const keepRow = el("div", "set-row");
+      const keepLabel = el("label", "switch wrap");
+      const remember = el("input");
+      remember.type = "checkbox";
+      remember.checked = !!d.remember;
+      keepLabel.append(remember, " Remember the password", el("small", "muted", "In this computer's password store, once the device has accepted it. Turning this off forgets the one that is kept."));
+      remember.addEventListener("change", () => save(() => invoke("remote_remember", { id: d.id, on: remember.checked }), "Could not change it"));
+      keepRow.append(keepLabel);
+      signIn.append(keepRow);
+    }
 
     const forget = el("p");
     forget.append(button("danger-text", "Forget this device", async () => {
@@ -511,7 +528,7 @@ const KagazRemote = (() => {
     note.setAttribute("role", "status");
     // Keep what is being typed when a check finishes under the person.
     const typing = document.activeElement && document.activeElement.id === "remote-user" ? document.activeElement.value : null;
-    box.replaceChildren(head, soon, note, paths, screen, mouse, about, forget);
+    box.replaceChildren(head, soon, note, paths, screen, mouse, signIn, about, forget);
     if (typing !== null) {
       const again = $("remote-user");
       again.value = typing;
@@ -526,6 +543,7 @@ const KagazRemote = (() => {
 
   // ---------- the page ----------
   async function show() {
+    invoke("remote_can_remember").then((can) => (canRemember = !!can)).catch(() => {});
     try {
       data = (await invoke("remote_saved")) || data;
     } catch (e) {
@@ -539,6 +557,9 @@ const KagazRemote = (() => {
   // From outside (`kagaz remote open`): straight to a device's screen,
   // named by its id, its name or the start of its name.
   async function connectTo(which) {
+    try {
+      canRemember = !!(await invoke("remote_can_remember"));
+    } catch (e) {}
     try {
       data = (await invoke("remote_saved")) || data;
     } catch (e) {}

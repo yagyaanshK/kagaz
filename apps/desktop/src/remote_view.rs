@@ -18,6 +18,7 @@
 
 use super::blocking;
 use super::remote::{path_states, PathState};
+use super::remote_vault as vault;
 use kagaz_core::remote::session::{self, Numbers, Reading};
 use kagaz_core::remote::{self, Devices, Event, Info, Input, LocateError, OpenError, PathKind, Piece, Rect, Settings, SignIn};
 use serde::{Deserialize, Serialize};
@@ -59,7 +60,8 @@ impl Viewers {
 pub enum Failed {
     /// The device asks for a password.
     Password,
-    WrongPassword,
+    /// `remembered`: it was the one from the password store.
+    WrongPassword { remembered: bool },
     /// No path answered: why, and how each did.
     Unreachable { why: String, paths: Vec<PathState> },
     Other { why: String },
@@ -233,6 +235,9 @@ pub async fn remote_connect(
     app: AppHandle,
     id: String,
     password: Option<String>,
+    // With a typed password: keep it in the system's password store if it
+    // is accepted (true), or stop keeping one (false).
+    remember: Option<bool>,
     channel: Channel<InvokeResponseBody>,
 ) -> Result<Connected, Failed> {
     tauri::async_runtime::spawn_blocking(move || {
@@ -256,16 +261,36 @@ pub async fn remote_connect(
             }
             Err(e) => return Err(Failed::other(e)),
         };
+        let typed = password.filter(|p| !p.is_empty());
+        // Nothing typed: the remembered one, if the person asked for that
+        // and the store can be reached.
+        let kept = match &typed {
+            None if device.remember => vault::get(&device.id).ok().flatten(),
+            _ => None,
+        };
+        let remembered = kept.is_some();
         let sign_in = SignIn {
             user: device.user.clone(),
-            password: password.filter(|p| !p.is_empty()),
+            password: typed.clone().or(kept),
         };
         let session = session::open(answer.addr, answer.way, &sign_in, &device.settings, Duration::from_secs(10))
             .map_err(|e| match e {
                 OpenError::NeedsPassword => Failed::Password,
-                OpenError::WrongPassword => Failed::WrongPassword,
+                OpenError::WrongPassword => Failed::WrongPassword { remembered },
                 other => Failed::other(format!("{}: {other}", device.name)),
             })?;
+        // It was accepted: keep it, or stop keeping one, as asked.
+        if let (Some(password), Some(keep)) = (&typed, remember) {
+            let stored = if keep { vault::set(&device.id, password) } else { vault::forget(&device.id) };
+            if stored.is_ok() && device.remember != keep {
+                let _ = Devices::update(&list, |d| {
+                    if let Some(dev) = d.devices.iter_mut().find(|x| x.id == device.id) {
+                        dev.remember = keep;
+                    }
+                    Ok(())
+                });
+            }
+        }
         let viewers = app.state::<Viewers>();
         let id = viewers.next.fetch_add(1, Ordering::SeqCst) + 1;
         let open = Open {
@@ -414,8 +439,9 @@ mod tests {
 
     #[test]
     fn a_failure_tells_the_page_its_kind() {
-        let json = serde_json::to_value(Failed::WrongPassword).unwrap();
+        let json = serde_json::to_value(Failed::WrongPassword { remembered: true }).unwrap();
         assert_eq!(json["kind"], "wrong-password");
+        assert_eq!(json["remembered"], true);
         let json = serde_json::to_value(Failed::Unreachable {
             why: "it is off".into(),
             paths: vec![],

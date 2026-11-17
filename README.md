@@ -361,7 +361,10 @@ on the other's clipboard, and the bar shows how the session travels and
 its delay, with tools to send keys such as Ctrl + Alt + Del, to make the
 picture sharper or smoother (by itself unless you choose), and for full
 screen. "Keep left click on the left" is for a device whose mouse buttons
-are swapped. The password is asked for each time for now. A device that
+are swapped. A password is asked for when the device wants one, and with
+**Remember** it is kept in the system's password store (never in Kagaz's
+own files) and used from then on; the device's page turns that off and
+forgets it. A device that
 speaks only Remote Desktop says that its sessions are still being built
 rather than offering a Connect that fails.
 

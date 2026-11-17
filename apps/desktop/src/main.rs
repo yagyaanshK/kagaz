@@ -25,6 +25,7 @@ mod printers;
 mod printing;
 mod purifiers;
 mod remote;
+mod remote_vault;
 mod remote_view;
 #[cfg(desktop)]
 mod ring_notice;
@@ -2030,6 +2031,8 @@ pub fn run() {
             remote::remote_path_add,
             remote::remote_path_remove,
             remote::remote_settings,
+            remote::remote_remember,
+            remote::remote_can_remember,
             remote_view::remote_connect,
             remote_view::remote_input,
             remote_view::remote_painted,

@@ -95,35 +95,39 @@ const KagazRemoteView = (() => {
     );
   }
 
+  // `wrong`: false the first time, "typed" or "remembered" after a
+  // password that the device did not accept.
   function passwordCard(d, wrong) {
     const vnc = (d.ways.find((w) => w.speaks !== "ssh") || {}).speaks === "vnc";
     const form = el("form", "rc-form");
     const label = el("label", "", "Password");
-    const wrap = el("span", "rc-pass");
+    // The app's own Show button joins every password field (reveal.js).
     const input = el("input");
     input.type = "password";
     input.autocomplete = "current-password";
     input.setAttribute("aria-describedby", "rv-pass-hint");
-    const eye = button("", "", () => {
-      input.type = input.type === "password" ? "text" : "password";
-      eye.setAttribute("aria-label", input.type === "password" ? "Show the password" : "Hide the password");
-    });
-    eye.setAttribute("aria-label", "Show the password");
-    setIcon(eye, "eye");
-    wrap.append(input, eye);
-    label.append(wrap);
-    const hint = el("small", "muted", (vnc ? "A VNC password: only its first eight letters count. " : "")
-      + "Kagaz asks each time for now; keeping it in this computer's password store comes next.");
+    label.append(input);
+    const hint = el("small", "muted", vnc ? "A VNC password: only its first eight letters count." : "");
     hint.id = "rv-pass-hint";
+    // Kept in the system's password store, never in Kagaz's own files.
+    const keepLabel = el("label", "switch wrap");
+    const keep = el("input");
+    keep.type = "checkbox";
+    keep.checked = !!d.remember;
+    keepLabel.append(keep, " Remember the password in this computer's password store");
     const go = el("button", "accent", "Connect");
     go.type = "submit";
-    form.append(label, hint, buttons(button("", "Cancel", () => close()), go));
+    form.append(label, hint);
+    if (hooks.canRemember) form.append(keepLabel);
+    form.append(buttons(button("", "Cancel", () => close()), go));
     form.addEventListener("submit", (ev) => {
       ev.preventDefault();
       if (!input.value) return input.focus();
-      connect(input.value);
+      d.remember = keep.checked;
+      connect(input.value, hooks.canRemember ? keep.checked : null);
     });
-    const say = el("p", wrong ? "rc-wrong" : "muted", wrong ? "The device did not accept that password." : `${d.name} asks for a password.`);
+    const say = el("p", wrong ? "rc-wrong" : "muted", wrong === "remembered" ? "The device did not accept the remembered password."
+      : wrong ? "The device did not accept that password." : `${d.name} asks for a password.`);
     say.setAttribute("role", "status");
     showCard(el("h3", "", `Sign in to ${d.name}`), say, form);
     input.focus();
@@ -145,7 +149,8 @@ const KagazRemoteView = (() => {
     connect(null);
   }
 
-  async function connect(password) {
+  // `remember`: with a typed password, whether to keep it once accepted.
+  async function connect(password, remember) {
     if (!cur) return;
     const mine = ++attempt;
     const state = cur;
@@ -161,12 +166,12 @@ const KagazRemoteView = (() => {
     };
     let connected;
     try {
-      connected = await invoke("remote_connect", { id: state.device.id, password: password || null, channel });
+      connected = await invoke("remote_connect", { id: state.device.id, password: password || null, remember: remember == null ? null : remember, channel });
     } catch (failed) {
       if (cur !== state || attempt !== mine) return;
       const f = typeof failed === "object" && failed ? failed : { kind: "other", why: String(failed) };
       if (f.kind === "password") passwordCard(state.device, false);
-      else if (f.kind === "wrong-password") passwordCard(state.device, true);
+      else if (f.kind === "wrong-password") passwordCard(state.device, f.remembered ? "remembered" : "typed");
       else if (f.kind === "unreachable") lostCard(state.device, f);
       else failedCard(state.device, f.why || String(failed));
       return;

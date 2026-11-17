@@ -163,7 +163,8 @@ pub struct Device {
     /// The account to sign in with.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub user: Option<String>,
-    /// The password is kept in the system's password store.
+    /// Keep the password in the system's password store once one is given
+    /// (the store is the window's affair; nothing of it is in this list).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub remember: bool,
     #[serde(default, skip_serializing_if = "settings_default")]

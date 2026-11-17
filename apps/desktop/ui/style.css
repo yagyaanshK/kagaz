@@ -1247,8 +1247,6 @@ dialog.ask.member-form { width: min(460px, calc(100vw - 32px)); max-height: calc
 .rc-slider input { width: 160px; min-height: 0; accent-color: var(--accent); }
 .switch.wrap { flex-wrap: wrap; white-space: normal; }
 .switch.wrap small { flex-basis: 100%; padding-left: 26px; }
-.rc-pass { display: flex; gap: 6px; }
-.rc-pass input { flex: 1 1 auto; min-width: 0; }
 [data-os="windows"] .rc-buttons:not(.start) { flex-direction: row-reverse; justify-content: flex-start; }
 
 [data-viewer] #sidebar, [data-viewer][data-layout] #bottom-nav { display: none !important; }
