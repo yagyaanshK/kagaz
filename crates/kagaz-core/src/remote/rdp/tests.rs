@@ -526,6 +526,8 @@ fn the_computers_sound_arrives_whole() {
     server.tone(200);
     assert!(until(|| server.heard().contains(&"Tone(35280)".to_string())), "heard {:?}", server.heard());
     assert!(until(|| session.numbers.read().sound == 35280), "sound {}", session.numbers.read().sound);
+    // Which channel it came by and in what form is told, for the log.
+    assert_eq!(session.numbers.sound_via(), "older channel, PCM at 44100 a second, 2 channels, 1 blocks");
     // Turned off here for now, it still arrives (the computer goes on
     // sending), and the session goes on.
     session.send(Input::Sound(false));

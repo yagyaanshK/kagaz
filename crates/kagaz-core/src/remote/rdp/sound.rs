@@ -17,6 +17,12 @@ use std::time::Duration;
 
 #[derive(Debug)]
 pub struct Sound {
+    /// Which of Remote Desktop's sound channels this one serves, for the
+    /// log: a computer uses one or the other.
+    channel: &'static str,
+    /// What the two agreed on, for the log.
+    agreed: String,
+    blocks: u64,
     /// What plays it; none where sound is only counted.
     player: Option<RdpsndBackend>,
     /// What is said to be playable where there is no player to ask.
@@ -30,7 +36,7 @@ pub struct Sound {
 impl Sound {
     /// `quiet` is shared with the session, which sets it when the person
     /// turns the sound off or on again.
-    pub fn new(quiet: Arc<AtomicBool>, numbers: Arc<Numbers>) -> Sound {
+    pub fn new(channel: &'static str, quiet: Arc<AtomicBool>, numbers: Arc<Numbers>) -> Sound {
         let pcm = |channels: u16, rate: u32| AudioFormat {
             format: WaveFormat::PCM,
             n_channels: channels,
@@ -41,6 +47,9 @@ impl Sound {
             data: None,
         };
         Sound {
+            channel,
+            agreed: String::new(),
+            blocks: 0,
             player: (!cfg!(test)).then(RdpsndBackend::new),
             plain: vec![pcm(2, 48000), pcm(2, 44100)],
             quiet,
@@ -62,14 +71,38 @@ impl RdpsndClientHandler for Sound {
     }
 
     fn choose_formats(&self, server_formats: &[AudioFormat]) -> Vec<AudioFormat> {
-        match &self.player {
+        let chosen = match &self.player {
             Some(player) => player.choose_formats(server_formats),
             None => self.plain.clone(),
-        }
+        };
+        // For the log: how far the two got in agreeing.
+        self.numbers.set_sound_via(format!(
+            "{}, {} ways offered, {} of them playable here",
+            self.channel,
+            server_formats.len(),
+            chosen.iter().filter(|c| server_formats.contains(c)).count()
+        ));
+        chosen
     }
 
     fn wave(&mut self, format: &AudioFormat, ts: u32, data: Cow<'_, [u8]>) {
         self.numbers.add_sound(data.len());
+        self.blocks += 1;
+        if self.blocks == 1 || self.blocks % 250 == 0 {
+            if self.blocks == 1 {
+                let form = match format.format {
+                    WaveFormat::PCM => "PCM".to_string(),
+                    WaveFormat::ADPCM => "ADPCM".to_string(),
+                    WaveFormat::DVI_ADPCM => "IMA ADPCM".to_string(),
+                    WaveFormat::ALAW => "A-law".to_string(),
+                    WaveFormat::MULAW => "mu-law".to_string(),
+                    WaveFormat::OPUS => "Opus".to_string(),
+                    other => format!("{other:?}"),
+                };
+                self.agreed = format!("{form} at {} a second, {} channels", format.n_samples_per_sec, format.n_channels);
+            }
+            self.numbers.set_sound_via(format!("{}, {}, {} blocks", self.channel, self.agreed, self.blocks));
+        }
         let Some(player) = &mut self.player else { return };
         if self.quiet.load(Ordering::Acquire) {
             // Nothing held back to play when the sound is turned on again.

@@ -395,10 +395,17 @@ Plan: `docs/remote-connection.md` (agreed 2026-11-16).
       no longer leaves the viewer's bar and full-window layout behind:
       the session goes on, its bar steps aside and Computers leads back.
       The log now says the size asked for and the size the device took.
-- [ ] **To hear from the owner on the real Windows PC**: whether a
-      window made smaller is redrawn sharp (it looked soft once, while
-      the page was stuck behind a call; the log's size lines will tell);
-      sending files; the certificate card; Remember typed in the window.
+- [x] **Heard from the owner on the real Windows PC** (2026-11-18):
+      a window made smaller and larger is redrawn well; the newer
+      picture "feels high res". Its log: version 10.7 agreed, the text
+      codec and the progressive one, no H.264 (Windows uses that for
+      all of the screen only by policy). The delay shown had swollen to
+      95 to 400 ms on the home network: it was the connection's running
+      average, which grows while Windows holds its acknowledgements
+      back; the lowest of the last minutes is shown now.
+- [ ] **To hear from the owner on the real Windows PC**: the sound
+      (above); sending files; the certificate card; Remember typed in
+      the window.
 - [x] **Step 1, Remote Desktop, clipboard text** both ways, in any
       script (2026-11-17): each side says it has text and hands it over
       when asked; Kagaz asks at once, so what is copied on the computer
@@ -458,7 +465,14 @@ Plan: `docs/remote-connection.md` (agreed 2026-11-16).
       much sound arrived. The test server sends a made tone (`--sound`,
       `tone <ms>`); in the tests nothing is played and every byte is
       counted. In the real window against the test server the system
-      showed Kagaz's stream playing. **Not yet** against real Windows.
+      showed Kagaz's stream playing. **On the owner's real Windows PC
+      (2026-11-18) no sound came**, though Windows had switched to
+      "Remote Audio": not a byte arrived on the older channel. Windows
+      since 8 sends its sound through dynamic channels where the viewer
+      has them, so Kagaz now listens on those as well (the library's
+      own; there is no test peer for them here), and the log says which
+      channel and format the sound came by, or how far the two got.
+      **To hear from the owner.**
       The build needs ALSA's development files (unpacked without root on
       the building computer, found through `PKG_CONFIG_PATH`).
 - [x] **The test server no longer says the text a viewer copied**

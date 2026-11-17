@@ -445,6 +445,7 @@ pub fn remote_numbers(viewers: tauri::State<'_, Viewers>, session: u64) -> Resul
     viewers.with(session, |open| Told {
         reading: open.numbers.read(),
         via: open.numbers.via(),
+        sound_via: open.numbers.sound_via(),
     })
 }
 
@@ -455,6 +456,8 @@ pub struct Told {
     #[serde(flatten)]
     reading: Reading,
     via: String,
+    /// The same for its sound: which channel, which format, how much.
+    sound_via: String,
 }
 
 /// Offer what is on this computer's clipboard to the device. Says how

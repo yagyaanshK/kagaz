@@ -799,7 +799,8 @@ const KagazRemoteView = (() => {
     log(`${(frames / seconds).toFixed(1)} updates/s, ${((now.paintMs - was.paintMs) / frames).toFixed(2)} ms to paint one, `
       + `${((now.bytes - was.bytes) / seconds / 1e6).toFixed(1)} MB/s to the page, delay ${r && r.delay != null ? r.delay + " ms" : "unknown"}${work}`
       + (r && was.sound != null && r.sound > was.sound ? `, sound ${Math.round((r.sound - was.sound) / seconds / 1000)} kB/s` : "")
-      + (r && r.via ? `; ${r.via}` : ""));
+      + (r && r.via ? `; ${r.via}` : "")
+      + (r && r.sound_via ? `; sound by the ${r.sound_via}` : ""));
   }, 5000);
 
   $("rv-full").addEventListener("click", () => {

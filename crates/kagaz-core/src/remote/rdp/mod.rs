@@ -45,7 +45,7 @@ use ironrdp_session::{ActiveStage, ActiveStageBuilder, ActiveStageOutput};
 use std::collections::HashMap;
 use std::io::{self, Read, Write};
 use std::net::{Shutdown, SocketAddr, TcpStream};
-use ironrdp_rdpsnd::client::Rdpsnd;
+use ironrdp_rdpsnd::client::{Rdpsnd, RdpsndDvcState};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant};
@@ -362,7 +362,18 @@ fn measured_delay(connection: &TcpStream) -> Option<u32> {
             (&mut info as *mut libc::tcp_info).cast(),
             &mut len,
         );
-        (ok == 0 && info.tcpi_rtt > 0).then(|| info.tcpi_rtt.div_ceil(1000))
+        if ok != 0 || info.tcpi_rtt == 0 {
+            return None;
+        }
+        // The lowest of the last minutes where the system keeps it: the
+        // running average swells when the other side holds its
+        // acknowledgements back (it does while it has nothing to send),
+        // which says nothing of the path.
+        let lowest = match info.tcpi_min_rtt {
+            0 | u32::MAX => info.tcpi_rtt,
+            lowest => lowest.min(info.tcpi_rtt),
+        };
+        Some(lowest.div_ceil(1000))
     }
 }
 
@@ -945,15 +956,23 @@ pub fn open(
     } else {
         numbers.set_via("older picture".into());
     }
-    // The computer's sound, unless it is not to be played here.
+    // The computer's sound, unless it is not to be played here. Windows
+    // since 8 sends it through a dynamic channel where the viewer has
+    // one, and only otherwise through the older channel of its own: both
+    // are there, each with a player that starts when sound comes to it.
     let with_sound = !settings.mute;
     let quiet = Arc::new(AtomicBool::new(false));
+    if with_sound {
+        let newer = RdpsndDvcState::new(Box::new(sound::Sound::new("newer channel", quiet.clone(), numbers.clone())));
+        dynamic = dynamic.with_dynamic_channel(newer.channel()).with_dynamic_channel(newer.lossy_channel());
+    }
     let mut connector =
         ClientConnector::new(config(user.trim(), password, size, scale, newer_picture, with_sound)?, local)
             .with_static_channel(CliprdrClient::new(Box::new(clipboard)))
             .with_static_channel(dynamic);
     if with_sound {
-        connector = connector.with_static_channel(Rdpsnd::new(Box::new(sound::Sound::new(quiet.clone(), numbers.clone()))));
+        connector = connector
+            .with_static_channel(Rdpsnd::new(Box::new(sound::Sound::new("older channel", quiet.clone(), numbers.clone()))));
     }
     let should_upgrade = ironrdp_blocking::connect_begin(&mut framed, &mut connector).map_err(refusal)?;
 

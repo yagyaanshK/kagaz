@@ -197,6 +197,8 @@ pub struct Numbers {
     sound: AtomicU64,
     /// How the picture travels, in a few words.
     via: std::sync::Mutex<String>,
+    /// And the device's sound.
+    sound_via: std::sync::Mutex<String>,
 }
 
 impl Default for Numbers {
@@ -211,6 +213,7 @@ impl Default for Numbers {
             work: AtomicU64::new(0),
             sound: AtomicU64::new(0),
             via: std::sync::Mutex::new(String::new()),
+            sound_via: std::sync::Mutex::new(String::new()),
         }
     }
 }
@@ -263,6 +266,15 @@ impl Numbers {
     }
     pub(crate) fn add_update(&self) {
         self.updates.fetch_add(1, Ordering::Relaxed);
+    }
+    /// How the device's sound travels (which channel, which format, how
+    /// many blocks), where the session knows; empty where it does not.
+    pub fn sound_via(&self) -> String {
+        self.sound_via.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
+    pub(crate) fn set_sound_via(&self, via: String) {
+        *self.sound_via.lock().unwrap_or_else(|e| e.into_inner()) = via;
     }
     pub(crate) fn add_work(&self, spent: Duration) {
         self.work.fetch_add(spent.as_micros() as u64, Ordering::Relaxed);
