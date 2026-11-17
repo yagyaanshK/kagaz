@@ -41,6 +41,11 @@ impl TestServer {
         writeln!(self.input, "size {width} {height}").unwrap();
     }
 
+    /// The computer makes a sound: a tone, so many milliseconds long.
+    fn tone(&mut self, millis: u32) {
+        writeln!(self.input, "tone {millis}").unwrap();
+    }
+
     /// What a viewer offers is pasted "on the computer", which waits so
     /// many milliseconds before it asks for each piece.
     fn paste(&mut self, wait: u32) {
@@ -140,7 +145,8 @@ fn serve_with(width: u16, height: u16, more: &[&str]) -> Option<TestServer> {
         return None;
     };
     let mut child = Command::new(program)
-        .args(["--size", &format!("{width}x{height}")])
+        // The text copied in these tests is made up: it may be said.
+        .args(["--size", &format!("{width}x{height}"), "--say-text"])
         .args(more)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -506,6 +512,49 @@ fn the_older_picture_is_used_when_asked_for() {
     // channel for it is never opened.
     std::thread::sleep(Duration::from_millis(600));
     assert!(!server.heard().iter().any(|h| h.starts_with("PipelineReady")), "heard {:?}", server.heard());
+}
+
+#[test]
+fn the_computers_sound_arrives_whole() {
+    let Some(mut server) = serve_with(64, 64, &["--sound"]) else { return };
+    let session = connect(&server, Some("asha"), Some("sesame"), &Trust::default()).unwrap();
+    assert!(session.info.sound);
+    assert!(until(|| server.heard().contains(&"SoundReady".to_string())), "heard {:?}", server.heard());
+    assert_eq!(session.numbers.read().sound, 0);
+    // A fifth of a second of tone: ten blocks, every byte of them here.
+    // (Nothing is played in a test; what arrives is counted.)
+    server.tone(200);
+    assert!(until(|| server.heard().contains(&"Tone(35280)".to_string())), "heard {:?}", server.heard());
+    assert!(until(|| session.numbers.read().sound == 35280), "sound {}", session.numbers.read().sound);
+    // Turned off here for now, it still arrives (the computer goes on
+    // sending), and the session goes on.
+    session.send(Input::Sound(false));
+    server.tone(100);
+    assert!(until(|| session.numbers.read().sound == 35280 + 17640), "sound {}", session.numbers.read().sound);
+    session.send(Input::Pointer { x: 5, y: 6, buttons: 0 });
+    assert!(until(|| server.heard().iter().any(|h| h == "Move { x: 5, y: 6 }")), "heard {:?}", server.heard());
+}
+
+#[test]
+fn no_sound_is_asked_for_when_it_is_not_to_be_played_here() {
+    let Some(mut server) = serve_with(64, 64, &["--sound"]) else { return };
+    let sign_in = SignIn {
+        user: Some("asha".into()),
+        password: Some("sesame".into()),
+    };
+    let silent = Settings {
+        mute: true,
+        ..Settings::default()
+    };
+    let session = open(server.addr, &sign_in, &silent, &Trust::default(), None, Duration::from_secs(10)).unwrap();
+    assert!(!session.info.sound);
+    let card = pattern::card(64, 64, 0);
+    assert!(until(|| bars_apart(&session, &card, 64) < 6.0));
+    // The computer has nobody to send its sound to.
+    server.tone(40);
+    assert!(until(|| server.heard().contains(&"NoSound".to_string())), "heard {:?}", server.heard());
+    assert!(!server.heard().contains(&"SoundReady".to_string()));
+    assert_eq!(session.numbers.read().sound, 0);
 }
 
 #[test]

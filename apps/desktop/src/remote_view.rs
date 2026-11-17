@@ -405,6 +405,8 @@ pub enum Did {
     Picture { value: Option<u8> },
     /// The device has its mouse buttons swapped.
     Swapped { on: bool },
+    /// Play the device's sound here, or not, for now.
+    Sound { on: bool },
     /// The viewer is this size now, in pixels.
     Resize { width: u16, height: u16 },
 }
@@ -419,6 +421,7 @@ pub fn remote_input(viewers: tauri::State<'_, Viewers>, session: u64, did: Vec<D
                 Did::Key { key, code, down } => Input::Key { key, code, down },
                 Did::Picture { value } => Input::Picture(value.map(|v| v.min(10))),
                 Did::Swapped { on } => Input::SwappedButtons(on),
+                Did::Sound { on } => Input::Sound(on),
                 Did::Resize { width, height } => Input::Resize { width, height },
             });
         }

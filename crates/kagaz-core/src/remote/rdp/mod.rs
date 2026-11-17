@@ -8,6 +8,7 @@
 //! that [`InputSender`] pokes, so a key or a click leaves at once.
 
 mod clip;
+mod sound;
 
 use super::keys;
 use super::reach;
@@ -44,7 +45,8 @@ use ironrdp_session::{ActiveStage, ActiveStageBuilder, ActiveStageOutput};
 use std::collections::HashMap;
 use std::io::{self, Read, Write};
 use std::net::{Shutdown, SocketAddr, TcpStream};
-use std::sync::atomic::Ordering;
+use ironrdp_rdpsnd::client::Rdpsnd;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant};
 
@@ -107,7 +109,14 @@ impl NetworkClient for NoDirectory {
     }
 }
 
-fn config(user: &str, password: &str, size: (u16, u16), scale: u32, newer_picture: bool) -> Result<Config, OpenError> {
+fn config(
+    user: &str,
+    password: &str,
+    size: (u16, u16),
+    scale: u32,
+    newer_picture: bool,
+    sound: bool,
+) -> Result<Config, OpenError> {
     // "DOMAIN\user" names a domain; a plain name signs in to the computer.
     let (domain, username) = match user.split_once('\\') {
         Some((domain, name)) if !domain.is_empty() => (Some(domain.to_string()), name.to_string()),
@@ -165,7 +174,9 @@ fn config(user: &str, password: &str, size: (u16, u16), scale: u32, newer_pictur
         hardware_id: None,
         request_data: None,
         autologon: false,
-        enable_audio_playback: false,
+        // Its sound plays here, not on the computer, where there is the
+        // channel to take it.
+        enable_audio_playback: sound,
         enable_audio_capture: false,
         performance_flags: PerformanceFlags::default(),
         license_cache: None,
@@ -393,6 +404,8 @@ struct Running {
     kept: HashMap<u32, Arc<clip::Offer>>,
     /// When the viewer was last told how a file is getting on.
     told: Option<Instant>,
+    /// The person has turned the computer's sound off here for now.
+    quiet: Arc<AtomicBool>,
     /// Keys that are down, to let go when the session closes.
     held: HashMap<String, FastPathInputEvent>,
 }
@@ -741,6 +754,7 @@ impl Running {
                 }
             }
             Input::SwappedButtons(now) => self.swapped = *now,
+            Input::Sound(on) => self.quiet.store(!*on, Ordering::Release),
             Input::Resize { width, height } => {
                 if self.fits {
                     self.wanted = Some(fitting(*width, *height));
@@ -931,9 +945,16 @@ pub fn open(
     } else {
         numbers.set_via("older picture".into());
     }
-    let mut connector = ClientConnector::new(config(user.trim(), password, size, scale, newer_picture)?, local)
-        .with_static_channel(CliprdrClient::new(Box::new(clipboard)))
-        .with_static_channel(dynamic);
+    // The computer's sound, unless it is not to be played here.
+    let with_sound = !settings.mute;
+    let quiet = Arc::new(AtomicBool::new(false));
+    let mut connector =
+        ClientConnector::new(config(user.trim(), password, size, scale, newer_picture, with_sound)?, local)
+            .with_static_channel(CliprdrClient::new(Box::new(clipboard)))
+            .with_static_channel(dynamic);
+    if with_sound {
+        connector = connector.with_static_channel(Rdpsnd::new(Box::new(sound::Sound::new(quiet.clone(), numbers.clone()))));
+    }
     let should_upgrade = ironrdp_blocking::connect_begin(&mut framed, &mut connector).map_err(refusal)?;
 
     // TLS: the computer shows its certificate. It is compared with the
@@ -1027,6 +1048,7 @@ pub fn open(
         clip_last: None,
         kept: HashMap::new(),
         told: None,
+        quiet,
         held: HashMap::new(),
     };
     {
@@ -1044,7 +1066,7 @@ pub fn open(
             speaks: Speaks::Rdp,
             name: identity.name.clone().unwrap_or_default(),
             encrypted: true,
-            sound: false,
+            sound: with_sound,
             files: true,
             monitors: false,
             resizes: fits,

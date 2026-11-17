@@ -61,6 +61,9 @@ ironrdp-cliprdr = "0.9"
 # decoded by OpenH264 (BSD-2-Clause), built into Kagaz from its source,
 # the owner's choice (2026-11-17).
 ironrdp-egfx = { version = "0.5", features = ["openh264-bundled"] }
+# The computer's sound: the library's channel for it; its player is
+# below, by system.
+ironrdp-rdpsnd = "0.11"
 x509-cert = { version = "0.2", default-features = false, features = ["std"] }
 
 [target.'cfg(not(target_os = "android"))'.dependencies]
@@ -77,3 +80,12 @@ windows-sys = { version = "0.61", features = [
     "Win32_Graphics_Printing",
     "Win32_Storage_Xps",
 ] }
+# The player of a computer's sound, without Opus (see below).
+ironrdp-rdpsnd-native = { version = "0.8", default-features = false, features = ["aac"] }
+
+# The player of a computer's sound (through cpal to the system's own
+# sound). Opus is decoded by libopus (BSD-3-Clause), built in from its
+# source; that build does not cross to Windows from Linux, and Windows
+# has a decoder of its own for the AAC it prefers.
+[target.'cfg(all(not(windows), not(any(target_os = "android", target_os = "ios"))))'.dependencies]
+ironrdp-rdpsnd-native = "0.8"

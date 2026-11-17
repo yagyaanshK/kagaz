@@ -447,9 +447,27 @@ Plan: `docs/remote-connection.md` (agreed 2026-11-16).
       2026-11-17): the computer makes one screen for the viewer. The
       button shows only for a kind of session that has monitors, which
       none has yet.
-- [ ] **Step 1, Remote Desktop, what is left**: sound (needs
-      `libasound2-dev`); whole folders, and files from the computer to
-      here; a sign-in through a company domain (Kerberos) is refused
+- [x] **Step 1, Remote Desktop, the computer's sound** (2026-11-18):
+      the library's sound channel and its player (through cpal to the
+      system's own sound; plain, ADPCM and Opus, the last by libopus
+      built in from source, not on Windows where that build does not
+      cross). It plays here instead of on the computer; "Play its sound
+      here" on the computer's page turns the channel off for it; the
+      speaker button turns it off for the moment; it waits while another
+      page shows; a session in the terminal plays none. The log tells how
+      much sound arrived. The test server sends a made tone (`--sound`,
+      `tone <ms>`); in the tests nothing is played and every byte is
+      counted. In the real window against the test server the system
+      showed Kagaz's stream playing. **Not yet** against real Windows.
+      The build needs ALSA's development files (unpacked without root on
+      the building computer, found through `PKG_CONFIG_PATH`).
+- [x] **The test server no longer says the text a viewer copied**
+      unless asked with `--say-text`, which only the tests do
+      (2026-11-18): the real window offers whatever is on its person's
+      clipboard, and in a real-window run a line of the owner's
+      clipboard had reached the test server's output.
+- [ ] **Step 1, Remote Desktop, what is left**: whole folders, and files
+      from the computer to here; a sign-in through a company domain (Kerberos) is refused
       with a reason; decoding on a thread of its own if a real computer
       shows it holding up the keys; the "Third-party licences" page in
       About, now owed for OpenH264's notice as well.

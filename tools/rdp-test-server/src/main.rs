@@ -3,7 +3,7 @@
 //! and talk to it over its standard input and output; it can also be run
 //! by hand to try the viewer.
 //!
-//!   kagaz-rdp-test-server [--port N] [--size 1280x720] [--fit] [--h264] [--no-files] [--user asha] [--password sesame]
+//!   kagaz-rdp-test-server [--port N] [--size 1280x720] [--fit] [--h264] [--sound] [--no-files] [--say-text] [--user asha] [--password sesame]
 //!
 //! With `--fit` its screen takes the size the viewer asks for, at the
 //! start and whenever the viewer's size changes, as a real computer's
@@ -13,12 +13,18 @@
 //! PipelineReady(<what the two agreed on>)`, `heard Frame(<tick>,
 //! <bytes>)` for each picture sent and `heard FrameAck` for each the
 //! viewer says it has drawn. With `rate <n>` on its input the card moves
-//! by itself, n ticks a second (0 stops it).
+//! by itself, n ticks a second (0 stops it). With `--sound` it has sound
+//! for a viewer that takes it: it says `heard SoundReady`, and `tone
+//! <ms>` on its input sends so long a made tone (plain 16-bit stereo at
+//! 44100 a second), then says `heard Tone(<bytes sent>)`.
 //!
 //! It says `listening <address>` and `fingerprint <sha-256 of its
 //! certificate>`, then `heard <what a viewer did>` for every key and
-//! mouse event, and `heard Text("…")` for text a viewer copied (it asks
-//! for it at once, as a clipboard history does). On its input, `tick <n>`
+//! mouse event, and for text a viewer copied (it asks for it at once, as
+//! a clipboard history does) `heard Text of <n> characters`, or with
+//! `--say-text` the text itself, `heard Text("…")`: only for tests, whose
+//! text is made up. A real viewer offers what is on its person's
+//! clipboard, and that is not to be written anywhere. On its input, `tick <n>`
 //! moves the card to that tick, `size <width> <height>` changes the
 //! screen's size, and `copy <text>` copies text "on the computer" (write
 //! `\n` for a line's end).
@@ -42,11 +48,13 @@ use ironrdp_cliprdr::pdu::{
 };
 use ironrdp_egfx::pdu::{Avc420Region, CapabilitiesAdvertisePdu, CapabilitySet};
 use ironrdp_egfx::server::{GraphicsPipelineHandler, GraphicsPipelineServer};
+use ironrdp_rdpsnd::pdu::{AudioFormat, WaveFormat};
+use ironrdp_rdpsnd::server::{NegotiatedFormat, RdpsndError, RdpsndServerHandler, RdpsndServerMessage};
 use ironrdp_server::tokio_rustls::{rustls, TlsAcceptor};
 use ironrdp_server::{
     BitmapUpdate, CliprdrServerFactory, Credentials, DesktopSize, DisplayUpdate, EgfxServerMessage, GfxDvcBridge,
     GfxServerFactory, GfxServerHandle, KeyboardEvent, MouseEvent, PixelFormat, RdpServer, RdpServerDisplay,
-    RdpServerDisplayUpdates, RdpServerInputHandler, ServerEvent, ServerEventSender,
+    RdpServerDisplayUpdates, RdpServerInputHandler, ServerEvent, ServerEventSender, SoundServerFactory,
 };
 use openh264::encoder::{BitRate, Encoder, EncoderConfig, FrameRate, QpRange, RateControlMode, UsageType};
 use openh264::formats::YUVBuffer;
@@ -155,6 +163,91 @@ impl RdpServerDisplay for Shared {
             sent: None,
             size,
         }))
+    }
+}
+
+/// The computer's sound: one plain format, and a made tone when asked.
+#[derive(Clone, Debug)]
+struct Speaker {
+    formats: Vec<AudioFormat>,
+    to_viewer: Arc<Mutex<Option<UnboundedSender<ServerEvent>>>>,
+    /// A viewer has agreed to take the sound.
+    ready: Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl Speaker {
+    fn new() -> Speaker {
+        Speaker {
+            formats: vec![AudioFormat {
+                format: WaveFormat::PCM,
+                n_channels: 2,
+                n_samples_per_sec: 44100,
+                n_avg_bytes_per_sec: 44100 * 4,
+                n_block_align: 4,
+                bits_per_sample: 16,
+                data: None,
+            }],
+            to_viewer: Arc::default(),
+            ready: Arc::default(),
+        }
+    }
+
+    /// So many milliseconds of a quiet 440 Hz tone, a fiftieth of a
+    /// second at a time, as a computer sends its sound.
+    fn tone(&self, millis: u64) {
+        if !self.ready.load(Ordering::Acquire) {
+            return say("heard NoSound");
+        }
+        let began = std::time::Instant::now();
+        let mut sent = 0usize;
+        let mut frame = 0u64;
+        for block in 0..millis / 20 {
+            let mut data = Vec::with_capacity(882 * 4);
+            for _ in 0..882 {
+                let level = ((frame as f64 * 440.0 * std::f64::consts::TAU / 44100.0).sin() * 3000.0) as i16;
+                data.extend_from_slice(&level.to_le_bytes());
+                data.extend_from_slice(&level.to_le_bytes());
+                frame += 1;
+            }
+            sent += data.len();
+            if let Some(sender) = self.to_viewer.lock().unwrap().as_ref() {
+                let _ = sender.send(ServerEvent::Rdpsnd(RdpsndServerMessage::Wave(data, began.elapsed().as_millis() as u32)));
+            }
+            std::thread::sleep((began + Duration::from_millis((block + 1) * 20)).saturating_duration_since(std::time::Instant::now()));
+        }
+        say(&format!("heard Tone({sent})"));
+    }
+}
+
+impl ServerEventSender for Speaker {
+    fn set_sender(&mut self, sender: UnboundedSender<ServerEvent>) {
+        *self.to_viewer.lock().unwrap() = Some(sender);
+    }
+}
+
+impl SoundServerFactory for Speaker {
+    fn build_backend(&self) -> Box<dyn RdpsndServerHandler> {
+        Box::new(self.clone())
+    }
+}
+
+impl RdpsndServerHandler for Speaker {
+    fn get_formats(&self) -> &[AudioFormat] {
+        &self.formats
+    }
+
+    fn choose_format<'a>(&mut self, common: &'a [NegotiatedFormat]) -> Option<&'a NegotiatedFormat> {
+        common.first()
+    }
+
+    fn start(&mut self, _format: &NegotiatedFormat) -> Result<(), Box<dyn RdpsndError>> {
+        self.ready.store(true, Ordering::Release);
+        say("heard SoundReady");
+        Ok(())
+    }
+
+    fn stop(&mut self) {
+        self.ready.store(false, Ordering::Release);
     }
 }
 
@@ -298,6 +391,8 @@ fn pump(shared: Shared, pipeline: Pipeline) {
                     .qp(QpRange::new(8, 18))
                     .bitrate(BitRate::from_bps(40_000_000))
                     .max_frame_rate(FrameRate::from_hz(60.0))
+                    .adaptive_quantization(false)
+                    .background_detection(false)
                     .skip_frames(false);
                 Encoder::with_api_config(OpenH264API::from_source(), config).expect("the encoder starts")
             });
@@ -373,6 +468,8 @@ struct Clipboard {
     to_viewer: Arc<Mutex<Option<UnboundedSender<ServerEvent>>>>,
     /// It takes no files.
     no_files: bool,
+    /// Say the text a viewer copied, not only how long it is.
+    say_text: bool,
     /// The viewer offers files, under this format.
     offered: Arc<Mutex<Option<ClipboardFormatId>>>,
     taking: Arc<Mutex<Taking>>,
@@ -532,9 +629,17 @@ impl CliprdrBackend for Clipboard {
         }));
     }
 
+    // What a viewer copied is said in full only when asked for with
+    // `--say-text` (the tests, which copy made-up text): a real viewer
+    // offers whatever is on its person's clipboard.
     fn on_format_data_response(&mut self, response: FormatDataResponse<'_>) {
         if let Ok(text) = response.to_unicode_string() {
-            say(&format!("heard Text({:?})", text.trim_end_matches('\0')));
+            let text = text.trim_end_matches('\0');
+            if self.say_text {
+                say(&format!("heard Text({text:?})"));
+            } else {
+                say(&format!("heard Text of {} characters", text.chars().count()));
+            }
         }
     }
 
@@ -631,6 +736,8 @@ fn main() -> anyhow::Result<()> {
         let (shared, pipeline) = (shared.clone(), pipeline.clone());
         std::thread::spawn(move || pump(shared, pipeline));
     }
+    let speaker = Speaker::new();
+    let with_sound = args.iter().any(|a| a == "--sound");
     // The card moving by itself, so many ticks a second.
     let rate = Arc::new(AtomicU32::new(0));
     {
@@ -648,6 +755,7 @@ fn main() -> anyhow::Result<()> {
 
     let clipboard = Clipboard {
         no_files: args.iter().any(|a| a == "--no-files"),
+        say_text: args.iter().any(|a| a == "--say-text"),
         ..Clipboard::default()
     };
     // What the tests (or a person) ask for; the end of the input ends it.
@@ -655,6 +763,7 @@ fn main() -> anyhow::Result<()> {
         let shared = shared.clone();
         let clipboard = clipboard.clone();
         let rate = rate.clone();
+        let speaker = speaker.clone();
         std::thread::spawn(move || {
             for line in std::io::stdin().lock().lines() {
                 let Ok(line) = line else { break };
@@ -671,6 +780,10 @@ fn main() -> anyhow::Result<()> {
                         }
                     }
                     ["rate", hz] => rate.store(hz.parse().unwrap_or(0), Ordering::Release),
+                    ["tone", ms] => {
+                        let (speaker, ms) = (speaker.clone(), ms.parse().unwrap_or(0));
+                        std::thread::spawn(move || speaker.tone(ms));
+                    }
                     ["paste"] => clipboard.paste(Duration::ZERO),
                     ["paste", ms] => clipboard.paste(Duration::from_millis(ms.parse().unwrap_or(0))),
                     ["size", w, h] => {
@@ -698,7 +811,7 @@ fn main() -> anyhow::Result<()> {
             .with_display_handler(shared)
             .with_cliprdr_factory(Some(Box::new(clipboard)))
             .with_gfx_factory(if h264 { Some(Box::new(pipeline)) } else { None })
-            .with_sound_factory(None)
+            .with_sound_factory(if with_sound { Some(Box::new(speaker)) } else { None })
             .with_honor_client_desktop_size(fit)
             .build();
         server.set_credentials(Some(Credentials {

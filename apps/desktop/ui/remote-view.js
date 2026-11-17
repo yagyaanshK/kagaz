@@ -289,10 +289,14 @@ const KagazRemoteView = (() => {
       $("bar-remote").classList.remove("hidden");
       stageResized();
       stage.focus();
+      // Its sound again, unless the person had turned it off.
+      if (cur.info && cur.info.sound && !cur.soundOff) did({ t: "sound", on: true }, true);
       log("back on screen");
     } else {
       releaseKeys(cur);
       closePop();
+      // Its sound waits too: a call at the door is not talked over.
+      if (cur.info && cur.info.sound && !cur.soundOff) did({ t: "sound", on: false }, true);
       if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(() => {});
       delete document.documentElement.dataset.viewer;
       $("bar-remote").classList.add("hidden");
@@ -325,11 +329,27 @@ const KagazRemoteView = (() => {
       $(id).title = on && !has ? without : title;
     };
     set("rv-file", info && info.files, "Send files: they go to the device's clipboard, to be pasted there", not("Sending files"));
-    set("rv-sound", info && info.sound, "The device's sound", not("The device's sound"));
+    // The device's sound plays here unless its page says not to; the
+    // button turns it off and on for the moment.
+    const noSound = info && info.speaks === "rdp" ? "Its sound is turned off for this computer on its page"
+      : "VNC carries no sound; the device needs Remote Desktop for it";
+    set("rv-sound", info && info.sound, "", noSound);
+    if (cur) cur.soundOff = false;
+    soundButton();
     // No kind of session has monitors to choose from yet: Remote Desktop
     // makes one screen for this window, VNC shows the device's as it is.
     $("rv-screens").classList.toggle("hidden", !(info && info.monitors));
     set("rv-screens", info && info.monitors, "Choose a monitor", "");
+  }
+
+  // The sound button says what a press does now.
+  function soundButton() {
+    const b = $("rv-sound");
+    const off = !!(cur && cur.soundOff);
+    setIcon(b.querySelector(".ic"), off ? "mute" : "speaker");
+    if (!b.disabled) b.title = off ? "Play the device's sound here again" : "Turn the device's sound off here for now";
+    b.setAttribute("aria-label", b.title || "The device's sound");
+    b.setAttribute("aria-pressed", off ? "true" : "false");
   }
 
   let toastTimer = 0;
@@ -670,6 +690,16 @@ const KagazRemoteView = (() => {
 
   $("rv-file").addEventListener("click", () => sendFiles());
 
+  $("rv-sound").addEventListener("click", () => {
+    if (!cur || cur.session == null) return;
+    closePop();
+    cur.soundOff = !cur.soundOff;
+    did({ t: "sound", on: !cur.soundOff }, true);
+    soundButton();
+    toast(cur.soundOff ? `${cur.device.name}'s sound is off here for now.` : `${cur.device.name}'s sound plays here again.`);
+    stage.focus();
+  });
+
   const megabytes = (bytes) => (bytes >= 1e9 ? `${(bytes / 1e9).toFixed(2)} GB` : `${(bytes / 1e6).toFixed(bytes >= 1e7 ? 0 : 1)} MB`);
   let lastReading = null;
   function numbersLine(r) {
@@ -756,7 +786,7 @@ const KagazRemoteView = (() => {
   // paint, how much reached the page.
   setInterval(() => {
     if (!cur || cur.session == null) return;
-    const now = { at: performance.now(), frames: cur.frames, paintMs: cur.paintMs, bytes: cur.bytes, work: lastReading ? lastReading.work : null };
+    const now = { at: performance.now(), frames: cur.frames, paintMs: cur.paintMs, bytes: cur.bytes, work: lastReading ? lastReading.work : null, sound: lastReading ? lastReading.sound : null };
     const was = cur.told;
     cur.told = now;
     if (!was || now.frames === was.frames) return;
@@ -768,6 +798,7 @@ const KagazRemoteView = (() => {
     const work = r && was.work != null && r.work >= was.work ? `, ${Math.round((r.work - was.work) / seconds)} ms of work a second` : "";
     log(`${(frames / seconds).toFixed(1)} updates/s, ${((now.paintMs - was.paintMs) / frames).toFixed(2)} ms to paint one, `
       + `${((now.bytes - was.bytes) / seconds / 1e6).toFixed(1)} MB/s to the page, delay ${r && r.delay != null ? r.delay + " ms" : "unknown"}${work}`
+      + (r && was.sound != null && r.sound > was.sound ? `, sound ${Math.round((r.sound - was.sound) / seconds / 1000)} kB/s` : "")
       + (r && r.via ? `; ${r.via}` : ""));
   }, 5000);
 

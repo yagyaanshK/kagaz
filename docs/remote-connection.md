@@ -60,7 +60,8 @@ the other kinds: saved devices, Found nearby, Add.
   so). Choosing a monitor was dropped on 2026-11-17: over RDP the
   computer makes one screen for the viewer. The picture comes by RDP's
   graphics pipeline, H.264 decoded by OpenH264 built in from source
-  (chosen 2026-11-17), with the older picture as a per-computer switch. A per-computer switch keeps left click
+  (chosen 2026-11-17), with the older picture as a per-computer switch.
+  Its sound plays here through the system's own sound (2026-11-18). A per-computer switch keeps left click
   left where the remote computer has its mouse buttons swapped.
 - **Trust.** A computer's RDP certificate is remembered at the first
   connection and a change is warned about. VNC outside Tailscale shows

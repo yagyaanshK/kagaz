@@ -520,8 +520,9 @@ fn write_loop(rx: mpsc::Receiver<Input>, link: &Link, settings: &Settings) {
                 })),
                 Input::Picture(p) => picture = *p,
                 Input::SwappedButtons(now) => swapped = *now,
-                // A VNC server's screen is the size it is.
-                Input::Resize { .. } => {}
+                // A VNC server's screen is the size it is, and it sends
+                // no sound.
+                Input::Resize { .. } | Input::Sound(_) => {}
                 Input::Close => close = true,
             }
         }

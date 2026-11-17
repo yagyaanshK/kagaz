@@ -246,7 +246,8 @@ on the computer's screen with the files on offer; `--here` keeps it in
 the terminal instead, for a computer that someone sits at. VNC carries no
 files (`remote copy` does, where the device runs an SSH server). `remote
 pattern` serves a moving test card over VNC, to try the viewer without a
-real screen. Over Remote Desktop sound and sending whole folders are not
+real screen. A session in the terminal plays no sound: the computer's
+sound is for the window. Over Remote Desktop sending whole folders is not
 built yet; there are no monitors to choose from, as the computer makes
 one screen for the viewer. `remote try` ends by saying how the picture
 came (which codecs, how many frames) and tells each second how much work
@@ -254,7 +255,8 @@ decoding it was. Both kinds of session are checked against test servers
 that show a generated test card (for Remote Desktop,
 `tools/rdp-test-server`, which the tests start once it is built: `cargo
 build --manifest-path tools/rdp-test-server/Cargo.toml`; with `--h264` it
-sends the card as H.264), not yet against
+sends the card as H.264, with `--sound` a made tone; no sound is played
+in the tests, what arrives is counted), not yet against
 a real computer or phone. The list lives in `~/.config/kagaz/remote.toml`;
 passwords are never in it. Plan:
 [docs/remote-connection.md](docs/remote-connection.md).
@@ -404,8 +406,11 @@ the system's password store (never in Kagaz's own files) and used from
 then on; the device's page turns that off and forgets it. **Send files**
 (Remote Desktop) puts the files you choose on the computer's clipboard:
 paste there, in any folder, and they are copied over, with a note here of
-how far each has got. Over Remote Desktop sound is not built yet, and its
-button says so.
+how far each has got. A Remote Desktop computer's **sound** plays here
+instead of there (through this system's own sound; turned off for a
+computer on its page): the speaker button turns it off for the moment,
+and it waits by itself while another page of Kagaz shows, so that a call
+at the door is not talked over.
 
 Each page keeps its place: leave a printer's page with a scan under way
 for the cameras, and coming back finds the scan where it was. Camera

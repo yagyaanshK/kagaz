@@ -502,6 +502,9 @@ fn open_session(which: &str, picture: Option<u8>) -> Result<(Device, Answer, Ses
         Err(e) => return Err(e.into()),
     };
     let mut settings = device.settings.clone();
+    // A session in the terminal plays nothing: the device's sound is for
+    // the window.
+    settings.mute = true;
     if picture.is_some() {
         settings.picture = picture.map(|p| p.min(10));
     }

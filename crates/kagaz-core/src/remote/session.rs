@@ -39,6 +39,9 @@ pub enum Input {
     Picture(Option<u8>),
     /// The device has its mouse buttons swapped, or not after all.
     SwappedButtons(bool),
+    /// Play the device's sound here, or not, for now (a session that
+    /// carries sound; see [`Info::sound`]).
+    Sound(bool),
     /// The viewer is this size now, in pixels: a device that can redraws
     /// its screen to fit.
     Resize { width: u16, height: u16 },
@@ -190,6 +193,8 @@ pub struct Numbers {
     picture: AtomicU32,
     /// Microseconds spent on what the device sent (its picture, mostly).
     work: AtomicU64,
+    /// Bytes of the device's sound that arrived.
+    sound: AtomicU64,
     /// How the picture travels, in a few words.
     via: std::sync::Mutex<String>,
 }
@@ -204,6 +209,7 @@ impl Default for Numbers {
             updates: AtomicU64::new(0),
             picture: AtomicU32::new(0),
             work: AtomicU64::new(0),
+            sound: AtomicU64::new(0),
             via: std::sync::Mutex::new(String::new()),
         }
     }
@@ -221,6 +227,8 @@ pub struct Reading {
     pub picture: u8,
     /// Milliseconds this device spent on what arrived, since the start.
     pub work: u64,
+    /// Bytes of the device's sound that arrived, as it travelled.
+    pub sound: u64,
 }
 
 impl Numbers {
@@ -234,6 +242,7 @@ impl Numbers {
             updates: self.updates.load(Ordering::Relaxed),
             picture: self.picture.load(Ordering::Relaxed) as u8,
             work: self.work.load(Ordering::Relaxed) / 1000,
+            sound: self.sound.load(Ordering::Relaxed),
         }
     }
 
@@ -257,6 +266,9 @@ impl Numbers {
     }
     pub(crate) fn add_work(&self, spent: Duration) {
         self.work.fetch_add(spent.as_micros() as u64, Ordering::Relaxed);
+    }
+    pub(crate) fn add_sound(&self, bytes: usize) {
+        self.sound.fetch_add(bytes as u64, Ordering::Relaxed);
     }
     pub(crate) fn set_via(&self, via: String) {
         *self.via.lock().unwrap_or_else(|e| e.into_inner()) = via;

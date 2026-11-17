@@ -436,7 +436,7 @@ const KagazRemote = (() => {
     if (overRdp(d)) {
       // Remote Desktop draws its screen for the viewer, and suits the
       // picture to the connection by itself.
-      screen.replaceChildren(el("h3", "", "Screen"));
+      screen.replaceChildren(el("h3", "", "Screen and sound"));
       const sizeRow = el("div", "set-row");
       const sizeLabel = el("label", "", "Size");
       sizeLabel.htmlFor = "remote-size";
@@ -468,7 +468,20 @@ const KagazRemote = (() => {
         keepSettings();
       });
       olderRow.append(olderLabel);
-      screen.append(sizeRow, olderRow, el("p", "muted small", "The computer suits its picture to the connection by itself, and shows one screen, made for this window. Its sound is not built yet."));
+      // Its sound plays here unless turned off for this computer.
+      const soundRow = el("div", "set-row");
+      const soundLabel = el("label", "switch wrap");
+      const sound = el("input");
+      sound.type = "checkbox";
+      sound.checked = !settings.mute;
+      soundLabel.append(sound, " Play its sound here", el("small", "muted", "Instead of on the computer itself. The speaker button over its screen turns it off for the moment. Takes effect at the next connection."));
+      sound.addEventListener("change", () => {
+        if (sound.checked) delete settings.mute;
+        else settings.mute = true;
+        keepSettings();
+      });
+      soundRow.append(soundLabel);
+      screen.append(sizeRow, olderRow, soundRow, el("p", "muted small", "The computer suits its picture to the connection by itself, and shows one screen, made for this window."));
     } else {
       screen.append(picRow, autoRow);
       if (canConnect(d)) screen.append(el("p", "muted small", "Over VNC the device's whole screen is shown at its own size, fitted to the window. Sound and files need Remote Desktop."));
