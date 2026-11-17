@@ -668,6 +668,28 @@ fn clip(which: &str, text: Option<String>) -> Result<()> {
         bail!("there is no text to send");
     }
     let (device, _, session) = open_session(which, None)?;
+    // Remote Desktop hands text over when it is asked for, which a
+    // computer does when something is pasted there: the session has to
+    // stay open until then.
+    if session.info.speaks == Speaks::Rdp {
+        const HOLD: u64 = 30;
+        std::thread::sleep(Duration::from_millis(400));
+        session.send(Input::Clipboard(text.clone()));
+        println!(
+            "Offered {} characters to {}. Remote Desktop hands text over when something is pasted there, so Kagaz \
+             stays connected for {HOLD} seconds: paste on the computer now.",
+            text.chars().count(),
+            device.name
+        );
+        let end = Instant::now() + Duration::from_secs(HOLD);
+        while Instant::now() < end {
+            session.screen.wait(Duration::from_millis(200));
+            if let Some(Event::Ended(why)) = session.screen.take().events.into_iter().find(|e| matches!(e, Event::Ended(_))) {
+                bail!("the session ended: {why}");
+            }
+        }
+        return Ok(());
+    }
     // A moment for the device to say how it takes clipboard text, then
     // the text, then a moment for it to leave.
     std::thread::sleep(Duration::from_millis(400));

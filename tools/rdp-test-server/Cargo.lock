@@ -1553,6 +1553,8 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "ironrdp-cliprdr",
+ "ironrdp-core",
  "ironrdp-displaycontrol",
  "ironrdp-server",
  "rcgen",

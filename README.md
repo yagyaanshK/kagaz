@@ -228,11 +228,12 @@ travels through Tailscale.
 `remote open` starts the Kagaz window on the device's screen. `remote
 try` opens a session and tells it in numbers, a line a second (how often
 the picture came, how much travelled, the delay), without showing or
-keeping any picture. `remote clip` sends text to a VNC device's
-clipboard. `remote pattern` serves a moving test card over VNC, to try
-the viewer without a real screen. Over Remote Desktop the clipboard,
-sound, sending files, choosing a monitor and the faster H.264 picture are
-not built yet. Both kinds of session are checked against test servers
+keeping any picture. `remote clip` sends text to the device's clipboard
+(over Remote Desktop text is handed over when something is pasted there,
+so the command stays connected for half a minute). `remote pattern`
+serves a moving test card over VNC, to try the viewer without a real
+screen. Over Remote Desktop sound, sending files, choosing a monitor and
+the faster H.264 picture are not built yet. Both kinds of session are checked against test servers
 that show a generated test card (for Remote Desktop,
 `tools/rdp-test-server`, which the tests start once it is built: `cargo
 build --manifest-path tools/rdp-test-server/Cargo.toml`), not yet against
@@ -374,14 +375,14 @@ Alt + Del and for full screen. A Remote Desktop computer draws its screen
 at the window's size and again when the window changes (or at a fixed
 size, scaled, if you choose that on its page); it asks who signs in, and
 if it ever shows another certificate than the one remembered, Kagaz stops
-and asks before signing in. Over VNC, text copied on either side is on the
-other's clipboard, and the picture can be made sharper or smoother (by
-itself unless you choose). "Keep left click on the left" is for a device
+and asks before signing in. Text copied on either side is on the other's
+clipboard, in any script. Over VNC the picture can be made sharper or
+smoother (by itself unless you choose). "Keep left click on the left" is for a device
 whose mouse buttons are swapped. With **Remember** the password is kept in
 the system's password store (never in Kagaz's own files) and used from
 then on; the device's page turns that off and forgets it. Over Remote
-Desktop the clipboard, sound, files and choosing a monitor are not built
-yet, and their buttons say so.
+Desktop sound, files and choosing a monitor are not built yet, and their
+buttons say so.
 
 Each page keeps its place: leave a printer's page with a scan under way
 for the cameras, and coming back finds the scan where it was. Camera

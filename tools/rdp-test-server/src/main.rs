@@ -11,19 +11,29 @@
 //!
 //! It says `listening <address>` and `fingerprint <sha-256 of its
 //! certificate>`, then `heard <what a viewer did>` for every key and
-//! mouse event. On its input, `tick <n>` moves the card to that tick and
-//! `size <width> <height>` changes the screen's size.
+//! mouse event, and `heard Text("…")` for text a viewer copied (it asks
+//! for it at once, as a clipboard history does). On its input, `tick <n>`
+//! moves the card to that tick, `size <width> <height>` changes the
+//! screen's size, and `copy <text>` copies text "on the computer" (write
+//! `\n` for a line's end).
 
 // The same card as the VNC test server and the tests draw.
 #[path = "../../../crates/kagaz-core/src/remote/pattern.rs"]
 #[allow(dead_code)]
 mod pattern;
 
+use ironrdp_cliprdr::backend::{ClipboardMessage, CliprdrBackend, CliprdrBackendFactory};
+use ironrdp_cliprdr::pdu::{
+    ClipboardFormat, ClipboardFormatId, ClipboardGeneralCapabilityFlags, FileContentsRequest, FileContentsResponse,
+    FormatDataRequest, FormatDataResponse, LockDataId,
+};
 use ironrdp_server::tokio_rustls::{rustls, TlsAcceptor};
 use ironrdp_server::{
-    BitmapUpdate, Credentials, DesktopSize, DisplayUpdate, KeyboardEvent, MouseEvent, PixelFormat, RdpServer,
-    RdpServerDisplay, RdpServerDisplayUpdates, RdpServerInputHandler,
+    BitmapUpdate, CliprdrServerFactory, Credentials, DesktopSize, DisplayUpdate, KeyboardEvent, MouseEvent,
+    PixelFormat, RdpServer, RdpServerDisplay, RdpServerDisplayUpdates, RdpServerInputHandler, ServerEvent,
+    ServerEventSender,
 };
+use tokio::sync::mpsc::UnboundedSender;
 use sha2::{Digest, Sha256};
 use std::io::{BufRead, Write};
 use std::num::{NonZeroU16, NonZeroUsize};
@@ -127,6 +137,97 @@ impl RdpServerDisplay for Shared {
     }
 }
 
+/// The computer's clipboard: the text "copied" there, and the way to the
+/// viewer once one is connected.
+#[derive(Clone, Debug, Default)]
+struct Clipboard {
+    text: Arc<Mutex<Option<String>>>,
+    to_viewer: Arc<Mutex<Option<UnboundedSender<ServerEvent>>>>,
+}
+
+impl Clipboard {
+    fn send(&self, message: ClipboardMessage) {
+        if let Some(sender) = self.to_viewer.lock().unwrap().as_ref() {
+            let _ = sender.send(ServerEvent::Clipboard(message));
+        }
+    }
+
+    fn formats(&self) -> Vec<ClipboardFormat> {
+        match *self.text.lock().unwrap() {
+            Some(_) => vec![ClipboardFormat::new(ClipboardFormatId::CF_UNICODETEXT)],
+            None => Vec::new(),
+        }
+    }
+
+    /// Text is copied on the computer: the viewer is told there is text.
+    fn copy(&self, text: String) {
+        *self.text.lock().unwrap() = Some(text);
+        self.send(ClipboardMessage::SendInitiateCopy(self.formats()));
+    }
+}
+
+impl ServerEventSender for Clipboard {
+    fn set_sender(&mut self, sender: UnboundedSender<ServerEvent>) {
+        *self.to_viewer.lock().unwrap() = Some(sender);
+    }
+}
+
+impl CliprdrBackendFactory for Clipboard {
+    fn build_cliprdr_backend(&self) -> Box<dyn CliprdrBackend> {
+        Box::new(self.clone())
+    }
+}
+
+impl CliprdrServerFactory for Clipboard {}
+
+ironrdp_core::impl_as_any!(Clipboard);
+
+impl CliprdrBackend for Clipboard {
+    fn temporary_directory(&self) -> &str {
+        ""
+    }
+
+    fn client_capabilities(&self) -> ClipboardGeneralCapabilityFlags {
+        ClipboardGeneralCapabilityFlags::empty()
+    }
+
+    fn on_ready(&mut self) {}
+
+    fn on_request_format_list(&mut self) {
+        self.send(ClipboardMessage::SendInitiateCopy(self.formats()));
+    }
+
+    fn on_process_negotiated_capabilities(&mut self, _capabilities: ClipboardGeneralCapabilityFlags) {}
+
+    // The viewer has text: ask for it at once.
+    fn on_remote_copy(&mut self, available_formats: &[ClipboardFormat]) {
+        if available_formats.iter().any(|f| f.id() == ClipboardFormatId::CF_UNICODETEXT) {
+            self.send(ClipboardMessage::SendInitiatePaste(ClipboardFormatId::CF_UNICODETEXT));
+        }
+    }
+
+    fn on_format_data_request(&mut self, request: FormatDataRequest) {
+        let text = self.text.lock().unwrap().clone();
+        self.send(ClipboardMessage::SendFormatData(match text {
+            Some(text) if request.format == ClipboardFormatId::CF_UNICODETEXT => {
+                FormatDataResponse::new_unicode_string(&text)
+            }
+            _ => FormatDataResponse::new_error(),
+        }));
+    }
+
+    fn on_format_data_response(&mut self, response: FormatDataResponse<'_>) {
+        if let Ok(text) = response.to_unicode_string() {
+            say(&format!("heard Text({:?})", text.trim_end_matches('\0')));
+        }
+    }
+
+    fn on_file_contents_request(&mut self, _request: FileContentsRequest) {}
+    fn on_file_contents_response(&mut self, _response: FileContentsResponse<'_>) {}
+    fn on_lock(&mut self, _data_id: LockDataId) {}
+    fn on_unlock(&mut self, _data_id: LockDataId) {}
+}
+
 fn value(args: &[String], name: &str) -> Option<String> {
     args.iter().position(|a| a == name).and_then(|i| args.get(i + 1)).cloned()
 }
@@ -174,12 +275,19 @@ fn main() -> anyhow::Result<()> {
         fit: args.iter().any(|a| a == "--fit"),
     };
 
+    let clipboard = Clipboard::default();
     // What the tests (or a person) ask for; the end of the input ends it.
     {
         let shared = shared.clone();
+        let clipboard = clipboard.clone();
         std::thread::spawn(move || {
             for line in std::io::stdin().lock().lines() {
                 let Ok(line) = line else { break };
+                if let Some(text) = line.strip_prefix("copy ") {
+                    // As Windows keeps it: lines end in CR LF.
+                    clipboard.copy(text.replace("\\n", "\r\n"));
+                    continue;
+                }
                 let words: Vec<&str> = line.split_whitespace().collect();
                 match words.as_slice() {
                     ["tick", n] => {
@@ -209,7 +317,7 @@ fn main() -> anyhow::Result<()> {
             .with_hybrid(acceptor, public_key)
             .with_input_handler(shared.clone())
             .with_display_handler(shared)
-            .with_cliprdr_factory(None)
+            .with_cliprdr_factory(Some(Box::new(clipboard)))
             .with_sound_factory(None)
             .with_honor_client_desktop_size(fit)
             .build();

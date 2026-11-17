@@ -385,8 +385,12 @@ Plan: `docs/remote-connection.md` (agreed 2026-11-16).
       own because it cannot share a build with the newest client parts).
       **Not yet** against real Windows or GNOME, and not yet in the real
       window. Computers only: phones come with step 2.
-- [ ] **Step 1, Remote Desktop, what is left**: clipboard text both ways;
-      the H.264 picture (the fast one; needs the owner's choice of
+- [x] **Step 1, Remote Desktop, clipboard text** both ways, in any
+      script (2026-11-17): each side says it has text and hands it over
+      when asked; Kagaz asks at once, so what is copied on the computer
+      is on this device's clipboard without a further step. Tested
+      against the test server, not yet against real Windows.
+- [ ] **Step 1, Remote Desktop, what is left**: the H.264 picture (the fast one; needs the owner's choice of
       decoder for Ubuntu, the library brings none there); sound (needs
       `libasound2-dev`); choosing a monitor; sending files (`kagaz remote
       send`); a sign-in through a company domain (Kerberos) is refused

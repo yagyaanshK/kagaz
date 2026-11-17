@@ -7,6 +7,8 @@
 //! One thread runs a session. It waits on the connection and on a waker
 //! that [`InputSender`] pokes, so a key or a click leaves at once.
 
+mod clip;
+
 use super::keys;
 use super::reach;
 use super::screen::{Event, Pointer, Rect, Screen};
@@ -15,6 +17,8 @@ use super::session::{
 };
 use super::{Settings, Speaks};
 use ironrdp_blocking::Framed;
+use ironrdp_cliprdr::pdu::{ClipboardFormat, ClipboardFormatId, FormatDataResponse};
+use ironrdp_cliprdr::CliprdrClient;
 use ironrdp_connector::connection_activation::{ConnectionActivationFactory, ConnectionActivationState};
 use ironrdp_connector::sspi::generator::NetworkRequest;
 use ironrdp_connector::sspi::network_client::NetworkClient;
@@ -329,6 +333,12 @@ struct Running {
     buttons: u8,
     /// Something was drawn since the last count.
     drew: bool,
+    /// What the clipboard channel asked for and the session has yet to do.
+    clip_asked: clip::Queue,
+    /// The text copied here, to hand over when the computer asks.
+    clip_here: Option<String>,
+    /// The text last seen, from either side: it is not sent back.
+    clip_last: Option<String>,
     /// Keys that are down, to let go when the session closes.
     held: HashMap<String, FastPathInputEvent>,
 }
@@ -427,6 +437,55 @@ impl Running {
         Ok(())
     }
 
+    /// Do what the clipboard channel asked for since the last look.
+    fn clipboard(&mut self) -> Result<(), String> {
+        loop {
+            let Some(asked) = self.clip_asked.lock().unwrap_or_else(|e| e.into_inner()).pop_front() else {
+                return Ok(());
+            };
+            let text_format = [ClipboardFormat::new(ClipboardFormatId::CF_UNICODETEXT)];
+            let Some(channel) = self.stage.get_svc_processor_mut::<CliprdrClient>() else {
+                continue;
+            };
+            let messages = match asked {
+                clip::Asked::List => channel.initiate_copy(if self.clip_here.is_some() { &text_format } else { &[] }),
+                clip::Asked::Fetch => channel.initiate_paste(ClipboardFormatId::CF_UNICODETEXT),
+                clip::Asked::Give(format) => channel.submit_format_data(match &self.clip_here {
+                    Some(text) if format == ClipboardFormatId::CF_UNICODETEXT => {
+                        FormatDataResponse::new_unicode_string(&clip::to_wire(text))
+                    }
+                    _ => FormatDataResponse::new_error(),
+                }),
+                clip::Asked::Text(text) => {
+                    if self.clip_last.as_deref() != Some(&text) {
+                        self.clip_last = Some(text.clone());
+                        // What is here now is the computer's: no longer
+                        // something to hand back to it.
+                        self.clip_here = None;
+                        self.screen.post(Event::Clipboard(text));
+                    }
+                    continue;
+                }
+            }
+            .map_err(|e| format!("the clipboard could not be carried ({e})"))?;
+            let frame = self
+                .stage
+                .process_svc_processor_messages(messages)
+                .map_err(|e| format!("the clipboard could not be carried ({e})"))?;
+            self.write(&frame)?;
+        }
+    }
+
+    /// Text was copied here: tell the computer there is text to have.
+    fn copied_here(&mut self, text: &str) {
+        if self.clip_last.as_deref() == Some(text) {
+            return;
+        }
+        self.clip_last = Some(text.to_string());
+        self.clip_here = Some(text.to_string());
+        self.clip_asked.lock().unwrap_or_else(|e| e.into_inner()).push_back(clip::Asked::List);
+    }
+
     /// What the person did, as the events Remote Desktop has for it.
     fn events(&mut self, input: &Input, out: &mut Vec<FastPathInputEvent>) {
         let mouse = |flags: PointerFlags, x: u16, y: u16, wheel: i16| {
@@ -502,9 +561,10 @@ impl Running {
                     self.wanted = Some(fitting(*width, *height));
                 }
             }
+            Input::Clipboard(text) => self.copied_here(text),
             // The computer suits its picture to the link by itself.
             Input::Picture(_) => {}
-            Input::Clipboard(_) | Input::Close => {}
+            Input::Close => {}
         }
     }
 }
@@ -582,6 +642,9 @@ fn run(mut s: Running, rx: mpsc::Receiver<Input>, mut waiter: waker::Waiter) -> 
                 Ok(Next::End(why)) | Err(why) => return why,
             }
         }
+        if let Err(why) = s.clipboard() {
+            return why;
+        }
         // The viewer has another size: ask for the screen at that size,
         // once the computer has said it takes such asking. It answers by
         // starting its screen over.
@@ -650,10 +713,13 @@ pub fn open(
 
     // Up to the point where both sides switch to TLS.
     let mut framed = Framed::new(counted);
-    // With the channel over which a new size is asked for later.
-    let mut connector = ClientConnector::new(config(user.trim(), password, size, scale)?, local).with_static_channel(
-        DrdynvcClient::new().with_dynamic_channel(DisplayControlClient::new(|_| Ok(Vec::new()))),
-    );
+    // With the channels for the clipboard and for asking for a new size.
+    let (clipboard, clip_asked) = clip::Backend::new();
+    let mut connector = ClientConnector::new(config(user.trim(), password, size, scale)?, local)
+        .with_static_channel(CliprdrClient::new(Box::new(clipboard)))
+        .with_static_channel(
+            DrdynvcClient::new().with_dynamic_channel(DisplayControlClient::new(|_| Ok(Vec::new()))),
+        );
     let should_upgrade = ironrdp_blocking::connect_begin(&mut framed, &mut connector).map_err(refusal)?;
 
     // TLS: the computer shows its certificate. It is compared with the
@@ -741,6 +807,9 @@ pub fn open(
         wanted: None,
         buttons: 0,
         drew: false,
+        clip_asked,
+        clip_here: None,
+        clip_last: None,
         held: HashMap::new(),
     };
     {

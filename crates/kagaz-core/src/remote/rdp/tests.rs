@@ -32,6 +32,11 @@ impl TestServer {
         writeln!(self.input, "tick {tick}").unwrap();
     }
 
+    /// Text is copied "on the computer"; `\n` in it is a line's end.
+    fn copy(&mut self, text: &str) {
+        writeln!(self.input, "copy {text}").unwrap();
+    }
+
     fn resize(&mut self, width: u16, height: u16) {
         writeln!(self.input, "size {width} {height}").unwrap();
     }
@@ -358,6 +363,35 @@ fn sizes_and_scales_remote_desktop_can_have() {
     assert_eq!(fitting_scale(50), 100);
     assert_eq!(fitting_scale(250), 250);
     assert_eq!(fitting_scale(900), 500);
+}
+
+#[test]
+fn copied_text_travels_both_ways_in_any_script() {
+    let Some(mut server) = serve(64, 64) else { return };
+    let session = connect(&server, Some("asha"), Some("sesame"), &Trust::default()).unwrap();
+    let mut events = Vec::new();
+    let mut seen = |want: &Event| -> bool {
+        until(|| {
+            events.extend(session.screen.take().events);
+            events.contains(want)
+        })
+    };
+    // Copied on the computer: here without a further step, its lines
+    // ending the way they do here.
+    std::thread::sleep(Duration::from_millis(300));
+    server.copy(r"नमस्ते\nfrom the computer");
+    assert!(seen(&Event::Clipboard("नमस्ते\nfrom the computer".into())), "no text from the computer");
+    // Copied here: the computer has it when it asks, with its own line
+    // ends.
+    session.send(Input::Clipboard("यहाँ से\ntwo lines".into()));
+    let want = format!("Text({:?})", "यहाँ से\r\ntwo lines");
+    assert!(until(|| server.heard().contains(&want)), "heard {:?}", server.heard());
+    // The same text again is not offered again.
+    session.send(Input::Clipboard("यहाँ से\ntwo lines".into()));
+    session.send(Input::Clipboard("and once more".into()));
+    let want = format!("Text({:?})", "and once more");
+    assert!(until(|| server.heard().contains(&want)), "heard {:?}", server.heard());
+    assert_eq!(server.heard().iter().filter(|h| h.starts_with("Text(")).count(), 2);
 }
 
 #[test]

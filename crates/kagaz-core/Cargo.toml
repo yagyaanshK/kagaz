@@ -56,6 +56,7 @@ ironrdp-graphics = "0.11"
 ironrdp-core = "0.3"
 ironrdp-dvc = "0.10"
 ironrdp-displaycontrol = "0.10"
+ironrdp-cliprdr = "0.9"
 x509-cert = { version = "0.2", default-features = false, features = ["std"] }
 
 [target.'cfg(not(target_os = "android"))'.dependencies]
