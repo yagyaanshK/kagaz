@@ -519,6 +519,12 @@ fn write_loop(rx: mpsc::Receiver<Input>, link: &Link, settings: &Settings) {
                     }
                 }
                 Input::Clipboard(text) | Input::ClipboardAsked(text) => link.clipboard_out(text, &mut out),
+                // VNC's clipboard is text alone.
+                Input::ClipboardPicture { text, .. } => {
+                    if let Some(text) = text {
+                        link.clipboard_out(text, &mut out);
+                    }
+                }
                 Input::Files(_) => link.screen.post(Event::Sending(Sending::Failed {
                     why: "VNC carries no files".into(),
                 })),

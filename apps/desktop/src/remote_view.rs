@@ -147,33 +147,84 @@ fn pointer_packet(p: &remote::Pointer) -> Vec<u8> {
 
 // ---- this computer's clipboard ----
 
-#[cfg(target_os = "linux")]
-fn clipboard_text(app: &AppHandle) -> Option<String> {
-    let (tx, rx) = mpsc::channel();
-    app.run_on_main_thread(move || {
-        let clipboard = gtk::Clipboard::get(&gtk::gdk::SELECTION_CLIPBOARD);
-        let _ = tx.send(clipboard.wait_for_text().map(|t| t.to_string()));
-    })
-    .ok()?;
-    rx.recv_timeout(Duration::from_secs(2)).ok().flatten()
+/// What is on this computer's clipboard that a session carries: its
+/// text, and its picture as PNG (a screenshot, an image out of a page).
+#[derive(Default)]
+struct Copied {
+    text: Option<String>,
+    png: Option<Vec<u8>>,
 }
 
+/// The largest picture taken off the clipboard here.
+const MOST_PICTURE: usize = 64 << 20;
+
 #[cfg(target_os = "linux")]
-fn set_clipboard_text(app: &AppHandle, text: String) -> bool {
+fn clipboard_now(app: &AppHandle) -> Copied {
+    let (tx, rx) = mpsc::channel();
+    let asked = app.run_on_main_thread(move || {
+        let clipboard = gtk::Clipboard::get(&gtk::gdk::SELECTION_CLIPBOARD);
+        let text = clipboard.wait_for_text().map(|t| t.to_string()).filter(|t| !t.is_empty());
+        // As PNG where the program that copied it has it so (most do);
+        // else whatever picture it has, made into PNG here.
+        let png = clipboard
+            .wait_for_contents(&gtk::gdk::Atom::intern("image/png"))
+            .map(|contents| contents.data())
+            .filter(|png| !png.is_empty())
+            .or_else(|| {
+                clipboard
+                    .wait_is_image_available()
+                    .then(|| clipboard.wait_for_image())
+                    .flatten()
+                    .and_then(|picture| picture.save_to_bufferv("png", &[]).ok())
+            })
+            .filter(|png| png.len() <= MOST_PICTURE);
+        let _ = tx.send(Copied { text, png });
+    });
+    if asked.is_err() {
+        return Copied::default();
+    }
+    rx.recv_timeout(Duration::from_secs(4)).unwrap_or_default()
+}
+
+/// Put what was copied on the device on this computer's clipboard: its
+/// text, or its picture (as PNG, which programs here read) with the text
+/// that came with it.
+#[cfg(target_os = "linux")]
+fn set_clipboard(app: &AppHandle, text: Option<String>, png: Option<Vec<u8>>) -> bool {
     app.run_on_main_thread(move || {
-        gtk::Clipboard::get(&gtk::gdk::SELECTION_CLIPBOARD).set_text(&text);
+        let clipboard = gtk::Clipboard::get(&gtk::gdk::SELECTION_CLIPBOARD);
+        let Some(png) = png else {
+            if let Some(text) = text {
+                clipboard.set_text(&text);
+            }
+            return;
+        };
+        let mut targets = vec![gtk::TargetEntry::new("image/png", gtk::TargetFlags::empty(), 1)];
+        if text.is_some() {
+            for name in ["UTF8_STRING", "text/plain;charset=utf-8", "text/plain", "STRING", "TEXT"] {
+                targets.push(gtk::TargetEntry::new(name, gtk::TargetFlags::empty(), 0));
+            }
+        }
+        // Handed over when something here pastes it, in the form asked for.
+        clipboard.set_with_data(&targets, move |_, selection, form| {
+            if form == 1 {
+                selection.set(&gtk::gdk::Atom::intern("image/png"), 8, &png);
+            } else if let Some(text) = &text {
+                selection.set_text(text);
+            }
+        });
     })
     .is_ok()
 }
 
 // The clipboard of the other systems comes with their viewers.
 #[cfg(not(target_os = "linux"))]
-fn clipboard_text(_app: &AppHandle) -> Option<String> {
-    None
+fn clipboard_now(_app: &AppHandle) -> Copied {
+    Copied::default()
 }
 
 #[cfg(not(target_os = "linux"))]
-fn set_clipboard_text(_app: &AppHandle, _text: String) -> bool {
+fn set_clipboard(_app: &AppHandle, _text: Option<String>, _png: Option<Vec<u8>>) -> bool {
     false
 }
 
@@ -215,8 +266,14 @@ fn forward(app: AppHandle, id: u64, session: remote::Session, channel: Channel<I
             for event in taken.events {
                 let (packet, last) = match event {
                     Event::Clipboard(text) => {
-                        let kept = set_clipboard_text(&app, text.clone());
-                        let news = serde_json::json!({ "type": "clipboard", "characters": text.chars().count(), "kept": kept });
+                        let characters = text.chars().count();
+                        let kept = set_clipboard(&app, Some(text), None);
+                        let news = serde_json::json!({ "type": "clipboard", "characters": characters, "kept": kept });
+                        (news_packet(news), false)
+                    }
+                    Event::ClipboardPicture { png, text } => {
+                        let kept = set_clipboard(&app, text, Some(png));
+                        let news = serde_json::json!({ "type": "clipboard", "picture": true, "kept": kept });
                         (news_packet(news), false)
                     }
                     Event::Pointer(p) => (pointer_packet(&p), false),
@@ -463,23 +520,35 @@ pub struct Told {
     sound_via: String,
 }
 
-/// Offer what is on this computer's clipboard to the device. Says how
-/// many characters went, or none when there is no text to offer. `asked`
-/// when the person pressed the button for it: the text is then offered
-/// even over files offered since it was last said.
+/// What was offered to the device from this computer's clipboard.
+#[derive(Serialize, Default)]
+pub struct Offered {
+    /// So many characters of text.
+    characters: Option<usize>,
+    /// A picture (with the text, where both were copied together).
+    picture: bool,
+}
+
+/// Offer what is on this computer's clipboard to the device: its text,
+/// its picture, or both where they were copied together. `asked` when the
+/// person pressed the button for it: text is then offered even over
+/// files offered since it was last said.
 #[tauri::command]
-pub async fn remote_clipboard_push(app: AppHandle, session: u64, asked: Option<bool>) -> Result<Option<usize>, String> {
+pub async fn remote_clipboard_push(app: AppHandle, session: u64, asked: Option<bool>) -> Result<Offered, String> {
     if !CLIPBOARD_HERE {
         return Err("the clipboard is not carried on this system yet".into());
     }
     blocking(move || {
-        let Some(text) = clipboard_text(&app).filter(|t| !t.is_empty()) else {
-            return Ok(None);
+        let copied = clipboard_now(&app);
+        let characters = copied.text.as_ref().map(|t| t.chars().count());
+        let (input, picture) = match copied {
+            Copied { png: Some(png), text } => (Input::ClipboardPicture { png, text }, true),
+            Copied { text: Some(text), .. } if asked == Some(true) => (Input::ClipboardAsked(text), false),
+            Copied { text: Some(text), .. } => (Input::Clipboard(text), false),
+            _ => return Ok(Offered::default()),
         };
-        let characters = text.chars().count();
-        let input = if asked == Some(true) { Input::ClipboardAsked(text) } else { Input::Clipboard(text) };
         app.state::<Viewers>().with(session, |open| open.input.send(input))?;
-        Ok(Some(characters))
+        Ok(Offered { characters, picture })
     })
     .await
 }

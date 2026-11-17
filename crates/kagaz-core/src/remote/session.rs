@@ -35,6 +35,11 @@ pub enum Input {
     /// The person asks for this text to be offered now, whatever was
     /// offered before.
     ClipboardAsked(String),
+    /// A picture was copied here (a screenshot, an image), as PNG, with
+    /// the text that was copied along with it: offered to the device as
+    /// text is. A device whose kind of session carries only text takes
+    /// the text.
+    ClipboardPicture { png: Vec<u8>, text: Option<String> },
     /// Offer these files to the device: they wait on its clipboard until
     /// they are pasted there. How they get on comes back as
     /// [`super::Event::Sending`].

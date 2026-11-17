@@ -403,9 +403,41 @@ Plan: `docs/remote-connection.md` (agreed 2026-11-16).
       95 to 400 ms on the home network: it was the connection's running
       average, which grows while Windows holds its acknowledgements
       back; the lowest of the last minutes is shown now.
-- [ ] **To hear from the owner on the real Windows PC**: the sound
-      (above); sending files; the certificate card; Remember typed in
-      the window.
+- [x] **The sound on the owner's real Windows PC** (2026-11-18): it
+      played once Kagaz also offered the channel for redirected devices
+      (with no device on it): Windows starts its sound only for a viewer
+      that offers both. It came by the older channel as mono ADPCM, 22
+      kB/s, Windows' thinnest, and "lagged a lot" (the owner; which lag
+      is asked). Since then: on a link that answers within 20 ms only
+      full sound (plain, stereo, 44100 or more) is taken where the
+      computer has it; the computer is told how long each block was
+      held; the log says how far ahead of the speakers the sound is
+      (about 170 ms on this laptop with the test server's tone: the
+      player's 100 ms and the system's own).
+- [x] **Keys and buttons that belong to the device** (2026-11-18): full
+      screen is the window's own, so Esc reaches the device; the mouse's
+      back and forward buttons go to a Remote Desktop computer and no
+      longer step back in Kagaz (which ended the session); Caps Lock,
+      Num Lock and Scroll Lock are told to it as they are here. Not yet
+      tried by a person.
+- [x] **Pictures on the clipboard over Remote Desktop** (2026-11-18,
+      the owner's ask): one copied on the computer (as PNG where it has
+      it so, else from Windows' own form) is put on this clipboard as
+      PNG, with the text copied along with it; one copied here is told
+      to the computer and handed over when pasted there, as PNG or in
+      Windows' form. The picture last seen, from either side, is not
+      said again, so the computer's own never goes back to it. Tested
+      against the test server (`copy-picture`, `paste-picture`). **Not
+      yet** on the real PC, and the part on this system's clipboard was
+      not run at all: a test of it would overwrite what the owner has
+      copied.
+- [ ] **System keys (Print Screen, the Windows key, Alt+Tab, Alt+F4)**:
+      a proposal is with the owner (to this computer in a window, to the
+      device in full screen, as Windows' own viewer has it).
+- [ ] **To hear from the owner on the real Windows PC**: which lag the
+      sound has, and the log's line on it; a picture copied each way;
+      sending files; the certificate card; Remember typed in the
+      window.
 - [x] **Step 1, Remote Desktop, clipboard text** both ways, in any
       script (2026-11-17): each side says it has text and hands it over
       when asked; Kagaz asks at once, so what is copied on the computer

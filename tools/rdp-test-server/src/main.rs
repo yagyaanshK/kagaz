@@ -29,6 +29,13 @@
 //! screen's size, and `copy <text>` copies text "on the computer" (write
 //! `\n` for a line's end).
 //!
+//! Pictures: `copy-picture png <tick>` copies the card at that tick "on
+//! the computer" (48 by 32) as PNG and in Windows' own form, `copy-picture
+//! dib <tick>` in Windows' form alone. A picture a viewer offers is said
+//! as `heard PictureOffer`; `paste-picture png` or `paste-picture dib`
+//! asks for it in that form and says `heard Picture(<form>, <bytes>,
+//! <sha-256 of them>)`. Never the picture itself.
+//!
 //! Files a viewer offers are said as `heard Offer`; they are taken when
 //! `paste` comes on the input (`paste <ms>` waits that long before each
 //! piece, as a slow link would). It keeps none of them: it says `heard
@@ -457,6 +464,9 @@ impl std::fmt::Debug for Taking {
     }
 }
 
+/// The number this computer gives PNG among what it offers.
+const PNG_THERE: ClipboardFormatId = ClipboardFormatId(0xC123);
+
 /// As much as a computer asks for at a time.
 const PIECE: u64 = 65536;
 
@@ -466,6 +476,14 @@ const PIECE: u64 = 65536;
 struct Clipboard {
     text: Arc<Mutex<Option<String>>>,
     to_viewer: Arc<Mutex<Option<UnboundedSender<ServerEvent>>>>,
+    /// The picture "copied" there, as PNG, and whether it is offered as
+    /// PNG too or in Windows' own form alone.
+    picture: Arc<Mutex<Option<(Vec<u8>, bool)>>>,
+    /// What was asked of the viewer and is on its way, in order: its
+    /// answers do not say what they answer.
+    wanted: Arc<Mutex<std::collections::VecDeque<&'static str>>>,
+    /// The number the viewer gave PNG among what it offers.
+    viewer_png: Arc<Mutex<Option<ClipboardFormatId>>>,
     /// It takes no files.
     no_files: bool,
     /// Say the text a viewer copied, not only how long it is.
@@ -483,17 +501,58 @@ impl Clipboard {
     }
 
     fn formats(&self) -> Vec<ClipboardFormat> {
-        match *self.text.lock().unwrap() {
-            Some(_) => vec![ClipboardFormat::new(ClipboardFormatId::CF_UNICODETEXT)],
-            None => Vec::new(),
+        let mut formats = Vec::new();
+        if self.text.lock().unwrap().is_some() {
+            formats.push(ClipboardFormat::new(ClipboardFormatId::CF_UNICODETEXT));
         }
+        if let Some((_, as_png)) = *self.picture.lock().unwrap() {
+            if as_png {
+                formats.push(ClipboardFormat::new(PNG_THERE).with_name(ClipboardFormatName::new("PNG")));
+            }
+            formats.push(ClipboardFormat::new(ClipboardFormatId::CF_DIB));
+        }
+        formats
     }
 
     /// Text is copied on the computer: the viewer is told there is text.
     fn copy(&self, text: String) {
         *self.text.lock().unwrap() = Some(text);
+        *self.picture.lock().unwrap() = None;
         *self.offered.lock().unwrap() = None;
         self.send(ClipboardMessage::SendInitiateCopy(self.formats()));
+    }
+
+    /// A picture is copied on the computer: the card at that tick.
+    fn copy_picture(&self, as_png: bool, tick: u32) {
+        let (width, height) = (48u16, 32u16);
+        let mut png = Vec::new();
+        {
+            let mut encoder = png::Encoder::new(&mut png, width.into(), height.into());
+            encoder.set_color(png::ColorType::Rgba);
+            encoder.set_depth(png::BitDepth::Eight);
+            let mut writer = encoder.write_header().expect("a PNG starts");
+            writer.write_image_data(&pattern::card(width, height, tick)).expect("a PNG is written");
+        }
+        *self.text.lock().unwrap() = None;
+        *self.picture.lock().unwrap() = Some((png, as_png));
+        *self.offered.lock().unwrap() = None;
+        self.send(ClipboardMessage::SendInitiateCopy(self.formats()));
+    }
+
+    /// The picture a viewer offers is pasted on the computer, in the form
+    /// named: asked for, and what arrives is told by its size and sum.
+    fn paste_picture(&self, form: &'static str) {
+        let format = match form {
+            "png" => *self.viewer_png.lock().unwrap(),
+            _ => Some(ClipboardFormatId::CF_DIB),
+        };
+        match format {
+            Some(format) => {
+                self.wanted.lock().unwrap().push_back(form);
+                self.send(ClipboardMessage::SendInitiatePaste(format));
+            }
+            None => say("heard NoPictureToPaste"),
+        }
     }
 
     /// What the viewer offers is pasted on the computer: its list of
@@ -600,7 +659,14 @@ impl CliprdrBackend for Clipboard {
             say("heard Offer");
         }
         if available_formats.iter().any(|f| f.id() == ClipboardFormatId::CF_UNICODETEXT) {
+            self.wanted.lock().unwrap().push_back("text");
             self.send(ClipboardMessage::SendInitiatePaste(ClipboardFormatId::CF_UNICODETEXT));
+        }
+        // A picture waits until it is pasted (`paste-picture`).
+        let png = available_formats.iter().find(|f| f.name().is_some_and(|n| n.value() == "PNG")).map(|f| f.id());
+        *self.viewer_png.lock().unwrap() = png;
+        if png.is_some() || available_formats.iter().any(|f| f.id() == ClipboardFormatId::CF_DIB) {
+            say("heard PictureOffer");
         }
     }
 
@@ -621,18 +687,35 @@ impl CliprdrBackend for Clipboard {
 
     fn on_format_data_request(&mut self, request: FormatDataRequest) {
         let text = self.text.lock().unwrap().clone();
-        self.send(ClipboardMessage::SendFormatData(match text {
-            Some(text) if request.format == ClipboardFormatId::CF_UNICODETEXT => {
+        let picture = self.picture.lock().unwrap().clone();
+        let answer = match (text, picture) {
+            (Some(text), _) if request.format == ClipboardFormatId::CF_UNICODETEXT => {
                 FormatDataResponse::new_unicode_string(&text)
             }
+            (_, Some((png, true))) if request.format == PNG_THERE => FormatDataResponse::new_data(png),
+            (_, Some((png, _))) if request.format == ClipboardFormatId::CF_DIB => {
+                match ironrdp_cliprdr_format::bitmap::png_to_cf_dib(&png) {
+                    Ok(dib) => FormatDataResponse::new_data(dib),
+                    Err(_) => FormatDataResponse::new_error(),
+                }
+            }
             _ => FormatDataResponse::new_error(),
-        }));
+        };
+        self.send(ClipboardMessage::SendFormatData(answer));
     }
 
     // What a viewer copied is said in full only when asked for with
     // `--say-text` (the tests, which copy made-up text): a real viewer
     // offers whatever is on its person's clipboard.
     fn on_format_data_response(&mut self, response: FormatDataResponse<'_>) {
+        let wanted = self.wanted.lock().unwrap().pop_front().unwrap_or("text");
+        if wanted != "text" {
+            if response.is_error() {
+                return say(&format!("heard PictureFailed({wanted})"));
+            }
+            let sum: String = Sha256::digest(response.data()).iter().map(|b| format!("{b:02x}")).collect();
+            return say(&format!("heard Picture({wanted}, {}, {sum})", response.data().len()));
+        }
         if let Ok(text) = response.to_unicode_string() {
             let text = text.trim_end_matches('\0');
             if self.say_text {
@@ -779,6 +862,9 @@ fn main() -> anyhow::Result<()> {
                             shared.tick.store(n, Ordering::Release);
                         }
                     }
+                    ["copy-picture", form, tick] => clipboard.copy_picture(*form == "png", tick.parse().unwrap_or(0)),
+                    ["paste-picture", "png"] => clipboard.paste_picture("png"),
+                    ["paste-picture", "dib"] => clipboard.paste_picture("dib"),
                     ["rate", hz] => rate.store(hz.parse().unwrap_or(0), Ordering::Release),
                     ["tone", ms] => {
                         let (speaker, ms) = (speaker.clone(), ms.parse().unwrap_or(0));

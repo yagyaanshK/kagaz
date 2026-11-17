@@ -399,7 +399,10 @@ at the window's size and again when the window changes (or at a fixed
 size, scaled, if you choose that on its page); it asks who signs in, and
 if it ever shows another certificate than the one remembered, Kagaz stops
 and asks before signing in. Text copied on either side is on the other's
-clipboard, in any script. Over VNC the picture can be made sharper or
+clipboard, in any script, and over Remote Desktop so is a picture (a
+screenshot, an image out of a page): one copied on the computer is on
+this clipboard at once; one copied here goes over when it is pasted
+there. Over VNC the picture can be made sharper or
 smoother (by itself unless you choose). "Keep left click on the left" is for a device
 whose mouse buttons are swapped. With **Remember** the password is kept in
 the system's password store (never in Kagaz's own files) and used from
@@ -410,7 +413,12 @@ how far each has got. A Remote Desktop computer's **sound** plays here
 instead of there (through this system's own sound; turned off for a
 computer on its page): the speaker button turns it off for the moment,
 and it waits by itself while another page of Kagaz shows, so that a call
-at the door is not talked over.
+at the door is not talked over. On a fast link Kagaz takes only the
+full sound (plain, stereo), where the computer would else send its
+thinnest. Esc, the mouse's back and forward buttons and the lock keys
+belong to the device while its screen has the focus: full screen is the
+window's own (a page's would end with Esc), and Caps Lock and Num Lock
+there follow this keyboard.
 
 Each page keeps its place: leave a printer's page with a scan under way
 for the cameras, and coming back finds the scan where it was. Camera

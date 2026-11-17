@@ -740,6 +740,7 @@ fn try_session(which: &str, seconds: u64, picture: Option<u8>) -> Result<()> {
                 match event {
                     Event::Ended(why) => ended = Some(why),
                     Event::Clipboard(text) => println!("  the device copied {} characters", text.chars().count()),
+                    Event::ClipboardPicture { png, .. } => println!("  the device copied a picture ({})", size_words(png.len() as u64)),
                     Event::Pointer(p) => println!("  its pointer is {} x {}", p.width, p.height),
                     Event::PointerDefault => println!("  its pointer is the ordinary arrow"),
                     Event::Bell => println!("  it rang its bell"),

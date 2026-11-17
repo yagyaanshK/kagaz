@@ -28,7 +28,7 @@ use ironrdp_connector::{
     BitmapConfig, ClientConnector, Config, ConnectionOutcome, ConnectorErrorKind, Credentials,
     DesktopSize, Sequence as _, ServerName,
 };
-use ironrdp_core::WriteBuf;
+use ironrdp_core::{IntoOwned as _, WriteBuf};
 use ironrdp_displaycontrol::client::DisplayControlClient;
 use ironrdp_dvc::DrdynvcClient;
 use ironrdp_egfx::client::{BitmapUpdate, GraphicsPipelineClient, GraphicsPipelineHandler};
@@ -414,6 +414,11 @@ struct Running {
     here_said: bool,
     /// The text last seen, from either side: it is not sent back.
     clip_last: Option<String>,
+    /// The same for the picture last seen (see [`mark`]).
+    clip_last_picture: Option<u64>,
+    /// The text of the computer's latest copy, for a picture that comes
+    /// with it.
+    their_text: Option<String>,
     /// Offers the computer asked to keep, by the number it gave each.
     kept: HashMap<u32, Arc<clip::Offer>>,
     /// When the viewer was last told how a file is getting on.
@@ -428,7 +433,48 @@ struct Running {
 enum Here {
     Nothing,
     Text(String),
+    /// A picture (PNG), with the text that was copied along with it.
+    Picture { png: Arc<Vec<u8>>, text: Option<String> },
     Files(Arc<clip::Offer>),
+}
+
+impl Here {
+    /// What the computer's clipboard is told there is to have.
+    fn formats(&self) -> Vec<ClipboardFormat> {
+        let text = ClipboardFormat::new(ClipboardFormatId::CF_UNICODETEXT);
+        match self {
+            Here::Text(_) => vec![text],
+            Here::Picture { text: with, .. } => {
+                let mut formats = clip::picture_formats().to_vec();
+                if with.is_some() {
+                    formats.push(text);
+                }
+                formats
+            }
+            // Files are said in a way of their own, once the channel is
+            // ready for them.
+            Here::Nothing | Here::Files(_) => Vec::new(),
+        }
+    }
+
+    /// What is here in the format the computer asks for.
+    fn give(&self, format: ClipboardFormatId) -> Option<FormatDataResponse<'static>> {
+        let text = |text: &str| FormatDataResponse::new_unicode_string(&clip::to_wire(text)).into_owned();
+        match self {
+            Here::Text(here) if format == ClipboardFormatId::CF_UNICODETEXT => Some(text(here)),
+            Here::Picture { text: Some(with), .. } if format == ClipboardFormatId::CF_UNICODETEXT => Some(text(with)),
+            Here::Picture { png, .. } => clip::picture_as(png, format).map(FormatDataResponse::new_data),
+            _ => None,
+        }
+    }
+}
+
+/// A picture told apart from another without keeping both.
+fn mark(png: &[u8]) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    png.hash(&mut hasher);
+    hasher.finish()
 }
 
 /// What the loop does next.
@@ -537,17 +583,17 @@ impl Running {
             let Some(asked) = self.clip.next() else {
                 return Ok(());
             };
-            let text_format = [ClipboardFormat::new(ClipboardFormatId::CF_UNICODETEXT)];
             let Some(channel) = self.stage.get_svc_processor_mut::<CliprdrClient>() else {
                 continue;
             };
             let messages = match asked {
-                // Asked at the start, when only text can be said; files
-                // offered that early are said once the channel is ready.
+                // Asked at the start, when text and pictures can be said;
+                // files offered that early are said once the channel is
+                // ready.
                 clip::Asked::List => {
-                    let text = matches!(self.here, Here::Text(_));
-                    self.here_said = text;
-                    channel.initiate_copy(if text { &text_format } else { &[] }).map_err(|e| carried(&e))?
+                    let formats = self.here.formats();
+                    self.here_said = !formats.is_empty();
+                    channel.initiate_copy(&formats).map_err(|e| carried(&e))?
                 }
                 clip::Asked::Mine => {
                     if self.here_said || !channel.is_ready() {
@@ -556,7 +602,9 @@ impl Running {
                     self.here_said = true;
                     match &self.here {
                         Here::Nothing => continue,
-                        Here::Text(_) => channel.initiate_copy(&text_format).map_err(|e| carried(&e))?,
+                        Here::Text(_) | Here::Picture { .. } => {
+                            channel.initiate_copy(&self.here.formats()).map_err(|e| carried(&e))?
+                        }
                         Here::Files(offer) => {
                             let offered = if self.clip.files.load(Ordering::Acquire) {
                                 channel
@@ -584,14 +632,22 @@ impl Running {
                 }
                 clip::Asked::Fetch => channel.initiate_paste(ClipboardFormatId::CF_UNICODETEXT).map_err(|e| carried(&e))?,
                 clip::Asked::Give(format) => channel
-                    .submit_format_data(match &self.here {
-                        Here::Text(text) if format == ClipboardFormatId::CF_UNICODETEXT => {
-                            FormatDataResponse::new_unicode_string(&clip::to_wire(text))
-                        }
-                        _ => FormatDataResponse::new_error(),
-                    })
+                    .submit_format_data(self.here.give(format).unwrap_or_else(FormatDataResponse::new_error))
                     .map_err(|e| carried(&e))?,
+                clip::Asked::FetchPicture(format) => channel.initiate_paste(format).map_err(|e| carried(&e))?,
+                clip::Asked::Picture(png) => {
+                    let seen = mark(&png);
+                    if self.clip_last_picture != Some(seen) {
+                        self.clip_last_picture = Some(seen);
+                        // The computer's now: nothing to hand back to it.
+                        self.withdraw();
+                        let text = self.their_text.clone();
+                        self.screen.post(Event::ClipboardPicture { png, text });
+                    }
+                    continue;
+                }
                 clip::Asked::Text(text) => {
+                    self.their_text = Some(text.clone());
                     if self.clip_last.as_deref() != Some(&text) {
                         self.clip_last = Some(text.clone());
                         // What is here now is the computer's: no longer
@@ -602,6 +658,9 @@ impl Running {
                     continue;
                 }
                 clip::Asked::Theirs => {
+                    // A new copy on the computer: its text, if it has
+                    // any, comes next.
+                    self.their_text = None;
                     if matches!(self.here, Here::Files(_)) {
                         self.withdraw();
                     }
@@ -664,6 +723,25 @@ impl Running {
         self.withdraw();
         self.clip_last = Some(text.to_string());
         self.here = Here::Text(text.to_string());
+        self.clip.ask(clip::Asked::Mine);
+    }
+
+    /// A picture was copied here: tell the computer there is one to have.
+    /// The one last seen, from either side, is not said again.
+    fn copied_picture(&mut self, png: &[u8], text: &Option<String>) {
+        let seen = mark(png);
+        if self.clip_last_picture == Some(seen) {
+            return;
+        }
+        self.withdraw();
+        self.clip_last_picture = Some(seen);
+        if let Some(text) = text {
+            self.clip_last = Some(text.clone());
+        }
+        self.here = Here::Picture {
+            png: Arc::new(png.to_vec()),
+            text: text.clone(),
+        };
         self.clip.ask(clip::Asked::Mine);
     }
 
@@ -794,6 +872,7 @@ impl Running {
             }
             Input::Clipboard(text) => self.copied_here(text, false),
             Input::ClipboardAsked(text) => self.copied_here(text, true),
+            Input::ClipboardPicture { png, text } => self.copied_picture(png, text),
             Input::Files(paths) => self.offer(paths),
             // The computer suits its picture to the link by itself.
             Input::Picture(_) => {}
@@ -944,7 +1023,9 @@ pub fn open(
     let numbers = Arc::new(Numbers::default());
     let began = Instant::now();
     let stream = TcpStream::connect_timeout(&addr, timeout)?;
-    numbers.set_delay(began.elapsed().as_millis() as u32);
+    // How long the computer took to answer the knock: the link's delay.
+    let answered = began.elapsed();
+    numbers.set_delay(answered.as_millis() as u32);
     stream.set_nodelay(true)?;
     stream.set_read_timeout(Some(timeout))?;
     stream.set_write_timeout(Some(WRITE_TIMEOUT))?;
@@ -983,8 +1064,19 @@ pub fn open(
     // are there, each with a player that starts when sound comes to it.
     let with_sound = !settings.mute;
     let quiet = Arc::new(AtomicBool::new(false));
+    // A link that answered within a fiftieth of a second carries the
+    // sound as it is; a slower one is left to the computer's own choice.
+    let fast = answered <= Duration::from_millis(20);
+    // How long each block of sound was held here before it was said to
+    // be played: the computer keeps sound and picture together by it.
+    let clock = || -> ironrdp_rdpsnd::client::Clock {
+        let start = Instant::now();
+        Box::new(move || start.elapsed())
+    };
     if with_sound {
-        let newer = RdpsndDvcState::new(Box::new(sound::Sound::new("newer channel", quiet.clone(), numbers.clone())));
+        let newer =
+            RdpsndDvcState::new(Box::new(sound::Sound::new("newer channel", fast, quiet.clone(), numbers.clone())))
+                .with_clock(clock());
         dynamic = dynamic.with_dynamic_channel(newer.channel()).with_dynamic_channel(newer.lossy_channel());
     }
     let mut connector =
@@ -997,7 +1089,10 @@ pub fn open(
         // channel in turn only with the sound's: here it carries no
         // device at all.
         connector = connector
-            .with_static_channel(Rdpsnd::new(Box::new(sound::Sound::new("older channel", quiet.clone(), numbers.clone()))))
+            .with_static_channel(
+                Rdpsnd::new(Box::new(sound::Sound::new("older channel", fast, quiet.clone(), numbers.clone())))
+                    .with_clock(clock()),
+            )
             .with_static_channel(Rdpdr::new(Box::new(NoopRdpdrBackend), "Kagaz".into()));
     }
     let should_upgrade = ironrdp_blocking::connect_begin(&mut framed, &mut connector).map_err(refusal)?;
@@ -1091,6 +1186,8 @@ pub fn open(
         here: Here::Nothing,
         here_said: false,
         clip_last: None,
+        clip_last_picture: None,
+        their_text: None,
         kept: HashMap::new(),
         told: None,
         quiet,

@@ -23,6 +23,15 @@ pub struct Sound {
     /// What the two agreed on, for the log.
     agreed: String,
     blocks: u64,
+    /// The link is fast: only sound as it is (plain, stereo) is taken,
+    /// where the computer has it so. Left the choice, Windows goes by a
+    /// guess at the link and often sends its thinnest (one channel,
+    /// packed small) on a home network that carries the full sound with
+    /// ease.
+    fast: bool,
+    /// The longest the sound was ahead of the speakers since the log was
+    /// last told: how late it plays, in milliseconds.
+    ahead: u64,
     /// What plays it; none where sound is only counted.
     player: Option<RdpsndBackend>,
     /// What is said to be playable where there is no player to ask.
@@ -36,7 +45,7 @@ pub struct Sound {
 impl Sound {
     /// `quiet` is shared with the session, which sets it when the person
     /// turns the sound off or on again.
-    pub fn new(channel: &'static str, quiet: Arc<AtomicBool>, numbers: Arc<Numbers>) -> Sound {
+    pub fn new(channel: &'static str, fast: bool, quiet: Arc<AtomicBool>, numbers: Arc<Numbers>) -> Sound {
         let pcm = |channels: u16, rate: u32| AudioFormat {
             format: WaveFormat::PCM,
             n_channels: channels,
@@ -50,6 +59,8 @@ impl Sound {
             channel,
             agreed: String::new(),
             blocks: 0,
+            fast,
+            ahead: 0,
             player: (!cfg!(test)).then(RdpsndBackend::new),
             plain: vec![pcm(2, 48000), pcm(2, 44100)],
             quiet,
@@ -71,10 +82,18 @@ impl RdpsndClientHandler for Sound {
     }
 
     fn choose_formats(&self, server_formats: &[AudioFormat]) -> Vec<AudioFormat> {
-        let chosen = match &self.player {
+        let mut chosen = match &self.player {
             Some(player) => player.choose_formats(server_formats),
             None => self.plain.clone(),
         };
+        if self.fast {
+            let full = |f: &AudioFormat| {
+                f.format == WaveFormat::PCM && f.n_channels >= 2 && f.n_samples_per_sec >= 44100 && f.bits_per_sample >= 16
+            };
+            if chosen.iter().any(|f| full(f) && server_formats.contains(f)) {
+                chosen.retain(full);
+            }
+        }
         // For the log: how far the two got in agreeing.
         self.numbers.set_sound_via(format!(
             "{}, {} ways offered, {} of them playable here",
@@ -88,7 +107,7 @@ impl RdpsndClientHandler for Sound {
     fn wave(&mut self, format: &AudioFormat, ts: u32, data: Cow<'_, [u8]>) {
         self.numbers.add_sound(data.len());
         self.blocks += 1;
-        if self.blocks == 1 || self.blocks % 250 == 0 {
+        {
             if self.blocks == 1 {
                 let form = match format.format {
                     WaveFormat::PCM => "PCM".to_string(),
@@ -101,7 +120,14 @@ impl RdpsndClientHandler for Sound {
                 };
                 self.agreed = format!("{form} at {} a second, {} channels", format.n_samples_per_sec, format.n_channels);
             }
-            self.numbers.set_sound_via(format!("{}, {}, {} blocks", self.channel, self.agreed, self.blocks));
+        }
+        let told = self.blocks == 1 || self.blocks % 50 == 0;
+        if told {
+            self.numbers.set_sound_via(format!(
+                "{}, {}, {} blocks, up to {} ms ahead of the speakers",
+                self.channel, self.agreed, self.blocks, self.ahead
+            ));
+            self.ahead = 0;
         }
         let Some(player) = &mut self.player else { return };
         if self.quiet.load(Ordering::Acquire) {
@@ -110,6 +136,7 @@ impl RdpsndClientHandler for Sound {
             return;
         }
         player.wave(format, ts, data);
+        self.ahead = self.ahead.max(player.playback_latency().as_millis() as u64);
     }
 
     fn playback_latency(&self) -> Duration {

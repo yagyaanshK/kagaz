@@ -42,6 +42,10 @@ x25519-dalek = { version = "2", features = ["static_secrets"] }
 chacha20 = "0.9"
 salsa20 = "0.10"
 
+[dev-dependencies]
+# Pictures in the clipboard tests are made and read as PNG.
+png = "0.18"
+
 # USB printers and scanners: computers only (a phone has no such port use).
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 nusb = "0.2"
@@ -57,6 +61,8 @@ ironrdp-core = "0.3"
 ironrdp-dvc = "0.10"
 ironrdp-displaycontrol = "0.10"
 ironrdp-cliprdr = "0.9"
+# Pictures on the clipboard: between PNG and the form Windows keeps them in.
+ironrdp-cliprdr-format = "0.3"
 # The newer picture (the graphics pipeline): its H.264 pictures are
 # decoded by OpenH264 (BSD-2-Clause), built into Kagaz from its source,
 # the owner's choice (2026-11-17).

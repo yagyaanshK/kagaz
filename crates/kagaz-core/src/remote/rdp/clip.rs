@@ -39,6 +39,10 @@ pub enum Asked {
     Give(ClipboardFormatId),
     /// The computer's text arrived.
     Text(String),
+    /// The computer says it has a picture: fetch it, in this format.
+    FetchPicture(ClipboardFormatId),
+    /// The computer's picture arrived, as PNG.
+    Picture(Vec<u8>),
     /// Something new is here to offer, or the channel has just become
     /// ready to be told of it.
     Mine,
@@ -72,15 +76,63 @@ impl Shared {
     }
 }
 
+/// What was asked of the computer and is on its way, in the order asked:
+/// its answers come back without saying what they answer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Wanted {
+    Text,
+    /// A picture as PNG, or in one of the two forms Windows keeps
+    /// pictures in.
+    Png,
+    Dib,
+    DibV5,
+}
+
+/// The number Kagaz gives PNG among the formats it offers (Windows goes
+/// by the name; the number only has to be told apart here).
+pub const PNG_HERE: ClipboardFormatId = ClipboardFormatId(0xC0F0);
+
+/// The largest picture taken from the computer's clipboard.
+const MOST_PICTURE: usize = 256 << 20;
+
+/// What the computer's clipboard is told of a picture offered from here:
+/// the form every Windows program reads, and PNG for those that keep
+/// see-through parts.
+pub fn picture_formats() -> [ClipboardFormat; 2] {
+    [
+        ClipboardFormat::new(ClipboardFormatId::CF_DIB),
+        ClipboardFormat::new(PNG_HERE).with_name(ClipboardFormatName::new("PNG")),
+    ]
+}
+
+/// A picture offered from here (PNG), in the format the computer asks
+/// for; none for a format it was not offered in.
+pub fn picture_as(png: &[u8], format: ClipboardFormatId) -> Option<Vec<u8>> {
+    if format == PNG_HERE {
+        Some(png.to_vec())
+    } else if format == ClipboardFormatId::CF_DIB {
+        ironrdp_cliprdr_format::bitmap::png_to_cf_dib(png).ok()
+    } else if format == ClipboardFormatId::CF_DIBV5 {
+        ironrdp_cliprdr_format::bitmap::png_to_cf_dibv5(png).ok()
+    } else {
+        None
+    }
+}
+
 #[derive(Debug)]
 pub struct Backend {
     shared: Arc<Shared>,
+    wanted: VecDeque<Wanted>,
 }
 
 impl Backend {
     pub fn new() -> (Backend, Arc<Shared>) {
         let shared = Arc::new(Shared::default());
-        (Backend { shared: shared.clone() }, shared)
+        let backend = Backend {
+            shared: shared.clone(),
+            wanted: VecDeque::new(),
+        };
+        (backend, shared)
     }
 
     fn ask(&self, what: Asked) {
@@ -132,7 +184,25 @@ impl CliprdrBackend for Backend {
             self.ask(Asked::Theirs);
         }
         if available_formats.iter().any(|f| f.id() == ClipboardFormatId::CF_UNICODETEXT) {
+            self.wanted.push_back(Wanted::Text);
             self.ask(Asked::Fetch);
+        }
+        // A picture: as PNG where the computer has it so (smaller, and it
+        // keeps see-through parts), else in Windows' own form. The plain
+        // form before the newer one, whose see-through channel a
+        // screenshot leaves empty.
+        let named = |name: &str| {
+            available_formats.iter().find(|f| f.name().is_some_and(|n| n.value().eq_ignore_ascii_case(name)))
+        };
+        let numbered = |id: ClipboardFormatId| available_formats.iter().find(|f| f.id() == id);
+        let picture = named("PNG")
+            .or_else(|| named("image/png"))
+            .map(|f| (f.id(), Wanted::Png))
+            .or_else(|| numbered(ClipboardFormatId::CF_DIB).map(|f| (f.id(), Wanted::Dib)))
+            .or_else(|| numbered(ClipboardFormatId::CF_DIBV5).map(|f| (f.id(), Wanted::DibV5)));
+        if let (Some((id, form)), false) = (picture, files) {
+            self.wanted.push_back(form);
+            self.ask(Asked::FetchPicture(id));
         }
     }
 
@@ -141,11 +211,29 @@ impl CliprdrBackend for Backend {
     }
 
     fn on_format_data_response(&mut self, response: FormatDataResponse<'_>) {
+        // Answers come in the order of the asking.
+        let Some(wanted) = self.wanted.pop_front() else { return };
         if response.is_error() {
             return;
         }
-        if let Ok(text) = response.to_unicode_string() {
-            self.ask(Asked::Text(from_wire(&text)));
+        let data = response.data();
+        if data.len() > MOST_PICTURE {
+            return;
+        }
+        use ironrdp_cliprdr_format::bitmap::{dib_to_png, dibv5_to_png};
+        let picture = match wanted {
+            Wanted::Text => {
+                if let Ok(text) = response.to_unicode_string() {
+                    self.ask(Asked::Text(from_wire(&text)));
+                }
+                return;
+            }
+            Wanted::Png => data.starts_with(b"\x89PNG\r\n\x1a\n").then(|| data.to_vec()),
+            Wanted::Dib => dib_to_png(data).ok(),
+            Wanted::DibV5 => dibv5_to_png(data).ok(),
+        };
+        if let Some(png) = picture {
+            self.ask(Asked::Picture(png));
         }
     }
 

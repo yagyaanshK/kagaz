@@ -3167,6 +3167,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "ironrdp-cliprdr-format"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a4db6a36e59dfd6c375538d2ba446c3df62f47ffd616c95527a6ec35467ae694"
+dependencies = [
+ "ironrdp-core",
+ "png 0.18.1",
+]
+
+[[package]]
 name = "ironrdp-connector"
 version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3638,6 +3648,7 @@ dependencies = [
  "image",
  "ironrdp-blocking",
  "ironrdp-cliprdr",
+ "ironrdp-cliprdr-format",
  "ironrdp-connector",
  "ironrdp-core",
  "ironrdp-displaycontrol",
@@ -3655,6 +3666,7 @@ dependencies = [
  "mdns-sd",
  "num-bigint",
  "nusb",
+ "png 0.18.1",
  "roxmltree",
  "rustls",
  "rustls-pki-types",

@@ -41,6 +41,19 @@ impl TestServer {
         writeln!(self.input, "size {width} {height}").unwrap();
     }
 
+    /// A picture is copied "on the computer": the card at that tick, 48
+    /// by 32, offered as PNG too (`png`) or in Windows' own form alone
+    /// (`dib`).
+    fn copy_picture(&mut self, form: &str, tick: u32) {
+        writeln!(self.input, "copy-picture {form} {tick}").unwrap();
+    }
+
+    /// The picture a viewer offers is pasted "on the computer", asked for
+    /// in that form.
+    fn paste_picture(&mut self, form: &str) {
+        writeln!(self.input, "paste-picture {form}").unwrap();
+    }
+
     /// The computer makes a sound: a tone, so many milliseconds long.
     fn tone(&mut self, millis: u32) {
         writeln!(self.input, "tone {millis}").unwrap();
@@ -88,6 +101,38 @@ fn arrived(name: &str, contents: &[u8]) -> String {
     use sha2::Digest as _;
     let sum: String = sha2::Sha256::digest(contents).iter().map(|b| format!("{b:02x}")).collect();
     format!("File({name:?}, {}, {sum})", contents.len())
+}
+
+/// A made picture as PNG: the card of that size at that tick.
+fn card_png(width: u16, height: u16, tick: u32) -> Vec<u8> {
+    let mut png = Vec::new();
+    let mut encoder = png::Encoder::new(&mut png, width.into(), height.into());
+    encoder.set_color(png::ColorType::Rgba);
+    encoder.set_depth(png::BitDepth::Eight);
+    let mut writer = encoder.write_header().unwrap();
+    writer.write_image_data(&pattern::card(width, height, tick)).unwrap();
+    drop(writer);
+    png
+}
+
+/// A PNG's size and its pixels as red, green and blue.
+fn seen(png: &[u8]) -> (u32, u32, Vec<u8>) {
+    let mut reader = png::Decoder::new(std::io::Cursor::new(png)).read_info().unwrap();
+    let mut pixels = vec![0; reader.output_buffer_size().unwrap()];
+    let info = reader.next_frame(&mut pixels).unwrap();
+    let step = info.color_type.samples();
+    let rgb = pixels[..info.buffer_size()].chunks(step).flat_map(|p| [p[0], p[1], p[2]]).collect();
+    (info.width, info.height, rgb)
+}
+
+/// The card's pixels as red, green and blue.
+fn card_rgb(width: u16, height: u16, tick: u32) -> Vec<u8> {
+    pattern::card(width, height, tick).chunks(4).flat_map(|p| [p[0], p[1], p[2]]).collect()
+}
+
+fn sum(bytes: &[u8]) -> String {
+    use sha2::Digest as _;
+    sha2::Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect()
 }
 
 /// Collects what a session tells, to look through.
@@ -515,6 +560,100 @@ fn the_older_picture_is_used_when_asked_for() {
 }
 
 #[test]
+fn a_picture_copied_on_the_computer_arrives_here() {
+    let Some(mut server) = serve(64, 64) else { return };
+    let session = connect(&server, Some("asha"), Some("sesame"), &Trust::default()).unwrap();
+    let mut told = Told::of(&session);
+    let mut picture = |told: &mut Told| -> Option<Vec<u8>> {
+        let mut found = None;
+        until(|| {
+            told.events.extend(told.session.screen.take().events);
+            found = told.events.iter().rev().find_map(|e| match e {
+                Event::ClipboardPicture { png, text: None } => Some(png.clone()),
+                _ => None,
+            });
+            found.is_some()
+        });
+        told.events.clear();
+        found
+    };
+    std::thread::sleep(Duration::from_millis(300));
+    // Copied as PNG: the very bytes arrive.
+    server.copy_picture("png", 3);
+    let png = picture(&mut told).expect("a picture from the computer");
+    assert_eq!(png, card_png(48, 32, 3));
+    // Copied in Windows' own form alone (a plain Print Screen): it
+    // arrives as PNG all the same, every pixel as it was.
+    server.copy_picture("dib", 9);
+    let png = picture(&mut told).expect("a picture from the computer, from Windows' form");
+    assert_eq!(seen(&png), (48, 32, card_rgb(48, 32, 9)));
+    // Text copied there afterwards is text again.
+    server.copy("and text again");
+    assert!(told.has(&Event::Clipboard("and text again".into())), "told {:?}", told.events.len());
+}
+
+#[test]
+fn a_picture_copied_here_is_handed_over_in_the_form_asked_for() {
+    let Some(mut server) = serve(64, 64) else { return };
+    let session = connect(&server, Some("asha"), Some("sesame"), &Trust::default()).unwrap();
+    let png = card_png(40, 24, 5);
+    let offers = |server: &TestServer| server.heard().iter().filter(|h| *h == "PictureOffer").count();
+    session.send(Input::ClipboardPicture { png: png.clone(), text: None });
+    assert!(until(|| offers(&server) == 1), "heard {:?}", server.heard());
+    // Nothing of it goes until it is pasted there; then as PNG, the very
+    // bytes, or in Windows' own form, as a program there asks.
+    server.paste_picture("png");
+    let as_png = format!("Picture(png, {}, {})", png.len(), sum(&png));
+    assert!(until(|| server.heard().contains(&as_png)), "heard {:?}", server.heard());
+    server.paste_picture("dib");
+    let dib = ironrdp_cliprdr_format::bitmap::png_to_cf_dib(&png).unwrap();
+    let as_dib = format!("Picture(dib, {}, {})", dib.len(), sum(&dib));
+    assert!(until(|| server.heard().contains(&as_dib)), "heard {:?}", server.heard());
+    // The viewer says again what is on the clipboard here whenever the
+    // person comes back to it: the same picture is not offered again.
+    session.send(Input::ClipboardPicture { png: png.clone(), text: None });
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(offers(&server), 1);
+    // A picture copied together with text: both are there to be had.
+    let other = card_png(40, 24, 6);
+    session.send(Input::ClipboardPicture {
+        png: other.clone(),
+        text: Some("with these words".into()),
+    });
+    let words = format!("Text({:?})", "with these words");
+    assert!(until(|| offers(&server) == 2 && server.heard().contains(&words)), "heard {:?}", server.heard());
+    server.paste_picture("png");
+    let as_png = format!("Picture(png, {}, {})", other.len(), sum(&other));
+    assert!(until(|| server.heard().contains(&as_png)), "heard {:?}", server.heard());
+    // Text copied here afterwards takes the picture's place.
+    session.send(Input::Clipboard("only words now".into()));
+    let words = format!("Text({:?})", "only words now");
+    assert!(until(|| server.heard().contains(&words)), "heard {:?}", server.heard());
+    server.paste_picture("dib");
+    assert!(until(|| server.heard().contains(&"PictureFailed(dib)".to_string())), "heard {:?}", server.heard());
+}
+
+#[test]
+fn a_picture_from_the_computer_is_not_offered_back_to_it() {
+    let Some(mut server) = serve(64, 64) else { return };
+    let session = connect(&server, Some("asha"), Some("sesame"), &Trust::default()).unwrap();
+    let mut told = Told::of(&session);
+    std::thread::sleep(Duration::from_millis(300));
+    server.copy_picture("png", 2);
+    let theirs = card_png(48, 32, 2);
+    let arrived = Event::ClipboardPicture {
+        png: theirs.clone(),
+        text: None,
+    };
+    assert!(told.has(&arrived));
+    // It is on the clipboard here now, and the viewer says so when the
+    // person comes back: the computer is not told of its own picture.
+    session.send(Input::ClipboardPicture { png: theirs, text: None });
+    std::thread::sleep(Duration::from_millis(400));
+    assert!(!server.heard().contains(&"PictureOffer".to_string()), "heard {:?}", server.heard());
+}
+
+#[test]
 fn the_side_buttons_and_the_lock_keys_arrive() {
     let Some(server) = serve(64, 64) else { return };
     let session = connect(&server, Some("asha"), Some("sesame"), &Trust::default()).unwrap();
@@ -556,7 +695,10 @@ fn the_computers_sound_arrives_whole() {
     assert!(until(|| server.heard().contains(&"Tone(35280)".to_string())), "heard {:?}", server.heard());
     assert!(until(|| session.numbers.read().sound == 35280), "sound {}", session.numbers.read().sound);
     // Which channel it came by and in what form is told, for the log.
-    assert_eq!(session.numbers.sound_via(), "older channel, PCM at 44100 a second, 2 channels, 1 blocks");
+    assert_eq!(
+        session.numbers.sound_via(),
+        "older channel, PCM at 44100 a second, 2 channels, 1 blocks, up to 0 ms ahead of the speakers"
+    );
     // Turned off here for now, it still arrives (the computer goes on
     // sending), and the session goes on.
     session.send(Input::Sound(false));

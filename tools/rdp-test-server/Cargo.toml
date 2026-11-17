@@ -25,6 +25,9 @@ openh264 = "0.9"
 ironrdp-displaycontrol = "0.8"
 ironrdp-cliprdr = "0.7"
 ironrdp-rdpsnd = "0.9"
+# Pictures on the clipboard: a made card as PNG and in Windows' own form.
+ironrdp-cliprdr-format = "0.3"
+png = "0.18"
 ironrdp-core = "0.2"
 tokio = { version = "1", features = ["rt", "net", "time", "sync"] }
 rcgen = { version = "0.14", default-features = false, features = ["aws_lc_rs"] }

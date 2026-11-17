@@ -399,8 +399,9 @@ const KagazRemoteView = (() => {
       if (news.type === "ended") ended(news.why);
       else if (news.type === "pointer-default") canvas.style.cursor = "default";
       else if (news.type === "clipboard") {
-        toast(news.kept ? `Copied on ${cur.device.name}: ${news.characters} characters are on this computer's clipboard now.`
-          : `Text was copied on ${cur.device.name}; the clipboard is not carried on this system yet.`);
+        const what = news.picture ? "a picture is" : `${news.characters} characters are`;
+        toast(news.kept ? `Copied on ${cur.device.name}: ${what} on this computer's clipboard now.`
+          : `Something was copied on ${cur.device.name}; the clipboard is not carried on this system yet.`);
       } else if (news.type === "sending") sending(news);
     } else if (u8[0] === 3) {
       const w = dv.getUint16(4, true), h = dv.getUint16(6, true);
@@ -631,8 +632,9 @@ const KagazRemoteView = (() => {
     try {
       const sent = await invoke("remote_clipboard_push", { session: cur.session, asked: !quietly });
       if (quietly) return;
-      toast(sent == null ? "There is no text on this computer's clipboard."
-        : `Offered ${sent} characters to ${cur.device.name}. Paste there to use them.`);
+      toast(sent.picture ? `Offered the picture on this computer's clipboard to ${cur.device.name}. Paste there to use it.`
+        : sent.characters == null ? "There is no text or picture on this computer's clipboard."
+        : `Offered ${sent.characters} characters to ${cur.device.name}. Paste there to use them.`);
     } catch (e) {
       if (!quietly) toast(sentence(e));
     }

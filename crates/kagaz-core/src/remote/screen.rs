@@ -97,6 +97,9 @@ pub struct Pointer {
 pub enum Event {
     /// Text was copied on the device.
     Clipboard(String),
+    /// A picture was copied on the device (a screenshot, an image out of
+    /// a page), as PNG, with the text that was copied along with it.
+    ClipboardPicture { png: Vec<u8>, text: Option<String> },
     /// The pointer's shape; of no size when the device hides it.
     Pointer(Pointer),
     /// The device shows its ordinary arrow again.
