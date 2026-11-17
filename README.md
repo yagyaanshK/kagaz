@@ -193,6 +193,8 @@ kagaz remote add study-laptop.local --name "Study laptop"
 kagaz remote
 kagaz remote paths "Study laptop"
 kagaz remote ssh "Study laptop"
+kagaz remote open "My phone"
+kagaz remote try "My phone"
 ```
 
 Your own computers and phones, and the fragile part of using one from
@@ -209,10 +211,22 @@ address is not mistaken for it. `remote nearby` shows what on this network
 shows its screen, and your Tailscale devices (read from Tailscale on this
 computer; nothing is changed there). `remote ssh` and `remote copy` run
 the system's own ssh and scp over the working path, with one known-hosts
-entry per device whichever address it has. The window's viewer for Remote
-Desktop and VNC is being built on this (plan:
-[docs/remote-connection.md](docs/remote-connection.md)). The list lives in
-`~/.config/kagaz/remote.toml`; passwords are never in it.
+entry per device whichever address it has.
+
+A device that speaks VNC (a phone running a VNC server, a Mac's Screen
+Sharing with a VNC password, a Linux computer's VNC) can be seen and used
+from here; VNC is spoken by Kagaz itself. `remote open` starts the Kagaz
+window on the device's screen. `remote try` opens a session and tells it
+in numbers, a line a second (how often the picture came, how much
+travelled, the delay), without showing or keeping any picture. `remote
+clip` sends text to the device's clipboard. `remote pattern` serves a
+moving test card over VNC, to try the viewer without a real screen. VNC
+protects nothing by itself, so Kagaz says "not encrypted on this network"
+unless the session travels through Tailscale. Remote Desktop sessions come
+next (plan: [docs/remote-connection.md](docs/remote-connection.md)).
+Checked against the test card only so far, not against a phone's or a
+computer's VNC server. The list lives in `~/.config/kagaz/remote.toml`;
+passwords are never in it.
 
 ```
 kagaz tapo login
@@ -341,8 +355,15 @@ screen and the devices in your Tailscale that are not added yet. **Add**
 takes one of those or an address, asks the device what it speaks, and
 opens its page: every way to reach it with how each does, more addresses,
 "It also shares its hotspot" for a phone, what it is and who signs in.
-Seeing and using the device's screen from here comes next; the page says
-so rather than offering a Connect that does nothing.
+**Connect** turns the window into the screen of a device that speaks VNC:
+the mouse, the wheel and the keys go there, text copied on either side is
+on the other's clipboard, and the bar shows how the session travels and
+its delay, with tools to send keys such as Ctrl + Alt + Del, to make the
+picture sharper or smoother (by itself unless you choose), and for full
+screen. "Keep left click on the left" is for a device whose mouse buttons
+are swapped. The password is asked for each time for now. A device that
+speaks only Remote Desktop says that its sessions are still being built
+rather than offering a Connect that fails.
 
 Each page keeps its place: leave a printer's page with a scan under way
 for the cameras, and coming back finds the scan where it was. Camera

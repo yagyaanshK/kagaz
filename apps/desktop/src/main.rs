@@ -25,6 +25,7 @@ mod printers;
 mod printing;
 mod purifiers;
 mod remote;
+mod remote_view;
 #[cfg(desktop)]
 mod ring_notice;
 mod ringtones;
@@ -1624,7 +1625,9 @@ fn unix_now() -> i64 {
         .unwrap_or(0)
 }
 
-/// `KAGAZ_OPEN=cameras` opens the window on the camera grid and starts it.
+/// `KAGAZ_OPEN=cameras` opens the window on the camera grid and starts it;
+/// `KAGAZ_OPEN=remote:<device>` on that computer's or phone's screen
+/// (`kagaz remote open` starts the window so).
 #[tauri::command]
 fn startup_view() -> String {
     std::env::var("KAGAZ_OPEN").unwrap_or_default()
@@ -1909,6 +1912,7 @@ pub fn run() {
         .manage(calls::CallsState::default())
         .manage(onetouch::OneTouchState::default())
         .manage(media::Watches::default())
+        .manage(remote_view::Viewers::default())
         .manage(xiaomi::XiaomiState::default())
         .plugin(tauri_plugin_dialog::init())
         .plugin(phone_plugin())
@@ -2026,6 +2030,12 @@ pub fn run() {
             remote::remote_path_add,
             remote::remote_path_remove,
             remote::remote_settings,
+            remote_view::remote_connect,
+            remote_view::remote_input,
+            remote_view::remote_painted,
+            remote_view::remote_numbers,
+            remote_view::remote_clipboard_push,
+            remote_view::remote_disconnect,
             fans::room_add,
             fans::room_rename,
             fans::room_remove,

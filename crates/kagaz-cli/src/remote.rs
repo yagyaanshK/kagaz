@@ -70,6 +70,8 @@ pub enum RemoteAction {
     Rename { device: String, name: String },
     /// Stop remembering a device
     Forget { device: String },
+    /// Open the Kagaz window on a device's screen
+    Open { device: String },
     /// Open a session with a device and tell it in numbers; no picture is shown or kept
     Try {
         device: String,
@@ -219,6 +221,7 @@ pub fn run(action: Option<RemoteAction>) -> Result<()> {
             println!("Forgot {}.", gone.name);
             Ok(())
         }
+        RemoteAction::Open { device } => open_window(&device),
         RemoteAction::Try { device, seconds, picture } => try_session(&device, seconds, picture),
         RemoteAction::Clip { device, text } => clip(&device, text),
         RemoteAction::Pattern {
@@ -471,7 +474,7 @@ fn locate_ssh(which: &str) -> Result<(Device, Answer)> {
 fn open_session(which: &str, picture: Option<u8>) -> Result<(Device, Answer, Session)> {
     let list = list_path();
     let device = Devices::load(&list)?.find(which)?.clone();
-    let Some(way) = device.screen_way() else {
+    let Some(way) = remote::session::way_for(&device) else {
         bail!("{} has no way in that shows its screen (Remote Desktop or VNC)", device.name);
     };
     let (device, answer) = match remote::locate(&list, &device.id, way.speaks, QUICK) {
@@ -499,6 +502,29 @@ fn open_session(which: &str, picture: Option<u8>) -> Result<(Device, Answer, Ses
             Err(e) => bail!("{}: {e}", device.name),
         }
     }
+}
+
+/// The Kagaz window, started on a device's screen. It is the program
+/// next to this one; the window does the connecting and the asking.
+fn open_window(which: &str) -> Result<()> {
+    let device = Devices::load(&list_path())?.find(which)?.clone();
+    if remote::session::way_for(&device).is_none() {
+        bail!("{} has no way in that shows its screen (Remote Desktop or VNC)", device.name);
+    }
+    let name = if cfg!(windows) { "kagaz-desktop.exe" } else { "kagaz-desktop" };
+    let window = std::env::current_exe().context("finding this program")?.with_file_name(name);
+    if !window.exists() {
+        bail!("the Kagaz window ({name}) is not next to this program, in {}", window.parent().map(|p| p.display().to_string()).unwrap_or_default());
+    }
+    std::process::Command::new(&window)
+        .env("KAGAZ_OPEN", format!("remote:{}", device.id))
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .with_context(|| format!("starting {}", window.display()))?;
+    println!("Opening {} in the Kagaz window.", device.name);
+    Ok(())
 }
 
 fn picture_words(picture: u8) -> String {

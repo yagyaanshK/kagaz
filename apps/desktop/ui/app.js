@@ -3203,6 +3203,9 @@ $("rescan").addEventListener("click", rescan);
 window.addEventListener("DOMContentLoaded", () => invoke("startup_view").then((v) => {
   if (v === "cameras") {
     selectCategory("cameras");
+  } else if (v.startsWith("remote:")) {
+    selectCategory("remote");
+    KagazRemote.connectTo(v.slice(7));
   } else if (!currentView) {
     selectCategory("home");
   }

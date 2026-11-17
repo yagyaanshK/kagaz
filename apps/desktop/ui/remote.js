@@ -1,8 +1,9 @@
 // Computers & phones: the person's own devices, each with every way to
 // reach it and how it does now; the ones nearby, not added yet (on this
-// network, in Tailscale); Add; and one device's page with its paths. The
-// viewer (Remote Desktop, VNC) opens from here once it is built; until
-// then the page says so rather than offering a Connect that does nothing.
+// network, in Tailscale); Add; and one device's page with its paths and
+// its settings. Connect opens the viewer (remote-view.js) on a device that
+// speaks VNC; Remote Desktop sessions are not built yet, and a device that
+// speaks only that says so instead of offering a Connect that fails.
 // Uses app.js's globals: $, invoke; ask.js's KagazAsk; icons.js; nav.js.
 
 const KagazRemote = (() => {
@@ -13,6 +14,7 @@ const KagazRemote = (() => {
   let looking = false;
   let lastLook = 0;
   let openId = null; // the device whose page is open
+  let viewId = null; // the device whose screen is shown
 
   function el(tag, cls, text) {
     const e = document.createElement(tag);
@@ -76,10 +78,42 @@ const KagazRemote = (() => {
     return line;
   }
 
+  // ---------- connecting ----------
+  // Can a session be opened with it today? VNC, yes.
+  const canConnect = (d) => d.ways.some((w) => w.speaks === "vnc");
+  const NOT_YET = "Remote Desktop sessions are being built. A device that speaks VNC can be connected to now.";
+
+  function connect(id) {
+    const d = data.devices.find((x) => x.id === id);
+    if (!d || KagazRemoteView.isOpen()) return;
+    viewId = id;
+    KagazRemoteView.open(d, {
+      show() {
+        showView("viewer");
+        KagazNav.push("remote-viewer", () => KagazRemoteView.close());
+      },
+      closed() {
+        viewId = null;
+        showView(openId ? "device" : "list");
+        KagazNav.pop("remote-viewer");
+        check(id);
+      },
+      // The picture setting chosen in the viewer is the device's from now on.
+      settings(deviceId, settings) {
+        const dev = data.devices.find((x) => x.id === deviceId);
+        if (!dev) return;
+        dev.settings = settings;
+        invoke("remote_settings", { id: deviceId, settings, user: dev.user || null, shape: dev.shape || null })
+          .then((out) => (data = out))
+          .catch(() => {});
+      },
+    });
+  }
+
   // ---------- the list ----------
   function tile(d) {
     const r = reachWords(d);
-    const t = el("div", "home-tile" + (r.ok ? " on" : ""));
+    const t = el("div", "home-tile has-actions" + (r.ok ? " on" : ""));
     const main = button("tile-main", [], () => openDevice(d.id), `${d.name}: ${r.text}`);
     const ic = el("span", "tile-icon");
     ic.innerHTML = KagazIcons.svg(shapeIcon(d));
@@ -88,7 +122,14 @@ const KagazRemote = (() => {
     const chev = el("span", "home-chevron rc-chev");
     chev.innerHTML = KagazIcons.svg("forward");
     main.append(ic, text, chev);
-    t.append(main);
+    const acts = el("span", "tile-actions");
+    const go = button("tile-act", withIcon("computer", "Connect"), () => connect(d.id), `Connect to ${d.name}`);
+    const st = states.get(d.id);
+    go.disabled = !canConnect(d) || !!(st && !st.within);
+    if (!canConnect(d)) go.title = NOT_YET;
+    else if (go.disabled) go.title = `${d.name} is out of reach`;
+    acts.append(go);
+    t.append(main, acts);
     return t;
   }
 
@@ -232,9 +273,9 @@ const KagazRemote = (() => {
 
   const viewIs = (v) => !$(`remote-${v}-view`).classList.contains("hidden");
   function showView(v) {
-    for (const x of ["list", "add", "device"]) $(`remote-${x}-view`).classList.toggle("hidden", x !== v);
+    for (const x of ["list", "add", "device", "viewer"]) $(`remote-${x}-view`).classList.toggle("hidden", x !== v);
     const pane = $("remote");
-    const d = v === "device" && data.devices.find((x) => x.id === openId);
+    const d = (v === "device" || v === "viewer") && data.devices.find((x) => x.id === (v === "viewer" ? viewId : openId));
     if (v === "add") pane.dataset.title = "Add a computer or phone";
     else if (d) pane.dataset.title = d.name;
     else delete pane.dataset.title;
@@ -333,7 +374,7 @@ const KagazRemote = (() => {
       if (viewIs("device")) closeDevice();
       return;
     }
-    $("remote").dataset.title = d.name;
+    if (!viewId) $("remote").dataset.title = d.name;
     const head = el("div", "rc-head");
     const big = el("span", "rc-big");
     big.innerHTML = KagazIcons.svg(shapeIcon(d));
@@ -343,13 +384,67 @@ const KagazRemote = (() => {
     const r = reachWords(d);
     sub.append(el("span", "rc-dot" + (r.ok ? " ok" : "")), [SYSTEM[d.system], d.ways.map(wayWords).join(", "), r.text].filter(Boolean).join(" · "));
     text.append(sub);
+    const go = button("accent big", "Connect", () => connect(d.id));
+    go.disabled = !canConnect(d);
     head.append(big, text, button("", "Rename", async () => {
       const name = await KagazAsk.name("Name the device", d.name, "Rename");
       if (!name || name === d.name) return;
       save(() => invoke("remote_rename", { id: d.id, name }), "Could not rename it");
-    }));
+    }), go);
 
-    const soon = el("p", "muted small", "The viewer that shows this device's screen here is being built. For now Kagaz keeps the device and every way to it, and shows how each does.");
+    const soon = el("p", "muted small", canConnect(d) ? "" : NOT_YET);
+    soon.classList.toggle("hidden", canConnect(d));
+
+    // How its screen is shown and driven: kept with the device.
+    const settings = { ...(d.settings || {}) };
+    const keepSettings = () => save(() => invoke("remote_settings", { id: d.id, settings, user: d.user || null, shape: d.shape || null }), "Could not save it");
+    const screen = el("section", "set-section");
+    screen.append(el("h3", "", "Picture"));
+    const picRow = el("div", "set-row");
+    const picLabel = el("label", "", "Picture");
+    picLabel.htmlFor = "remote-picture";
+    const slider = el("span", "rc-slider");
+    const range = el("input");
+    range.id = "remote-picture";
+    range.type = "range";
+    range.min = 0;
+    range.max = 10;
+    range.value = settings.picture == null ? 0 : settings.picture;
+    range.disabled = settings.picture == null;
+    slider.append(el("span", "", "Sharper"), range, el("span", "", "Smoother"));
+    picRow.append(picLabel, slider);
+    const autoRow = el("div", "set-row");
+    const autoLabel = el("label", "switch");
+    const auto = el("input");
+    auto.type = "checkbox";
+    auto.checked = settings.picture == null;
+    autoLabel.append(auto, " Adjust by itself to the connection");
+    autoRow.append(autoLabel);
+    const keepPicture = () => {
+      if (auto.checked) delete settings.picture;
+      else settings.picture = Number(range.value);
+      keepSettings();
+    };
+    range.addEventListener("change", keepPicture);
+    auto.addEventListener("change", keepPicture);
+    screen.append(picRow, autoRow);
+    if (canConnect(d)) screen.append(el("p", "muted small", "Over VNC the device's whole screen is shown at its own size, fitted to the window. Sound, files and choosing a monitor need Remote Desktop."));
+
+    const mouse = el("section", "set-section");
+    mouse.append(el("h3", "", "Mouse"));
+    const swapRow = el("div", "set-row");
+    const swapLabel = el("label", "switch wrap");
+    const swap = el("input");
+    swap.type = "checkbox";
+    swap.checked = !!settings.swapped_buttons;
+    swapLabel.append(swap, " Keep left click on the left", el("small", "muted", "For a device whose mouse buttons are swapped: a left click here stays a left click there."));
+    swap.addEventListener("change", () => {
+      if (swap.checked) settings.swapped_buttons = true;
+      else delete settings.swapped_buttons;
+      keepSettings();
+    });
+    swapRow.append(swapLabel);
+    mouse.append(swapRow);
 
     const paths = el("section", "set-section");
     paths.append(el("h3", "", "Ways to reach it"), el("p", "muted", "All are tried at once; the first to answer is used."));
@@ -416,7 +511,7 @@ const KagazRemote = (() => {
     note.setAttribute("role", "status");
     // Keep what is being typed when a check finishes under the person.
     const typing = document.activeElement && document.activeElement.id === "remote-user" ? document.activeElement.value : null;
-    box.replaceChildren(head, soon, note, paths, about, forget);
+    box.replaceChildren(head, soon, note, paths, screen, mouse, about, forget);
     if (typing !== null) {
       const again = $("remote-user");
       again.value = typing;
@@ -441,6 +536,21 @@ const KagazRemote = (() => {
     if (Date.now() - lastLook > 2 * 60 * 1000) look();
   }
 
+  // From outside (`kagaz remote open`): straight to a device's screen,
+  // named by its id, its name or the start of its name.
+  async function connectTo(which) {
+    try {
+      data = (await invoke("remote_saved")) || data;
+    } catch (e) {}
+    renderList();
+    const w = which.trim().toLowerCase();
+    const d = data.devices.find((x) => x.id === which) || data.devices.find((x) => x.name.toLowerCase() === w)
+      || data.devices.find((x) => x.name.toLowerCase().startsWith(w));
+    if (!d) $("remote-note").textContent = `There is no device called "${which}" here.`;
+    else if (!canConnect(d)) openDevice(d.id);
+    else connect(d.id);
+  }
+
   // From Home: a device's own page.
   function open(id) {
     if (data.devices.some((d) => d.id === id)) openDevice(id);
@@ -462,5 +572,5 @@ const KagazRemote = (() => {
     addHost(host, $("remote-add-name").value.trim() || null, $("remote-add-speaks").value || null).finally(() => (go.disabled = false));
   });
 
-  return { show, rescan, open, openAdd, homeWords, saved: () => data.devices, shapeIcon, within: (id) => !!(states.get(id) && states.get(id).within) };
+  return { show, rescan, open, openAdd, connectTo, homeWords, saved: () => data.devices, shapeIcon, within: (id) => !!(states.get(id) && states.get(id).within) };
 })();

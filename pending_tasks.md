@@ -337,7 +337,8 @@ Plan: `docs/remote-connection.md` (agreed 2026-11-16).
 
 - [ ] **Step 0: the RDP library on a real Windows computer.** Resizing to
       the window, sound, clipboard, files, monitor choice.
-- [ ] **Step 0: mockups** of the device list, Add and the viewer.
+- [x] **Step 0: mockups** of the device list, Add and the viewer
+      (`design/mockups/computers-phones/`, approved 2026-11-16).
 - [x] **Step 1, reaching** (2026-11-16): the saved list
       (`remote.toml`), every path tried at once, what a host speaks, the
       certificate a Remote Desktop computer shows, the look over the local
@@ -352,9 +353,34 @@ Plan: `docs/remote-connection.md` (agreed 2026-11-16).
       Checked in a browser with a stand-in backend (Ubuntu, Windows, macOS,
       Android and iPhone looks), not yet looked at in the real window.
       Connect, the screen settings and the password come with the viewer.
-- [ ] **Step 1, the sessions and the viewer**: Remote Desktop (IronRDP)
-      and VNC, the picture in the window, mouse and keyboard, clipboard,
-      sound, monitors, files; `kagaz remote open`, `clip` and `send`.
+- [x] **Step 1, VNC sessions and the viewer** (2026-11-17): VNC written
+      in Kagaz (Raw, CopyRect, RRE, Hextile, ZRLE, Tight with JPEG; the
+      pointer's shape; a changed screen size; clipboard text in any
+      script; the delay measured), the viewer in the window (picture,
+      mouse, wheel, keys, send keys, clipboard on Linux, sharper or
+      smoother, own size, full screen, left kept left), `kagaz remote
+      open`, `try`, `clip` and `pattern`. Checked against Kagaz's own test
+      card (`kagaz remote pattern`) in the tests and in the real window on
+      Ubuntu (1280x720 moving 30 times a second: every update shown, under
+      1 ms to paint one). **Not yet** against a phone's or a computer's
+      VNC server, over Tailscale or a hotspot.
+- [ ] **Step 1, to check on real devices**: a phone's VNC server (the
+      keyboard there, clipboard, turning the phone), a Mac's Screen
+      Sharing, how the automatic picture setting behaves on a slow link
+      (it goes by the measured delay alone).
+- [ ] **Step 1, Remote Desktop sessions** (IronRDP with Kagaz's own check
+      of the certificate): the picture at the window's size, sound,
+      monitors, files (`kagaz remote send`). Waits on the Step 0 trial
+      against real Windows and on a choice of H.264 decoder for Ubuntu
+      (the library has a place for one and brings none); sound needs
+      `libasound2-dev`.
+- [ ] **Step 1, the password in the system's password store** behind a
+      Remember switch: needs the store's entry name from the owner. Until
+      then the viewer asks each time and says so.
+- [ ] **Step 1, smaller things left in the viewer**: zoom beyond fit and
+      own size; VNC over TLS (VeNCrypt), which some Linux VNC servers
+      offer alone; the clipboard on Windows and macOS (comes with their
+      viewers in step 2); a "Third-party licences" page in About.
 
 ## Roadmap, not yet started
 

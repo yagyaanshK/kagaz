@@ -3,7 +3,7 @@
 //! (and Remote Desktop next).
 
 use super::screen::Screen;
-use super::{Settings, Speaks, Way};
+use super::{Device, Settings, Speaks, Way};
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{mpsc, Arc};
@@ -209,6 +209,13 @@ impl Drop for Session {
     }
 }
 
+/// The way into a device that a session opens through: VNC where the
+/// device speaks it, while Remote Desktop sessions are not built; then
+/// Remote Desktop, which says so when tried.
+pub fn way_for(device: &Device) -> Option<Way> {
+    device.way(Speaks::Vnc).or_else(|| device.way(Speaks::Rdp))
+}
+
 /// Open a session at an address that answered (see [`super::reach`]).
 pub fn open(
     addr: SocketAddr,
@@ -237,6 +244,19 @@ mod tests {
         assert_eq!(buttons_for(RIGHT, true), LEFT);
         assert_eq!(buttons_for(LEFT | RIGHT | MIDDLE, true), LEFT | RIGHT | MIDDLE);
         assert_eq!(buttons_for(MIDDLE, true), MIDDLE);
+    }
+
+    #[test]
+    fn a_session_goes_through_vnc_while_remote_desktop_is_not_built() {
+        let mut d = Device {
+            ways: vec![Way::new(Speaks::Ssh), Way::new(Speaks::Rdp)],
+            ..Device::default()
+        };
+        assert_eq!(way_for(&d).map(|w| w.speaks), Some(Speaks::Rdp));
+        d.ways.push(Way { speaks: Speaks::Vnc, port: 5901 });
+        assert_eq!(way_for(&d), Some(Way { speaks: Speaks::Vnc, port: 5901 }));
+        d.ways.truncate(1);
+        assert_eq!(way_for(&d), None);
     }
 
     #[test]

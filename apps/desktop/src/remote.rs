@@ -1,7 +1,7 @@
 //! Computers & phones for the window (kagaz-core `remote`): the devices
 //! the person added, kept in `<config>/remote.toml`, how each is reached
 //! now, what is nearby, and add, rename, forget and each device's paths and
-//! settings. The viewer comes on top of this.
+//! settings. The viewer (remote_view.rs) comes on top of this.
 //!
 //! `LIST`: every change to the list is load, change, save in one go, so a
 //! look around the network (seconds) cannot undo a rename made meanwhile.
@@ -54,6 +54,26 @@ pub struct State {
     pub paths: Vec<PathState>,
 }
 
+/// How each path of a device did, for the page.
+pub(crate) fn path_states(d: &Device, reports: &[PathReport]) -> Vec<PathState> {
+    reports
+        .iter()
+        .map(|r| {
+            let p = &d.paths[r.path];
+            let answer = r.outcome.as_ref().ok();
+            PathState {
+                label: p.kind.label().to_string(),
+                host: p.host.clone(),
+                way: r.way.words(),
+                answers: answer.is_some(),
+                address: answer.map(|a| a.addr.ip().to_string()).filter(|ip| *ip != p.host),
+                millis: answer.map(|a| a.millis),
+                trouble: r.outcome.as_ref().err().map(|t| t.to_string()),
+            }
+        })
+        .collect()
+}
+
 fn state(d: &Device, reports: &[PathReport], tailscale: &Tailscale) -> State {
     let best = remote::best(d, reports);
     State {
@@ -62,22 +82,7 @@ fn state(d: &Device, reports: &[PathReport], tailscale: &Tailscale) -> State {
         path: best.as_ref().map(|a| d.paths[a.path].kind.label().to_string()),
         millis: best.as_ref().map(|a| a.millis),
         why: best.is_none().then(|| remote::why_not(d, reports, tailscale)),
-        paths: reports
-            .iter()
-            .map(|r| {
-                let p = &d.paths[r.path];
-                let answer = r.outcome.as_ref().ok();
-                PathState {
-                    label: p.kind.label().to_string(),
-                    host: p.host.clone(),
-                    way: r.way.words(),
-                    answers: answer.is_some(),
-                    address: answer.map(|a| a.addr.ip().to_string()).filter(|ip| *ip != p.host),
-                    millis: answer.map(|a| a.millis),
-                    trouble: r.outcome.as_ref().err().map(|t| t.to_string()),
-                }
-            })
-            .collect(),
+        paths: path_states(d, reports),
     }
 }
 

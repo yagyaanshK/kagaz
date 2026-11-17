@@ -43,6 +43,13 @@ const KagazIcons = (() => {
     device: '<rect x="4" y="4" width="16" height="16" rx="3"/><circle cx="12" cy="12" r="2"/>',
     computer: '<rect x="3" y="4" width="18" height="12" rx="1.5"/><path d="M12 16v4M8 20h8"/>',
     laptop: '<rect x="5" y="5" width="14" height="10" rx="1.5"/><path d="M3 18.5h18L19 15H5z"/>',
+    // The viewer's tools (remote-view.js).
+    keyboard: '<rect x="2.5" y="6" width="19" height="12" rx="2"/><path d="M6.5 10h.01M10.2 10h.01M13.8 10h.01M17.5 10h.01M6.5 14h.01M17.5 14h.01" class="dot"/><path d="M10 14h4"/>',
+    clipboard: '<rect x="5" y="4.5" width="14" height="16.5" rx="2"/><rect x="9" y="2.5" width="6" height="4" rx="1"/>',
+    file: '<path d="M7 3h6.5l5 5v11.5A1.5 1.5 0 0 1 17 21H7a1.5 1.5 0 0 1-1.5-1.5v-15A1.5 1.5 0 0 1 7 3zM13.5 3v5h5"/>',
+    screens: '<rect x="2.5" y="5.5" width="11.5" height="8.5" rx="1.2"/><rect x="10" y="10" width="11.5" height="8.5" rx="1.2"/>',
+    picture: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 15.5l4.5-4.5 4 4 3-3 6.5 6.5"/>',
+    lock: '<rect x="5" y="10.5" width="14" height="10" rx="2"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5"/>',
 
     // ---- actions ----
     plus: '<path d="M12 5v14M5 12h14"/>',
