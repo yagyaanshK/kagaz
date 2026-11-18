@@ -526,7 +526,21 @@ Plan: `docs/remote-connection.md` (agreed 2026-11-16).
       words, off until "Share this computer" is chosen (nothing runs or
       listens before), several devices at once. The host speaks Remote
       Desktop on a port of its own. First tried on the Windows PC the
-      owner already reaches by Remote Desktop. Until
+      owner already reaches by Remote Desktop. Its port and networks
+      are a setting too (3390 unless changed, or 3389 with Windows'
+      own off; local network and Tailscale, Tailscale only, or this
+      computer only). **Step 1 built** (`crates/kagaz-share`, its own
+      program; `dist/kagaz-share-windows-x64.exe`): the main screen
+      through DXGI (GDI when that fails) with this computer's pointer
+      drawn in, H.264 through the graphics pipeline, mouse and keys by
+      SendInput (keys by their place on the keyboard; Caps, Num and
+      Scroll Lock follow the viewer), `--watch`, `--pattern` for the
+      test card. Tried here with the test card through `kagaz remote
+      try` (1080p, 30 a second, 13.6 ms to encode each); **not yet run
+      on Windows**. Known gaps: one viewer at a time; the library turns
+      the middle button and the sideways wheel of a standard mouse
+      message into nothing; no sound, clipboard, files, sign or pairing
+      yet. Until
       it exists: a VNC server on that laptop, reached over Tailscale,
       with today's Kagaz (not yet tried against a real Windows VNC
       server).

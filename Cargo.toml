@@ -5,7 +5,7 @@ members = ["crates/kagaz-core", "crates/kagaz-cli", "apps/desktop"]
 # and `cargo test` stay on the core and the CLI.
 default-members = ["crates/kagaz-core", "crates/kagaz-cli"]
 # Programs of their own, each with its own lock file (see their manifests).
-exclude = ["tools/rdp-test-server"]
+exclude = ["tools/rdp-test-server", "crates/kagaz-share"]
 
 [workspace.package]
 version = "0.1.0"

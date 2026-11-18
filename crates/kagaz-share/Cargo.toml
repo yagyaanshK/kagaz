@@ -1,0 +1,60 @@
+# Sharing this computer: a Remote Desktop server that shows the screen of
+# the person signed in, who goes on using it (docs/remote-connection.md,
+# step 2). A program of its own, started only while sharing is turned on:
+# nothing of it runs before (the owner: one use of Kagaz must not cloud
+# another). It is outside the workspace for a second reason: the
+# library's published server part (ironrdp-server 0.13) and the newer
+# client parts Kagaz's viewer uses pin different versions of one
+# dependency and cannot share a build. When a server part matching the
+# client's is published, this can move into kagaz-core.
+#
+#   cargo build --manifest-path crates/kagaz-share/Cargo.toml
+[package]
+name = "kagaz-share"
+description = "Shares this computer's screen with a paired Kagaz over Remote Desktop"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "LicenseRef-KGZ-1.2.0"
+
+[workspace]
+
+[dependencies]
+ironrdp-server = { version = "0.13", default-features = false, features = ["egfx"] }
+ironrdp-pdu = "0.9"
+ironrdp-egfx = "0.3"
+ironrdp-dvc = "0.8"
+ironrdp-svc = "0.8"
+ironrdp-displaycontrol = "0.8"
+# The screen goes as H.264, encoded by OpenH264 (BSD-2-Clause) built from
+# its source, as in the viewer.
+openh264 = { version = "0.9", default-features = false, features = ["source"] }
+tokio = { version = "1", features = ["rt", "net", "time", "sync"] }
+rcgen = { version = "0.14", default-features = false, features = ["aws_lc_rs"] }
+x509-cert = { version = "0.2", default-features = false, features = ["std"] }
+sha2 = "0.10"
+async-trait = "0.1"
+anyhow = "1"
+
+[target.'cfg(windows)'.dependencies]
+# The screen through DXGI's desktop duplication (GDI when that is not
+# available), the pointer drawn in with GDI, input through SendInput.
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Direct3D",
+    "Win32_Graphics_Direct3D11",
+    "Win32_Graphics_Dxgi",
+    "Win32_Graphics_Dxgi_Common",
+    "Win32_Graphics_Gdi",
+    "Win32_UI_HiDpi",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
+[profile.release]
+opt-level = 3
+strip = true
+
+[profile.dev]
+debug = false
+opt-level = 2

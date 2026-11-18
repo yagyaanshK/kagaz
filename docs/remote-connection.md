@@ -118,6 +118,20 @@ today's viewer works with it unchanged.
   stops all of it.
 - *Several devices at once* (a setting, yes by default); the sign on the
   computer names each and whether it watches or controls.
+- *Port and networks* (the owner, 2026-11-18: how it listens is the
+  user's choice): Kagaz's own port, 3390 unless changed, or any other,
+  or Remote Desktop's usual 3389 when Windows' own is off; and where it
+  listens: the local network and Tailscale, Tailscale only, or this
+  computer only.
+- *Its own program,* `kagaz-share` (`crates/kagaz-share`), started by
+  Kagaz only while sharing is on. The published server part of the
+  Remote Desktop library cannot share a build with the newer client parts
+  the viewer uses; when a matching one is published it can move into
+  kagaz-core. Built in order: (1) the screen, mouse and keys, started by
+  hand (done 2026-11-18, tried here with the test card: Full HD at 30
+  pictures a second through Kagaz's viewer); (2) sound, clipboard,
+  files; (3) pairing, the PIN, the question; (4) the screens; (5) start
+  with Windows, the helper service.
 - *Connecting:* "Ask here each time" (someone at the computer allows it,
   with control or watch only; no answer in 30 s is no) or "Connect with the
   PIN, without asking"; the computer's choice is the default, each paired
