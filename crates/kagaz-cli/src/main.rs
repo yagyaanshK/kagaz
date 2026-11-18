@@ -16,6 +16,7 @@ use std::time::Duration;
 
 mod fans;
 mod remote;
+mod tv;
 
 #[derive(Parser)]
 #[command(
@@ -298,6 +299,26 @@ enum Command {
     Remote {
         #[command(subcommand)]
         action: Option<remote::RemoteAction>,
+    },
+    /// TVs & displays found nearby, and the ways each answers (Cast, AirPlay, screen mirroring, remote control)
+    Tvs {
+        /// Seconds to listen on the network
+        #[arg(long, default_value_t = 4.0)]
+        seconds: f32,
+        /// Also look over Wi-Fi Direct (20 seconds at least), which finds TVs
+        /// on no network whose screen sharing is on (Linux)
+        #[arg(long)]
+        direct: bool,
+        /// Machine-readable output
+        #[arg(long)]
+        json: bool,
+    },
+    /// One TV: show this computer's picture on it
+    Tv {
+        /// Part of the TV's name, or its address (`kagaz tvs` lists them)
+        tv: String,
+        #[command(subcommand)]
+        action: tv::TvAction,
     },
 }
 
@@ -1284,6 +1305,8 @@ fn main() -> Result<()> {
         Command::Fan { fan, action } => fans::fan(&fan, action),
         Command::Rooms { action } => fans::rooms(action),
         Command::Remote { action } => remote::run(action),
+        Command::Tvs { seconds, direct, json } => tv::list(seconds, direct, json),
+        Command::Tv { tv: name, action } => tv::tv(&name, action),
     }
 }
 

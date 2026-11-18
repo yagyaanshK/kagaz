@@ -635,6 +635,14 @@ first, then sending files, the remote, and extending. Nothing built yet.
       receiver, a Cast mirroring session from a sender that is not Chrome,
       AirPlay pairing with its PIN, Wake-on-LAN over Wi-Fi. Each with the
       owner's go-ahead at the moment.
+- [x] **Step 2, first part** (2026-11-18): the Miracast sender with the
+      test pattern, both routes, played on the LG (720p30, a little stutter).
+- [ ] **Step 2: 60 pictures a second on the LG** (720p60 is now chosen;
+      not yet seen on the TV).
+- [ ] **Step 2: this computer's screen** (xdg-desktop-portal ScreenCast and
+      PipeWire on Linux; Windows.Graphics.Capture; ScreenCaptureKit), sound
+      (the LG takes LPCM and AAC), the delay measured, and Windows' own
+      Wi-Fi Direct.
 - [ ] **AirPlay mirroring from Linux, Windows and Android** needs FairPlay's
       sender side, which is not published; find out whether it can be done
       before promising it.

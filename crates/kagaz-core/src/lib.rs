@@ -22,6 +22,7 @@ pub mod remote;
 pub mod scan;
 pub mod select;
 pub mod tools;
+pub mod tv;
 
 pub use device::{Device, Protocol, Service, UsbInfo};
 pub use discovery::{discover, DiscoverOptions};

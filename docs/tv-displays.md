@@ -219,6 +219,26 @@ still to be given).
 
 ### 2. Mirror the screen
 
+*Progress, 2026-11-18.* The Miracast sender is in `tv/miracast/`
+(MS-MICE, the Wi-Fi Display RTSP setup, H.264 by OpenH264, MPEG-TS over
+RTP) with the Wi-Fi Direct link in `tv/p2p.rs`, and on the command line
+as `kagaz tvs [--direct]` and `kagaz tv NAME mirror --pattern [--via
+network|direct] [--size 720|1080] [--seconds N]`. It sends the test
+pattern only; this computer's screen is next. A test plays a whole
+session against a stand-in TV that answers as the LG did and decodes what
+arrives. On the LG, with the owner watching, the pattern played for 30
+seconds over each route at 720p, 30 pictures a second: the bars, the
+moving square and the clock showed, the square with a little stutter.
+The TV shows a notice that connects by itself after a moment, with only
+a Cancel button. The first Wi-Fi Direct link right after a network
+session timed out (NetworkManager gave up after 45 seconds); the second
+came up in 2 seconds, so Kagaz now tries twice. Since then Kagaz picks
+60 pictures a second when the TV takes it (the LG takes 720p at 60 and
+1080p at 30, not 1080p at 60); not yet seen on the TV. Saved TVs (names,
+rooms) come with the window; until then `kagaz tvs` lists the TVs found
+nearby.
+
+
 - **Capture.** Linux: xdg-desktop-portal ScreenCast and PipeWire (through
   each desktop's own portal: GNOME, KDE, Hyprland), with the portal's own
   picker each time. Windows: Windows.Graphics.Capture. macOS:
