@@ -173,7 +173,11 @@ fn mirror(name: &str, via: Option<Via>, opts: &Options) -> Result<()> {
                 return run(Route::Network(t.address.expect("found on the network")), opts, || Ok(()));
             }
             Ok(t) if matches!(via, Some(Via::Network)) => {
-                bail!("{} does not take screen mirroring over the network; try `--via direct`", t.name)
+                bail!(
+                    "{} is not taking screen mirroring over the network right now (it may be starting up, \
+                     or in standby); `--via direct` reaches it over Wi-Fi Direct",
+                    t.name
+                )
             }
             Err(e) if matches!(via, Some(Via::Network)) => return Err(e),
             _ => {}
