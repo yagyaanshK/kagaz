@@ -145,6 +145,9 @@ pub struct SinkAbilities {
     pub hdcp: bool,
     /// The TV can send a mouse and keyboard back (UIBC).
     pub uibc: bool,
+    /// Wi-Fi Display R2: the CEA resolution bitmap (48 bits) of its H.264
+    /// Constrained Baseline entry, 0 when the TV has no R2 list.
+    pub r2_cea: u64,
 }
 
 /// Reads the TV's GET_PARAMETER reply.
@@ -190,6 +193,19 @@ pub fn sink_abilities(body: &str) -> SinkAbilities {
                     .and_then(|p| p.parse().ok())
                     .unwrap_or(0);
             }
+            "wfd2_video_formats" if value != "none" => {
+                // native, then entries "codec profile level cea vesa hh
+                // latency min-slice slice-enc frame-rate", then one
+                // non-transcoding byte (Wi-Fi Display R2, 6.1.22).
+                let rest = value.split_once(' ').map(|(_, r)| r).unwrap_or("");
+                for entry in rest.split(',') {
+                    let f: Vec<&str> = entry.split_whitespace().collect();
+                    if f.len() >= 4 && f[0] == "01" && u8::from_str_radix(f[1], 16).is_ok_and(|p| p & 0x01 != 0) {
+                        a.r2_cea = u64::from_str_radix(f[3], 16).unwrap_or(0);
+                        break;
+                    }
+                }
+            }
             "wfd_content_protection" => a.hdcp = value != "none",
             "wfd_uibc_capability" => a.uibc = value != "none",
             _ => {}
@@ -218,12 +234,27 @@ pub const MODES: [Mode; 5] = [
     Mode { width: 640, height: 480, fps: 60, cea_bit: 0 },
 ];
 
-/// The best mode the TV takes no larger than `max_height`.
-pub fn choose_mode(a: &SinkAbilities, max_height: u32) -> Mode {
+/// The best mode the TV takes no larger than `max_height` and `max_fps`,
+/// and whether it is offered only in the TV's R2 list (then it is asked for
+/// the R2 way).
+pub fn choose(a: &SinkAbilities, max_height: u32, max_fps: u32) -> (Mode, bool) {
+    for m in MODES.iter().copied().filter(|m| m.height <= max_height && m.fps <= max_fps) {
+        if a.cea & (1 << m.cea_bit) != 0 {
+            return (m, false);
+        }
+        if a.r2_cea & (1 << m.cea_bit) != 0 {
+            return (m, true);
+        }
+    }
+    (MODES[4], false)
+}
+
+/// The best mode in the TV's basic (R1) list.
+pub fn choose_mode(a: &SinkAbilities, max_height: u32, max_fps: u32) -> Mode {
     MODES
         .iter()
         .copied()
-        .find(|m| m.height <= max_height && a.cea & (1 << m.cea_bit) != 0)
+        .find(|m| m.height <= max_height && m.fps <= max_fps && a.cea & (1 << m.cea_bit) != 0)
         .unwrap_or(MODES[4])
 }
 
@@ -249,8 +280,22 @@ pub fn stream_parameters(mode: Mode, rtp_port: u16, presentation: &str) -> Strin
     )
 }
 
+/// The same in Wi-Fi Display R2's form (6.1.22): only `wfd2_video_formats`,
+/// one H.264 Constrained Baseline entry, and no `wfd_video_formats`.
+pub fn stream_parameters_r2(mode: Mode, rtp_port: u16, presentation: &str) -> String {
+    let level = level_for(mode) as u16;
+    format!(
+        "wfd2_video_formats: 00 01 01 {level:04x} {:012x} 000000000000 000000000000 00 0000 0000 00 00\r\n\
+         wfd_presentation_URL: {presentation} none\r\n\
+         wfd_client_rtp_ports: RTP/AVP/UDP;unicast {rtp_port} 0 mode=play\r\n",
+        1u64 << mode.cea_bit
+    )
+}
+
 /// The parameters the source asks the TV about (M3).
-pub const ASKED: [&str; 8] = [
+pub const ASKED: [&str; 10] = [
+    "wfd2_video_formats",
+    "wfd2_audio_codecs",
     "wfd_video_formats",
     "wfd_audio_codecs",
     "wfd_client_rtp_ports",
@@ -278,10 +323,17 @@ mod tests {
         assert!(a.hdcp);
         assert!(a.uibc);
         // The LG takes 1080p at 30 and 720p at 60, not 1080p at 60.
-        let m = choose_mode(&a, 1080);
+        let m = choose_mode(&a, 1080, 60);
         assert_eq!((m.width, m.height, m.fps), (1920, 1080, 30));
-        let m = choose_mode(&a, 720);
+        let m = choose_mode(&a, 720, 60);
         assert_eq!((m.height, m.fps), (720, 60));
+        assert_eq!(choose_mode(&a, 720, 30).fps, 30);
+        // Its R2 list adds 1080p60 (and 4K at 24 to 30).
+        assert_eq!(a.r2_cea, 0x0F_97FF);
+        let (m, r2) = choose(&a, 1080, 60);
+        assert_eq!((m.height, m.fps, r2), (1080, 60, true));
+        let (m, r2) = choose(&a, 1080, 30);
+        assert_eq!((m.height, m.fps, r2), (1080, 30, false));
     }
 
     #[test]
@@ -306,6 +358,11 @@ mod tests {
         assert!(body.starts_with("wfd_video_formats: 00 00 01 01 00000020 "));
         let body = stream_parameters(MODES[2], 53000, "rtsp://192.0.2.1/wfd1.0/streamid=0");
         assert!(body.starts_with("wfd_video_formats: 00 00 01 02 00000040 "));
+        let body = stream_parameters_r2(MODES[0], 53000, "rtsp://192.0.2.1/wfd1.0/streamid=0");
+        assert!(body.starts_with(
+            "wfd2_video_formats: 00 01 01 0010 000000000100 000000000000 000000000000 00 0000 0000 00 00\r\n"
+        ));
+        assert!(!body.contains("wfd_video_formats"));
         assert!(body.contains("unicast 53000 0 mode=play"));
     }
 }

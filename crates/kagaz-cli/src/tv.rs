@@ -2,7 +2,7 @@
 
 use anyhow::{anyhow, bail, Result};
 use clap::{Subcommand, ValueEnum};
-use kagaz_core::tv::miracast::{self, Event, Options, Pictures, Route};
+use kagaz_core::tv::miracast::{self, video, Event, Options, Pictures, Route};
 use kagaz_core::tv::{self, Tv, Way};
 use std::net::IpAddr;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -22,6 +22,57 @@ pub enum Via {
     Network,
     /// Wi-Fi Direct: a link of this computer's own, for a TV on no network
     Direct,
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+pub enum Power {
+    /// Less power: the graphics chip's low-power encoder where it has one, at
+    /// most 30 pictures a second
+    Battery,
+    /// The smoothest and sharpest the TV takes
+    Performance,
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+pub enum EncoderChoice {
+    /// The graphics chip when it can, else the processor
+    Auto,
+    /// Only the graphics chip
+    Hardware,
+    /// Only the processor (OpenH264)
+    Software,
+}
+
+impl From<Power> for video::Priority {
+    fn from(p: Power) -> Self {
+        match p {
+            Power::Battery => video::Priority::Battery,
+            Power::Performance => video::Priority::Performance,
+        }
+    }
+}
+
+impl From<EncoderChoice> for video::Engine {
+    fn from(e: EncoderChoice) -> Self {
+        match e {
+            EncoderChoice::Auto => video::Engine::Auto,
+            EncoderChoice::Hardware => video::Engine::Hardware,
+            EncoderChoice::Software => video::Engine::Software,
+        }
+    }
+}
+
+#[derive(Subcommand)]
+pub enum TvsAction {
+    /// Show or change how Kagaz sends pictures to TVs
+    Settings {
+        /// Optimise for battery or for performance (Kagaz's power setting)
+        #[arg(long, value_enum)]
+        power: Option<Power>,
+        /// Which encoder makes the pictures
+        #[arg(long, value_enum)]
+        encoder: Option<EncoderChoice>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -50,6 +101,13 @@ pub enum TvAction {
         /// The name the TV shows for this computer
         #[arg(long, default_value = "Kagaz")]
         name: String,
+        /// Optimise for battery or performance this time (default: Kagaz's
+        /// setting, `kagaz tvs settings`)
+        #[arg(long, value_enum)]
+        power: Option<Power>,
+        /// Which encoder this time (default: Kagaz's setting)
+        #[arg(long, value_enum)]
+        encoder: Option<EncoderChoice>,
     },
     /// Use the TV as a second monitor: the desktop makes a new monitor of the
     /// TV's size (see it in the display settings, drag windows onto it).
@@ -68,6 +126,13 @@ pub enum TvAction {
         /// The name the TV shows for this computer
         #[arg(long, default_value = "Kagaz")]
         name: String,
+        /// Optimise for battery or performance this time (default: Kagaz's
+        /// setting, `kagaz tvs settings`)
+        #[arg(long, value_enum)]
+        power: Option<Power>,
+        /// Which encoder this time (default: Kagaz's setting)
+        #[arg(long, value_enum)]
+        encoder: Option<EncoderChoice>,
     },
 }
 
@@ -96,6 +161,20 @@ fn stop_on_ctrl_c() {}
 
 fn ways(tv: &Tv) -> String {
     tv.ways.iter().map(|w| w.label()).collect::<Vec<_>>().join(", ")
+}
+
+/// `kagaz tvs settings`
+pub fn settings(action: TvsAction) -> Result<()> {
+    let TvsAction::Settings { power, encoder } = action;
+    if let Some(p) = power {
+        kagaz_core::paths::set_setting("power", Some(video::Priority::from(p).name()))?;
+    }
+    if let Some(e) = encoder {
+        kagaz_core::paths::set_setting("tv_encoder", Some(video::Engine::from(e).name()))?;
+    }
+    println!("Power: optimise for {}.", video::Priority::from_settings().name());
+    println!("Encoder: {}.", video::Engine::from_settings().name());
+    Ok(())
 }
 
 /// `kagaz tvs`
@@ -128,22 +207,26 @@ pub fn list(seconds: f32, direct: bool, json: bool) -> Result<()> {
 /// `kagaz tv NAME ...`
 pub fn tv(name: &str, action: TvAction) -> Result<()> {
     match action {
-        TvAction::Mirror { pattern, window, via, size, seconds, name: shown } => {
+        TvAction::Mirror { pattern, window, via, size, seconds, name: shown, power, encoder } => {
             let mut pictures = pictures(if pattern { What::Pattern } else if window { What::Window } else { What::Screen }, size)?;
             let opts = Options {
                 name: shown,
                 max_height: height(size),
+                engine: encoder.map(Into::into).unwrap_or_else(video::Engine::from_settings),
+                priority: power.map(Into::into).unwrap_or_else(video::Priority::from_settings),
                 length: seconds.map(Duration::from_secs),
                 wait: Duration::from_secs(30),
             };
             stop_on_ctrl_c();
             mirror(name, via, &opts, pictures.as_mut())
         }
-        TvAction::Extend { via, size, seconds, name: shown } => {
+        TvAction::Extend { via, size, seconds, name: shown, power, encoder } => {
             let mut pictures = pictures(What::Extend, size)?;
             let opts = Options {
                 name: shown,
                 max_height: height(size),
+                engine: encoder.map(Into::into).unwrap_or_else(video::Engine::from_settings),
+                priority: power.map(Into::into).unwrap_or_else(video::Priority::from_settings),
                 length: seconds.map(Duration::from_secs),
                 wait: Duration::from_secs(30),
             };
@@ -223,6 +306,7 @@ fn on_event(e: Event) {
                 println!("The TV {}.", notes.join(", "));
             }
         }
+        Event::Encoder(which) => println!("Encoding on {which}."),
         Event::Playing(m) => println!("Playing at {}x{}, {} pictures a second. Ctrl+C ends it.", m.width, m.height, m.fps),
         Event::Progress {
             seconds,

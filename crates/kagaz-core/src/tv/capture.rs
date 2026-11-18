@@ -6,15 +6,15 @@
 //! KDE and Hyprland each answer through their own portal. The portal hands
 //! over a PipeWire connection and a stream on it; Kagaz keeps the newest
 //! picture and scales it to the TV's size when the TV is ready for one.
+//! PipeWire itself is opened only then (`pw.rs`).
 //!
 //! Kept inside `tv/` for now (the owner's choice of 2026-11-18); written so
 //! that remote connection's host can use it later.
 
+use super::pw;
 use dbus::arg::{OwnedFd as DbusFd, PropMap, RefArg, Variant};
 use dbus::blocking::Connection;
 use dbus::message::MatchRule;
-use pipewire as pw;
-use pw::spa;
 use std::collections::HashMap;
 use std::os::fd::{FromRawFd, OwnedFd};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -55,8 +55,7 @@ pub enum Choice {
 /// portal's session, which takes the desktop's "sharing" sign away).
 pub struct Screen {
     latest: Arc<Mutex<Latest>>,
-    quit: Option<pw::channel::Sender<()>>,
-    thread: Option<std::thread::JoinHandle<()>>,
+    stream: Option<pw::VideoStream>,
     /// Kept so the portal session lives as long as the capture.
     _portal: Option<Connection>,
     last_seq: u64,
@@ -70,12 +69,8 @@ pub struct Screen {
 
 impl Drop for Screen {
     fn drop(&mut self) {
-        if let Some(q) = self.quit.take() {
-            let _ = q.send(());
-        }
-        if let Some(t) = self.thread.take() {
-            let _ = t.join();
-        }
+        // The stream ends before the portal's session.
+        self.stream.take();
     }
 }
 
@@ -242,27 +237,10 @@ impl Screen {
     fn start(fd: Option<OwnedFd>, node: u32, size: Option<(u32, u32)>) -> Result<Screen, String> {
         let latest = Arc::new(Mutex::new(Latest::default()));
         let arrived = Arc::new(AtomicU64::new(0));
-        let (quit_tx, quit_rx) = pw::channel::channel::<()>();
-        let (ready_tx, ready_rx) = std::sync::mpsc::channel::<Result<(), String>>();
-        let l = latest.clone();
-        let count = arrived.clone();
-        let thread = std::thread::Builder::new()
-            .name("kagaz-screen".into())
-            .spawn(move || {
-                if let Err(e) = run_stream(fd, node, size, l, count, quit_rx, &ready_tx) {
-                    let _ = ready_tx.send(Err(e));
-                }
-            })
-            .map_err(|e| e.to_string())?;
-        match ready_rx.recv_timeout(Duration::from_secs(10)) {
-            Ok(Ok(())) => {}
-            Ok(Err(e)) => return Err(e),
-            Err(_) => return Err("the screen stream did not start".into()),
-        }
+        let stream = run_stream(fd, node, size, latest.clone(), arrived.clone())?;
         Ok(Screen {
             latest,
-            quit: Some(quit_tx),
-            thread: Some(thread),
+            stream: Some(stream),
             _portal: None,
             last_seq: 0,
             scaled: Vec::new(),
@@ -398,66 +376,35 @@ fn scale(src: &[u8], sw: usize, sh: usize, stride: usize, layout: Layout, dst: &
 /// Threads that share the scaling of each picture.
 const SCALE_THREADS: usize = 6;
 
+/// Opens the stream; PipeWire's own thread puts each picture in `latest`.
 fn run_stream(
     fd: Option<OwnedFd>,
     node: u32,
     size: Option<(u32, u32)>,
     latest: Arc<Mutex<Latest>>,
     arrived: Arc<AtomicU64>,
-    quit: pw::channel::Receiver<()>,
-    ready: &std::sync::mpsc::Sender<Result<(), String>>,
-) -> Result<(), String> {
-    pw::init();
-    let err = |e: pw::Error| format!("PipeWire: {e}");
-    let mainloop = pw::main_loop::MainLoopRc::new(None).map_err(err)?;
-    let context = pw::context::ContextRc::new(&mainloop, None).map_err(err)?;
-    let core = match fd {
-        Some(fd) => context.connect_fd_rc(fd, None),
-        None => context.connect_rc(None),
-    }
-    .map_err(|e| format!("PipeWire could not be reached: {e}"))?;
-    let stream = pw::stream::StreamBox::new(
-        &core,
-        "kagaz-screen",
-        pw::properties::properties! {
-            *pw::keys::MEDIA_TYPE => "Video",
-            *pw::keys::MEDIA_CATEGORY => "Capture",
-            *pw::keys::MEDIA_ROLE => "Screen",
-        },
-    )
-    .map_err(err)?;
-
+) -> Result<pw::VideoStream, String> {
     let layout = Arc::new(Mutex::new(None::<(Layout, usize, usize)>));
     let lay = layout.clone();
-    let _listener = stream
-        .add_local_listener_with_user_data(())
-        .param_changed(move |_, _, id, param| {
-            let Some(param) = param else { return };
-            if id != spa::param::ParamType::Format.as_raw() {
-                return;
-            }
-            let mut info = spa::param::video::VideoInfoRaw::default();
-            if info.parse(param).is_err() {
-                return;
-            }
-            let l = match info.format() {
-                spa::param::video::VideoFormat::BGRx | spa::param::video::VideoFormat::BGRA => Layout::Bgrx,
-                spa::param::video::VideoFormat::RGBx | spa::param::video::VideoFormat::RGBA => Layout::Rgbx,
+    pw::VideoStream::open(
+        fd,
+        node,
+        size,
+        move |f| {
+            let l = match f.format {
+                pw::BGRX | pw::BGRA => Layout::Bgrx,
+                pw::RGBX | pw::RGBA => Layout::Rgbx,
                 _ => return,
             };
-            *lay.lock().unwrap() = Some((l, info.size().width as usize, info.size().height as usize));
-        })
-        .process(move |stream, _| {
-            let Some(mut buffer) = stream.dequeue_buffer() else { return };
+            *lay.lock().unwrap() = Some((l, f.width as usize, f.height as usize));
+        },
+        move |frame| {
             let Some((l, w, h)) = *layout.lock().unwrap() else { return };
-            let datas = buffer.datas_mut();
-            let Some(d) = datas.first_mut() else { return };
-            let (offset, size, stride) = {
-                let c = d.chunk();
-                (c.offset() as usize, c.size() as usize, c.stride().max(0) as usize)
+            let (bytes, offset, size) = (frame.bytes, frame.offset, frame.size);
+            let stride = match frame.stride.max(0) as usize {
+                0 => w * 4,
+                s => s,
             };
-            let Some(bytes) = d.data() else { return };
-            let stride = if stride == 0 { w * 4 } else { stride };
             if size == 0 || bytes.len() < offset + stride * h {
                 // An empty buffer: the picture did not change.
                 return;
@@ -471,79 +418,8 @@ fn run_stream(
             t.data.extend_from_slice(&bytes[offset..offset + stride * h]);
             t.seq += 1;
             arrived.fetch_add(1, Ordering::Relaxed);
-        })
-        .register()
-        .map_err(err)?;
-
-    use spa::param::format::{FormatProperties, MediaSubtype, MediaType};
-    use spa::param::video::VideoFormat;
-    use spa::utils::{Fraction, Rectangle};
-    let (want, min, max) = match size {
-        // A virtual monitor: exactly this size.
-        Some((w, h)) => (Rectangle { width: w, height: h }, Rectangle { width: w, height: h }, Rectangle { width: w, height: h }),
-        None => (
-            Rectangle { width: 1920, height: 1080 },
-            Rectangle { width: 1, height: 1 },
-            Rectangle { width: 8192, height: 8192 },
-        ),
-    };
-    let obj = spa::pod::object!(
-        spa::utils::SpaTypes::ObjectParamFormat,
-        spa::param::ParamType::EnumFormat,
-        spa::pod::property!(FormatProperties::MediaType, Id, MediaType::Video),
-        spa::pod::property!(FormatProperties::MediaSubtype, Id, MediaSubtype::Raw),
-        spa::pod::property!(
-            FormatProperties::VideoFormat,
-            Choice,
-            Enum,
-            Id,
-            VideoFormat::BGRx,
-            VideoFormat::BGRx,
-            VideoFormat::RGBx,
-            VideoFormat::BGRA,
-            VideoFormat::RGBA
-        ),
-        spa::pod::property!(
-            FormatProperties::VideoSize,
-            Choice,
-            Range,
-            Rectangle,
-            want,
-            min,
-            max
-        ),
-        spa::pod::property!(
-            FormatProperties::VideoFramerate,
-            Choice,
-            Range,
-            Fraction,
-            Fraction { num: 60, denom: 1 },
-            Fraction { num: 0, denom: 1 },
-            Fraction { num: 1000, denom: 1 }
-        ),
-    );
-    let bytes: Vec<u8> = spa::pod::serialize::PodSerializer::serialize(
-        std::io::Cursor::new(Vec::new()),
-        &spa::pod::Value::Object(obj),
+        },
     )
-    .map_err(|_| "PipeWire format could not be written".to_string())?
-    .0
-    .into_inner();
-    let mut params = [spa::pod::Pod::from_bytes(&bytes).ok_or("PipeWire format could not be read back")?];
-    stream
-        .connect(
-            spa::utils::Direction::Input,
-            Some(node),
-            pw::stream::StreamFlags::AUTOCONNECT | pw::stream::StreamFlags::MAP_BUFFERS,
-            &mut params,
-        )
-        .map_err(err)?;
-
-    let ml = mainloop.clone();
-    let _quit = quit.attach(mainloop.loop_(), move |_| ml.quit());
-    let _ = ready.send(Ok(()));
-    mainloop.run();
-    Ok(())
 }
 
 #[cfg(test)]

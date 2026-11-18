@@ -11,6 +11,8 @@ pub mod miracast;
 pub mod capture;
 #[cfg(target_os = "linux")]
 pub mod p2p;
+#[cfg(target_os = "linux")]
+mod pw;
 
 use mdns_sd::{ServiceDaemon, ServiceEvent};
 use serde::Serialize;

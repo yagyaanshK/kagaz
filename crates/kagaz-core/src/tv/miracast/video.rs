@@ -185,6 +185,131 @@ impl Video {
     }
 }
 
+/// Which encoder makes the pictures.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Engine {
+    /// The graphics chip's encoder when there is one, else OpenH264.
+    #[default]
+    Auto,
+    /// Only the graphics chip's encoder (an error without one).
+    Hardware,
+    /// Only OpenH264, on the processor.
+    Software,
+}
+
+/// What matters more while mirroring (Kagaz's setting).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Priority {
+    /// Less power: the chip's low-power encoder where it has one, and at
+    /// most 30 pictures a second.
+    Battery,
+    /// The smoothest and sharpest the TV takes.
+    #[default]
+    Performance,
+}
+
+impl Engine {
+    pub fn name(self) -> &'static str {
+        match self {
+            Engine::Auto => "auto",
+            Engine::Hardware => "hardware",
+            Engine::Software => "software",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Engine> {
+        [Engine::Auto, Engine::Hardware, Engine::Software].into_iter().find(|e| e.name() == s)
+    }
+
+    /// Kagaz's setting `tv_encoder` (auto when unset).
+    pub fn from_settings() -> Engine {
+        crate::paths::setting("tv_encoder").and_then(|s| Engine::parse(&s)).unwrap_or_default()
+    }
+}
+
+impl Priority {
+    pub fn name(self) -> &'static str {
+        match self {
+            Priority::Battery => "battery",
+            Priority::Performance => "performance",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Priority> {
+        [Priority::Battery, Priority::Performance].into_iter().find(|p| p.name() == s)
+    }
+
+    /// Kagaz's app-wide setting `power`: optimise for battery or for
+    /// performance (performance when unset).
+    pub fn from_settings() -> Priority {
+        crate::paths::setting("power").and_then(|s| Priority::parse(&s)).unwrap_or_default()
+    }
+}
+
+/// The encoder in use, hardware or OpenH264.
+pub enum AnyVideo {
+    Software(Video),
+    #[cfg(target_os = "linux")]
+    Vaapi(super::vaapi::Vaapi),
+}
+
+impl AnyVideo {
+    /// Opens an encoder; with it, a line saying which.
+    pub fn open(
+        width: usize,
+        height: usize,
+        fps: u32,
+        bits_per_second: u32,
+        engine: Engine,
+        priority: Priority,
+    ) -> Result<(AnyVideo, String), String> {
+        #[cfg(target_os = "linux")]
+        let hardware_error = if engine != Engine::Software {
+            let power = match priority {
+                Priority::Battery => super::vaapi::Power::Battery,
+                Priority::Performance => super::vaapi::Power::Performance,
+            };
+            match super::vaapi::Vaapi::open(width, height, fps, bits_per_second, power) {
+                Ok(v) => {
+                    let line = format!("the graphics chip ({})", v.described);
+                    return Ok((AnyVideo::Vaapi(v), line));
+                }
+                Err(e) => Some(e),
+            }
+        } else {
+            None
+        };
+        #[cfg(not(target_os = "linux"))]
+        let hardware_error = (engine != Engine::Software).then(|| "no hardware encoder on this system yet".to_string());
+        let _ = priority;
+        if engine == Engine::Hardware {
+            return Err(hardware_error.unwrap_or_default());
+        }
+        let v = Video::new(width, height, fps, bits_per_second)?;
+        let line = match hardware_error {
+            Some(e) => format!("the processor (OpenH264); not the graphics chip: {e}"),
+            None => "the processor (OpenH264)".to_string(),
+        };
+        Ok((AnyVideo::Software(v), line))
+    }
+
+    pub fn key_next(&mut self) {
+        match self {
+            AnyVideo::Software(v) => v.key_next(),
+            #[cfg(target_os = "linux")]
+            AnyVideo::Vaapi(v) => v.key_next(),
+        }
+    }
+
+    pub fn encode(&mut self, rgba: &[u8]) -> Result<Encoded, String> {
+        match self {
+            AnyVideo::Software(v) => v.encode(rgba),
+            #[cfg(target_os = "linux")]
+            AnyVideo::Vaapi(v) => v.encode(rgba).map(|(data, key)| Encoded { data, key }),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -213,7 +338,7 @@ mod tests {
 }
 
 #[cfg(test)]
-mod quality {
+pub(crate) mod quality {
     use super::*;
 
     /// A desktop-like picture: white, with rows of small dark "letters"

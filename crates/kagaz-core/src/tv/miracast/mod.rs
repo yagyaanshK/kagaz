@@ -9,6 +9,11 @@ pub mod mice;
 pub mod rtsp;
 pub mod ts;
 pub mod video;
+pub mod h264;
+#[cfg(target_os = "linux")]
+mod va_sys;
+#[cfg(target_os = "linux")]
+pub mod vaapi;
 
 use rtsp::{Message, Mode, SinkAbilities};
 use std::io::{ErrorKind, Read, Write};
@@ -68,6 +73,9 @@ pub struct Options {
     pub name: String,
     /// The tallest picture to send: 1080 or 720.
     pub max_height: u32,
+    /// Which encoder, and what matters more.
+    pub engine: video::Engine,
+    pub priority: video::Priority,
     /// Stop after this long; `None` runs until `stop` is set.
     pub length: Option<Duration>,
     /// How long to wait for the TV to connect.
@@ -85,6 +93,8 @@ pub enum Event {
     Abilities(SinkAbilities),
     /// The TV is playing the stream.
     Playing(Mode),
+    /// Which encoder makes the pictures.
+    Encoder(String),
     /// Once a second while playing: how many pictures, how fast the stream,
     /// how long a picture took to make (average and worst, ms) against the
     /// time it had, and how many were dropped for falling behind.
@@ -308,6 +318,8 @@ pub fn mirror<R>(
         let mut waiting_for = Some(m1_seq);
         let mut step = 1;
         let mut mode = rtsp::MODES[3];
+        // The mode is asked for in Wi-Fi Display R2's form.
+        let mut r2 = false;
         let handshake_end = Instant::now() + Duration::from_secs(15);
         while !asked.playing {
             if Instant::now() > handshake_end || stop.load(Ordering::Relaxed) {
@@ -322,6 +334,21 @@ pub fn mirror<R>(
                 continue;
             }
             if waiting_for.as_deref() != Some(m.cseq()) {
+                continue;
+            }
+            if m.status() != 200 && step == 4 && r2 {
+                // The TV refused the R2 request: the best of its basic list.
+                let a = report.abilities.clone().unwrap_or_default();
+                let max_fps = if opts.priority == video::Priority::Battery { 30 } else { 60 };
+                mode = rtsp::choose_mode(&a, opts.max_height, max_fps);
+                report.mode = Some(mode);
+                r2 = false;
+                let port = asked.rtp_port.unwrap_or(1028);
+                let m4 = link
+                    .request("SET_PARAMETER", "rtsp://localhost/wfd1.0")
+                    .with_parameters(rtsp::stream_parameters(mode, port, &presentation));
+                waiting_for = Some(m4.cseq().to_string());
+                link.send(&m4)?;
                 continue;
             }
             if m.status() != 200 {
@@ -345,7 +372,8 @@ pub fn mirror<R>(
                     if a.profiles.is_empty() {
                         return Err("the TV named no H.264 picture it can show".into());
                     }
-                    mode = rtsp::choose_mode(&a, opts.max_height);
+                    let max_fps = if opts.priority == video::Priority::Battery { 30 } else { 60 };
+                    (mode, r2) = rtsp::choose(&a, opts.max_height, max_fps);
                     let port = if a.rtp_port != 0 { a.rtp_port } else { 1028 };
                     asked.rtp_port = Some(port);
                     event(Event::Abilities(a.clone()));
@@ -354,7 +382,11 @@ pub fn mirror<R>(
                     // M4: this is the stream.
                     let m4 = link
                         .request("SET_PARAMETER", "rtsp://localhost/wfd1.0")
-                        .with_parameters(rtsp::stream_parameters(mode, port, &presentation));
+                        .with_parameters(if r2 {
+                            rtsp::stream_parameters_r2(mode, port, &presentation)
+                        } else {
+                            rtsp::stream_parameters(mode, port, &presentation)
+                        });
                     waiting_for = Some(m4.cseq().to_string());
                     link.send(&m4)?;
                     step = 4;
@@ -384,7 +416,8 @@ pub fn mirror<R>(
             (false, false) => 10_000_000,
         };
         let (w, h) = (mode.width as usize, mode.height as usize);
-        let mut encoder = video::Video::new(w, h, mode.fps, bitrate)?;
+        let (mut encoder, which) = video::AnyVideo::open(w, h, mode.fps, bitrate, opts.engine, opts.priority)?;
+        event(Event::Encoder(which));
         let mut muxer = ts::Muxer::new();
         let mut rtp = ts::Rtp::new(u32::from_be_bytes(random_bytes()));
         let start = Instant::now();
@@ -640,6 +673,8 @@ pub(crate) mod tests {
         let opts = Options {
             name: "Kagaz test".into(),
             max_height: 720,
+            engine: video::Engine::Software,
+            priority: video::Priority::Performance,
             length: Some(length),
             wait: Duration::from_secs(5),
         };
@@ -669,6 +704,8 @@ pub(crate) mod tests {
         let opts = Options {
             name: "Kagaz test".into(),
             max_height: 720,
+            engine: video::Engine::Software,
+            priority: video::Priority::Performance,
             length: Some(Duration::from_millis(1500)),
             wait: Duration::from_secs(5),
         };

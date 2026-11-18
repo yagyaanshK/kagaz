@@ -302,6 +302,8 @@ enum Command {
     },
     /// TVs & displays found nearby, and the ways each answers (Cast, AirPlay, screen mirroring, remote control)
     Tvs {
+        #[command(subcommand)]
+        action: Option<tv::TvsAction>,
         /// Seconds to listen on the network
         #[arg(long, default_value_t = 4.0)]
         seconds: f32,
@@ -1305,7 +1307,8 @@ fn main() -> Result<()> {
         Command::Fan { fan, action } => fans::fan(&fan, action),
         Command::Rooms { action } => fans::rooms(action),
         Command::Remote { action } => remote::run(action),
-        Command::Tvs { seconds, direct, json } => tv::list(seconds, direct, json),
+        Command::Tvs { action: Some(a), .. } => tv::settings(a),
+        Command::Tvs { action: None, seconds, direct, json } => tv::list(seconds, direct, json),
         Command::Tv { tv: name, action } => tv::tv(&name, action),
     }
 }
