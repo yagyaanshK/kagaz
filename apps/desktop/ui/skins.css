@@ -24,7 +24,7 @@ body {
   grid-template-areas: "nav column" "bottom bottom";
   background: var(--nav-bg, var(--bg));
 }
-#sidebar { grid-area: nav; display: flex; flex-direction: column; min-height: 0; overflow-y: auto; overflow-x: hidden; background: var(--nav-bg, var(--panel)); }
+#sidebar { grid-area: nav; display: flex; flex-direction: column; min-height: 0; overflow: hidden; background: var(--nav-bg, var(--panel)); }
 #column { grid-area: column; display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--bg); }
 #main { flex: 1 1 auto; }
 #bottom-nav { grid-area: bottom; display: none; }
@@ -34,9 +34,8 @@ body {
 .side-toggle svg, .bar-btn svg { width: 20px; height: 20px; }
 .side-title { font-weight: 700; }
 
-#categories { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; flex: 1 1 auto; }
+#categories { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
 #categories li { display: flex; align-items: center; cursor: default; position: relative; color: var(--nav-fg, var(--text)); }
-#categories li.cat-foot { margin-top: auto; }
 #categories .cat-note { display: none; }
 .cat-icon { display: inline-flex; align-items: center; justify-content: center; position: relative; flex: none; }
 .cat-icon svg { width: var(--nav-icon, 20px); height: var(--nav-icon, 20px); }
@@ -293,7 +292,6 @@ body {
 [data-os="windows"] #categories li:hover { background: var(--hover); }
 [data-os="windows"] #categories li.active { background: var(--nav-active-bg); }
 [data-os="windows"] #categories li.active::before { content: ""; position: absolute; left: 0; top: 50%; width: 3px; height: 16px; margin-top: -8px; border-radius: 2px; background: var(--accent); }
-[data-os="windows"] #categories li.cat-foot { margin-top: auto; }
 /* The page sits on its own layer, its corner rounded under the pane. */
 [data-os="windows"] #column { border-top-left-radius: 8px; border: 1px solid var(--line); border-right: none; border-bottom: none; }
 [data-os="windows"][data-layout="bar"] #column, [data-os="windows"][data-layout="minimal"] #column { border-radius: 0; border-left: none; }
@@ -355,7 +353,6 @@ body {
 [data-os="gnome"] #categories { padding: 6px 0; }
 [data-os="gnome"] #categories li { gap: 12px; min-height: 38px; margin: 0 6px 2px; padding: 0 10px; border-radius: 9px; }
 [data-os="gnome"] #categories li:hover { background: var(--hover); }
-[data-os="gnome"] #categories li.cat-foot { margin-top: auto; margin-bottom: 6px; }
 [data-os="gnome"] #categories li.active { background: var(--nav-active-bg); }
 /* The header bar: the page's name in the middle, flat buttons either side. */
 [data-os="gnome"] #bar { min-height: 47px; padding: 6px 7px 7px; gap: 6px; background: var(--bar-bg); box-shadow: inset 0 -1px rgba(0, 0, 6, 0.12); }
@@ -421,3 +418,50 @@ body {
 [data-os="macos"] .tile-act, [data-os="macos"] .urgent-btn, [data-os="macos"] .add-device { border-radius: 6px; min-height: 24px; font-size: 12px; }
 [data-os="macos"] .tile-main, [data-os="macos"] .home-tile { min-height: 52px; }
 [data-os="macos"] #main { padding: 16px 20px 24px; }
+
+/* ---------- the list's three parts (every system) ----------
+   Home; the person's kinds of device, which scroll by themselves between
+   it and the foot when they outgrow the window; Tools and Settings at the
+   foot. These rules come last so that they hold against each system's own
+   for an entry. */
+[data-os] #categories li.cat-scroll,
+[data-os] #categories li.cat-scroll:hover {
+  display: block; flex: 1 1 auto; min-height: 0; margin: 0; padding: 0; border-radius: 0; background: none; overflow-y: auto; scrollbar-width: thin; cursor: default;
+}
+#categories li.cat-scroll::before { display: none; }
+.cat-kinds { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0; }
+[data-os="ios"] .cat-kinds { gap: 2px; }
+[data-os="macos"] .cat-kinds { gap: 1px; }
+
+/* The heading over the person's kinds, as each system sets a small one. */
+[data-os] #categories li.cat-head,
+[data-os] #categories li.cat-head:hover {
+  min-height: 0; margin: 0; padding: 14px 16px 4px; background: none; border-radius: 0;
+  font-size: 12px; font-weight: 600; color: var(--muted);
+}
+[data-os="gnome"] #categories li.cat-head { padding: 12px 16px 4px; }
+[data-os="windows"] #categories li.cat-head { padding: 14px 16px 6px; font-size: 14px; color: var(--text); }
+[data-os="macos"] #categories li.cat-head { padding: 12px 8px 3px; font-size: 11px; font-weight: 700; }
+[data-os="ios"] #categories li.cat-head { padding: 18px 12px 6px; font-size: 13px; }
+[data-os="android"] #categories li.cat-head { padding: 18px 16px 8px; font-size: 14px; font-weight: 500; }
+/* Where only icons fit, a line stands for the heading, and the middle
+   scrolls without a bar of its own. */
+[data-layout="rail"]:not(.pane-over) #categories li.cat-head,
+[data-layout="rail"]:not(.pane-over) #categories li.cat-head:hover {
+  height: 1px; padding: 0; margin: 8px 12px; background: var(--line); font-size: 0; overflow: hidden;
+}
+[data-os="android"][data-layout="rail"] #categories li.cat-head { margin: 2px 24px; }
+[data-os="android"][data-layout="rail"] .cat-kinds { gap: 12px; }
+[data-layout="rail"] #categories li.cat-scroll { scrollbar-width: none; }
+
+/* Add a device: an entry, quieter than a place. */
+#categories li.cat-add:not(.active) { color: var(--muted); }
+
+/* A line over the foot, under which the middle may scroll. */
+[data-os] #categories li.cat-foot { margin-top: 9px; }
+#categories li.cat-foot::after { content: ""; position: absolute; left: 8px; right: 8px; top: -5px; height: 1px; background: var(--line); }
+
+/* The entries' icons in Kagaz's green on Ubuntu and Windows, as on macOS
+   (the owner, 2026-11-18); Add a device stays quiet. */
+[data-os="gnome"] #categories .cat-icon, [data-os="windows"] #categories .cat-icon { color: var(--accent); }
+[data-os] #categories li.cat-add:not(.active) .cat-icon { color: var(--muted); }

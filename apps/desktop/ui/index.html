@@ -18,17 +18,27 @@
       <button id="pane-toggle" type="button" class="side-toggle" aria-label="Show or hide the names" title="Navigation" aria-expanded="true"><span class="ic" data-icon="menu"></span></button>
       <span class="side-title">Kagaz</span>
     </div>
+    <!-- Home; then the kinds of device the person has added, by name
+         (shell.js shows those and hides the rest), with Add a device at
+         their end; Tools and Settings stay at the foot. The middle scrolls
+         by itself when it outgrows the window. -->
     <ul id="categories">
       <li data-cat="home" tabindex="0" role="button" class="active" title="Home"><span class="cat-icon" data-icon="home" aria-hidden="true"></span><span class="cat-name">Home</span><span class="cat-note muted">your devices</span></li>
-      <li data-cat="doorbell" tabindex="0" role="button" title="Doorbell"><span class="cat-icon" data-icon="doorbell" aria-hidden="true"></span><span class="cat-name">Doorbell</span><span class="cat-note muted">video intercom</span></li>
-      <li data-cat="cameras" tabindex="0" role="button" title="Security cameras"><span class="cat-icon" data-icon="cameras" aria-hidden="true"></span><span class="cat-name">Cameras</span><span class="cat-note muted">Tapo, through your account</span></li>
-      <li data-cat="print" tabindex="0" role="button" title="Printers and scanners"><span class="cat-icon" data-icon="print" aria-hidden="true"></span><span class="cat-name">Print &amp; scan</span><span class="cat-note muted">on the network and USB</span></li>
-      <li data-cat="fans" tabindex="0" role="button" title="Ceiling fans"><span class="cat-icon" data-icon="fan" aria-hidden="true"></span><span class="cat-name">Fans</span><span class="cat-note muted">Atomberg, over Bluetooth</span></li>
-      <li data-cat="purifiers" tabindex="0" role="button" title="Air purifiers"><span class="cat-icon" data-icon="purifier" aria-hidden="true"></span><span class="cat-name">Purifiers</span><span class="cat-note muted">Philips, on the network</span></li>
-      <li data-cat="remote" tabindex="0" role="button" title="Computers and phones"><span class="cat-icon" data-icon="computer" aria-hidden="true"></span><span class="cat-name">Computers</span><span class="cat-note muted">yours, from here</span></li>
-      <li data-cat="society" tabindex="0" role="button" title="Society gate"><span class="cat-icon" data-icon="society" aria-hidden="true"></span><span class="cat-name">Society gate</span><span class="cat-note muted">MyGate, Park+</span></li>
-      <li data-cat="tools" tabindex="0" role="button" title="Tools"><span class="cat-icon" data-icon="tools" aria-hidden="true"></span><span class="cat-name">Tools</span><span class="cat-note muted">tidy, crop, compress a file</span></li>
-      <li data-cat="settings" tabindex="0" role="button" class="cat-foot" title="Settings"><span class="cat-icon" data-icon="settings" aria-hidden="true"></span><span class="cat-name">Settings</span><span class="cat-note muted">accounts, about</span></li>
+      <li class="cat-scroll" role="presentation">
+        <ul id="cat-kinds" class="cat-kinds">
+          <li id="cat-head" class="cat-head hidden" role="presentation">Your devices</li>
+          <li class="hidden" data-cat="cameras" tabindex="0" role="button" title="Security cameras"><span class="cat-icon" data-icon="cameras" aria-hidden="true"></span><span class="cat-name">Cameras</span><span class="cat-note muted">Tapo, through your account</span></li>
+          <li class="hidden" data-cat="remote" tabindex="0" role="button" title="Computers and phones"><span class="cat-icon" data-icon="computer" aria-hidden="true"></span><span class="cat-name">Computers</span><span class="cat-note muted">yours, from here</span></li>
+          <li class="hidden" data-cat="doorbell" tabindex="0" role="button" title="Doorbell"><span class="cat-icon" data-icon="doorbell" aria-hidden="true"></span><span class="cat-name">Doorbell</span><span class="cat-note muted">video intercom</span></li>
+          <li class="hidden" data-cat="fans" tabindex="0" role="button" title="Ceiling fans"><span class="cat-icon" data-icon="fan" aria-hidden="true"></span><span class="cat-name">Fans</span><span class="cat-note muted">Atomberg, over Bluetooth</span></li>
+          <li class="hidden" data-cat="print" tabindex="0" role="button" title="Printers and scanners"><span class="cat-icon" data-icon="print" aria-hidden="true"></span><span class="cat-name">Print &amp; scan</span><span class="cat-note muted">on the network and USB</span></li>
+          <li class="hidden" data-cat="purifiers" tabindex="0" role="button" title="Air purifiers"><span class="cat-icon" data-icon="purifier" aria-hidden="true"></span><span class="cat-name">Purifiers</span><span class="cat-note muted">Philips, on the network</span></li>
+          <li class="hidden" data-cat="society" tabindex="0" role="button" title="Society gate"><span class="cat-icon" data-icon="society" aria-hidden="true"></span><span class="cat-name">Society gate</span><span class="cat-note muted">MyGate, Park+</span></li>
+          <li data-cat="add" tabindex="0" role="button" class="cat-add" title="Add a device"><span class="cat-icon" data-icon="plus" aria-hidden="true"></span><span class="cat-name">Add a device</span></li>
+        </ul>
+      </li>
+      <li data-cat="tools" class="cat-foot" tabindex="0" role="button" title="Tools"><span class="cat-icon" data-icon="tools" aria-hidden="true"></span><span class="cat-name">Tools</span><span class="cat-note muted">tidy, crop, compress a file</span></li>
+      <li data-cat="settings" tabindex="0" role="button" title="Settings"><span class="cat-icon" data-icon="settings" aria-hidden="true"></span><span class="cat-name">Settings</span><span class="cat-note muted">accounts, about</span></li>
     </ul>
   </aside>
 

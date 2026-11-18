@@ -173,14 +173,23 @@ with the commit that closes them.
 
 ## Desktop app polish
 
-- [ ] **The navigation, put in order** (asked 2026-11-18): only the
-      kinds of device the person has added, by name; Home on top; Tools
-      and Settings at the foot; Add a device at the end of the person's
-      kinds; Home's groups in the same order. Mockup in
-      `design/mockups/navigation/` (the app's own stylesheets, every
-      system, wide, icons-only and phone), with two ways for a phone's
-      bar. Waiting for the owner's word on the mockup and on the phone's
-      bar before it is built.
+- [x] **The navigation, put in order** (asked, approved and built
+      2026-11-18; mockup in `design/mockups/navigation/`): only the
+      kinds of device the person has added (Home says which, by the same
+      rule as its own groups), by the name each shows; Home on top;
+      Tools and Settings at the foot; Add a device at the end of the
+      person's kinds; the kinds scroll by themselves between the two. A
+      kind's page that is open has its entry even before its first
+      device. A phone's bar stays Home, Tools, Settings (the owner's
+      choice of the two drawn). Home's groups are by name too. The
+      entries' icons are green on Ubuntu and Windows as on macOS (the
+      owner). Checked in the headless page on every system's look; not
+      yet seen in the real window by a person.
+- [ ] **One name for a kind everywhere?** The sidebar says Cameras,
+      Fans, Purifiers, Computers, Print & scan; Home and the pages say
+      Security cameras, Ceiling fans, Air purifiers, Computers & phones,
+      Printers & scanners. Each list is in order by the names it shows,
+      so the two orders differ a little. Asked of the owner.
 
 - [x] Illustrations next to each option in the Scan pane and a badge per
       verdict in About (inline SVG, 2026-10-06). Worth a look in the window.
@@ -491,6 +500,12 @@ Plan: `docs/remote-connection.md` (agreed 2026-11-16).
       webview's again. Checked: the page's part in the headless page;
       in the real window (test card) the webview's pinch is found and
       turned off. **Not yet** tried with fingers.
+- [ ] **Several sessions at once, each in a window of its own** (the
+      owner, 2026-11-18): today one session takes over Kagaz's window.
+      Asked for: every connection in its own window, closing it ends
+      that session (after a question), the main window free meanwhile
+      for the rest of Kagaz (a call at the door, a TV's remote). Open
+      questions are with the owner; a mockup comes before it is built.
 - [ ] **To hear from the owner on the real Windows PC**: a pinch on a
       PDF there; the sound now
       (gaps, how late), and the log's line on it; this computer's keys

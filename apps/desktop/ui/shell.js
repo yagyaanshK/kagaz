@@ -11,7 +11,14 @@
 //            · 1008+ the pane with names (its menu button folds it)
 //   gnome    < 550 bottom bar · 550+ sidebar
 //   macos    sidebar
-// Uses app.js's selectCategory; nav.js's KagazNav.
+//
+// The list itself, wherever it has room for more than a phone's bar: Home;
+// then the kinds of device the person has added, by name, and only those
+// (Home says which, home.js), with Add a device at their end, behind
+// which every kind is; Tools and Settings at the foot. A kind's page that
+// is open has its entry even before its first device, so that the list
+// always says where the person is.
+// Uses app.js's selectCategory; nav.js's KagazNav; home.js's KagazHome.
 
 const KagazShell = (() => {
   const $ = (id) => document.getElementById(id);
@@ -97,6 +104,43 @@ const KagazShell = (() => {
     if (ev.key === "Escape") closeOverlay();
   });
 
+  // ---------- the person's kinds ----------
+  // Those known when Kagaz was last open show at once; Home's word on
+  // them follows in a moment.
+  const KINDS_KEY = "kagaz.shell.kinds";
+  let added = new Set();
+  try {
+    added = new Set(JSON.parse(localStorage.getItem(KINDS_KEY) || "[]"));
+  } catch (e) {}
+  const kindEntries = () => [...document.querySelectorAll("#cat-kinds li[data-cat]:not(.cat-add)")];
+  // By the name each shows, whatever order the page lists them in.
+  {
+    const name = (li) => li.querySelector(".cat-name").textContent;
+    const add = document.querySelector("#cat-kinds .cat-add");
+    for (const li of kindEntries().sort((a, b) => name(a).localeCompare(name(b), undefined, { sensitivity: "base" }))) add.before(li);
+  }
+  function showKinds() {
+    let any = false;
+    for (const li of kindEntries()) {
+      const on = added.has(li.dataset.cat) || li.dataset.cat === view;
+      li.classList.toggle("hidden", !on);
+      any = any || on;
+    }
+    $("cat-head").classList.toggle("hidden", !any);
+  }
+  function kinds(ids) {
+    added = new Set(ids);
+    try {
+      localStorage.setItem(KINDS_KEY, JSON.stringify(ids));
+    } catch (e) {}
+    showKinds();
+  }
+  // Ask Home which kinds there are now (it draws itself when it is the
+  // page on screen, and says so then).
+  function askKinds() {
+    if (view !== "home" && typeof KagazHome !== "undefined") KagazHome.kinds();
+  }
+
   // ---------- the bar ----------
   function updateBar() {
     const levels = KagazNav.depth();
@@ -133,6 +177,9 @@ const KagazShell = (() => {
     closeOverlay();
     updateBar();
     showRing();
+    // What was added on the page just left has its entry from now on.
+    showKinds();
+    askKinds();
   }
 
   // ---------- a ring, wherever the person is ----------
@@ -161,6 +208,8 @@ const KagazShell = (() => {
   // app.js chose the first place before this file loaded.
   if (typeof currentView !== "undefined" && currentView) view = currentView;
   applyLayout();
+  showKinds();
+  if (typeof KagazHome !== "undefined") KagazHome.kinds();
 
-  return { place, ring, layout: () => layout };
+  return { place, ring, kinds, layout: () => layout };
 })();

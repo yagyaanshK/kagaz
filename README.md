@@ -440,7 +440,12 @@ Each page keeps its place: leave a printer's page with a scan under way
 for the cameras, and coming back finds the scan where it was. Camera
 pictures play only while their page is chosen (on a phone, also only
 while Kagaz is on screen), sparing the connection; downloads carry on.
-Wide windows have a sidebar; phones a bottom bar.
+Wide windows have a sidebar; phones a bottom bar. The sidebar lists
+Home, then only the kinds of device you have added, by name, with **Add
+a device** at their end (every kind Kagaz knows is behind it), and Tools
+and Settings at its foot; a long list of kinds scrolls between the two.
+A narrower window shows the same as icons. A phone's bar stays Home,
+Tools and Settings, and Home lists your kinds by name.
 
 On a phone, Kagaz keeps listening for doorbell calls after you close it,
 with a small "Ready for doorbell calls" notification; some phones stop

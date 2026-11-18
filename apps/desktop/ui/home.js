@@ -263,12 +263,32 @@ const KagazHome = (() => {
     return { id: "society", icon: "society", title: "Society gate", status: st.status, devices: devs, open, chips, count: 0 };
   }
 
+  // The kinds the person has something of, by name: Home lists those,
+  // and so does the navigation (shell.js), each by the name it shows.
+  const byTitle = (a, b) => a.title.localeCompare(b.title, undefined, { sensitivity: "base" });
+  async function kindsNow() {
+    const kinds = await Promise.all([doorbellKind(), camerasKind(), printersKind(), fansKind(), purifiersKind(), remoteKind(), societyKind()]);
+    return kinds.filter(Boolean).sort(byTitle);
+  }
+  function tellShell(kinds) {
+    if (typeof KagazShell !== "undefined") KagazShell.kinds(kinds.map((k) => k.id));
+    kindNotes(kinds);
+  }
+  // For the navigation alone, when Home is not the page on screen.
+  let asking = 0;
+  async function kinds() {
+    const mine = ++asking;
+    const list = await kindsNow();
+    if (mine === asking) tellShell(list);
+  }
+
   // ---------- drawing Home ----------
   let drawing = 0;
   async function show() {
     const mine = ++drawing;
-    const kinds = (await Promise.all([doorbellKind(), camerasKind(), printersKind(), fansKind(), purifiersKind(), remoteKind(), societyKind()])).filter(Boolean);
+    const kinds = await kindsNow();
     if (mine !== drawing) return; // a newer drawing is on its way
+    asking++; // and none older for the navigation
 
     // Chips: what needs a look, most pressing first.
     const chips = kinds.flatMap((k) => k.chips).sort((a, b) => (b.tone === "warn") - (a.tone === "warn"));
@@ -297,7 +317,7 @@ const KagazHome = (() => {
     $("home-groups").replaceChildren(...kinds.map((k) => group({ ...k, devices: k.devices.map((d) => ({ ...d, key: choosing ? d.key : null })) })));
     $("home-empty").classList.toggle("hidden", kinds.length > 0);
     $("home-all-title").textContent = kinds.length ? "All devices" : "Your devices";
-    kindNotes(kinds);
+    tellShell(kinds);
 
     // The added printers' states; their addresses are refreshed by a quiet
     // search now and then (a router can hand them new ones).
@@ -328,9 +348,10 @@ const KagazHome = (() => {
   }
 
   // Something changed (a printer search finished, a purifier added): redraw
-  // if Home is on screen.
+  // if Home is on screen; else the navigation alone hears of it.
   function devicesChanged() {
     if (!$("home").classList.contains("hidden")) show();
+    else kinds();
   }
 
   // ---------- Add a device ----------
@@ -406,5 +427,5 @@ const KagazHome = (() => {
   $("home-add").addEventListener("click", openAdd);
   $("add-back").addEventListener("click", () => (addKind ? showKinds() : selectCategory("home")));
 
-  return { show, devicesChanged, openAdd };
+  return { show, devicesChanged, openAdd, kinds };
 })();

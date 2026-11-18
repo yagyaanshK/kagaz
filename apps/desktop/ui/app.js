@@ -726,12 +726,12 @@ function selectCategory(cat) {
   if (typeof KagazRemoteView !== "undefined") KagazRemoteView.shown(cat === "remote");
   // Back from any page goes to Home.
   KagazNav.root(cat === "home" ? null : cat, () => selectCategory("home"));
-  // The sidebar and the bottom bar mark the section on screen, and only it
-  // (Add a device is part of Home); on a device's page the bottom bar
-  // marks nothing, as that page has no button there.
-  const navCat = cat === "add" ? "home" : cat;
+  // The sidebar and the bottom bar mark the section on screen, and only
+  // it. Add a device has an entry of its own in the sidebar; a phone's
+  // bar has none, and there it is part of Home. On a device's page the
+  // bottom bar marks nothing, as that page has no button there.
   document.querySelectorAll("#categories li[data-cat], #bottom-nav button").forEach((el) => {
-    const on = el.dataset.cat === navCat;
+    const on = el.dataset.cat === (cat === "add" && el.tagName === "BUTTON" ? "home" : cat);
     el.classList.toggle("active", on);
     if (on) el.setAttribute("aria-current", "page");
     else el.removeAttribute("aria-current");
@@ -769,7 +769,7 @@ function selectCategory(cat) {
 }
 
 document.querySelectorAll("#categories li[data-cat], #bottom-nav button").forEach((el) =>
-  el.addEventListener("click", () => selectCategory(el.dataset.cat)));
+  el.addEventListener("click", () => (el.dataset.cat === "add" ? KagazHome.openAdd() : selectCategory(el.dataset.cat))));
 document.querySelectorAll(".to-home").forEach((el) => el.addEventListener("click", () => selectCategory("home")));
 
 // Reload all, Sound on all and Rearrange: only with cameras showing, and
