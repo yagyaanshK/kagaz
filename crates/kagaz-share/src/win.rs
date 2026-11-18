@@ -2,8 +2,11 @@
 //! GDI where that is not available), this computer's pointer drawn in,
 //! and the viewer's mouse and keys given to Windows as if typed here.
 //!
-//! It runs as the person signed in, so it sees and works only what they
-//! can: the sign-in screen and administrator prompts are out of its reach
+//! Run as the person signed in, it sees and works only what they can: the
+//! sign-in screen and administrator prompts are out of its reach. Run by
+//! the helper service (`--system`), it follows Windows from one desktop to
+//! the other (`FOLLOW`): the person's, and the secure one where the
+//! sign-in screen and administrator prompts are drawn
 //! (docs/remote-connection.md, step 2).
 
 use crate::picture::{Frame, Source};
@@ -11,7 +14,12 @@ use ironrdp_pdu::input::fast_path::SynchronizeFlags;
 use ironrdp_server::{KeyboardEvent, MouseEvent};
 use std::time::Duration;
 use windows::core::Interface;
-use windows::Win32::Foundation::HMODULE;
+use windows::Win32::Foundation::{HANDLE, HMODULE};
+use windows::Win32::System::StationsAndDesktops::{
+    CloseDesktop, GetThreadDesktop, GetUserObjectInformationW, OpenInputDesktop, SetThreadDesktop, DESKTOP_ACCESS_FLAGS,
+    DESKTOP_CONTROL_FLAGS, HDESK, UOI_NAME,
+};
+use windows::Win32::System::Threading::GetCurrentThreadId;
 use windows::Win32::Graphics::Direct3D::D3D_DRIVER_TYPE_UNKNOWN;
 use windows::Win32::Graphics::Direct3D11::{
     D3D11CreateDevice, ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D, D3D11_CPU_ACCESS_READ,
@@ -47,8 +55,115 @@ pub fn dpi_aware() {
     }
 }
 
-/// The main screen: DXGI unless told `gdi`, falling back to GDI.
+/// Run by the helper service: the pictures and the input go to whichever
+/// desktop Windows shows (the person's, or the secure one).
+pub static FOLLOW: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+fn desktop_name(desk: HDESK) -> String {
+    let mut buf = [0u16; 128];
+    let mut needed = 0u32;
+    let ok = unsafe {
+        GetUserObjectInformationW(
+            HANDLE(desk.0),
+            UOI_NAME,
+            Some(buf.as_mut_ptr().cast()),
+            (buf.len() * 2) as u32,
+            Some(&mut needed),
+        )
+    };
+    if ok.is_err() {
+        return String::new();
+    }
+    let end = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
+    String::from_utf16_lossy(&buf[..end])
+}
+
+/// The desktop Windows shows now, when it is not this thread's: opened,
+/// to be moved to.
+fn moved_to() -> Option<HDESK> {
+    if !FOLLOW.load(std::sync::atomic::Ordering::Relaxed) {
+        return None;
+    }
+    unsafe {
+        // Every right on it, as the helper has (GENERIC_ALL).
+        let input = OpenInputDesktop(DESKTOP_CONTROL_FLAGS(0), false, DESKTOP_ACCESS_FLAGS(0x1000_0000)).ok()?;
+        let here = GetThreadDesktop(GetCurrentThreadId()).ok();
+        if here.is_some_and(|h| desktop_name(h) == desktop_name(input)) {
+            let _ = CloseDesktop(input);
+            return None;
+        }
+        Some(input)
+    }
+}
+
+/// Moves this thread to the desktop Windows shows, if it is elsewhere
+/// (looked at no more than ten times a second).
+pub fn follow() {
+    thread_local! {
+        static LOOKED: std::cell::Cell<Option<std::time::Instant>> = const { std::cell::Cell::new(None) };
+    }
+    if !FOLLOW.load(std::sync::atomic::Ordering::Relaxed) {
+        return;
+    }
+    let due = LOOKED.with(|l| {
+        let due = l.get().is_none_or(|t| t.elapsed() >= Duration::from_millis(100));
+        if due {
+            l.set(Some(std::time::Instant::now()));
+        }
+        due
+    });
+    if !due {
+        return;
+    }
+    if let Some(input) = moved_to() {
+        let name = desktop_name(input);
+        // The desktop the thread was on is left open: Windows keeps it.
+        if unsafe { SetThreadDesktop(input) }.is_ok() {
+            crate::say(&format!("now on the {name} desktop"));
+        } else {
+            unsafe {
+                let _ = CloseDesktop(input);
+            }
+        }
+    }
+}
+
+/// A source that gives way when Windows shows another desktop, so that
+/// the next one is opened there.
+struct Following(Box<dyn Source>);
+
+impl Source for Following {
+    fn name(&self) -> String {
+        self.0.name()
+    }
+    fn next(&mut self, wait: Duration) -> anyhow::Result<Option<Frame>> {
+        if let Some(input) = moved_to() {
+            unsafe {
+                let _ = CloseDesktop(input);
+            }
+            anyhow::bail!("Windows shows another desktop");
+        }
+        self.0.next(wait)
+    }
+}
+
+/// The main screen: DXGI unless told `gdi`, falling back to GDI; run by
+/// the helper, on the desktop Windows shows.
 pub fn open(how: Option<&str>) -> anyhow::Result<Box<dyn Source>> {
+    if FOLLOW.load(std::sync::atomic::Ordering::Relaxed) {
+        if let Some(input) = moved_to() {
+            unsafe {
+                if SetThreadDesktop(input).is_err() {
+                    let _ = CloseDesktop(input);
+                }
+            }
+        }
+        return Ok(Box::new(Following(open_here(how)?)));
+    }
+    open_here(how)
+}
+
+fn open_here(how: Option<&str>) -> anyhow::Result<Box<dyn Source>> {
     match how {
         Some("gdi") => Ok(Box::new(Gdi::new()?)),
         Some("dxgi") => Ok(Box::new(Dxgi::new()?)),
@@ -362,6 +477,7 @@ impl Source for Dxgi {
 }
 
 fn send(inputs: &[INPUT]) {
+    follow();
     unsafe {
         SendInput(inputs, std::mem::size_of::<INPUT>() as i32);
     }
@@ -403,6 +519,7 @@ pub fn key(event: KeyboardEvent) {
 
 /// Caps Lock, Num Lock and Scroll Lock as the viewer's keyboard has them.
 fn locks(flags: SynchronizeFlags) {
+    follow();
     for (vk, on, extended) in [
         (VK_CAPITAL, flags.contains(SynchronizeFlags::CAPS_LOCK), false),
         (VK_NUMLOCK, flags.contains(SynchronizeFlags::NUM_LOCK), true),

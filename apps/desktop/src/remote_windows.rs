@@ -144,6 +144,11 @@ pub fn on_event(window: &tauri::Window, event: &tauri::WindowEvent) {
                 if super::remote_view::open_in(app, label) {
                     api.prevent_close();
                     let _ = app.emit_to(label, "remote-close-asked", ());
+                } else if label == MAIN && super::share::keeps_running() {
+                    // Sharing this computer is on: Kagaz waits in the tray,
+                    // sessions and all, and sharing goes on.
+                    api.prevent_close();
+                    let _ = window.hide();
                 } else if label == MAIN {
                     let state = app.state::<SessionWindows>();
                     let others = state.now();
@@ -170,7 +175,7 @@ pub fn on_event(window: &tauri::Window, event: &tauri::WindowEvent) {
                 };
                 super::remote_view::end_in(app, label);
                 tell(app);
-                if left == 0 && state.main_hidden.load(Ordering::Acquire) {
+                if left == 0 && state.main_hidden.load(Ordering::Acquire) && !super::share::keeps_running() {
                     app.exit(0);
                 }
             }

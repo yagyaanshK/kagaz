@@ -152,7 +152,17 @@ today's viewer works with it unchanged.
   everything; Control and Watch in the viewer's bar; still to come: the
   QR code, blanking the screen, several devices at once, the viewer's bar
   following a switch to watching made on the computer); (5) start
-  with Windows, the helper service.
+  with Windows, the tray, the helper service (built 2026-11-19, not yet
+  run on Windows: while sharing is on, Kagaz waits in the tray when its
+  window closes, with Open Kagaz, Stop sharing and Quit; "Start with
+  Windows" puts it there at sign-in; the helper service, named
+  KagazHelper ("Kagaz helper") with its folder in
+  `C:\ProgramData\Kagaz`, runs kagaz-share as the system at the
+  computer's own screen, following Windows to the sign-in screen and
+  administrator prompts and on after a restart before anyone signs in;
+  Kagaz steers it over a token-protected connection on the computer;
+  with nobody there to ask, only devices allowed to connect with the
+  PIN without asking get in).
 - *Connecting:* "Ask here each time" (someone at the computer allows it,
   with control or watch only; no answer in 30 s is no) or "Connect with the
   PIN, without asking"; the computer's choice is the default, each paired

@@ -472,6 +472,8 @@ const KagazRemoteView = (() => {
       else if (news.type === "pointer-default") canvas.style.cursor = "default";
       else if (news.type === "clipboard") {
         const what = news.picture ? "a picture is" : `${news.characters} characters are`;
+        // Its size only, never what it says: whether copies arrive.
+        log(`copied on the device: ${news.picture ? "a picture" : `${news.characters} characters`}${news.kept ? "" : ", not kept here"}`);
         toast(news.kept ? `Copied on ${cur.device.name}: ${what} on this computer's clipboard now.`
           : `Something was copied on ${cur.device.name}; the clipboard is not carried on this system yet.`);
       } else if (news.type === "sending") sending(news);

@@ -11,6 +11,9 @@ const KagazShare = (() => {
   let sub = "main"; // main | pair | device | sessions
   let deviceId = null;
   let note = "";
+  // A question about the helper service waiting for a yes: "install", or
+  // the choice to go back to ("person", "rdp") once it is removed.
+  let helperAsk = null;
 
   function el(tag, cls, text) {
     const e = document.createElement(tag);
@@ -139,7 +142,7 @@ const KagazShare = (() => {
   function drawMain(box) {
     const s = st.settings;
     const on = section("Sharing this computer", "Off until you turn it on. While off, nothing of it runs or listens.");
-    on.append(row("Share this computer", "Paired devices only", check(s.on, (v) => save({ on: v }))));
+    on.append(row("Share this computer", st.windows ? "Paired devices only. While on, Kagaz stays in the tray." : "Paired devices only", check(s.on, (v) => save({ on: v }))));
     const status = el("p", "muted small", "");
     status.id = "share-state";
     if (s.on && st.listening) {
@@ -152,8 +155,14 @@ const KagazShare = (() => {
     n.id = "share-note";
     n.setAttribute("role", "status");
     on.append(n);
+    if (s.on && st.windows) on.append(row("Start with Windows", "Waits in the tray", check(!!s.startup, (v) => save({ startup: v }))));
     box.append(on);
-    if (!s.on) return;
+    if (!s.on) {
+      // Still installed while sharing is off: it listens for nothing, and
+      // can be removed here.
+      if (st.helper) box.append(drawPrompts());
+      return;
+    }
 
     const who = section("Who may connect");
     who.append(
@@ -214,6 +223,72 @@ const KagazShare = (() => {
       row("Listen on", "", select([["all", "Local network and Tailscale"], ["tailscale", "Tailscale only"], ["local", "This computer only"]], s.listen, (v) => save({ listen: v }))),
     );
     box.append(net);
+    if (st.windows) box.append(drawPrompts());
+  }
+
+  // The sign-in screen and administrator prompts: Windows draws them
+  // where a program run by the person cannot see or answer.
+  function drawPrompts() {
+    const s = st.settings;
+    const sec = section("Sign-in screen and administrator prompts", "Kagaz can't see these on its own.");
+    const chosen = st.helper ? "service" : s.prompts === "service" ? "person" : s.prompts || "person";
+    // While its question is open, the menu shows what was picked.
+    const shown = helperAsk === "install" ? "service" : helperAsk || chosen;
+    const pick = select([["person", "Someone here answers them"], ["rdp", "Windows' Remote Desktop (Pro)"], ["service", "Kagaz's helper service"]], shown, (v) => {
+      if (v === chosen) return;
+      if (v === "service") helperAsk = "install";
+      else if (st.helper) helperAsk = v;
+      else return save({ prompts: v });
+      draw();
+    });
+    sec.append(row("When one appears", "", pick));
+    if (helperAsk) {
+      const ask = el("div", "share-ask-inline");
+      ask.setAttribute("role", "alertdialog");
+      if (helperAsk === "install") {
+        ask.append(
+          el("p", "share-ask-title", "Install Kagaz's helper service?"),
+          el("p", "", "Lets a paired device answer the sign-in screen and administrator prompts, also after a restart."),
+          el("p", "muted small", "Needs an administrator's password once. Runs with system rights while the computer is on. Before anyone signs in, only devices that connect with the PIN, no asking, get in. Choosing otherwise here removes it."),
+        );
+      } else {
+        ask.append(
+          el("p", "share-ask-title", "Remove Kagaz's helper service?"),
+          el("p", "muted small", "Needs an administrator's password once. Paired devices stay paired."),
+        );
+      }
+      const yes = helperAsk === "install" ? "Install" : "Remove";
+      const buttons = el("div", "rc-buttons");
+      buttons.append(
+        button("", helperAsk === "install" ? "Not now" : "Keep it", () => {
+          helperAsk = null;
+          draw();
+        }),
+        button("accent", yes, () => {
+          const next = helperAsk === "install" ? "service" : helperAsk;
+          helperAsk = null;
+          say("Answer Windows' administrator question…");
+          save({ prompts: next });
+        }),
+      );
+      ask.append(buttons);
+      sec.append(ask);
+      return sec;
+    }
+    if (chosen === "service") {
+      sec.append(el("p", "muted small", st.steering
+        ? "Installed and running. Sharing goes on while Kagaz is closed; before anyone signs in, only devices that connect with the PIN, no asking, get in."
+        : "Installed. Looking for it…"));
+    } else if (chosen === "rdp") {
+      if (st.rdp === true) sec.append(el("p", "muted small", "Remote Desktop is on here. Connect from Kagaz as a Remote Desktop computer, with a Windows account."));
+      else if (st.rdp === false) {
+        sec.append(el("p", "muted small", "Remote Desktop is off here (Windows Pro can turn it on)."));
+        const b = el("div", "rc-buttons start");
+        b.append(button("", "Open Windows' settings", () => send("open-rdp-settings")));
+        sec.append(b);
+      }
+    } else sec.append(el("p", "muted small", "Meanwhile the device sees the screen stop until they are answered here."));
+    return sec;
   }
 
   function drawPair(box) {

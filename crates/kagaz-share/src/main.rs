@@ -9,6 +9,8 @@
 //!               [--no-sound] [--no-clipboard] [--no-files]
 //!               [--pattern [--size 1280x720] [--card-rate 5] [--tone] [--answer control|watch|deny]]
 //!               [--keep DIR]
+//!   kagaz-share --system [--home DIR]
+//!   kagaz-share helper install --from DIR [--settings FILE] | remove --to DIR
 //!
 //! `--port` is the port it listens on (3390 unless said: Windows' own
 //! Remote Desktop keeps 3389). `--local` listens on this computer only,
@@ -53,6 +55,15 @@
 //! Its certificate and the paired devices are kept in `--keep` (Kagaz's
 //! folder for them unless said).
 //!
+//! `--system` is how Kagaz's helper service runs it (win_helper.rs), as
+//! the system, at the computer's own screen whichever desktop Windows
+//! shows: its settings (share.json's) and what it keeps are in `--home`
+//! (`C:\ProgramData\Kagaz`), its log in `share\helper.log` there, and
+//! Kagaz's window steers it over control.rs, sending `settings <json>`
+//! when they change. Who is asked when nobody steers it: Windows' own
+//! small question, which nobody answers before sign-in, so then only
+//! devices allowed to connect with the PIN without asking come in.
+//!
 //! It says what it does on its output, one line each: `listening
 //! <address>`, `fingerprint <sha-256 of its certificate>`, `pictures from
 //! …`, who connected and left, and every five seconds the pictures'
@@ -67,6 +78,7 @@ mod pattern;
 #[allow(dead_code)]
 mod link;
 mod clip;
+mod control;
 mod paired;
 mod pairing;
 mod picture;
@@ -77,6 +89,8 @@ mod win;
 mod win_ask;
 #[cfg(windows)]
 mod win_clip;
+#[cfg(windows)]
+mod win_helper;
 #[cfg(windows)]
 mod win_sound;
 
@@ -98,8 +112,14 @@ use std::time::{Duration, Instant};
 /// `--driven`): `@` and JSON, one event each.
 static DRIVEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
+/// Run by the helper service: Kagaz's window hears it over control.rs.
+static SYSTEM: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 pub fn event(value: serde_json::Value) {
-    if DRIVEN.load(Ordering::Relaxed) {
+    if SYSTEM.load(Ordering::Relaxed) {
+        control::remember(&value);
+        control::send(&format!("@{value}"));
+    } else if DRIVEN.load(Ordering::Relaxed) {
         say(&format!("@{value}"));
     }
 }
@@ -117,7 +137,21 @@ pub fn local_input() -> u64 {
     }
 }
 
+/// Where the helper's lines go: a log of its own (it has no output).
+static LOG: std::sync::Mutex<Option<PathBuf>> = std::sync::Mutex::new(None);
+
 pub fn say(line: &str) {
+    if let Some(at) = LOG.lock().unwrap().as_ref() {
+        // Kept short: started again when over a megabyte.
+        if std::fs::metadata(at).is_ok_and(|m| m.len() > 1 << 20) {
+            let _ = std::fs::rename(at, at.with_extension("old.log"));
+        }
+        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(at) {
+            let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+            let _ = writeln!(f, "{secs} {line}");
+        }
+        return;
+    }
     let mut out = std::io::stdout().lock();
     let _ = writeln!(out, "{line}");
     let _ = out.flush();
@@ -341,11 +375,22 @@ fn devices_event(paired: &paired::Paired) {
     event(serde_json::json!({ "kind": "devices", "devices": list, "pin": store.pin.is_some() }));
 }
 
-fn commands(pairing: Arc<pairing::Pairing>, lines: Arc<paired::Lines>, now: Arc<Now>) {
-    std::thread::spawn(move || {
-        use std::io::BufRead;
-        for line in std::io::stdin().lock().lines() {
-            let Ok(line) = line else { break };
+/// What Kagaz's window (or a person typing) can tell it.
+struct Commands {
+    pairing: Arc<pairing::Pairing>,
+    lines: Arc<paired::Lines>,
+    now: Arc<Now>,
+    /// Run by the helper: where its settings are kept.
+    settings: Option<PathBuf>,
+}
+
+impl Commands {
+    fn run(&self, line: &str) {
+        let (pairing, lines, now) = (&self.pairing, &self.lines, &self.now);
+        {
+            if let (Some(rest), Some(at)) = (line.strip_prefix("settings "), self.settings.as_ref()) {
+                return self.settings_changed(at, rest);
+            }
             let words: Vec<&str> = line.split_whitespace().collect();
             let paired = &pairing.paired;
             match words.as_slice() {
@@ -413,6 +458,41 @@ fn commands(pairing: Arc<pairing::Pairing>, lines: Arc<paired::Lines>, now: Arc<
                 _ => say("pair, confirm, cancel, pin <digits>, list, allow <id> …, forget <id>, answer <id> control|watch|deny"),
             }
         }
+    }
+
+    /// Run by the helper: new settings from Kagaz's window. Kept; the lock
+    /// at once, and for where or whether it listens it ends, to be started
+    /// again by the service with them.
+    fn settings_changed(&self, at: &std::path::Path, text: &str) {
+        helper_settings(at, text, Some(&self.now.lock));
+    }
+}
+
+fn helper_settings(at: &std::path::Path, text: &str, lock: Option<&std::sync::Mutex<String>>) {
+    let Ok(new) = serde_json::from_str::<HelperSettings>(text) else {
+        return say("settings that could not be read");
+    };
+    let old = HelperSettings::load(at);
+    if std::fs::write(at, text).is_err() {
+        return say("the settings could not be kept");
+    }
+    if let Some(lock) = lock {
+        *lock.lock().unwrap() = new.lock.clone();
+    }
+    if (new.on, new.port, &new.listen, new.record) != (old.on, old.port, &old.listen, old.record) {
+        say("settings changed: starting again with them");
+        std::process::exit(0);
+    }
+}
+
+/// Typed lines, or a driven program's input from Kagaz's window.
+fn commands(commands: Arc<Commands>) {
+    std::thread::spawn(move || {
+        use std::io::BufRead;
+        for line in std::io::stdin().lock().lines() {
+            let Ok(line) = line else { break };
+            commands.run(&line);
+        }
         // Kagaz's window that ran it is gone: sharing stops with it, never
         // left running unseen.
         if DRIVEN.load(Ordering::Relaxed) {
@@ -420,6 +500,55 @@ fn commands(pairing: Arc<pairing::Pairing>, lines: Arc<paired::Lines>, now: Arc<
             std::process::exit(0);
         }
     });
+}
+
+/// Kagaz's settings for sharing, as the helper keeps them (share.json's
+/// shape; what else is there is Kagaz's).
+#[derive(serde::Deserialize, Clone)]
+#[serde(default)]
+struct HelperSettings {
+    on: bool,
+    port: u16,
+    listen: String,
+    lock: String,
+    record: bool,
+}
+
+impl Default for HelperSettings {
+    fn default() -> HelperSettings {
+        HelperSettings { on: false, port: 3390, listen: "all".into(), lock: "unused".into(), record: true }
+    }
+}
+
+impl HelperSettings {
+    fn load(at: &std::path::Path) -> HelperSettings {
+        std::fs::read_to_string(at).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default()
+    }
+}
+
+/// This computer's Tailscale address, found without sending anything.
+fn tailscale_address() -> Option<std::net::IpAddr> {
+    let s = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
+    s.connect("100.100.100.100:53").ok()?;
+    let ip = s.local_addr().ok()?.ip();
+    ip.to_string().starts_with("100.").then_some(ip)
+}
+
+/// Run by the helper: Kagaz's window answers when it steers; otherwise
+/// Windows' own question, which nobody answers before sign-in.
+struct Either {
+    lines: Arc<paired::Lines>,
+    alone: Arc<dyn paired::Asker>,
+}
+
+impl paired::Asker for Either {
+    fn ask(&self, id: &str, name: &str, wait: Duration) -> paired::Answer {
+        if control::connected() {
+            paired::Asker::ask(&*self.lines, id, name, wait)
+        } else {
+            self.alone.ask(id, name, wait)
+        }
+    }
 }
 
 /// A new connection: a pairing (it starts with Kagaz's mark) or a Remote
@@ -460,10 +589,75 @@ fn main() -> anyhow::Result<()> {
         return Ok(());
     }
     #[cfg(windows)]
+    if args.get(1).map(String::as_str) == Some("helper") {
+        return win_helper::main(&args);
+    }
+    #[cfg(windows)]
     win::dpi_aware();
-    let port: u16 = value(&args, "--port").map(|p| p.parse()).transpose()?.unwrap_or(3390);
-    let local = args.iter().any(|a| a == "--local");
-    let bind: Option<std::net::IpAddr> = value(&args, "--bind").map(|b| b.parse()).transpose()?;
+    // Run by the helper service: its folder, its log, its settings.
+    let home: Option<PathBuf> = if args.iter().any(|a| a == "--system") {
+        let home = match value(&args, "--home") {
+            Some(h) => PathBuf::from(h),
+            #[cfg(windows)]
+            None => win_helper::home(),
+            #[cfg(not(windows))]
+            None => anyhow::bail!("--system needs --home DIR here"),
+        };
+        for d in ["share", "control", "received"] {
+            std::fs::create_dir_all(home.join(d))?;
+        }
+        SYSTEM.store(true, Ordering::Relaxed);
+        *LOG.lock().unwrap() = Some(home.join("share").join("helper.log"));
+        #[cfg(windows)]
+        win::FOLLOW.store(true, Ordering::Relaxed);
+        Some(home)
+    } else {
+        None
+    };
+    let helper = home.as_ref().map(|h| HelperSettings::load(&h.join("share").join("settings.json")));
+    if let (Some(home), Some(settings)) = (&home, &helper) {
+        if !settings.on {
+            // Sharing is off: nothing listens; Kagaz's window can still
+            // turn it on.
+            say("sharing is off");
+            event(serde_json::json!({ "kind": "off" }));
+            let at = home.join("share").join("settings.json");
+            control::serve(&home.join("control"), move |line| {
+                if let Some(rest) = line.strip_prefix("settings ") {
+                    helper_settings(&at, rest, None);
+                }
+            })?;
+            loop {
+                std::thread::park();
+            }
+        }
+    }
+    let port: u16 = match &helper {
+        Some(h) => h.port,
+        None => value(&args, "--port").map(|p| p.parse()).transpose()?.unwrap_or(3390),
+    };
+    let local = match &helper {
+        Some(h) => h.listen == "local",
+        None => args.iter().any(|a| a == "--local"),
+    };
+    let bind: Option<std::net::IpAddr> = match &helper {
+        // Tailscale may come up after the computer starts: waited for.
+        Some(h) if h.listen == "tailscale" => {
+            let mut said = false;
+            loop {
+                if let Some(ip) = tailscale_address() {
+                    break Some(ip);
+                }
+                if !said {
+                    say("waiting for Tailscale");
+                    said = true;
+                }
+                std::thread::sleep(Duration::from_secs(5));
+            }
+        }
+        Some(_) => None,
+        None => value(&args, "--bind").map(|b| b.parse()).transpose()?,
+    };
     if args.iter().any(|a| a == "--driven") {
         DRIVEN.store(true, Ordering::Relaxed);
     }
@@ -471,7 +665,10 @@ fn main() -> anyhow::Result<()> {
     let pattern = args.iter().any(|a| a == "--pattern");
     let watch = args.iter().any(|a| a == "--watch");
     let name = value(&args, "--name").unwrap_or_else(computer_name);
-    let keep = keep_dir(&args);
+    let keep = match &home {
+        Some(h) => h.join("share"),
+        None => keep_dir(&args),
+    };
     let (der, key) = certificate(&keep)?;
     let paired = Arc::new(paired::Paired::load(keep.join("paired.json")));
     if let Some(pin) = value(&args, "--pin") {
@@ -539,7 +736,10 @@ fn main() -> anyhow::Result<()> {
         None
     };
     // The clipboard and files.
-    let received = std::env::temp_dir().join("kagaz").join("received");
+    let received = match &home {
+        Some(h) => h.join("received"),
+        None => std::env::temp_dir().join("kagaz").join("received"),
+    };
     tidy(&received);
     let clipboard = if args.iter().any(|a| a == "--no-clipboard") {
         None
@@ -569,7 +769,13 @@ fn main() -> anyhow::Result<()> {
     let fingerprint: String = link::hex(&Sha256::digest(&der));
     // Who answers when a device asks to connect.
     let lines = Arc::new(paired::Lines::default());
-    let asker: Arc<dyn paired::Asker> = if args.iter().any(|a| a == "--ask-on-input" || a == "--driven") {
+    let asker: Arc<dyn paired::Asker> = if home.is_some() {
+        #[cfg(windows)]
+        let alone: Arc<dyn paired::Asker> = Arc::new(win_ask::Window);
+        #[cfg(not(windows))]
+        let alone: Arc<dyn paired::Asker> = Arc::new(paired::Always(paired::Answer::Deny));
+        Arc::new(Either { lines: lines.clone(), alone })
+    } else if args.iter().any(|a| a == "--ask-on-input" || a == "--driven") {
         lines.clone()
     } else if pattern {
         Arc::new(paired::Always(match value(&args, "--answer").as_deref() {
@@ -593,12 +799,35 @@ fn main() -> anyhow::Result<()> {
         allowed: allowed.clone(),
         current: current.clone(),
         quit: std::sync::Mutex::new(None),
-        lock: std::sync::Mutex::new(value(&args, "--lock").unwrap_or_else(|| "never".into())),
+        lock: std::sync::Mutex::new(match &helper {
+            Some(h) => h.lock.clone(),
+            None => value(&args, "--lock").unwrap_or_else(|| "never".into()),
+        }),
     });
-    let record = !args.iter().any(|a| a == "--no-record");
-    let sessions_file = keep.join("sessions.jsonl");
+    let record = match &helper {
+        Some(h) => h.record,
+        None => !args.iter().any(|a| a == "--no-record"),
+    };
+    // Run by the helper, the record is where the person who installed it
+    // can read it.
+    let sessions_file = match &home {
+        Some(h) => h.join("control").join("sessions.jsonl"),
+        None => keep.join("sessions.jsonl"),
+    };
     let pairing = Arc::new(pairing::Pairing::new(paired.clone(), name.clone(), fingerprint.clone(), addr.port()));
-    commands(pairing.clone(), lines, now.clone());
+    let steering = Arc::new(Commands {
+        pairing: pairing.clone(),
+        lines,
+        now: now.clone(),
+        settings: home.as_ref().map(|h| h.join("share").join("settings.json")),
+    });
+    match &home {
+        Some(h) => {
+            let c = steering.clone();
+            control::serve(&h.join("control"), move |line| c.run(line))?;
+        }
+        None => commands(steering),
+    }
     let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
     let viewers = latest.viewers.clone();
     runtime.block_on(async move {
@@ -665,8 +894,14 @@ fn main() -> anyhow::Result<()> {
                 let how = now.lock.lock().unwrap().clone();
                 if how == "always" || (how == "unused" && !used_here) {
                     say("locking this computer: the session is over");
-                    #[cfg(windows)]
-                    win::lock();
+                    // Run by the helper, the person's own Kagaz locks it
+                    // (Windows locks only from the person's desktop).
+                    if home.is_some() && control::connected() {
+                        event(serde_json::json!({ "kind": "lock" }));
+                    } else {
+                        #[cfg(windows)]
+                        win::lock();
+                    }
                 }
             }
         }

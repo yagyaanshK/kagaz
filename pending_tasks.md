@@ -606,7 +606,44 @@ Plan: `docs/remote-connection.md` (agreed 2026-11-16).
          copy text and a picture each way, send a file and paste it in a
          folder there, play something (`kagaz remote try "<name>" --sound`
          prints how its sound arrives); 7. turn sharing off and go back to
-         Windows' own Remote Desktop. Until
+         Windows' own Remote Desktop. **Step 5 built** (2026-11-19, the
+         owner's answers: while sharing is on, closing Kagaz's window
+         leaves it in the tray; the helper reaches the sign-in screen
+         after a restart too; names `KagazHelper`, "Kagaz helper",
+         `C:\ProgramData\Kagaz`): Start with Windows (HKCU Run entry
+         `"<Kagaz>" --tray`, only while sharing is on and chosen; off by
+         default), the tray (Open Kagaz, Stop sharing, Quit) only while
+         sharing is on, the window hiding to it on close; "Sign-in screen
+         and administrator prompts": someone here / Windows' Remote
+         Desktop (says whether it is on, opens Windows' page) / Kagaz's
+         helper service, installed and removed through Windows'
+         administrator question (`kagaz-share helper install|remove`,
+         sc.exe, icacls; the paired devices, certificate and record move
+         to the helper's folder and back). The service runs
+         `kagaz-share --system` as the system in the console session,
+         following Windows between the person's desktop and the secure
+         one; Kagaz steers it over a token-protected connection on this
+         computer (control.rs); with nobody steering, Windows' own small
+         question asks, so before sign-in only devices allowed in with
+         the PIN without asking get in. Tried here with the test card
+         and a stand-in for the service: pairing, the PIN, the record,
+         a change of port restarting it, turning it off; nobody steering
+         turned a device without the PIN away. **Not yet run on Windows
+         at all** (service, desktop switching, tray, Run entry). Not done:
+         Ctrl + Alt + Del at the sign-in screen (Windows lets a service
+         send it only under a policy), and a helper left at an older
+         version after Kagaz is updated (choose it again to update it).
+         **Step 5 on the PC, after the steps above:** 8. turn on Start
+         with Windows, sign out and in: Kagaz should wait in the tray,
+         sharing; close its window: still in the tray; 9. choose Kagaz's
+         helper service, answer Windows' question, connect from here;
+         press the Windows key + L there: the lock screen should show
+         here and take the PIN or password typed here; open something
+         that asks for an administrator: the prompt should show and be
+         answerable; restart the PC and connect before signing in;
+         10. choose "Someone here answers them" again: the helper and
+         `C:\ProgramData\Kagaz` should be gone, the paired devices kept.
+         Until
       it exists: a VNC server on that laptop, reached over Tailscale,
       with today's Kagaz (not yet tried against a real Windows VNC
       server).

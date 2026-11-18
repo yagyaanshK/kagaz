@@ -1362,5 +1362,8 @@ body.share-sign-body { background: var(--accent); overflow: hidden; }
 .share-pin input { width: 160px; }
 .share-perms { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 6px 16px; }
 .share-perms .disabled-look { color: var(--muted); }
+.share-ask-inline { margin-top: 10px; padding: 12px 14px; border-radius: 10px; border: 1px solid var(--line, rgba(127, 127, 127, 0.3)); background: var(--hover, rgba(127, 127, 127, 0.08)); }
+.share-ask-inline p { margin: 0 0 6px; }
+.share-ask-inline .share-ask-title { font-weight: 600; }
 .pair-digits { font-size: 32px; font-weight: 700; letter-spacing: 4px; margin: 8px 0; }
 .share-row { border-radius: var(--r-card, 12px); background: var(--panel); margin-bottom: 12px; padding: 10px 14px; }

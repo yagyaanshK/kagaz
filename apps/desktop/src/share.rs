@@ -5,6 +5,14 @@
 //! happens in `@`-lines of JSON; this side keeps the state, tells the
 //! pages, and opens the question and the sign as their own small
 //! windows, on top of whatever is open.
+//!
+//! While sharing is on, Kagaz waits in the tray when its window is closed
+//! (Open Kagaz, Stop sharing, Quit), and can start with Windows straight
+//! into the tray (off unless chosen). With Kagaz's helper service
+//! installed (chosen under "Sign-in screen and administrator prompts",
+//! with an administrator's password; win_helper.rs in kagaz-share), the
+//! service runs the share instead, also before anyone signs in, and this
+//! window steers it over a connection on this computer.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -32,11 +40,26 @@ pub struct Settings {
     pub lock: String,
     /// Keep a record of sessions, on this computer only.
     pub record: bool,
+    /// Start Kagaz, in the tray, when the person signs in to Windows.
+    pub startup: bool,
+    /// The sign-in screen and administrator prompts: "person" (someone at
+    /// the computer answers them), "rdp" (Windows' own Remote Desktop), or
+    /// "service" (Kagaz's helper service).
+    pub prompts: String,
 }
 
 impl Default for Settings {
     fn default() -> Settings {
-        Settings { on: false, port: 3390, listen: "all".into(), ask: true, lock: "unused".into(), record: true }
+        Settings {
+            on: false,
+            port: 3390,
+            listen: "all".into(),
+            ask: true,
+            lock: "unused".into(),
+            record: true,
+            startup: false,
+            prompts: "person".into(),
+        }
     }
 }
 
@@ -69,12 +92,27 @@ pub struct Status {
     pub control: bool,
     pub asking: Vec<Value>,
     pub problem: Option<String>,
+    /// Windows (the tray, starting with Windows, the helper are offered).
+    pub windows: bool,
+    /// Kagaz's helper service is installed, and this window steers it.
+    pub helper: bool,
+    pub steering: bool,
+    /// Windows' own Remote Desktop is turned on here (None: not known).
+    pub rdp: Option<bool>,
+}
+
+/// How Kagaz reaches the share: the program it started, or the helper's.
+enum Link {
+    Child(Child, ChildStdin),
+    Helper(std::net::TcpStream),
 }
 
 #[derive(Default)]
 pub struct Share {
-    child: Mutex<Option<(Child, ChildStdin)>>,
+    child: Mutex<Option<Link>>,
     status: Mutex<Status>,
+    /// Looking for the helper again after losing it.
+    seeking: std::sync::atomic::AtomicBool,
 }
 
 fn log(line: &str) {
@@ -88,6 +126,78 @@ fn program() -> Option<PathBuf> {
     }
     let here = std::env::current_exe().ok()?.parent()?.to_path_buf();
     ["kagaz-share.exe", "kagaz-share-windows-x64.exe", "kagaz-share"].iter().map(|n| here.join(n)).find(|p| p.is_file())
+}
+
+/// The helper's folder (`C:\ProgramData\Kagaz`), or the one named by
+/// KAGAZ_SHARE_HELPER for testing (with a `kagaz-share --system --home`
+/// there standing in for the service).
+fn helper_home() -> Option<PathBuf> {
+    if let Some(dir) = std::env::var_os("KAGAZ_SHARE_HELPER") {
+        return Some(dir.into());
+    }
+    #[cfg(windows)]
+    {
+        let base = std::env::var_os("ProgramData").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(r"C:\ProgramData"));
+        Some(base.join("Kagaz"))
+    }
+    #[cfg(not(windows))]
+    None
+}
+
+#[cfg(windows)]
+fn quiet(program: &str) -> Command {
+    use std::os::windows::process::CommandExt;
+    let mut c = Command::new(program);
+    c.creation_flags(0x0800_0000);
+    c
+}
+
+/// Kagaz's helper service is installed here.
+fn helper_installed() -> bool {
+    if std::env::var_os("KAGAZ_SHARE_HELPER").is_some() {
+        return true;
+    }
+    #[cfg(windows)]
+    {
+        quiet("sc.exe").args(["query", "KagazHelper"]).output().is_ok_and(|o| o.status.success())
+    }
+    #[cfg(not(windows))]
+    false
+}
+
+/// Windows' own Remote Desktop is on (it lets connections in).
+fn rdp_on() -> Option<bool> {
+    #[cfg(windows)]
+    {
+        let out = quiet("reg.exe")
+            .args(["query", r"HKLM\SYSTEM\CurrentControlSet\Control\Terminal Server", "/v", "fDenyTSConnections"])
+            .output()
+            .ok()?;
+        let text = String::from_utf8_lossy(&out.stdout);
+        let v = text.split_whitespace().last()?;
+        Some(v == "0x0")
+    }
+    #[cfg(not(windows))]
+    None
+}
+
+/// Start with Windows: Kagaz in the tray at sign-in, while sharing is on
+/// and the person chose it; otherwise nothing of it is left.
+fn startup_apply(settings: &Settings) {
+    #[cfg(windows)]
+    {
+        const RUN: &str = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run";
+        if settings.on && settings.startup {
+            if let Ok(me) = std::env::current_exe() {
+                let line = format!("\"{}\" --tray", me.to_string_lossy());
+                let _ = quiet("reg.exe").args(["add", RUN, "/v", "Kagaz", "/t", "REG_SZ", "/d", &line, "/f"]).output();
+            }
+        } else {
+            let _ = quiet("reg.exe").args(["delete", RUN, "/v", "Kagaz", "/f"]).output();
+        }
+    }
+    #[cfg(not(windows))]
+    let _ = settings;
 }
 
 /// Sharing is offered where the screen can be shared: Windows for now
@@ -127,6 +237,10 @@ impl Share {
         s.supported = supported();
         s.settings = load();
         s.addresses = if s.running { addresses() } else { Vec::new() };
+        s.windows = cfg!(windows) || std::env::var_os("KAGAZ_SHARE_PATTERN").is_some();
+        s.helper = helper_installed();
+        s.steering = matches!(*self.child.lock().unwrap(), Some(Link::Helper(_)));
+        s.rdp = rdp_on();
         s
     }
 
@@ -134,8 +248,91 @@ impl Share {
         let _ = app.emit("share", self.status());
     }
 
-    /// Starts the program with the settings, unless it runs.
+    /// Steers the helper's share: its token and port are in its folder,
+    /// readable by the person who installed it. The settings go first.
+    fn steer(&self, app: &AppHandle) -> Result<(), String> {
+        let mut link = self.child.lock().unwrap();
+        if link.is_some() {
+            return Ok(());
+        }
+        let home = helper_home().ok_or("no helper here")?;
+        let told: Value = std::fs::read_to_string(home.join("control").join("control.json"))
+            .ok()
+            .and_then(|t| serde_json::from_str(&t).ok())
+            .ok_or("Kagaz's helper is not running")?;
+        let port = told["port"].as_u64().ok_or("Kagaz's helper is not running")? as u16;
+        let token = told["token"].as_str().unwrap_or("");
+        let mut stream = std::net::TcpStream::connect_timeout(&([127, 0, 0, 1], port).into(), std::time::Duration::from_secs(2))
+            .map_err(|_| "Kagaz's helper is not running".to_string())?;
+        let settings = serde_json::to_string(&load()).map_err(|e| e.to_string())?;
+        writeln!(stream, "{token}").and_then(|_| writeln!(stream, "settings {settings}")).map_err(|e| e.to_string())?;
+        let reading = stream.try_clone().map_err(|e| e.to_string())?;
+        *link = Some(Link::Helper(stream));
+        drop(link);
+        *self.status.lock().unwrap() = Status::default();
+        log("steering the helper");
+        let app = app.clone();
+        std::thread::spawn(move || {
+            for line in std::io::BufReader::new(reading).lines() {
+                let Ok(line) = line else { break };
+                if let Some(ev) = line.strip_prefix('@').and_then(|j| serde_json::from_str::<Value>(j).ok()) {
+                    heard(&app, ev);
+                }
+            }
+            let share = app.state::<Share>();
+            let was = matches!(*share.child.lock().unwrap(), Some(Link::Helper(_)));
+            if was {
+                share.child.lock().unwrap().take();
+            }
+            *share.status.lock().unwrap() = Status::default();
+            close_window(&app, "share-sign");
+            close_window(&app, "share-ask");
+            log("the helper let go");
+            share.tell(&app);
+            // It starts again by itself after a change of settings: found
+            // again when it does.
+            if was {
+                share.seek(&app);
+            }
+        });
+        Ok(())
+    }
+
+    /// Looks for the helper every two seconds until it answers (or is no
+    /// longer installed).
+    fn seek(&self, app: &AppHandle) {
+        if self.seeking.swap(true, std::sync::atomic::Ordering::AcqRel) {
+            return;
+        }
+        let app = app.clone();
+        std::thread::spawn(move || {
+            let share = app.state::<Share>();
+            for _ in 0..900 {
+                std::thread::sleep(std::time::Duration::from_secs(2));
+                if !helper_installed() || share.child.lock().unwrap().is_some() {
+                    break;
+                }
+                if share.steer(&app).is_ok() {
+                    share.tell(&app);
+                    break;
+                }
+            }
+            share.seeking.store(false, std::sync::atomic::Ordering::Release);
+        });
+    }
+
+    /// Starts the program with the settings, unless it runs; with the
+    /// helper installed, steers the helper's instead.
     pub fn start(&self, app: &AppHandle) -> Result<(), String> {
+        if helper_installed() {
+            return match self.steer(app) {
+                Ok(()) => Ok(()),
+                Err(e) => {
+                    self.seek(app);
+                    Err(e)
+                }
+            };
+        }
         let mut child = self.child.lock().unwrap();
         if child.is_some() {
             return Ok(());
@@ -173,7 +370,7 @@ impl Share {
         let mut c = cmd.spawn().map_err(|e| format!("kagaz-share did not start: {e}"))?;
         let stdin = c.stdin.take().ok_or("no way to kagaz-share")?;
         let stdout = c.stdout.take().ok_or("no word from kagaz-share")?;
-        *child = Some((c, stdin));
+        *child = Some(Link::Child(c, stdin));
         drop(child);
         {
             let mut st = self.status.lock().unwrap();
@@ -190,8 +387,15 @@ impl Share {
                 }
             }
             let share = app.state::<Share>();
-            let ended = share.child.lock().unwrap().take();
-            if let Some((mut c, _)) = ended {
+            let ended = {
+                let mut link = share.child.lock().unwrap();
+                if matches!(*link, Some(Link::Child(..))) {
+                    link.take()
+                } else {
+                    None
+                }
+            };
+            if let Some(Link::Child(mut c, _)) = ended {
                 let _ = c.wait();
             }
             {
@@ -210,20 +414,31 @@ impl Share {
         Ok(())
     }
 
+    /// Stops the program Kagaz started, or lets go of the helper's (which
+    /// goes on as its settings say).
     pub fn stop(&self) {
-        if let Some((mut c, stdin)) = self.child.lock().unwrap().take() {
-            // Its input closing ends it; then make sure.
-            drop(stdin);
-            std::thread::sleep(std::time::Duration::from_millis(300));
-            let _ = c.kill();
-            let _ = c.wait();
+        let link = self.child.lock().unwrap().take();
+        match link {
+            Some(Link::Child(mut c, stdin)) => {
+                // Its input closing ends it; then make sure.
+                drop(stdin);
+                std::thread::sleep(std::time::Duration::from_millis(300));
+                let _ = c.kill();
+                let _ = c.wait();
+            }
+            Some(Link::Helper(s)) => {
+                let _ = s.shutdown(std::net::Shutdown::Both);
+            }
+            None => {}
         }
     }
 
     pub fn send(&self, line: &str) -> Result<(), String> {
         let mut child = self.child.lock().unwrap();
-        let (_, stdin) = child.as_mut().ok_or("sharing is off")?;
-        writeln!(stdin, "{line}").and_then(|_| stdin.flush()).map_err(|e| e.to_string())
+        match child.as_mut().ok_or("sharing is off")? {
+            Link::Child(_, stdin) => writeln!(stdin, "{line}").and_then(|_| stdin.flush()).map_err(|e| e.to_string()),
+            Link::Helper(s) => writeln!(s, "{line}").and_then(|_| s.flush()).map_err(|e| e.to_string()),
+        }
     }
 }
 
@@ -274,6 +489,7 @@ fn heard(app: &AppHandle, ev: Value) {
         let mut st = share.status.lock().unwrap();
         match kind.as_str() {
             "listening" => {
+                st.running = true;
                 st.listening = ev["address"].as_str().map(String::from);
                 st.name = ev["name"].as_str().unwrap_or("").to_string();
                 st.problem = None;
@@ -304,6 +520,12 @@ fn heard(app: &AppHandle, ev: Value) {
                 st.session = Some(ev.clone());
             }
             "mode" => st.control = ev["control"].as_bool().unwrap_or(false),
+            // The helper's share, turned off: nothing listens.
+            "off" => {
+                st.running = false;
+                st.listening = None;
+                st.session = None;
+            }
             "left" => {
                 st.session = None;
                 st.control = false;
@@ -323,16 +545,96 @@ fn heard(app: &AppHandle, ev: Value) {
         "paired" => {
             let _ = share.send("devices");
         }
+        // The helper's share asks this window to lock: Windows locks only
+        // from the person's own desktop.
+        "lock" => {
+            #[cfg(windows)]
+            let _ = quiet("rundll32.exe").arg("user32.dll,LockWorkStation").spawn();
+        }
         _ => {}
     }
     share.tell(app);
 }
 
+// ---- the tray ----
+
+/// Kagaz stays running in the tray (sharing is on here).
+pub fn keeps_running() -> bool {
+    load().on && supported()
+}
+
+const TRAY: &str = "share";
+
+/// The tray icon while sharing is on, and only then.
+fn tray(app: &AppHandle) {
+    use tauri::menu::{Menu, MenuItem};
+    use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+    let want = keeps_running();
+    let have = app.tray_by_id(TRAY).is_some();
+    if want == have {
+        return;
+    }
+    if !want {
+        let _ = app.remove_tray_by_id(TRAY);
+        return;
+    }
+    let made = (|| -> tauri::Result<()> {
+        let open = MenuItem::with_id(app, "share-open", "Open Kagaz", true, None::<&str>)?;
+        let stop = MenuItem::with_id(app, "share-stop", "Stop sharing", true, None::<&str>)?;
+        let quit = MenuItem::with_id(app, "share-quit", "Quit Kagaz", true, None::<&str>)?;
+        let menu = Menu::with_items(app, &[&open, &stop, &quit])?;
+        let mut b = TrayIconBuilder::with_id(TRAY).menu(&menu).tooltip("Kagaz: sharing this computer").show_menu_on_left_click(false);
+        if let Some(icon) = app.default_window_icon() {
+            b = b.icon(icon.clone());
+        }
+        b.on_menu_event(|app, ev| match ev.id().as_ref() {
+            "share-open" => show_main(app),
+            "share-stop" => {
+                let mut s = load();
+                s.on = false;
+                let app = app.clone();
+                tauri::async_runtime::spawn(async move {
+                    let _ = share_settings(app, s).await;
+                });
+            }
+            "share-quit" => app.exit(0),
+            _ => {}
+        })
+        .on_tray_icon_event(|icon, ev| {
+            if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = ev {
+                show_main(icon.app_handle());
+            }
+        })
+        .build(app)?;
+        Ok(())
+    })();
+    if let Err(e) = made {
+        log(&format!("no tray icon: {e}"));
+    }
+}
+
+fn show_main(app: &AppHandle) {
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.show();
+        let _ = w.unminimize();
+        let _ = w.set_focus();
+    }
+}
+
 /// At Kagaz's start: sharing goes on again only if the person left it on.
+/// Started with Windows (`--tray`), Kagaz waits in the tray.
 pub fn resume(app: &AppHandle) {
-    if load().on && supported() {
+    let settings = load();
+    if settings.on && supported() {
+        startup_apply(&settings);
         if let Err(e) = app.state::<Share>().start(app) {
             log(&e);
+        }
+        tray(app);
+        if std::env::args().any(|a| a == "--tray") {
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.hide();
+            }
         }
     }
 }
@@ -342,17 +644,102 @@ pub fn share_status(app: AppHandle) -> Status {
     app.state::<Share>().status()
 }
 
+/// Installs or removes Kagaz's helper service (Windows' administrator
+/// question first); Kagaz's own share is stopped while it does.
+async fn helper_change(app: &AppHandle, install: bool) -> Result<(), String> {
+    if !cfg!(windows) {
+        return Err("Kagaz's helper service is for Windows.".into());
+    }
+    let program = program().ok_or("kagaz-share is not next to Kagaz")?;
+    let keep = share_folder();
+    let settings = settings_path();
+    let share = app.state::<Share>();
+    share.stop();
+    let ended = tauri::async_runtime::spawn_blocking(move || {
+        let mut cmd = Command::new(program);
+        cmd.arg("helper");
+        if install {
+            cmd.arg("install").arg("--from").arg(&keep).arg("--settings").arg(&settings);
+        } else {
+            cmd.arg("remove").arg("--to").arg(&keep);
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(0x0800_0000);
+        }
+        cmd.status().map(|s| s.code())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| format!("kagaz-share did not start: {e}"))?;
+    match ended {
+        Some(0) => Ok(()),
+        Some(1223) => Err("Windows' administrator question was not answered yes: nothing changed.".into()),
+        _ => Err(if install {
+            "Kagaz's helper could not be installed.".into()
+        } else {
+            "Kagaz's helper could not be removed completely.".into()
+        }),
+    }
+}
+
 #[tauri::command]
-pub fn share_settings(app: AppHandle, settings: Settings) -> Result<Status, String> {
+pub async fn share_settings(app: AppHandle, settings: Settings) -> Result<Status, String> {
     let before = load();
-    let text = serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?;
+    // The helper, installed or removed as the choice for the sign-in
+    // screen asks; on a no, the choice stays as it was.
+    let mut settings = settings;
+    let installed = helper_installed() && std::env::var_os("KAGAZ_SHARE_HELPER").is_none();
+    if settings.prompts == "service" && !installed && cfg!(windows) {
+        if let Err(e) = helper_change(&app, true).await {
+            settings.prompts = before.prompts.clone();
+            save(&settings)?;
+            let share = app.state::<Share>();
+            if settings.on {
+                let _ = share.start(&app);
+            }
+            share.tell(&app);
+            return Err(e);
+        }
+    } else if settings.prompts != "service" && installed {
+        if let Err(e) = helper_change(&app, false).await {
+            settings.prompts = "service".into();
+            save(&settings)?;
+            let share = app.state::<Share>();
+            let _ = share.start(&app);
+            share.tell(&app);
+            return Err(e);
+        }
+    }
+    apply(&app, before, settings)
+}
+
+fn save(settings: &Settings) -> Result<(), String> {
+    let text = serde_json::to_string_pretty(settings).map_err(|e| e.to_string())?;
     let path = settings_path();
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     }
-    std::fs::write(&path, text).map_err(|e| e.to_string())?;
+    std::fs::write(&path, text).map_err(|e| e.to_string())
+}
+
+fn apply(app: &AppHandle, before: Settings, settings: Settings) -> Result<Status, String> {
+    let app = app.clone();
+    save(&settings)?;
+    startup_apply(&settings);
     let share = app.state::<Share>();
-    if !settings.on {
+    if helper_installed() {
+        // The helper's share takes the settings and starts again with them
+        // where needed; it goes on while Kagaz is closed.
+        if share.child.lock().unwrap().is_none() {
+            let _ = share.start(&app);
+        } else {
+            let line = serde_json::to_string(&settings).map_err(|e| e.to_string())?;
+            share.send(&format!("settings {line}"))?;
+        }
+        share.status.lock().unwrap().problem = None;
+    } else if !settings.on {
         share.stop();
         share.status.lock().unwrap().problem = None;
     } else if !supported() {
@@ -367,6 +754,7 @@ pub fn share_settings(app: AppHandle, settings: Settings) -> Result<Status, Stri
         }
         share.start(&app)?;
     }
+    tray(&app);
     share.tell(&app);
     Ok(share.status())
 }
@@ -375,6 +763,17 @@ pub fn share_settings(app: AppHandle, settings: Settings) -> Result<Status, Stri
 #[tauri::command]
 pub fn share_send(app: AppHandle, line: String) -> Result<(), String> {
     let first = line.split_whitespace().next().unwrap_or("");
+    // Windows' own page for Remote Desktop, from the choice for the
+    // sign-in screen.
+    if line == "open-rdp-settings" {
+        #[cfg(windows)]
+        {
+            let _ = quiet("explorer.exe").arg("ms-settings:remotedesktop").spawn();
+            return Ok(());
+        }
+        #[cfg(not(windows))]
+        return Err("Windows' own Remote Desktop is on Windows".into());
+    }
     const ALLOWED: [&str; 12] = ["pair", "stop", "confirm", "cancel", "pin", "allow", "forget", "answer", "watch", "control", "end", "devices"];
     if !ALLOWED.contains(&first) || line.contains('\n') {
         return Err("not a sharing command".into());
@@ -382,25 +781,33 @@ pub fn share_send(app: AppHandle, line: String) -> Result<(), String> {
     app.state::<Share>().send(&line)
 }
 
-/// The record of sessions, newest first.
-#[tauri::command]
-pub fn share_sessions() -> Vec<Value> {
-    let keep = std::env::var_os("KAGAZ_SHARE_KEEP").map(PathBuf::from).unwrap_or_else(|| {
+/// kagaz-share's folder for what sharing keeps (the same as it finds).
+fn share_folder() -> PathBuf {
+    std::env::var_os("KAGAZ_SHARE_KEEP").map(PathBuf::from).unwrap_or_else(|| {
         let base = std::env::var_os("LOCALAPPDATA")
             .map(PathBuf::from)
             .or_else(|| std::env::var_os("XDG_DATA_HOME").map(PathBuf::from))
             .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")))
             .unwrap_or_default();
         base.join("kagaz").join("share")
-    });
-    let text = std::fs::read_to_string(keep.join("sessions.jsonl")).unwrap_or_default();
+    })
+}
+
+/// The record of sessions, newest first (the helper's, where it runs).
+#[tauri::command]
+pub fn share_sessions() -> Vec<Value> {
+    let at = match helper_home().filter(|_| helper_installed()) {
+        Some(home) => home.join("control").join("sessions.jsonl"),
+        None => share_folder().join("sessions.jsonl"),
+    };
+    let text = std::fs::read_to_string(at).unwrap_or_default();
     let mut list: Vec<Value> = text.lines().filter_map(|l| serde_json::from_str(l).ok()).collect();
     list.reverse();
     list.truncate(100);
     list
 }
 
-/// Kagaz is closing: sharing stops with it.
+/// Kagaz is closing: sharing stops with it (the helper's goes on).
 pub fn shutdown(app: &AppHandle) {
     app.state::<Share>().stop();
 }

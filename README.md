@@ -218,7 +218,12 @@ that runs Kagaz and shares its screen while its person goes on using it
 (`kagaz-share`, being built: see docs/remote-connection.md): its code,
 then three words both show; after that this device signs in with the
 computer's PIN, or the person there is asked. `remote try --sound` plays
-a device's sound here and tells how it arrives.
+a device's sound here and tells how it arrives. On the computer being
+shared, Kagaz waits in the tray while sharing is on, and can start with
+Windows; the sign-in screen and administrator prompts are answered by
+someone there, through Windows' own Remote Desktop, or by Kagaz's helper
+service, installed only when chosen (with an administrator's password)
+and removed when the choice goes back.
 
 A device's screen can be seen and used from here over Remote Desktop (a
 Windows computer, GNOME's own remote access) or VNC (a phone running a VNC
