@@ -18,6 +18,8 @@ pub mod vaapi;
 mod nv_sys;
 #[cfg(target_os = "linux")]
 pub mod nvenc;
+#[cfg(windows)]
+pub mod mf;
 
 use rtsp::{Message, Mode, SinkAbilities};
 use std::io::{ErrorKind, Read, Write};
@@ -64,6 +66,17 @@ impl Pictures for video::Pattern {
             *self = video::Pattern::new(width, height);
         }
         self.draw(due.as_millis() as u64)
+    }
+}
+
+#[cfg(windows)]
+impl Pictures for super::capture_win::Screen {
+    fn picture(&mut self, _due: Duration, width: usize, height: usize) -> &[u8] {
+        super::capture_win::Screen::picture(self, width, height)
+    }
+
+    fn delivered(&self) -> u64 {
+        self.arrived
     }
 }
 

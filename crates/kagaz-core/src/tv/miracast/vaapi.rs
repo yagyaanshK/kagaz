@@ -8,6 +8,7 @@
 
 use super::va_sys::*;
 use crate::tv::capture::GpuPicture;
+pub use crate::tv::picture::rgba_to_nv12;
 use std::ffi::{c_char, c_int, c_uint, c_void, CStr};
 use std::os::fd::AsRawFd;
 
@@ -848,65 +849,9 @@ impl Drop for Vaapi {
     }
 }
 
-/// RGBA to NV12 (BT.601, video range, as OpenH264 does), on several threads.
-pub fn rgba_to_nv12(rgba: &[u8], w: usize, h: usize, y: &mut [u8], y_pitch: usize, uv: &mut [u8], uv_pitch: usize) {
-    const THREADS: usize = 6;
-    let pairs = h / 2;
-    let band = pairs.div_ceil(THREADS).max(1);
-    std::thread::scope(|s| {
-        let mut ys = y.chunks_mut(band * 2 * y_pitch);
-        let mut uvs = uv.chunks_mut(band * uv_pitch);
-        for b in 0..pairs.div_ceil(band) {
-            let (Some(yb), Some(uvb)) = (ys.next(), uvs.next()) else { break };
-            s.spawn(move || {
-                for k in 0..band {
-                    let pair = b * band + k;
-                    if pair >= pairs {
-                        break;
-                    }
-                    for dy in 0..2 {
-                        let row = &rgba[(pair * 2 + dy) * w * 4..(pair * 2 + dy + 1) * w * 4];
-                        let out = &mut yb[(k * 2 + dy) * y_pitch..(k * 2 + dy) * y_pitch + w];
-                        for (o, p) in out.iter_mut().zip(row.chunks_exact(4)) {
-                            let (r, g, b) = (p[0] as i32, p[1] as i32, p[2] as i32);
-                            *o = (((66 * r + 129 * g + 25 * b + 128) >> 8) + 16) as u8;
-                        }
-                    }
-                    let top = &rgba[pair * 2 * w * 4..];
-                    let bottom = &rgba[(pair * 2 + 1) * w * 4..];
-                    let out = &mut uvb[k * uv_pitch..k * uv_pitch + w];
-                    for x in (0..w).step_by(2) {
-                        let i = x * 4;
-                        let avg = |c: usize| {
-                            (top[i + c] as i32 + top[i + 4 + c] as i32 + bottom[i + c] as i32 + bottom[i + 4 + c] as i32) / 4
-                        };
-                        let (r, g, b) = (avg(0), avg(1), avg(2));
-                        out[x] = (((-38 * r - 74 * g + 112 * b + 128) >> 8) + 128) as u8;
-                        out[x + 1] = (((112 * r - 94 * g - 18 * b + 128) >> 8) + 128) as u8;
-                    }
-                }
-            });
-        }
-    });
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn nv12_of_white_and_black() {
-        let (w, h) = (4, 4);
-        let mut rgba = vec![255u8; w * h * 4];
-        for px in rgba[..w * 2 * 4].chunks_exact_mut(4) {
-            px[..3].copy_from_slice(&[0, 0, 0]);
-        }
-        let (mut y, mut uv) = (vec![0u8; w * h], vec![0u8; w * h / 2]);
-        rgba_to_nv12(&rgba, w, h, &mut y, w, &mut uv, w);
-        assert_eq!(y[0], 16);
-        assert_eq!(y[w * 3], 235);
-        assert!(uv.iter().all(|&c| (127..=129).contains(&c)));
-    }
 
     /// On this computer's graphics chip, when it has one: whole pictures
     /// come out and decode. Skipped without VA-API.
@@ -1097,7 +1042,7 @@ mod from_graphics_memory {
             for px in want.chunks_exact_mut(4) {
                 px[3] = 255;
             }
-            crate::tv::capture::scale_rgba(&src, sw as usize, sh as usize, &mut want, 1920, 1080);
+            crate::tv::picture::scale_rgba(&src, sw as usize, sh as usize, &mut want, 1920, 1080);
             for nal in openh264::nal_units(&bytes) {
                 if let Ok(Some(y)) = decoder.decode(nal) {
                     use openh264::formats::YUVSource;

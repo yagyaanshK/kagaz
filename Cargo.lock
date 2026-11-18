@@ -3613,6 +3613,7 @@ dependencies = [
  "libc",
  "qrcode",
  "serde_json",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3672,6 +3673,7 @@ dependencies = [
  "url",
  "uuid",
  "webpki-roots 1.0.9",
+ "windows",
  "windows-sys 0.61.2",
  "x25519-dalek 2.0.1",
  "x509-cert 0.2.5",

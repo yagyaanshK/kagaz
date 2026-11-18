@@ -109,6 +109,10 @@ pub enum TvAction {
         #[arg(long, value_enum)]
         encoder: Option<EncoderChoice>,
     },
+    /// Open the system's own screen sender instead of Kagaz's: Windows' Cast
+    /// panel (Win+K), GNOME Network Displays on Linux where installed, AirPlay
+    /// on a Mac
+    System,
     /// Use the TV as a second monitor: the desktop makes a new monitor of the
     /// TV's size (see it in the display settings, drag windows onto it).
     /// Ctrl+C ends it and the monitor goes away.
@@ -156,7 +160,18 @@ fn stop_on_ctrl_c() {
     }
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
+fn stop_on_ctrl_c() {
+    unsafe extern "system" fn on_ctrl(_: u32) -> windows_sys::core::BOOL {
+        STOP.store(true, Ordering::SeqCst);
+        1
+    }
+    unsafe {
+        windows_sys::Win32::System::Console::SetConsoleCtrlHandler(Some(on_ctrl), 1);
+    }
+}
+
+#[cfg(not(any(unix, windows)))]
 fn stop_on_ctrl_c() {}
 
 fn ways(tv: &Tv) -> String {
@@ -222,6 +237,11 @@ pub fn tv(name: &str, action: TvAction) -> Result<()> {
             stop_on_ctrl_c();
             mirror(name, via, &opts, pictures.as_mut())
         }
+        TvAction::System => {
+            let said = kagaz_core::tv::open_system_sender().map_err(|e| anyhow!(e))?;
+            println!("{}", said.replace("the TV", &format!("\"{name}\"")));
+            Ok(())
+        }
         TvAction::Extend { via, size, seconds, name: shown, power, encoder } => {
             let engine = encoder.map(Into::into).unwrap_or_else(video::Engine::from_settings);
             let mut pictures = pictures(What::Extend, size, engine)?;
@@ -276,7 +296,21 @@ fn pictures(what: What, size: Size, engine: video::Engine) -> Result<Box<dyn Pic
         }
         Ok(Box::new(screen))
     }
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(windows)]
+    {
+        let _ = engine;
+        if !matches!(what, What::Screen) {
+            bail!("on Windows Kagaz shows the main screen so far; a window or a new monitor for the TV come later");
+        }
+        let _ = size;
+        let mut screen = kagaz_core::tv::capture_win::Screen::main().map_err(|e| anyhow!(e))?;
+        match screen.first_picture(Duration::from_secs(5)) {
+            Some((w, h)) => println!("Sharing the main screen, {w}x{h}."),
+            None => bail!("Windows sent no picture of the screen"),
+        }
+        Ok(Box::new(screen))
+    }
+    #[cfg(not(any(target_os = "linux", windows)))]
     {
         let _ = (size, engine);
         bail!("showing the screen works on Linux so far; `--pattern` sends the test pattern")
@@ -387,7 +421,10 @@ fn direct(name: &str, opts: &Options, pictures: &mut dyn Pictures) -> Result<()>
 
 #[cfg(not(target_os = "linux"))]
 fn direct(name: &str, _opts: &Options, _pictures: &mut dyn Pictures) -> Result<()> {
-    bail!("{name} was not found on the network, and Wi-Fi Direct from Kagaz works on Linux only so far")
+    bail!(
+        "{name} was not found on the network, and Wi-Fi Direct from Kagaz works on Linux only so far; \
+         `kagaz tv {name} system` opens this system's own sender, which can reach it"
+    )
 }
 
 fn run<R>(

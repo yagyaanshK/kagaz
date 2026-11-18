@@ -11,6 +11,7 @@
 //! Kept inside `tv/` for now (the owner's choice of 2026-11-18); written so
 //! that remote connection's host can use it later.
 
+use super::picture::{scale, Layout};
 use super::pw;
 use dbus::arg::{OwnedFd as DbusFd, PropMap, RefArg, Variant};
 use dbus::blocking::Connection;
@@ -20,13 +21,6 @@ use std::os::fd::{FromRawFd, OwnedFd};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-
-/// The pixel layouts Kagaz takes from PipeWire: four bytes a pixel.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Layout {
-    Bgrx,
-    Rgbx,
-}
 
 /// A picture left in graphics memory (DMA-BUF), laid out row after row:
 /// what the graphics chip's encoder takes without a copy.
@@ -349,81 +343,6 @@ impl Screen {
     }
 }
 
-/// Scales smoothly, keeping the shape: bilinear when shrinking a little or
-/// growing (a 1920x1200 screen into 1080 lines), an average of the pixels
-/// covered when shrinking by half or more.
-#[allow(clippy::too_many_arguments)]
-fn scale(src: &[u8], sw: usize, sh: usize, stride: usize, layout: Layout, dst: &mut [u8], dw: usize, dh: usize) {
-    if sw == 0 || sh == 0 {
-        return;
-    }
-    // Fit inside, centred.
-    let (fw, fh) = if sw * dh > sh * dw { (dw, (sh * dw / sw).max(1)) } else { ((sw * dh / sh).max(1), dh) };
-    let (ox, oy) = ((dw - fw) / 2, (dh - fh) / 2);
-    let (r, b) = match layout {
-        Layout::Bgrx => (2, 0),
-        Layout::Rgbx => (0, 2),
-    };
-    // Each target column and row: the source positions around it, and the
-    // weight of the second (0..256). Shrinking by half or more first
-    // averages 2x2 blocks by spreading the taps.
-    let taps = |n: usize, f: usize, s: usize| -> Vec<(usize, usize, u32)> {
-        let step = s as f64 / f as f64;
-        let spread = if step >= 2.0 { (step / 2.0).floor() } else { 0.0 };
-        (0..f)
-            .map(|i| {
-                let c = ((i as f64 + 0.5) * step - 0.5 - spread / 2.0).max(0.0);
-                let i0 = (c.floor() as usize).min(n - 1);
-                let w = if spread > 0.0 { 128 } else { ((c - c.floor()) * 256.0) as u32 };
-                let i1 = (i0 + 1 + spread as usize).min(n - 1);
-                (i0, i1, w)
-            })
-            .collect()
-    };
-    let cols = taps(sw, fw, sw);
-    let rows = taps(sh, fh, sh);
-    let same = sw == fw && sh == fh;
-    let band_rows = fh.div_ceil(SCALE_THREADS);
-    let area = &mut dst[oy * dw * 4..(oy + fh) * dw * 4];
-    std::thread::scope(|s| {
-        for (band, chunk) in area.chunks_mut(band_rows * dw * 4).enumerate() {
-            let (cols, rows) = (&cols, &rows);
-            s.spawn(move || {
-                for (k, line) in chunk.chunks_mut(dw * 4).enumerate() {
-                    let y = band * band_rows + k;
-                    let out = &mut line[ox * 4..(ox + fw) * 4];
-                    if same {
-                        // The same size: only the channels change places.
-                        let row = &src[y * stride..y * stride + sw * 4];
-                        for (px, s) in out.chunks_exact_mut(4).zip(row.chunks_exact(4)) {
-                            px[0] = s[r];
-                            px[1] = s[1];
-                            px[2] = s[b];
-                            px[3] = 255;
-                        }
-                        continue;
-                    }
-                    let (y0, y1, wy) = rows[y];
-                    let row0 = &src[y0 * stride..];
-                    let row1 = &src[y1 * stride..];
-                    for (px, &(x0, x1, wx)) in out.chunks_exact_mut(4).zip(cols.iter()) {
-                        let (a, c) = (x0 * 4, x1 * 4);
-                        let mix = |from: usize| {
-                            let top = row0[a + from] as u32 * (256 - wx) + row0[c + from] as u32 * wx;
-                            let bottom = row1[a + from] as u32 * (256 - wx) + row1[c + from] as u32 * wx;
-                            ((top * (256 - wy) + bottom * wy) >> 16) as u8
-                        };
-                        px[0] = mix(r);
-                        px[1] = mix(1);
-                        px[2] = mix(b);
-                        px[3] = 255;
-                    }
-                }
-            });
-        }
-    });
-}
-
 /// Reads a picture in graphics memory through a mapping (for the
 /// processor's encoder) and scales it.
 fn scale_mapped(g: &GpuPicture, dst: &mut [u8], dw: usize, dh: usize) -> Result<(), String> {
@@ -462,15 +381,6 @@ fn read_mapped<T>(g: &GpuPicture, read: impl FnOnce(&[u8], usize, usize, usize, 
         Ok(out)
     }
 }
-
-/// [`scale`] from RGBA, for tests elsewhere.
-#[cfg(test)]
-pub(crate) fn scale_rgba(src: &[u8], sw: usize, sh: usize, dst: &mut [u8], dw: usize, dh: usize) {
-    scale(src, sw, sh, sw * 4, Layout::Rgbx, dst, dw, dh);
-}
-
-/// Threads that share the scaling of each picture.
-const SCALE_THREADS: usize = 6;
 
 /// Opens the stream; PipeWire's own thread puts each picture in `latest`.
 fn run_stream(
@@ -787,22 +697,5 @@ mod tests {
         eprintln!("scale 1920x1200 -> 1080p: {:.1} ms", a.elapsed().as_secs_f64() / 20.0 * 1e3);
     }
 
-    #[test]
-    fn scales_with_bars_and_colours_in_place() {
-        // A 4x2 BGRx picture: left half red, right half blue.
-        let mut src = Vec::new();
-        for _ in 0..2 {
-            for x in 0..4 {
-                src.extend_from_slice(if x < 2 { &[0, 0, 255, 0] } else { &[255, 0, 0, 0] });
-            }
-        }
-        // Into 4x4: the picture fills the middle two rows, black above and below.
-        let mut dst = vec![0u8; 4 * 4 * 4];
-        scale(&src, 4, 2, 16, Layout::Bgrx, &mut dst, 4, 4);
-        let px = |x: usize, y: usize| &dst[(y * 4 + x) * 4..(y * 4 + x) * 4 + 4];
-        assert_eq!(px(0, 0), &[0, 0, 0, 0]);
-        assert_eq!(px(0, 1), &[255, 0, 0, 255]);
-        assert_eq!(px(3, 2), &[0, 0, 255, 255]);
-        assert_eq!(px(3, 3), &[0, 0, 0, 0]);
-    }
+
 }

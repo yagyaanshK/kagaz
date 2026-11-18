@@ -95,6 +95,30 @@ windows-sys = { version = "0.61", features = [
     "Win32_Graphics_Printing",
     "Win32_Storage_Xps",
 ] }
+# Mirroring to a TV on Windows: the screen through
+# Windows.Graphics.Capture, H.264 through Media Foundation (the graphics chip's encoder
+# where there is one), and Win+K for Windows' own Cast.
+windows = { version = "0.62", features = [
+    "Foundation",
+    "Graphics",
+    "Graphics_Capture",
+    "Graphics_DirectX",
+    "Graphics_DirectX_Direct3D11",
+    "Win32_Foundation",
+    "Win32_Graphics_Direct3D",
+    "Win32_Graphics_Direct3D11",
+    "Win32_Graphics_Dxgi",
+    "Win32_Graphics_Dxgi_Common",
+    "Win32_Graphics_Gdi",
+    "Win32_Media_MediaFoundation",
+    "Win32_System_Com",
+    "Win32_System_Ole",
+    "Win32_System_Variant",
+    "Win32_System_WinRT",
+    "Win32_System_WinRT_Direct3D11",
+    "Win32_System_WinRT_Graphics_Capture",
+    "Win32_UI_Input_KeyboardAndMouse",
+] }
 
 # A computer's sound packed as Opus is decoded by libopus (BSD-3-Clause),
 # built in from its source. That build does not cross to Windows from

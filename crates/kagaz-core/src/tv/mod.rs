@@ -7,8 +7,12 @@
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub mod miracast;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+pub mod picture;
 #[cfg(target_os = "linux")]
 pub mod capture;
+#[cfg(windows)]
+pub mod capture_win;
 #[cfg(target_os = "linux")]
 pub mod p2p;
 #[cfg(target_os = "linux")]
@@ -233,4 +237,78 @@ pub fn nearby(wait: Duration, direct: bool) -> Result<Vec<Tv>, String> {
     // device knows which it is.
     tvs.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(tvs)
+}
+
+/// Opens the system's own way of sending the screen to a TV, beside
+/// Kagaz's: Windows' Cast panel (Win+K, Miracast, also to TVs on no
+/// network), GNOME Network Displays on Linux where installed. Says what
+/// was opened, or why nothing could be.
+pub fn open_system_sender() -> Result<String, String> {
+    #[cfg(windows)]
+    {
+        use windows::Win32::UI::Input::KeyboardAndMouse::{
+            SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP, VIRTUAL_KEY, VK_LWIN,
+        };
+        let key = |vk: VIRTUAL_KEY, up: bool| INPUT {
+            r#type: INPUT_KEYBOARD,
+            Anonymous: INPUT_0 {
+                ki: KEYBDINPUT {
+                    wVk: vk,
+                    wScan: 0,
+                    dwFlags: if up { KEYEVENTF_KEYUP } else { KEYBD_EVENT_FLAGS(0) },
+                    time: 0,
+                    dwExtraInfo: 0,
+                },
+            },
+        };
+        let k = VIRTUAL_KEY(b'K' as u16);
+        let inputs = [key(VK_LWIN, false), key(k, false), key(k, true), key(VK_LWIN, true)];
+        // SAFETY: plain key presses, sized as SendInput wants.
+        let sent = unsafe { SendInput(&inputs, std::mem::size_of::<INPUT>() as i32) };
+        if sent as usize != inputs.len() {
+            return Err("Windows did not take the Win+K keys: press them yourself to open Cast".into());
+        }
+        Ok("Windows' Cast panel is open (Win+K): pick the TV there.".into())
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let tries: [(&str, &[&str]); 2] =
+            [("gnome-network-displays", &[]), ("flatpak", &["run", "org.gnome.NetworkDisplays"])];
+        for (program, args) in tries {
+            let found = std::env::var_os("PATH")
+                .is_some_and(|p| std::env::split_paths(&p).any(|d| d.join(program).is_file()));
+            if !found {
+                continue;
+            }
+            let ok = std::process::Command::new(program)
+                .args(args)
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+                .is_ok();
+            if ok && (program != "flatpak" || flatpak_has("org.gnome.NetworkDisplays")) {
+                return Ok("GNOME Network Displays is open: pick the TV there.".into());
+            }
+        }
+        Err("this desktop has no screen sender of its own (GNOME Network Displays is one to install); Kagaz's own is `kagaz tv NAME mirror`".into())
+    }
+    #[cfg(target_os = "macos")]
+    {
+        Ok("On a Mac, the system's own is AirPlay: Control Centre, Screen Mirroring, then the TV (TVs with AirPlay only).".into())
+    }
+    #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
+    {
+        Err("this system has no screen sender Kagaz knows of".into())
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn flatpak_has(app: &str) -> bool {
+    std::process::Command::new("flatpak")
+        .args(["info", app])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success())
 }

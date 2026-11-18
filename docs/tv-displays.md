@@ -346,9 +346,28 @@ reordering, Kagaz's own BT.601 conversion so colours match; battery takes
 the fastest preset. **Not yet run on an NVIDIA chip** (there is none
 here): the test skips without the driver.
 
-Still to do for other graphics: Windows for every vendor (Media
-Foundation, which covers NVIDIA, AMD and Intel there), macOS
-(VideoToolbox); both wait on screen capture for those systems.
+*Windows* (2026-11-18, the owner: Kagaz's own sender first, Windows'
+Cast beside it): `tv/capture_win.rs` takes the main screen through
+Windows.Graphics.Capture (Windows 10 1903 or newer, pointer included;
+Windows 11 leaves off the yellow frame), and `miracast/mf.rs` encodes
+through Media Foundation: the graphics chip's encoder first (NVIDIA, AMD
+or Intel; these work asynchronously and are driven by their events),
+then Microsoft's own, then OpenH264; the same stream as on Linux.
+Scaling and the NV12 conversion are shared (`tv/picture.rs`). Over the
+network only so far (MS-MICE); a TV on no network is reached with
+`kagaz tv NAME system`, which opens Windows' Cast panel (Win+K). Ctrl+C
+ends a session properly there too. Windows' firewall may ask once to let
+Kagaz take the TV's connection. **Built for Windows from Linux, not yet
+run on Windows.** Still to do there: a window or a new monitor for the
+TV, Wi-Fi Direct of Kagaz's own, and the screen straight from graphics
+memory into the encoder.
+
+`kagaz tv NAME system` opens the system's own sender on any system: the
+Cast panel on Windows, GNOME Network Displays on Linux where installed,
+and on a Mac it says where AirPlay's Screen Mirroring is.
+
+Still to do for other graphics: macOS (VideoToolbox), with its screen
+capture.
 All tests on a real TV use the LG for now (the owner, 2026-11-18). Saved TVs (names,
 rooms) come with the window; until then `kagaz tvs` lists the TVs found
 nearby.
