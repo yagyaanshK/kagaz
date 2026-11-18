@@ -234,7 +234,14 @@ a Cancel button. The first Wi-Fi Direct link right after a network
 session timed out (NetworkManager gave up after 45 seconds); the second
 came up in 2 seconds, so Kagaz now tries twice. Since then Kagaz picks
 60 pictures a second when the TV takes it (the LG takes 720p at 60 and
-1080p at 30, not 1080p at 60); not yet seen on the TV. Saved TVs (names,
+1080p at 30, not 1080p at 60). At 60 the owner saw the square move
+smoothly but in waves: slower after crossing each colour bar, then
+faster. The stream as sent is steady (a test decodes what arrives: every
+picture there, the square 4.96 pixels further each time), so the waves
+come from the radio link or the TV's own playback timing; pictures are
+now stamped at exactly even times rather than when each was drawn, to
+give the TV no wobble of Kagaz's own to follow. Not yet seen on the TV.
+All tests on a real TV use the LG for now (the owner, 2026-11-18). Saved TVs (names,
 rooms) come with the window; until then `kagaz tvs` lists the TVs found
 nearby.
 

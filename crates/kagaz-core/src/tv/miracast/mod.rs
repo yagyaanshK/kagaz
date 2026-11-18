@@ -378,21 +378,24 @@ pub fn mirror<R>(
             if Instant::now() < next_frame {
                 continue;
             }
+            // Each picture is stamped with the time it was due, not the
+            // moment it happened to be drawn: the TV gets exactly even steps.
+            let due = next_frame - start;
             next_frame += frame_time;
             if Instant::now() > next_frame + frame_time * 4 {
                 // Fell behind (a slow machine): drop the backlog.
                 next_frame = Instant::now() + frame_time;
             }
-            let elapsed = start.elapsed();
             let rgba = match opts.source {
-                Source::Pattern => pattern.draw(elapsed.as_millis() as u64),
+                Source::Pattern => pattern.draw(due.as_millis() as u64),
             };
             let picture = encoder.encode(rgba)?;
             if picture.data.is_empty() {
                 continue;
             }
-            let pts90 = (elapsed.as_micros() as u64 * 9 / 100) + ts::PTS_AHEAD;
-            let pcr27 = elapsed.as_micros() as u64 * 27;
+            let pts90 = (due.as_micros() as u64 * 9 / 100) + ts::PTS_AHEAD;
+            // The clock reference is the real time it leaves.
+            let pcr27 = start.elapsed().as_micros() as u64 * 27;
             let packets = muxer.frame(&picture.data, picture.key, pcr27, pts90);
             if asked.playing {
                 for p in rtp.packets(&packets, pts90) {
@@ -439,15 +442,23 @@ pub fn mirror<R>(
 }
 
 #[cfg(test)]
-mod tests {
+mod tests_support {
+    pub use super::tests::*;
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
     use super::*;
     use std::sync::{Arc, Mutex};
 
     const LG: &str = include_str!("../../../tests/fixtures/tv/lg-webos-2024-wfd-m3.txt");
 
+    /// Sessions listen on port 7236, so the tests that run one take turns.
+    pub static ONE_AT_A_TIME: Mutex<()> = Mutex::new(());
+
     /// A stand-in TV acting as the LG did: answers the setup, asks for SETUP
     /// and PLAY, takes the stream over UDP and ends when asked.
-    fn stand_in_tv(received: Arc<Mutex<Vec<Vec<u8>>>>) -> std::thread::JoinHandle<Vec<String>> {
+    pub fn stand_in_tv(received: Arc<Mutex<Vec<Vec<u8>>>>) -> std::thread::JoinHandle<Vec<String>> {
         std::thread::spawn(move || {
             let udp = UdpSocket::bind("127.0.0.1:0").unwrap();
             let port = udp.local_addr().unwrap().port();
@@ -513,7 +524,7 @@ mod tests {
     }
 
     /// The H.264 the stream carries, from RTP, transport stream and PES.
-    fn elementary_stream(rtp: &[Vec<u8>]) -> Vec<u8> {
+    pub fn elementary_stream(rtp: &[Vec<u8>]) -> Vec<u8> {
         let mut pes = Vec::new();
         for p in rtp {
             assert_eq!(p[1], 33);
@@ -537,8 +548,39 @@ mod tests {
         pes
     }
 
+    /// A session of `length` with the stand-in TV: the report, and the H.264
+    /// that arrived.
+    pub fn session_with_stand_in(length: Duration) -> (Report, Vec<u8>) {
+        let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+        let received = Arc::new(Mutex::new(Vec::new()));
+        let tv = std::cell::Cell::new(None);
+        let opts = Options {
+            name: "Kagaz test".into(),
+            source: Source::Pattern,
+            max_height: 720,
+            length: Some(length),
+            wait: Duration::from_secs(5),
+        };
+        let stop = AtomicBool::new(false);
+        let report = mirror(
+            Route::Direct,
+            &opts,
+            &stop,
+            || {
+                tv.set(Some(stand_in_tv(received.clone())));
+                Ok(())
+            },
+            |_| {},
+        )
+        .unwrap();
+        tv.take().unwrap().join().unwrap();
+        let es = elementary_stream(&received.lock().unwrap());
+        (report, es)
+    }
+
     #[test]
     fn a_whole_session_with_a_stand_in_tv() {
+        let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
         let received = Arc::new(Mutex::new(Vec::new()));
         let tv = std::cell::Cell::new(None);
         let opts = Options {
@@ -582,5 +624,36 @@ mod tests {
             }
         }
         assert!(pictures >= 30, "{pictures} pictures decoded");
+    }
+}
+
+#[cfg(test)]
+mod motion {
+    use super::tests_support::*;
+    use super::*;
+
+    /// The test pattern's square moves the same distance in every picture
+    /// that arrives (4.96 pixels at 720p60, so 4 to 6 after rounding), and
+    /// no picture goes missing: what reaches the TV is steady.
+    #[test]
+    fn the_square_moves_steadily() {
+        let (report, es) = session_with_stand_in(Duration::from_millis(3000));
+        let mut decoder = openh264::decoder::Decoder::new().unwrap();
+        let mut xs = Vec::new();
+        for nal in openh264::nal_units(&es) {
+            if let Ok(Some(yuv)) = decoder.decode(nal) {
+                use openh264::formats::YUVSource;
+                let (w, h) = yuv.dimensions();
+                let row = (h * 2 / 3) / 2;
+                let y = &yuv.y()[row * yuv.strides().0..][..w];
+                // White is 235 in video's limited range; the bars are below 200.
+                xs.push(y.iter().position(|&v| v > 225).expect("the square is on the row"));
+            }
+        }
+        assert!(xs.len() as u64 + 2 >= report.frames, "{} of {} pictures decoded", xs.len(), report.frames);
+        for p in xs.windows(2) {
+            let step = p[1] as i64 - p[0] as i64;
+            assert!((3..=7).contains(&step), "a step of {step} pixels: {xs:?}");
+        }
     }
 }
