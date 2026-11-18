@@ -593,14 +593,18 @@ Plan: `docs/remote-connection.md` (agreed 2026-11-16).
 Plan in [docs/tv-displays.md](docs/tv-displays.md) (2026-11-18): mirroring
 first, then sending files, the remote, and extending. Nothing built yet.
 
-- [ ] **Step 0: Wi-Fi Direct on this laptop** with the LG in Screen Share
-      mode: through NetworkManager and wpa_supplicant, with the home Wi-Fi up
-      (2.4 and 5 GHz) and with the TV on no network. Needs the owner's
-      go-ahead at the moment, since the TV shows a prompt.
-- [ ] **Step 0: what the LG accepts**: webOS pairing, Cast's media receiver,
-      a Cast mirroring session from a sender that is not Chrome, Miracast over
-      the network (MS-MICE, port 7250, announced as `_display._tcp`),
-      Wake-on-LAN over Wi-Fi.
+- [x] **Step 0: Miracast to the LG, both routes** (2026-11-18): over the
+      network (MS-MICE) and over Wi-Fi Direct (NetworkManager, no root, home
+      Wi-Fi kept up), as far as the TV's RTSP answer; no picture sent.
+- [ ] **Step 0: Wi-Fi Direct still to try**: the LG with its Wi-Fi
+      forgotten (on no network), this laptop on 5 GHz, the Windows PC.
+- [ ] **Step 0: what else the LG accepts**: webOS pairing, Cast's media
+      receiver, a Cast mirroring session from a sender that is not Chrome,
+      AirPlay pairing with its PIN, Wake-on-LAN over Wi-Fi. Each with the
+      owner's go-ahead at the moment.
+- [ ] **AirPlay mirroring from Linux, Windows and Android** needs FairPlay's
+      sender side, which is not published; find out whether it can be done
+      before promising it.
 - [ ] **Step 0: each library's licence** checked before it is added.
 - [ ] **The TV on no network**: brand and model to hear from the owner.
 - [ ] **Mockups** of the TVs list, Add and a TV's screen, approved before

@@ -3,8 +3,7 @@
 Find the TVs on the home network, say plainly why one cannot be found,
 send a photo, video, song or document to one, use it as a remote, show
 this computer's screen on it, and use it as a second monitor. Planned
-2026-11-18. Update this file
-as steps land.
+2026-11-18. Update this file as steps land.
 
 ## Why
 
@@ -30,8 +29,19 @@ it):
   them.
 - This laptop's Wi-Fi (Realtek RTL8852CE, rtw89) lists P2P-client and
   P2P-GO, may run one P2P link beside the home connection on a second
-  channel, and NetworkManager shows a Wi-Fi P2P device for it. Making a
-  Wi-Fi Direct group with a TV has not been tried.
+  channel, and NetworkManager shows a Wi-Fi P2P device for it.
+
+Then, with the owner's go-ahead, both Miracast routes were tried on the
+LG the same day, as far as asking the TV what it can play; no picture
+was sent (see step 0 for the details):
+
+- **Over the network (MS-MICE):** the TV took Kagaz's Source Ready,
+  showed a notice naming the sender, connected back for RTSP and answered.
+- **Over Wi-Fi Direct:** NetworkManager found the TV in about 25 seconds
+  of searching and joined its group in about 20 seconds, the TV as group
+  owner on 5 GHz while the home connection stayed up on 2.4 GHz. The TV
+  then connected for RTSP and gave the same answer. No root, no password
+  prompt.
 
 **A TV on no network at all** (never set up on Wi-Fi, or with no
 internet and no router nearby) must still take this computer's screen:
@@ -52,6 +62,16 @@ Kagaz tries the network route when the TV is on the network and Wi-Fi
 Direct otherwise, and lets the owner choose. Google Cast, DLNA, AirPlay
 and the TV makers' remote-control protocols all need the TV on a network;
 on a TV that is not, Kagaz offers mirroring only and says why.
+
+**AirPlay on every system** (the owner's requirement of 2026-11-18: Kagaz
+is meant for every platform, and many TVs now take AirPlay). On a Mac
+and an iPhone, Kagaz uses the system's own AirPlay, which Apple supports
+for apps. On Linux, Windows and Android, Kagaz speaks AirPlay itself:
+pairing with the PIN the TV shows, then sound, photos and video by
+address. Mirroring the screen over AirPlay from those systems needs
+Apple's FairPlay handshake, whose sender side is not published, and no
+open implementation of it was found; it is tried, and if it cannot be
+done Kagaz says so and offers Miracast or Cast to the same TV instead.
 
 ## Shape
 
@@ -124,7 +144,7 @@ still to be given).
   | Google Cast | media by URL; mirroring through Cast Streaming | none published; the protocol is CastV2 (protobuf over TLS) | `rust_cast` (MIT) or Kagaz's own over `prost` (Apache-2.0); Chromium's Open Screen `libcast` (BSD-3, C++) for Cast Streaming |
   | DLNA / UPnP | media by URL | UPnP AV MediaRenderer, AVTransport (published) | Kagaz's own: SSDP plus a few SOAP calls |
   | DIAL | starting a TV app | DIAL 2.x (published) | Kagaz's own |
-  | AirPlay 2 | sound; media by URL; mirroring | not published; mirroring needs Apple's FairPlay | sound and media only if pairing without FairPlay works; mirroring is not planned, and Kagaz says why |
+  | AirPlay 2 | sound; media by URL; mirroring | not published (community-documented); pairing follows HomeKit's pair-setup (SRP, Ed25519, ChaCha20); mirroring needs Apple's FairPlay | Mac and iPhone: the system's AirPlay (AVKit). Elsewhere: Kagaz's own client for pairing, sound and media; mirroring only if the FairPlay step can be done, else said plainly |
   | Miracast over the network | mirroring | [MS-MICE] (Microsoft Open Specifications) plus the Wi-Fi Display spec (Wi-Fi Alliance, free download) | Kagaz's own: RTSP, MPEG-TS, RTP |
   | Miracast over Wi-Fi Direct | mirroring | Wi-Fi Display, Wi-Fi P2P | Kagaz's own over wpa_supplicant's or NetworkManager's D-Bus P2P API |
   | LG webOS | remote; launching apps; media by URL | none published (community-documented) | Kagaz's own WebSocket client (`tungstenite`, MIT/Apache-2.0) |
@@ -137,18 +157,44 @@ still to be given).
   library's licence is checked before it is added, and its text ships in
   About under "Third-party licences".
 - **Wi-Fi Direct on this laptop, first**, since it is the only way to a
-  TV on no network. Make a P2P group with the TV in Screen Share mode
-  through NetworkManager and through wpa_supplicant directly: once with
-  the home connection up (on 2.4 and on 5 GHz) and once with the TV on no
-  network. Record what works, what drops, and whether the home connection
-  survives. Only with the owner's go-ahead at that moment, since the TV
-  shows a prompt. On Windows, the same with the Wi-Fi Direct API on the
-  Windows PC.
-- **What the LG TV accepts.** With the owner watching, at each first try:
+  TV on no network. *Done 2026-11-18 with the TV on the home network and
+  this laptop on 2.4 GHz:* NetworkManager's D-Bus API, as the signed-in
+  user (no root, no password prompt), found the TV as a Wi-Fi Direct peer
+  (`StartFind`; its Wi-Fi Display information says dual role, session
+  available, RTSP port 7236), and a `wifi-p2p` connection carrying
+  Kagaz's Wi-Fi Display information (source, session available, port
+  7236) joined its group in about 20 seconds. The TV was group owner on a
+  5 GHz channel, handing out an address in 192.168.49.0/24; the laptop's
+  home connection stayed up on 2.4 GHz throughout and after. The TV then
+  connected to port 7236 here. NetworkManager refuses an interface name
+  on such a connection (longer than 15 characters): leave it out.
+  *Still to try:* the TV on no network (its Wi-Fi forgotten), this laptop
+  on 5 GHz, and the Windows PC's Wi-Fi Direct API.
+- **Miracast over the network.** *Done 2026-11-18:* a Source Ready
+  message to port 7250 (friendly name, RTSP port, a random source ID)
+  made the TV show a notice naming the sender and connect back to port
+  7236 within a second; Stop Projection ended it. No PIN or DTLS was
+  asked for.
+- **What the TV can play**, the same over both routes (its RTSP
+  `GET_PARAMETER` answer is kept in
+  `crates/kagaz-core/tests/fixtures/tv/lg-webos-2024-wfd-m3.txt`):
+  - Video: H.264 Constrained Baseline and Constrained High, level 4.2,
+    at 1080p and below (the exact sizes and rates in its CEA, VESA and
+    handheld bitmaps, and the longer Wi-Fi Display R2 list, to be decoded
+    in step 2).
+  - Sound: LPCM 44.1 and 48 kHz stereo, AAC 48 kHz stereo.
+  - HDCP 2.1 offered, not demanded: whether it plays an unprotected
+    stream is the first thing step 2 checks.
+  - UIBC: the TV can send a mouse and keyboard back (generic and USB
+    HID), so a keyboard or mouse plugged into the TV could work this
+    computer while mirroring.
+  - It answers OPTIONS with `User-Agent: LGE` and RTCP is supported.
+- **Still to try on the LG**, with the owner watching, at each first try:
   webOS pairing (the on-screen prompt); Cast's Default Media Receiver with
   a test picture; whether its Cast receiver accepts a mirroring session
-  from a sender that is not Chrome; MS-MICE to a test pattern; whether
-  Wake-on-LAN works over Wi-Fi with the TV's "Turn on via Wi-Fi" setting.
+  from a sender that is not Chrome; AirPlay pairing with the TV's PIN,
+  then sound and a test picture; whether Wake-on-LAN works over Wi-Fi
+  with the TV's "Turn on via Wi-Fi" setting.
 - **Mockups** (local pages under `design/mockups/`) of the TVs list, Add,
   a TV's screen (remote, send, mirror) in each system's look, approved
   before building.
@@ -185,16 +231,17 @@ still to be given).
 - **Ways out.** Miracast over Wi-Fi Direct, which works with a TV on no
   network, and Miracast over the network (MS-MICE) for a TV on the same
   network; both are built in this step, and both carry the same RTSP and
-  MPEG-TS stream. Cast Streaming after them, if step 0 finds the TV
-  accepts it. Kagaz sends no HDCP: a TV that demands it refuses, and
+  MPEG-TS stream (both proven as far as the TV's answer in step 0). Cast
+  Streaming after them, if step 0 finds the TV accepts it; AirPlay
+  mirroring if its FairPlay step can be done. Kagaz sends no HDCP: a TV that demands it refuses, and
   Kagaz says so.
 - **The home connection during Wi-Fi Direct.** Where the card can keep
   both (this laptop's says it can, on two channels), the home Wi-Fi stays
   up; where it cannot, Kagaz says before connecting that the internet
   will drop while mirroring.
 - **The system's own sender** is offered beside Kagaz's, with a line on
-  which is better: Windows' Connect (Win + K, Miracast) and macOS' AirPlay
-  (the only way to AirPlay mirroring).
+  which is better: Windows' Connect (Win + K, Miracast) and AirPlay on a
+  Mac or iPhone.
 - **Delay** is measured end to end (a timestamp drawn on the test
   pattern, read back from a capture of the receiver's output) and shown:
   fine for slides, photos and video, not for games, if it is above about
@@ -203,8 +250,9 @@ still to be given).
 ### 3. Send media
 
 - Photos, video and audio, and documents rendered to pictures, through
-  Cast's Default Media Receiver, DLNA's SetAVTransportURI, or webOS's
-  media launch, whichever the TV has.
+  Cast's Default Media Receiver, AirPlay, DLNA's SetAVTransportURI, or
+  webOS's media launch, whichever the TV has. On a Mac and an iPhone,
+  AirPlay goes through the system's own AirPlay.
 - Kagaz serves the file from a small HTTP server on this computer, for
   that TV's address only and only while sending, with correct content
   types and range requests.
@@ -260,7 +308,8 @@ still to be given).
 ## Limits
 
 - AirPlay mirroring from anything other than an Apple device needs
-  Apple's FairPlay, which is not published; Kagaz does not do it.
+  Apple's FairPlay, whose sender side is not published; until it is done,
+  Kagaz mirrors to such a TV by Miracast or Cast instead and says why.
 - Content protected by DRM (a streaming service in a browser) is often
   black when captured; that is the service's choice, and Kagaz says so if
   a picture comes out black.
