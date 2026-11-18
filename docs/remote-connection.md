@@ -130,7 +130,11 @@ today's viewer works with it unchanged.
   kagaz-core. Built in order: (1) the screen, mouse and keys, started by
   hand (done 2026-11-18, tried here with the test card: Full HD at 30
   pictures a second through Kagaz's viewer); (2) sound, clipboard,
-  files; (3) pairing, the PIN, the question; (4) the screens; (5) start
+  files (done 2026-11-19: the speakers' sound as it plays, which goes on
+  playing here; text and pictures both ways; files sent from the viewer
+  land in a folder of their own under the temporary folder and on the
+  clipboard, to paste anywhere; files copied on the computer wait for
+  the viewer to take files); (3) pairing, the PIN, the question; (4) the screens; (5) start
   with Windows, the helper service.
 - *Connecting:* "Ask here each time" (someone at the computer allows it,
   with control or watch only; no answer in 30 s is no) or "Connect with the

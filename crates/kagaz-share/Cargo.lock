@@ -1569,10 +1569,13 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "ironrdp-cliprdr",
+ "ironrdp-core",
  "ironrdp-displaycontrol",
  "ironrdp-dvc",
  "ironrdp-egfx",
  "ironrdp-pdu",
+ "ironrdp-rdpsnd",
  "ironrdp-server",
  "ironrdp-svc",
  "openh264",

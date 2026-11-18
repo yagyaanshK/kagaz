@@ -537,10 +537,22 @@ Plan: `docs/remote-connection.md` (agreed 2026-11-16).
       Scroll Lock follow the viewer), `--watch`, `--pattern` for the
       test card. Tried here with the test card through `kagaz remote
       try` (1080p, 30 a second, 13.6 ms to encode each); **not yet run
-      on Windows**. Known gaps: one viewer at a time; the library turns
-      the middle button and the sideways wheel of a standard mouse
-      message into nothing; no sound, clipboard, files, sign or pairing
-      yet. **For the owner to try, when ready** (put off 2026-11-18):
+      on Windows**. Known gaps: one viewer at a time; the library turns the middle
+      button and the sideways wheel of a standard mouse message into
+      nothing; no sign or pairing yet. **Step 2 built** (2026-11-19):
+      the speakers' sound through WASAPI's loopback (16-bit stereo,
+      48000 or 44100 as the speakers play, blocks of 20 ms), the
+      clipboard both ways through a hidden window (text, pictures in
+      Windows' form and PNG; what came from the viewer is not offered
+      back), files sent from the viewer into
+      `%TEMP%\kagaz\received\<time>\` and onto the clipboard to paste
+      (folders older than a day let go); `--no-sound`, `--no-clipboard`,
+      `--no-files`; watching takes nothing from the viewer. Tried here
+      on the test card: text (24 characters) and two files (3 MB, sums
+      equal) through `kagaz remote clip` / `send`, and the made tone
+      through the new `kagaz remote try --sound` to a silent output (303
+      blocks, no gaps). Files copied on the computer are not offered:
+      the viewer takes no files from a computer yet. **For the owner to try, when ready** (put off 2026-11-18):
       1. send `dist/kagaz-share-windows-x64.exe` to the PC with Kagaz's
          Send a file; 2. in Terminal there run
          `.\kagaz-share-windows-x64.exe --pin <six digits>` and keep it
@@ -552,8 +564,11 @@ Plan: `docs/remote-connection.md` (agreed 2026-11-16).
          the PC again with Remote Desktop on port 3390 (or `kagaz remote
          add <address> --name "PC via Kagaz" --rdp 3390`) and connect with
          the PIN; 5. try mouse, keys, scroll, Num Lock, a video, and read
-         the numbers its window prints every 5 seconds; 6. close it and go
-         back to Windows' own Remote Desktop. Until
+         the numbers its window prints every 5 seconds; also copy text
+         and a picture each way, send a file and paste it in a folder
+         there, and play something (its sound comes here; `kagaz remote
+         try "PC via Kagaz" --sound` prints how it arrives); 6. close it
+         and go back to Windows' own Remote Desktop. Until
       it exists: a VNC server on that laptop, reached over Tailscale,
       with today's Kagaz (not yet tried against a real Windows VNC
       server).

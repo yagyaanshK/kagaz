@@ -81,6 +81,9 @@ pub enum RemoteAction {
         /// Sharper (0) to smoother (10); without it Kagaz follows the link
         #[arg(long)]
         picture: Option<u8>,
+        /// Play its sound here meanwhile, and tell how it comes
+        #[arg(long)]
+        sound: bool,
     },
     /// Send text to a device's clipboard (the text, or what is piped in)
     Clip {
@@ -235,7 +238,7 @@ pub fn run(action: Option<RemoteAction>) -> Result<()> {
             Ok(())
         }
         RemoteAction::Open { device } => open_window(&device, &[]),
-        RemoteAction::Try { device, seconds, picture } => try_session(&device, seconds, picture),
+        RemoteAction::Try { device, seconds, picture, sound } => try_session(&device, seconds, picture, sound),
         RemoteAction::Clip { device, text } => clip(&device, text),
         RemoteAction::Send {
             device,
@@ -490,7 +493,7 @@ fn locate_ssh(which: &str) -> Result<(Device, Answer)> {
 
 /// Reach a device the way that shows its screen, and open a session
 /// there; a password is asked for when the device wants one.
-fn open_session(which: &str, picture: Option<u8>) -> Result<(Device, Answer, Session)> {
+fn open_session(which: &str, picture: Option<u8>, sound: bool) -> Result<(Device, Answer, Session)> {
     let list = list_path();
     let device = Devices::load(&list)?.find(which)?.clone();
     let Some(way) = remote::session::way_for(&device) else {
@@ -502,9 +505,9 @@ fn open_session(which: &str, picture: Option<u8>) -> Result<(Device, Answer, Ses
         Err(e) => return Err(e.into()),
     };
     let mut settings = device.settings.clone();
-    // A session in the terminal plays nothing: the device's sound is for
-    // the window.
-    settings.mute = true;
+    // A session in the terminal plays nothing unless asked: the device's
+    // sound is for the window.
+    settings.mute = !sound;
     if picture.is_some() {
         settings.picture = picture.map(|p| p.min(10));
     }
@@ -641,7 +644,7 @@ fn send(which: &str, files: &[std::path::PathBuf], here: bool, seconds: u64) -> 
     if !here {
         return open_window(which, &paths);
     }
-    let (device, _, session) = open_session(which, None)?;
+    let (device, _, session) = open_session(which, None, false)?;
     if !session.info.files {
         bail!("{}", no_files_words(&device));
     }
@@ -704,8 +707,8 @@ fn megabytes(bytes: u64) -> String {
 
 /// A session in numbers, a line a second: how often the picture came,
 /// how much of the screen changed, how much travelled, the delay.
-fn try_session(which: &str, seconds: u64, picture: Option<u8>) -> Result<()> {
-    let (device, answer, session) = open_session(which, picture)?;
+fn try_session(which: &str, seconds: u64, picture: Option<u8>, sound: bool) -> Result<()> {
+    let (device, answer, session) = open_session(which, picture, sound)?;
     let (width, height) = session.screen.size();
     println!(
         "{} · {} over {} at {}",
@@ -783,6 +786,10 @@ fn try_session(which: &str, seconds: u64, picture: Option<u8>) -> Result<()> {
     if !via.is_empty() {
         println!("the picture came as: {via}");
     }
+    if sound {
+        let heard = session.numbers.sound_via();
+        println!("the sound: {}", if heard.is_empty() { "none came" } else { &heard });
+    }
     Ok(())
 }
 
@@ -799,7 +806,7 @@ fn clip(which: &str, text: Option<String>) -> Result<()> {
     if text.is_empty() {
         bail!("there is no text to send");
     }
-    let (device, _, session) = open_session(which, None)?;
+    let (device, _, session) = open_session(which, None, false)?;
     // Remote Desktop hands text over when it is asked for, which a
     // computer does when something is pasted there: the session has to
     // stay open until then.

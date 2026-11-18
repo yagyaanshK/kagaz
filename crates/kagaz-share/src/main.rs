@@ -5,7 +5,8 @@
 //!
 //!   kagaz-share [--port 3390] [--local] [--user NAME] [--pin 123456]
 //!               [--watch] [--rate 30] [--capture dxgi|gdi]
-//!               [--pattern [--size 1280x720] [--card-rate 5]] [--keep DIR]
+//!               [--no-sound] [--no-clipboard] [--no-files]
+//!               [--pattern [--size 1280x720] [--card-rate 5] [--tone]] [--keep DIR]
 //!
 //! `--port` is the port it listens on (3390 unless said: Windows' own
 //! Remote Desktop keeps 3389). `--local` listens on this computer only.
@@ -13,7 +14,16 @@
 //! said) with `--pin` as the password (six digits made up and shown when
 //! none is given). `--watch` shows the screen and takes no mouse or keys.
 //! `--pattern` shows the test card instead of the screen, on any system,
-//! and says each key and mouse event as `heard …`: for the tests.
+//! and says each key and mouse event as `heard …`: for the tests. With it
+//! `--tone` sends a quiet made tone as the sound, and what the viewer
+//! copies or sends is said by its length or size, never its content.
+//!
+//! This computer's sound goes to the viewer (`--no-sound` keeps it
+//! here), the clipboard goes both ways (`--no-clipboard`), and files the
+//! viewer sends land in a folder of their own under the system's
+//! temporary folder and on the clipboard, to paste anywhere
+//! (`--no-files` refuses them). Watching only takes nothing from the
+//! viewer.
 //!
 //! Its certificate is kept in `--keep` (Kagaz's folder for it unless
 //! said), so that the viewer recognises this computer the next time.
@@ -27,9 +37,15 @@
 #[path = "../../kagaz-core/src/remote/pattern.rs"]
 #[allow(dead_code)]
 mod pattern;
+mod clip;
 mod picture;
+mod sound;
 #[cfg(windows)]
 mod win;
+#[cfg(windows)]
+mod win_clip;
+#[cfg(windows)]
+mod win_sound;
 
 use ironrdp_server::tokio_rustls::{rustls, TlsAcceptor};
 use ironrdp_server::{
@@ -180,6 +196,19 @@ impl RdpServerDisplay for Display {
     }
 }
 
+/// Files received more than a day ago are let go: pasting copied them
+/// where they were wanted.
+fn tidy(received: &std::path::Path) {
+    let Ok(entries) = std::fs::read_dir(received) else { return };
+    let day = Duration::from_secs(24 * 60 * 60);
+    for e in entries.flatten() {
+        let old = e.metadata().and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).is_some_and(|age| age > day);
+        if old {
+            let _ = std::fs::remove_dir_all(e.path());
+        }
+    }
+}
+
 fn value(args: &[String], name: &str) -> Option<String> {
     args.iter().position(|a| a == name).and_then(|i| args.get(i + 1)).cloned()
 }
@@ -223,7 +252,7 @@ fn made_pin() -> String {
 fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().collect();
     if args.iter().any(|a| a == "--help" || a == "-h") {
-        say("kagaz-share [--port 3390] [--local] [--user NAME] [--pin 123456] [--watch] [--rate 30] [--capture dxgi|gdi] [--pattern [--size 1280x720] [--card-rate 5]] [--keep DIR]");
+        say("kagaz-share [--port 3390] [--local] [--user NAME] [--pin 123456] [--watch] [--rate 30] [--capture dxgi|gdi] [--no-sound] [--no-clipboard] [--no-files] [--pattern [--size 1280x720] [--card-rate 5] [--tone]] [--keep DIR]");
         return Ok(());
     }
     #[cfg(windows)]
@@ -289,6 +318,49 @@ fn main() -> anyhow::Result<()> {
         #[cfg(not(windows))]
         anyhow::bail!("sharing this computer's screen comes to this system later; --pattern shows the test card");
     }
+    // The sound: this computer's, or the made tone.
+    let with_sound = !args.iter().any(|a| a == "--no-sound") && (!pattern || args.iter().any(|a| a == "--tone"));
+    let speaker = if !with_sound {
+        None
+    } else if pattern {
+        Some(sound::Speaker::new(|| Ok(Box::new(sound::Tone::new()) as Box<dyn sound::Sound>), 48000))
+    } else {
+        #[cfg(windows)]
+        {
+            Some(sound::Speaker::new(|| Ok(Box::new(win_sound::open()?) as Box<dyn sound::Sound>), win_sound::native_rate()))
+        }
+        #[cfg(not(windows))]
+        None
+    };
+    // The clipboard and files.
+    let received = std::env::temp_dir().join("kagaz").join("received");
+    tidy(&received);
+    let clipboard = if args.iter().any(|a| a == "--no-clipboard") {
+        None
+    } else {
+        let board: Option<Arc<dyn clip::Board>> = if pattern {
+            Some(Arc::new(clip::Said::default()))
+        } else {
+            #[cfg(windows)]
+            {
+                match win_clip::WinBoard::start() {
+                    Ok(b) => Some(Arc::new(b)),
+                    Err(e) => {
+                        say(&format!("no clipboard: {e:#}"));
+                        None
+                    }
+                }
+            }
+            #[cfg(not(windows))]
+            None
+        };
+        board.map(|b| {
+            let mut c = clip::Clip::new(b, received.clone());
+            c.take = !watch;
+            c.files = !watch && !args.iter().any(|a| a == "--no-files");
+            c
+        })
+    };
     let pipeline = picture::Pipeline::default();
     picture::pump(latest.clone(), pipeline.clone(), rate);
 
@@ -310,6 +382,8 @@ fn main() -> anyhow::Result<()> {
             .with_input_handler(input)
             .with_display_handler(Display { latest: latest.clone() })
             .with_gfx_factory(Some(Box::new(pipeline) as Box<dyn GfxServerFactory>))
+            .with_sound_factory(speaker.map(|s| Box::new(s) as Box<dyn ironrdp_server::SoundServerFactory>))
+            .with_cliprdr_factory(clipboard.map(|c| Box::new(c) as Box<dyn ironrdp_server::CliprdrServerFactory>))
             .with_honor_client_desktop_size(false)
             .build();
         server.set_credentials(Some(Credentials { username: username.clone(), password: pin.clone(), domain: None }));
