@@ -783,7 +783,15 @@ const KagazRemoteView = (() => {
   // on as Ctrl + wheel, a notch for every eighth wider or narrower: what
   // Windows itself makes of a pinch on its own touchpad, and what
   // programs everywhere take for zoom.
+  //
+  // Ctrl is pressed once as the pinch starts and held until the fingers
+  // lift, the notches following a moment after the press: Windows takes
+  // a session's keys and its mouse in by separate ways, so a press, a
+  // notch and a release sent in the same instant can reach a program
+  // out of order, and the notch then scrolls.
   let pinchSaid = false, pinchDone = 0;
+  const PINCH_CTRL = { key: "Control", code: "ControlLeft", pinch: true };
+  let pinchReady = 0, pinchUp = 0, pinchWheel = 0, pinchLetGo = 0;
   function wantPinch() {
     const on = !!cur && cur.session != null && !cur.away;
     if (on === pinchSaid) return;
@@ -792,20 +800,47 @@ const KagazRemoteView = (() => {
       if (on) log(found ? "a pinch here zooms on the device" : "this webview's own pinch could not be turned off");
     }).catch(() => {});
   }
-  function pinch(scale, begin) {
+  function pinchWheelNow() {
+    pinchWheel = 0;
+    if (!pinchUp || !cur || cur.session == null) {
+      pinchUp = 0;
+      return;
+    }
+    const p = cur.point || { x: Math.round(cur.width / 2), y: Math.round(cur.height / 2) };
+    did({ t: "wheel", x: p.x, y: p.y, up: pinchUp, right: 0 }, true);
+    pinchUp = 0;
+  }
+  // The pinch's own Ctrl let go, once its last notch has gone.
+  function pinchLift(after) {
+    clearTimeout(pinchLetGo);
+    pinchLetGo = setTimeout(() => {
+      pinchLetGo = 0;
+      if (pinchWheel) return pinchLift(after);
+      if (cur && cur.held.get("ControlLeft") === PINCH_CTRL) {
+        cur.held.delete("ControlLeft");
+        did({ t: "key", key: "Control", code: "ControlLeft", down: false }, true);
+      }
+    }, after);
+  }
+  function pinch(scale, begin, end) {
     if (begin) pinchDone = 0;
+    if (end) return pinchLift(120);
     if (begin || !cur || cur.session == null || cur.away || !(scale > 0)) return;
     const steps = Math.trunc(Math.log(scale) / Math.log(1.125));
     const up = steps - pinchDone;
     if (!up) return;
     if (!pinchDone) log("a pinch, passed on as zoom");
     pinchDone = steps;
-    const p = cur.point || { x: Math.round(cur.width / 2), y: Math.round(cur.height / 2) };
     // With Ctrl already held here, the device has it held too.
-    const ctrl = cur.held.has("ControlLeft") || cur.held.has("ControlRight");
-    if (!ctrl) did({ t: "key", key: "Control", code: "ControlLeft", down: true }, false);
-    did({ t: "wheel", x: p.x, y: p.y, up, right: 0 }, ctrl);
-    if (!ctrl) did({ t: "key", key: "Control", code: "ControlLeft", down: false }, true);
+    if (!cur.held.has("ControlLeft") && !cur.held.has("ControlRight")) {
+      cur.held.set("ControlLeft", PINCH_CTRL);
+      did({ t: "key", key: "Control", code: "ControlLeft", down: true }, true);
+      pinchReady = performance.now() + 60;
+    }
+    pinchUp += up;
+    if (!pinchWheel) pinchWheel = setTimeout(pinchWheelNow, Math.max(0, pinchReady - performance.now()));
+    // Should the fingers' lifting never be told.
+    pinchLift(1500);
   }
 
   document.documentElement.addEventListener("mouseenter", () => {
@@ -1125,7 +1160,7 @@ const KagazRemoteView = (() => {
     ? window.__TAURI__.webviewWindow.getCurrentWebviewWindow() : null;
   const hear = (name, fn) => (mine ? mine.listen(name, fn) : events.listen(name, fn));
   if (events && events.listen) {
-    hear("remote-pinch", (ev) => pinch(ev.payload.scale, ev.payload.begin));
+    hear("remote-pinch", (ev) => pinch(ev.payload.scale, ev.payload.begin, ev.payload.end));
     hear("remote-close-asked", async () => {
       if (cur && cur.session != null) {
         const yes = await KagazAsk.confirm(

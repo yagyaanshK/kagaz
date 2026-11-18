@@ -749,11 +749,15 @@ pub async fn remote_pinch(window: tauri::WebviewWindow, on: bool) -> Result<bool
                         mine.set_propagation_phase(gtk::PropagationPhase::None);
                         let to = page.clone();
                         mine.connect_begin(move |_, _| {
-                            let _ = to.emit_to(to.label(), "remote-pinch", Pinch { scale: 1.0, begin: true });
+                            let _ = to.emit_to(to.label(), "remote-pinch", Pinch { scale: 1.0, begin: true, end: false });
+                        });
+                        let to = page.clone();
+                        mine.connect_end(move |_, _| {
+                            let _ = to.emit_to(to.label(), "remote-pinch", Pinch { scale: 1.0, begin: false, end: true });
                         });
                         let to = page.clone();
                         mine.connect_scale_changed(move |_, scale| {
-                            let _ = to.emit_to(to.label(), "remote-pinch", Pinch { scale, begin: false });
+                            let _ = to.emit_to(to.label(), "remote-pinch", Pinch { scale, begin: false, end: false });
                         });
                         (mine, theirs.propagation_phase())
                     });
@@ -772,12 +776,13 @@ pub async fn remote_pinch(window: tauri::WebviewWindow, on: bool) -> Result<bool
 }
 
 /// How far the fingers of a pinch have spread since it began (1 at its
-/// beginning, 2 at twice as far apart).
+/// beginning, 2 at twice as far apart), and when the fingers lift.
 #[cfg(target_os = "linux")]
 #[derive(Clone, Serialize)]
 struct Pinch {
     scale: f64,
     begin: bool,
+    end: bool,
 }
 
 /// A session is open in that window: closing it would end the session,
