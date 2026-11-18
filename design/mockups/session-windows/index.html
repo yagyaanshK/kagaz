@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Kagaz · session windows mockups</title>
+<style>
+  body { margin: 0; padding: 24px; font-family: system-ui, sans-serif; background: #e9e9e6; color: #222; }
+  @media (prefers-color-scheme: dark) { body { background: #1c1c1e; color: #e6e6e6; } p, li, figcaption { color: #b9b9b9 !important; } .win { border-color: #444 !important; } .win > .title { background: #2a2a2d !important; color: #ddd !important; } }
+  h1 { font-size: 20px; margin: 0 0 6px; }
+  h2 { font-size: 16px; margin: 34px 0 4px; }
+  p, li { color: #444; max-width: 900px; line-height: 1.45; margin: 4px 0; }
+  ul { margin: 6px 0 14px; padding-left: 20px; }
+  .row { display: flex; gap: 24px; flex-wrap: wrap; align-items: flex-start; margin-top: 12px; }
+  figure { margin: 0; }
+  figcaption { font-size: 12px; color: #555; margin-bottom: 6px; max-width: 640px; }
+  .win { border: 1px solid #bbb; border-radius: 10px; overflow: hidden; box-shadow: 0 6px 20px rgba(0,0,0,.18); display: inline-block; }
+  .win > .title { display: flex; align-items: center; justify-content: center; position: relative; height: 30px; font-size: 13px; font-weight: 600; background: #dcdcd8; color: #333; }
+  .win > .title::after { content: "–  ▢  ✕"; position: absolute; right: 12px; font-weight: 400; letter-spacing: 2px; opacity: .7; }
+  iframe { border: 0; display: block; background: #fff; }
+  .main { width: 860px; height: 460px; }
+  .sess { width: 640px; height: 420px; }
+</style>
+</head>
+<body>
+<h1>Kagaz · each session in a window of its own</h1>
+<p>Drawn with the app's own stylesheets (the Ubuntu look); devices are made up and the "remote screens" are coloured stand-ins.</p>
+<ul>
+  <li><strong>Connect opens a window</strong> named after the device: its screen under Kagaz's green bar, with the session's tools, and nothing else of Kagaz.</li>
+  <li><strong>Kagaz's main window stays as it is</strong>: a call at the door, a TV's remote, the cameras, another Connect. A device in a window says so, and its button brings that window to the front.</li>
+  <li><strong>Closing a session's window ends that session</strong>, after a question, and only that one.</li>
+  <li>Full screen, this computer's own keys, the clipboard and the sound belong to the window in front.</li>
+</ul>
+
+<h2>Two sessions, and Kagaz free beside them</h2>
+<div class="row">
+  <figure><figcaption>Kagaz's main window. The two devices in windows say so; the rest can be connected as before.</figcaption><div class="win"><div class="title">Kagaz</div><iframe class="main" src="win.html?os=gnome&scene=main"></iframe></div></figure>
+  <figure><figcaption>A session's window (a Windows computer).</figcaption><div class="win"><div class="title">Study laptop · Kagaz</div><iframe class="sess" src="win.html?os=gnome&scene=session&name=Study%20laptop&desk=windows"></iframe></div></figure>
+  <figure><figcaption>Another, at the same time (an Ubuntu computer).</figcaption><div class="win"><div class="title">Workshop PC · Kagaz</div><iframe class="sess" src="win.html?os=gnome&scene=session&name=Workshop%20PC&desk=ubuntu"></iframe></div></figure>
+</div>
+
+<h2>The questions</h2>
+<div class="row">
+  <figure><figcaption>Closing a session's window (its ✕, or Alt + F4 when the keys are this computer's).</figcaption><div class="win"><div class="title">Study laptop · Kagaz</div><iframe class="sess" src="win.html?os=gnome&scene=session&name=Study%20laptop&desk=windows&ask=close"></iframe></div></figure>
+  <figure><figcaption>Connect on a device that already has a window. "Show that window" is the safe button; "Connect again" does what you ask, and says what a Windows computer will do with it.</figcaption><div class="win"><div class="title">Kagaz</div><iframe class="main" src="win.html?os=gnome&scene=main&ask=again"></iframe></div></figure>
+  <figure><figcaption>Closing Kagaz's main window with sessions open, as it is unless changed in Settings: one question, then everything closes. The other choice in Settings: the session windows stay, and Kagaz with them.</figcaption><div class="win"><div class="title">Kagaz</div><iframe class="main" src="win.html?os=gnome&scene=main&ask=quit"></iframe></div></figure>
+</div>
+
+<h2>A call at the door while you are in a session</h2>
+<div class="row">
+  <figure><figcaption>A strip under the green bar, in the window in front (also in full screen). Answer brings Kagaz's main window forward with the call; Decline is only this device's. Settings can turn the strip off; the main window and the system's notification ring either way.</figcaption><div class="win"><div class="title">Study laptop · Kagaz</div><iframe class="sess" src="win.html?os=gnome&scene=session&name=Study%20laptop&desk=windows&ring=1"></iframe></div></figure>
+</div>
+</body>
+</html>

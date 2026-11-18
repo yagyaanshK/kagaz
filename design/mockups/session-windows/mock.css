@@ -1,0 +1,26 @@
+/* Only what the mockup needs beyond the app's own styles. */
+.sw-rows { display: flex; flex-direction: column; gap: 8px; padding: 4px 0; }
+.sw-row { display: flex; align-items: center; gap: 14px; padding: 12px 14px; border-radius: var(--r-card, 12px); background: var(--panel); }
+.sw-icon svg { width: 22px; height: 22px; }
+.sw-icon { display: inline-flex; width: 40px; height: 40px; align-items: center; justify-content: center; border-radius: 50%; background: var(--hover, rgba(127,127,127,.12)); flex: none; }
+.sw-words { display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0; }
+.sw-sub { color: var(--muted); font-size: 13px; display: inline-flex; align-items: center; gap: 6px; }
+.sw-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+.sw-dot.on { background: #3fb27f; }
+.sw-dot.live { background: #3fb27f; box-shadow: 0 0 0 3px rgba(63, 178, 127, 0.25); }
+
+/* A made-up remote screen, so that the window has something in it. */
+.desk { position: absolute; inset: 0; overflow: hidden; background: linear-gradient(135deg, #1c3f6e, #2b6cb0 55%, #6fb1e6); }
+.desk.ubuntu { background: linear-gradient(135deg, #3b1c4a, #77216f 55%, #e95420); }
+.desk-bar { position: absolute; left: 0; right: 0; bottom: 0; height: 30px; background: rgba(20, 24, 32, 0.82); }
+.desk.ubuntu .desk-bar { top: 0; bottom: auto; height: 22px; background: rgba(15, 15, 15, 0.9); }
+.desk-top { display: none; }
+.desk.ubuntu .desk-top { display: block; position: absolute; left: 0; top: 22px; bottom: 0; width: 44px; background: rgba(15, 15, 15, 0.55); }
+.desk-win { position: absolute; border-radius: 6px; background: #f4f4f4; box-shadow: 0 8px 28px rgba(0, 0, 0, 0.4); }
+.desk-win::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 22px; border-radius: 6px 6px 0 0; background: #d9dde3; }
+.desk-win.one { left: 12%; top: 14%; width: 46%; height: 52%; }
+.desk-win.two { left: 44%; top: 34%; width: 40%; height: 44%; background: #1f2430; }
+.desk-win.two::before { background: #2c3342; }
+
+/* The ring, as a strip under the session's bar. */
+[data-viewer] .urgent { margin: 0; border-radius: 0; }

@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Kagaz · session windows mockup</title>
+  <!-- The app's own look: nothing of it is redrawn here. -->
+  <script src="../../../apps/desktop/ui/platform.js"></script>
+  <link rel="stylesheet" href="../../../apps/desktop/ui/style.css">
+  <link rel="stylesheet" href="../../../apps/desktop/ui/skins.css">
+  <link rel="stylesheet" href="mock.css">
+</head>
+<body>
+  <aside id="sidebar" aria-label="Kagaz">
+    <div class="side-head"><button id="pane-toggle" type="button" class="side-toggle" aria-label="Navigation"><span class="ic" data-icon="menu"></span></button><span class="side-title">Kagaz</span></div>
+    <ul id="categories"></ul>
+  </aside>
+  <div id="column">
+    <header id="bar">
+      <h1 id="bar-title"></h1>
+      <div class="bar-actions"><span id="bar-remote" class="bar-remote hidden"></span></div>
+    </header>
+    <div id="urgent" class="urgent hidden" role="alert"></div>
+    <main id="main"><section id="remote" class="pane"></section></main>
+  </div>
+  <nav id="bottom-nav"></nav>
+  <script src="../../../apps/desktop/ui/icons.js"></script>
+  <script src="mock.js"></script>
+</body>
+</html>

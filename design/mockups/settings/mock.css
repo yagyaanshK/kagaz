@@ -1,0 +1,16 @@
+/* Only what the proposal adds to the app's own settings styles. */
+.set-search { display: flex; align-items: center; gap: 8px; padding: 0 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.set-search svg { width: 18px; height: 18px; color: var(--muted); }
+.set-search input { flex: 1 1 auto; border: none; background: none; min-height: 40px; color: var(--text); font: inherit; outline: none; box-shadow: none; padding: 0; }
+/* A row that leads somewhere. */
+.set-door { flex-wrap: nowrap; cursor: default; }
+.set-door:hover { background: var(--hover, rgba(127, 127, 127, 0.07)); }
+.set-door-icon svg { width: 20px; height: 20px; color: var(--accent); }
+.set-door-go svg { width: 16px; height: 16px; color: var(--muted); }
+.set-door .set-label { flex: 1 1 auto; }
+/* A device's own setting, where its kind has one for all. */
+.set-own-mark { margin-left: 8px; padding: 1px 7px; border-radius: 9px; font-size: 11px; font-weight: 600; background: color-mix(in srgb, var(--accent) 22%, transparent); color: var(--text); vertical-align: 1px; }
+.set-section .set-row:first-of-type { border-top: none; }
+.set-section h3 + .set-row, .set-section p + .set-row { border-top: 1px solid var(--line); }
+#settings-body { max-width: 760px; }
+.set-control select { max-width: 330px; }

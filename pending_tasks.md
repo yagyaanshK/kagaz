@@ -504,8 +504,26 @@ Plan: `docs/remote-connection.md` (agreed 2026-11-16).
       owner, 2026-11-18): today one session takes over Kagaz's window.
       Asked for: every connection in its own window, closing it ends
       that session (after a question), the main window free meanwhile
-      for the rest of Kagaz (a call at the door, a TV's remote). Open
-      questions are with the owner; a mockup comes before it is built.
+      for the rest of Kagaz (a call at the door, a TV's remote). The
+      owner's answers: closing the main window ends every session after
+      one question, unless Settings says the session windows stay;
+      Connect on a device that has a window asks (show that window, or
+      connect again: a Windows computer has one screen per account, so
+      the first window loses it; checked 2026-11-18); a call at the
+      door shows as a strip in the session's window, with a setting to
+      turn it off. Mockup in `design/mockups/session-windows/`, waiting
+      for the owner's word. On phones: Android can show each session as
+      its own entry among the recent apps (a native screen per session,
+      to be built with the phone's viewer, step 2); an iPhone has one
+      window per app, so there a switcher inside Kagaz.
+- [ ] **Settings, put in order** (the owner, 2026-11-18: "simple,
+      minimal and sorted and still customizable"): a setting lives with
+      the smallest thing it changes (device, kind, all of Kagaz);
+      Settings is the one door to all of them (Kagaz's own, then each
+      kind the person has, by name; a kind's row is its gear's page);
+      a kind's setting holds for all its devices, a device says "Same
+      as all" until given its own; a field finds any setting. Mockup in
+      `design/mockups/settings/`, waiting for the owner's word.
 - [ ] **To hear from the owner on the real Windows PC**: a pinch on a
       PDF there; the sound now
       (gaps, how late), and the log's line on it; this computer's keys

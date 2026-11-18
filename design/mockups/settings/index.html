@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Kagaz · settings mockups</title>
+<style>
+  body { margin: 0; padding: 24px; font-family: system-ui, sans-serif; background: #e9e9e6; color: #222; }
+  @media (prefers-color-scheme: dark) { body { background: #1c1c1e; color: #e6e6e6; } p, li, figcaption, td { color: #b9b9b9 !important; } iframe { border-color: #444 !important; } th { color: #ddd !important; } td, th { border-color: #3a3a3d !important; } }
+  h1 { font-size: 20px; margin: 0 0 6px; }
+  h2 { font-size: 16px; margin: 34px 0 4px; }
+  p, li { color: #444; max-width: 900px; line-height: 1.45; margin: 4px 0; }
+  ol, ul { margin: 6px 0 14px; padding-left: 22px; }
+  .row { display: flex; gap: 24px; flex-wrap: wrap; align-items: flex-start; margin-top: 12px; }
+  figure { margin: 0; }
+  figcaption { font-size: 12px; color: #555; margin-bottom: 6px; max-width: 560px; }
+  iframe { border: 1px solid #bbb; background: #fff; border-radius: 10px; display: block; box-shadow: 0 6px 20px rgba(0,0,0,.12); }
+  .desk { width: 980px; height: 680px; }
+  .phone { width: 390px; height: 720px; }
+  table { border-collapse: collapse; margin-top: 10px; font-size: 13px; max-width: 1100px; }
+  th, td { text-align: left; vertical-align: top; padding: 6px 12px 6px 0; border-bottom: 1px solid #cfcfca; color: #444; }
+  th { color: #222; }
+</style>
+</head>
+<body>
+<h1>Kagaz · settings, put in order</h1>
+<p>Drawn with the app's own stylesheets; devices are made up. Nothing here is built yet.</p>
+<ol>
+  <li><strong>A setting lives with the smallest thing it changes</strong>: this device, this kind of device, or all of Kagaz. Never in two places.</li>
+  <li><strong>One door to all of them.</strong> Settings lists Kagaz's own few, then one row for each kind you have, by name (the sidebar's list). A kind's row opens the page its gear opens; a device's row opens that device's settings. So every setting is reached from the top, and from the thing itself.</li>
+  <li><strong>Set once, change where needed.</strong> Where it makes sense, a kind holds the setting for all its devices, and a device says "Same as all" until it is given its own. Its own are marked and can be given back.</li>
+  <li><strong>Few, and sorted.</strong> On a page, what holds for all comes first, then each device by name. A group has a handful of rows; what is only for when something is wrong sits under "More".</li>
+  <li><strong>Find a setting.</strong> One field at the top of Settings finds any of them, at any level, and says where it lives.</li>
+  <li><strong>A row is one line and one control</strong>, acts at once, and says so when it could not be saved. What is needed in the middle of something (the viewer's key menu) stays there too, as a shortcut to the same setting.</li>
+</ol>
+
+<h2>The three levels</h2>
+<div class="row">
+  <figure><figcaption>Settings: Kagaz's own, then your kinds by name.</figcaption><iframe class="desk" src="set.html?os=gnome&screen=index"></iframe></figure>
+  <figure><figcaption>A kind (also behind its gear): what holds for all of its devices, then each device. The new settings for session windows live here.</figcaption><iframe class="desk" src="set.html?os=gnome&screen=kind"></iframe></figure>
+  <figure><figcaption>A device: only its own. "Same as all" where its kind decides; "Its own" where it was changed, with the way back beside it.</figcaption><iframe class="desk" src="set.html?os=gnome&screen=device"></iframe></figure>
+</div>
+
+<h2>Finding one</h2>
+<div class="row">
+  <figure><figcaption>"ring" finds settings of Kagaz, of the Doorbell and of Computers & phones; each says where it lives and opens there.</figcaption><iframe class="desk" src="set.html?os=gnome&screen=search"></iframe></figure>
+</div>
+
+<h2>On a phone</h2>
+<p>The same three levels, one screen each, with Back at the top.</p>
+<div class="row">
+  <figure><figcaption>Android</figcaption><iframe class="phone" src="set.html?os=android&screen=index"></iframe></figure>
+  <figure><figcaption>Android · a kind</figcaption><iframe class="phone" src="set.html?os=android&screen=kind"></iframe></figure>
+  <figure><figcaption>iPhone · a device</figcaption><iframe class="phone" src="set.html?os=ios&screen=device"></iframe></figure>
+</div>
+
+<h2>Where each of today's settings would live</h2>
+<p>From a count of every setting in the app today. Most are not on the Settings page: the Doorbell and the Cameras have a gear, the other kinds have none, and three settings are offered in two places.</p>
+<table><tr><th>Setting</th><th>Today</th><th>Proposed</th></tr>
+<tr><th colspan="3" style="padding-top:16px">Kagaz</th></tr>
+<tr><td>Accounts</td><td>OneTouch and Tapo are listed in Settings, each with a button that only leads to its page. Xiaomi is not listed. Signing out is in the cameras' gear and in the doorbell's ⋯ menu.</td><td>Settings › Accounts: every account (OneTouch, Tapo, Xiaomi, later MyGate and Park+), each with its state and Sign in or Sign out there. A kind's page still asks for the sign-in it needs.</td></tr>
+<tr><td>Ring during Do Not Disturb (phones)</td><td>Settings › Ringing</td><td>Stays: Settings › Kagaz.</td></tr>
+<tr><td>Save pictures and videos in</td><td>Settings › Saving</td><td>Settings › Where things are saved.</td></tr>
+<tr><td>About Kagaz</td><td>Settings › About</td><td>Stays, with the third-party licences.</td></tr>
+<tr><th colspan="3" style="padding-top:16px">Doorbell</th></tr>
+<tr><td>When someone rings, Vibrate, Ringtone, Ring volume, your own tones</td><td>Doorbell's gear › Every doorbell</td><td>Doorbell › For every doorbell. Unchanged, and now also reached from Settings.</td></tr>
+<tr><td>Ring me here</td><td>In two places: the calls panel and Doorbell's gear › OneTouch</td><td>One place: Doorbell › OneTouch. The calls panel shows the state and leads there.</td></tr>
+<tr><td>A tone for door stations, for family, for one device or person</td><td>Doorbell's gear › OneTouch, in a fold-out</td><td>The kind's tone under OneTouch; each device's under Each device, saying "Same as its kind" until changed.</td></tr>
+<tr><td>Stations on this network: ringtone, UDP port, Find stations</td><td>Doorbell's gear</td><td>Doorbell › Stations on this network; the port under More.</td></tr>
+<tr><th colspan="3" style="padding-top:16px">Cameras</th></tr>
+<tr><td>Playback method, Tiles per row</td><td>Cameras' gear; forgotten when Kagaz closes</td><td>Cameras › For every camera, and remembered. Playback method under More.</td></tr>
+<tr><td>Log in, Log out, Add Xiaomi cameras, Sign out of Xiaomi</td><td>Cameras' gear</td><td>Settings › Accounts (the gear keeps a shortcut).</td></tr>
+<tr><td>Name, Group, Turn the picture, Mirror</td><td>A camera's ⋮ dialog</td><td>Cameras › Each device › that camera: the same dialog's contents.</td></tr>
+<tr><td>Quality, volume of one camera</td><td>On its tile</td><td>Stay on the tile: used while watching.</td></tr>
+<tr><td>Rearrange, groups</td><td>Cameras page</td><td>Stay on the page: arranging, not a setting.</td></tr>
+<tr><th colspan="3" style="padding-top:16px">Computers & phones</th></tr>
+<tr><td>When Kagaz's main window closes; a call at the door in a session's window</td><td>New</td><td>Computers & phones › Session windows.</td></tr>
+<tr><td>This computer's own keys; Play its sound here; Size</td><td>Each device's page (the keys also in the viewer's key menu)</td><td>Computers & phones › For every computer and phone, with each device's own where changed. The viewer's menu stays as a shortcut to the device's own.</td></tr>
+<tr><td>Use the older picture; Keep left click on the left; Sign in as; Remember the password; Ways to reach it; It is a…; Rename; Forget</td><td>Each device's page</td><td>Each device, as today; the older picture under More.</td></tr>
+<tr><th colspan="3" style="padding-top:16px">Fans, Purifiers, Printers, Society gate</th></tr>
+<tr><td>A fan's name and room; a purifier's name</td><td>The card's ⋯ menu, or a row's buttons</td><td>Each device; the menus stay as shortcuts.</td></tr>
+<tr><td>The printer's own Scan button (Brother)</td><td>A Brother printer › Scan tab, at the bottom</td><td>Print & scan › Brother (the tab keeps a link).</td></tr>
+<tr><td>Tell me on every entry and exit</td><td>Society › Vehicles; forgotten when Kagaz closes</td><td>Society gate › For the gate, and remembered.</td></tr>
+<tr><th colspan="3" style="padding-top:16px">Not settings: they stay where they are used</th></tr>
+<tr><td>Favourites on Home; what a print, scan, copy or tool asks for each time; the voice's volume in a call; a session's sound off for the moment</td><td>On their pages</td><td>Unchanged.</td></tr>
+</table>
+</body>
+</html>
