@@ -476,8 +476,10 @@ body {
 /* The TVs are Home's device tiles, the ones nearby rc-rows, as on
    Computers & phones; only the bar's spinning refresh, the snackbar and
    the sheet are added here. */
-#bar-refresh.working svg { animation: bar-spin 1s linear infinite; }
-@keyframes bar-spin { to { transform: rotate(360deg); } }
+/* While looking, the refresh icon gives its place to the app's one
+   progress circle (never both). */
+#bar-refresh.working svg { display: none; }
+#bar-refresh.working::before { width: 18px; height: 18px; margin: 0; vertical-align: middle; }
 .tv-about { margin-top: 20px; }
 .home-tile.live { border-color: var(--accent); }
 /* One-off news: Android's snackbar (inverse surface, 4 px corners), a
