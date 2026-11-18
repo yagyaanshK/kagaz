@@ -450,3 +450,52 @@ pub fn mouse(event: MouseEvent, size: (u16, u16)) {
     }
     let _ = none;
 }
+
+/// Mouse and key presses the person here made (not those a viewer sent,
+/// which Windows marks as injected), counted by low-level hooks on a
+/// thread of their own, started the first time it is asked.
+static LOCAL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static HOOKED: std::sync::Once = std::sync::Once::new();
+
+unsafe extern "system" fn mouse_hook(code: i32, w: windows::Win32::Foundation::WPARAM, l: windows::Win32::Foundation::LPARAM) -> windows::Win32::Foundation::LRESULT {
+    use windows::Win32::UI::WindowsAndMessaging::{CallNextHookEx, LLMHF_INJECTED, MSLLHOOKSTRUCT};
+    if code >= 0 {
+        let info = &*(l.0 as *const MSLLHOOKSTRUCT);
+        if info.flags & LLMHF_INJECTED == 0 {
+            LOCAL.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+    CallNextHookEx(None, code, w, l)
+}
+
+unsafe extern "system" fn key_hook(code: i32, w: windows::Win32::Foundation::WPARAM, l: windows::Win32::Foundation::LPARAM) -> windows::Win32::Foundation::LRESULT {
+    use windows::Win32::UI::WindowsAndMessaging::{CallNextHookEx, KBDLLHOOKSTRUCT, LLKHF_INJECTED};
+    if code >= 0 {
+        let info = &*(l.0 as *const KBDLLHOOKSTRUCT);
+        if info.flags.0 & LLKHF_INJECTED.0 == 0 {
+            LOCAL.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+    CallNextHookEx(None, code, w, l)
+}
+
+pub fn local_input() -> u64 {
+    HOOKED.call_once(|| {
+        std::thread::spawn(|| unsafe {
+            use windows::Win32::UI::WindowsAndMessaging::{GetMessageW, SetWindowsHookExW, MSG, WH_KEYBOARD_LL, WH_MOUSE_LL};
+            let module = windows::Win32::System::LibraryLoader::GetModuleHandleW(None).ok();
+            let _m = SetWindowsHookExW(WH_MOUSE_LL, Some(mouse_hook), module.map(|m| m.into()), 0);
+            let _k = SetWindowsHookExW(WH_KEYBOARD_LL, Some(key_hook), module.map(|m| m.into()), 0);
+            let mut msg = MSG::default();
+            while GetMessageW(&mut msg, None, 0, 0).as_bool() {}
+        });
+    });
+    LOCAL.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Locks Windows, as Windows key + L does.
+pub fn lock() {
+    unsafe {
+        let _ = windows::Win32::System::Shutdown::LockWorkStation();
+    }
+}

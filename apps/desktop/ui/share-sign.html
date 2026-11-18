@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en" data-pop="sign">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Kagaz</title>
+  <script src="platform.js"></script>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="skins.css">
+</head>
+<body class="share-pop share-sign-body">
+  <!-- For the whole session, on top of everything: who is connected, and
+       a way to let it only watch or to end it. It cannot be turned off. -->
+  <div class="share-sign" role="status">
+    <span class="share-dot"></span>
+    <span id="sign-text">A device is connected</span>
+    <button id="sign-mode" type="button">Watch only</button>
+    <button id="sign-end" type="button" class="end">End</button>
+  </div>
+  <script src="share-pop.js"></script>
+</body>
+</html>

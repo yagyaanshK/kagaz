@@ -9,7 +9,8 @@
 //! wrong PINs in a row stop PINs for five minutes.
 
 use crate::link;
-use crate::say;
+use crate::{event, say};
+use serde_json::json;
 use ironrdp_server::{CredentialDecision, CredentialValidationError, CredentialValidator, Credentials};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -232,6 +233,21 @@ impl Allowed {
     }
 }
 
+/// The device connected now, for the sign here, a change from watching
+/// to control, and the record of sessions.
+#[derive(Clone, Debug)]
+pub struct Current {
+    pub id: String,
+    pub name: String,
+    /// What it may do at most (its permissions); `allowed` says what it
+    /// does now.
+    pub may: May,
+    pub began: Instant,
+    /// How much the person here had used the mouse and keys when it
+    /// began, to tell afterwards whether anyone was here.
+    pub local_input: u64,
+}
+
 /// Decides each sign-in.
 pub struct Gate {
     pub paired: Arc<Paired>,
@@ -239,6 +255,7 @@ pub struct Gate {
     pub allowed: Allowed,
     /// Watching only, whatever the device may do (`--watch`).
     pub watch_only: bool,
+    pub current: Arc<Mutex<Option<Current>>>,
 }
 
 #[async_trait::async_trait]
@@ -283,11 +300,13 @@ impl CredentialValidator for Gate {
             match answer {
                 Answer::Deny => {
                     say(&format!("{} was not allowed", device.name));
+                    event(json!({ "kind": "asked", "id": device.id }));
                     return Ok(CredentialDecision::Reject);
                 }
                 Answer::Watch => may.control = false,
                 Answer::Control => {}
             }
+            event(json!({ "kind": "asked", "id": device.id }));
         }
         if self.watch_only {
             may.control = false;
@@ -305,6 +324,14 @@ impl CredentialValidator for Gate {
         }
         self.paired.save();
         say(&format!("{} is connected: {}", device.name, may.words()));
+        event(json!({ "kind": "connected", "id": device.id, "name": device.name, "control": may.control, "may": device.may.words() }));
+        *self.current.lock().unwrap() = Some(Current {
+            id: device.id.clone(),
+            name: device.name.clone(),
+            may: device.may,
+            began: Instant::now(),
+            local_input: crate::local_input(),
+        });
         Ok(CredentialDecision::Accept)
     }
 }
@@ -331,6 +358,7 @@ impl Asker for Lines {
         let (tx, rx) = std::sync::mpsc::channel();
         self.waiting.lock().unwrap().push((id.to_string(), tx));
         say(&format!("ask {id} {name:?}: type answer {id} control, watch or deny"));
+        event(json!({ "kind": "ask", "id": id, "name": name, "seconds": wait.as_secs() }));
         let answer = rx.recv_timeout(wait).unwrap_or(Answer::Deny);
         self.waiting.lock().unwrap().retain(|(w, _)| w != id);
         answer

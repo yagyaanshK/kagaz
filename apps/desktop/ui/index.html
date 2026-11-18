@@ -57,6 +57,7 @@
         <!-- The viewer's tools, while a device's screen is shown (remote-view.js). -->
         <span id="bar-remote" class="bar-remote hidden">
           <span id="rv-chip" class="rc-chip" title="How this session travels"><span id="rv-chip-icon" class="ic" data-icon="lock"></span><span id="rv-chip-path" class="rc-chip-path"></span><span id="rv-chip-text"></span></span>
+          <span id="rv-mode" class="rc-mode hidden" role="group" aria-label="Control or watch"><button id="rv-mode-control" type="button" class="on" aria-pressed="true" title="Use its mouse and keys">Control</button><button id="rv-mode-watch" type="button" aria-pressed="false" title="Only watch: this computer's mouse and keys stay here">Watch</button></span>
           <button id="rv-keys" type="button" class="bar-btn" aria-haspopup="true" aria-expanded="false" title="Send keys such as Ctrl + Alt + Del" aria-label="Send keys"><span class="ic" data-icon="keyboard"></span></button>
           <button id="rv-clip" type="button" class="bar-btn" title="Send this computer's clipboard (text or a picture) to the device; what is copied there arrives here by itself" aria-label="Send the clipboard"><span class="ic" data-icon="clipboard"></span></button>
           <button id="rv-file" type="button" class="bar-btn" aria-label="Send a file" disabled><span class="ic" data-icon="file"></span></button>
@@ -210,12 +211,20 @@
           <p class="muted">Add one of yours; Kagaz keeps every way to reach it and shows how it does.</p>
           <button id="remote-empty-add" type="button" class="accent"><span class="ic" data-icon="plus"></span><span>Add a computer or phone</span></button>
         </div>
+        <div id="remote-share-row" class="hidden"></div>
         <div id="remote-tiles" class="home-tiles rc-tiles"></div>
         <h3 id="remote-found-head" class="list-head">Found nearby</h3>
         <p id="remote-found-note" class="muted" role="status"></p>
         <ul id="remote-found" class="rc-rows"></ul>
       </div>
       <div id="remote-add-view" class="rc-add hidden">
+        <!-- Sharing this computer is its own choice (share.js), shown only
+             where this computer can share. -->
+        <section id="remote-add-share" class="set-section hidden">
+          <h3>Share this computer</h3>
+          <p class="muted small">Let paired devices see and use this computer while you go on using it. Off until you turn it on.</p>
+          <div class="rc-buttons start"><button id="remote-add-share-go" type="button">Set up sharing</button></div>
+        </section>
         <section class="set-section">
           <h3>Found on this network</h3>
           <p id="remote-add-network-note" class="muted"></p>
@@ -259,6 +268,8 @@
       <div id="remote-device-view" class="hidden"></div>
       <!-- This kind's own settings, behind its gear (remote.js). -->
       <div id="remote-settings-view" class="hidden"></div>
+      <!-- This computer, shared (share.js). -->
+      <div id="remote-share-view" class="hidden"></div>
       <!-- The viewer (remote-view.js): the window is the device's screen. -->
       <div id="remote-viewer-view" class="rc-viewer hidden">
         <div id="rv-banner" class="rc-banner hidden" role="status"><span class="ic" data-icon="unlock"></span><span><strong>Not encrypted on this network.</strong> Others on it can read the screen and what you type; over Tailscale they can't.</span></div>
@@ -983,6 +994,7 @@
   <script src="society.js"></script>
   <script src="remote-view.js"></script>
   <script src="remote-settings.js"></script>
+  <script src="share.js"></script>
   <script src="remote.js"></script>
   <script src="history.js"></script>
   <script src="settings.js"></script>

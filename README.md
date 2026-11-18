@@ -434,8 +434,8 @@ this keyboard.
 Ctrl + Alt + Del and the like) go to one side only, never both, and
 which is your choice for each device, on its page under Keyboard or in
 the viewer's key menu: to the device **in full screen only** (the
-default: nothing of this computer shows then), **whenever the pointer is
-on Kagaz** while it is in front, or **never**. The first time, this
+default: nothing of this computer shows then), **whenever the session's
+window is active and the pointer is inside it**, or **never**. The first time, this
 computer asks whether Kagaz may have its keys (on GNOME, Super + Esc
 takes them back at any moment). **Ctrl + Esc** leaves full screen.
 On a computer **each session has a window of its own**, named after its

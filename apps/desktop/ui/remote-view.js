@@ -289,7 +289,10 @@ const KagazRemoteView = (() => {
     state.last = null; // nothing typed is kept once it has been used
     state.asked = view();
     for (; state.owed > 0; state.owed--) invoke("remote_painted", { session: state.session }).catch(() => {});
-    hideCard();
+    // A computer running Kagaz that is asking its person lets the session
+    // open before the answer: "Asking…" stays until its first picture.
+    if (state.device.paired && asking.password === "" && !state.frames) state.waitingAnswer = true;
+    else hideCard();
     $("rv-banner").classList.toggle("hidden", connected.protected);
     setTools(connected.info);
     setChip(connected.millis);
@@ -391,6 +394,20 @@ const KagazRemoteView = (() => {
     // makes one screen for this window, VNC shows the device's as it is.
     $("rv-screens").classList.toggle("hidden", !(info && info.monitors));
     set("rv-screens", info && info.monitors, "Choose a monitor", "");
+    // A computer running Kagaz, which its person goes on using: watch it
+    // without touching, or control it.
+    const paired = !!(cur && cur.device.paired);
+    $("rv-mode").classList.toggle("hidden", !paired);
+    if (cur) cur.watching = false;
+    modeButtons();
+  }
+
+  function modeButtons() {
+    const watching = !!(cur && cur.watching);
+    $("rv-mode-control").classList.toggle("on", !watching);
+    $("rv-mode-control").setAttribute("aria-pressed", watching ? "false" : "true");
+    $("rv-mode-watch").classList.toggle("on", watching);
+    $("rv-mode-watch").setAttribute("aria-pressed", watching ? "true" : "false");
   }
 
   // The sound button says what a press does now.
@@ -437,6 +454,10 @@ const KagazRemoteView = (() => {
         } else if (kind === 3) ctx.drawImage(canvas, fx, fy, w, h, x, y, w, h);
       }
       cur.frames++;
+      if (cur.waitingAnswer) {
+        cur.waitingAnswer = false;
+        hideCard();
+      }
       cur.paintMs += performance.now() - began;
       if (cur.session != null) invoke("remote_painted", { session: cur.session }).catch(() => {});
       else cur.owed++;
@@ -536,7 +557,9 @@ const KagazRemoteView = (() => {
   let flushing = 0;
   function flush() {
     flushing = 0;
-    if (!outbox.length || !cur || cur.session == null) {
+    // Watching a computer running Kagaz: this computer's mouse and keys
+    // stay here.
+    if (!outbox.length || !cur || cur.session == null || cur.watching) {
       outbox = [];
       return;
     }
@@ -724,9 +747,9 @@ const KagazRemoteView = (() => {
   // Kagaz is in front with the pointer on it, or never. Never while a
   // card or question of Kagaz's own has the keys.
   const KEY_MODES = [
-    ["full-screen", "In full screen only"],
-    ["window", "Whenever the pointer is on Kagaz"],
-    ["never", "Never: they stay with this computer"],
+    ["full-screen", "Full screen only"],
+    ["window", "Window active, pointer inside"],
+    ["never", "Never: they stay here"],
   ];
   const keyMode = () => (cur && cur.settings && cur.settings.system_keys) || "full-screen";
   let pointerIn = document.documentElement.matches(":hover");
@@ -914,6 +937,17 @@ const KagazRemoteView = (() => {
     where.append(el("span", "", `Print Screen, the Windows key, Alt + Tab and this computer's other keys go to ${cur.device.name}`), choose);
     if (openPop("rv-keys", "keys", [el("strong", "", "Send keys"), ...list, where])) pop.setAttribute("role", "menu");
   });
+
+  for (const [id, watching] of [["rv-mode-control", false], ["rv-mode-watch", true]]) {
+    $(id).addEventListener("click", () => {
+      if (!cur) return;
+      cur.watching = watching;
+      outbox = [];
+      modeButtons();
+      invoke("page_log", { line: `remote: ${watching ? "watching" : "in control"}` }).catch(() => {});
+      stage.focus();
+    });
+  }
 
   $("rv-clip").addEventListener("click", () => {
     closePop();

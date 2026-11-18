@@ -358,11 +358,12 @@ const KagazRemote = (() => {
 
   const viewIs = (v) => !$(`remote-${v}-view`).classList.contains("hidden");
   function showView(v) {
-    for (const x of ["list", "add", "device", "viewer", "settings"]) $(`remote-${x}-view`).classList.toggle("hidden", x !== v);
+    for (const x of ["list", "add", "device", "viewer", "settings", "share"]) $(`remote-${x}-view`).classList.toggle("hidden", x !== v);
     const pane = $("remote");
     const d = (v === "device" || v === "viewer") && data.devices.find((x) => x.id === (v === "viewer" ? viewId : openId));
     if (v === "add") pane.dataset.title = "Add a computer or phone";
     else if (v === "settings") pane.dataset.title = "Settings for computers & phones";
+    else if (v === "share") pane.dataset.title = "This computer";
     else if (d) pane.dataset.title = d.name;
     else delete pane.dataset.title;
     $("main").scrollTop = 0;
@@ -619,7 +620,25 @@ const KagazRemote = (() => {
       each.append(r);
     }
     if (!data.devices.length) each.append(el("p", "muted", "No computers or phones yet."));
-    box.replaceChildren(win, each);
+    const parts = [win, each];
+    if (share && share.supported) {
+      const mine = el("section", "set-section");
+      mine.append(el("h3", "", "This computer"));
+      const r = el("div", "set-row set-door");
+      r.tabIndex = 0;
+      r.setAttribute("role", "button");
+      const ic = el("span", "set-door-icon ic");
+      ic.innerHTML = KagazIcons.svg("screens");
+      const l = el("span", "set-label");
+      l.append(el("span", "", "Share this computer"), el("span", "muted small", share.settings && share.settings.on ? "On" : "Off"));
+      const go = el("span", "set-door-go ic");
+      go.innerHTML = KagazIcons.svg("forward");
+      r.append(ic, l, go);
+      r.addEventListener("click", openShare);
+      mine.append(r);
+      parts.unshift(mine);
+    }
+    box.replaceChildren(...parts);
   }
   async function openSettings() {
     try {
@@ -674,6 +693,49 @@ const KagazRemote = (() => {
   function open(id) {
     if (data.devices.some((d) => d.id === id)) openDevice(id);
   }
+
+  // ---------- this computer, shared (share.js) ----------
+  let share = null;
+  function openShare() {
+    if (!viewIs("share")) {
+      const from = viewIs("settings") ? "settings" : viewIs("add") ? "add" : "list";
+      showView("share");
+      KagazNav.push("remote-share", () => showView(from));
+    }
+    KagazShare.open();
+  }
+  // Where this computer can share: Add offers it, the gear's page has a
+  // way to it, and while it is on the list says so.
+  function shareChanged(st) {
+    share = st;
+    const can = !!(st && st.supported);
+    $("remote-add-share").classList.toggle("hidden", !can);
+    const rowBox = $("remote-share-row");
+    rowBox.classList.toggle("hidden", !(st && st.settings && st.settings.on));
+    if (st && st.settings && st.settings.on) {
+      const r = el("div", "set-row set-door share-row");
+      r.tabIndex = 0;
+      r.setAttribute("role", "button");
+      const ic = el("span", "set-door-icon ic");
+      ic.innerHTML = KagazIcons.svg("screens");
+      const l = el("span", "set-label");
+      const words = st.session ? `${st.session.name} is connected now` : `${(st.devices || []).length} paired; nobody connected`;
+      l.append(el("span", "", "This computer is shared"), el("span", "muted small", st.problem || words));
+      const go = el("span", "set-door-go ic");
+      go.innerHTML = KagazIcons.svg("forward");
+      r.append(ic, l, go);
+      r.addEventListener("click", openShare);
+      rowBox.replaceChildren(r);
+    }
+    if (viewIs("settings")) renderSettings();
+    // Turned on or off: Home and the sidebar list the kind accordingly.
+    const on = !!(st && st.settings && st.settings.on);
+    if (on !== sharedBefore && typeof KagazHome !== "undefined") KagazHome.devicesChanged();
+    sharedBefore = on;
+  }
+  let sharedBefore = false;
+  $("remote-add-share-go").addEventListener("click", openShare);
+  KagazShare.status().then(shareChanged);
 
   // ---------- pairing with a computer that runs Kagaz ----------
   function pairShown(check) {
@@ -745,5 +807,5 @@ const KagazRemote = (() => {
     addHost(host, $("remote-add-name").value.trim() || null, $("remote-add-speaks").value || null).finally(() => (go.disabled = false));
   });
 
-  return { show, rescan, open, openAdd, openSettings, connectTo, homeWords, saved: () => data.devices, shapeIcon, within: (id) => !!(states.get(id) && states.get(id).within) };
+  return { show, rescan, open, openAdd, openSettings, openShare, shareChanged, connectTo, homeWords, saved: () => data.devices, shapeIcon, within: (id) => !!(states.get(id) && states.get(id).within) };
 })();

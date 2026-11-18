@@ -247,14 +247,17 @@ const KagazHome = (() => {
   async function remoteKind() {
     if (typeof KagazRemote === "undefined") return null;
     const data = await invoke("remote_saved").catch(() => null);
-    if (!data || !data.devices.length) return null;
+    // A computer that only shares itself has the kind too: its settings
+    // are there.
+    const shared = typeof KagazShare !== "undefined" && KagazShare.current() && KagazShare.current().settings && KagazShare.current().settings.on;
+    if (!data || (!data.devices.length && !shared)) return null;
     const open = () => selectCategory("remote");
     const devs = data.devices.map((d) => ({
       key: favKey("remote", d.name), name: d.name, sub: KagazRemote.homeWords(d), icon: KagazRemote.shapeIcon(d),
       tone: KagazRemote.within(d.id) ? "on" : "",
       open: () => { open(); KagazRemote.open(d.id); },
     }));
-    return { id: "remote", icon: "computer", title: "Computers & phones", status: "", devices: devs, open, chips: [], count: devs.length };
+    return { id: "remote", icon: "computer", title: "Computers & phones", status: shared && !devs.length ? "This computer is shared" : "", devices: devs, open, chips: [], count: devs.length };
   }
 
   // The society's gate: who is waiting, when signed in (or looking at the sample).

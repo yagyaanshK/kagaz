@@ -65,7 +65,7 @@ the other kinds: saved devices, Found nearby, Add.
   by Kagaz's own player, which keeps only as much ready as the way the
   sound arrives needs. This computer's own keys (Print Screen, the
   Windows key, Alt + Tab) go to the device in full screen only, whenever
-  the pointer is on Kagaz, or never: the owner's choice per device
+  its window is active with the pointer inside, or never: the owner's choice per device
   (2026-11-18), with Ctrl + Esc to leave full screen and a question
   before Kagaz closes with a session open. A per-computer switch keeps
   left click left where the remote computer has its mouse buttons
@@ -142,7 +142,16 @@ today's viewer works with it unchanged.
   allowed to connect without asking straight in, otherwise the person
   there is asked (control, watch, or no; no answer in 30 s is no); five
   wrong PINs stop PINs for five minutes; what each device may do is
-  enforced); (4) the screens; (5) start
+  enforced); (4) the screens (done 2026-11-19: Kagaz runs kagaz-share
+  only while sharing is on, and it stops with Kagaz; This computer under
+  Computers & phones, reached from Add a device, the gear and a row on
+  the list while on: the switch, ask or PIN for new devices, the PIN,
+  paired devices and what each may do, pairing with the code and this
+  computer's addresses, locking afterwards, the record of sessions, port
+  and networks; the question and the sign as small windows on top of
+  everything; Control and Watch in the viewer's bar; still to come: the
+  QR code, blanking the screen, several devices at once, the viewer's bar
+  following a switch to watching made on the computer); (5) start
   with Windows, the helper service.
 - *Connecting:* "Ask here each time" (someone at the computer allows it,
   with control or watch only; no answer in 30 s is no) or "Connect with the

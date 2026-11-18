@@ -53,7 +53,7 @@ const KagazRemoteSettings = (() => {
     return s;
   }
 
-  const KEY_MODES = [["full-screen", "In full screen only"], ["window", "Whenever the pointer is on Kagaz"], ["never", "Never: they stay with this computer"]];
+  const KEY_MODES = [["full-screen", "Full screen only"], ["window", "Window active, pointer inside"], ["never", "Never: they stay here"]];
 
   // One device's sections. `o`: rdp (it is reached over Remote Desktop),
   // vnc (it can be connected over VNC), canRemember, and what to do with
@@ -66,7 +66,7 @@ const KagazRemoteSettings = (() => {
       // Remote Desktop draws its screen for the viewer, and suits the
       // picture to the connection by itself.
       screen.append(el("h3", "", "Screen and sound"));
-      const size = select("remote-size", [["", "Fit this window, sharp"], ["own", "A fixed size (1920 × 1080), scaled to the window"]], settings.own_size ? "own" : "", (v) => {
+      const size = select("remote-size", [["", "Fit this window, sharp"], ["own", "Fixed 1920 × 1080, scaled to fit"]], settings.own_size ? "own" : "", (v) => {
         if (v) settings.own_size = true;
         else delete settings.own_size;
         keep();
@@ -176,7 +176,7 @@ const KagazRemoteSettings = (() => {
   function windows(w, keep) {
     const win = el("section", "set-section");
     win.append(el("h3", "", "Session windows"), el("p", "muted small", "Each session has a window of its own; Kagaz's main window stays free for everything else."));
-    const closing = select(null, [["", "End every session, after asking"], ["keep", "Keep the session windows open"]], w.keep_open ? "keep" : "", (v) => keep({ keep_open: v === "keep" }));
+    const closing = select(null, [["", "End all sessions, after asking"], ["keep", "Keep session windows open"]], w.keep_open ? "keep" : "", (v) => keep({ keep_open: v === "keep" }));
     const ringLabel = el("label", "switch");
     const ring = el("input");
     ring.type = "checkbox";

@@ -568,28 +568,45 @@ Plan: `docs/remote-connection.md` (agreed 2026-11-16).
       (asked), forgetting removes the secret. The library sends its
       refusal in a form the viewer's newer library cannot read; the
       viewer says "turned away" for a session that breaks before any
-      picture. **For the owner to try, when ready** (put off 2026-11-18):
-      1. send `dist/kagaz-share-windows-x64.exe` to the PC with Kagaz's
-         Send a file; 2. in Terminal there run
-         `.\kagaz-share-windows-x64.exe --pin <4 to 8 digits>` and keep it
-         open (allow it on private networks if the firewall asks); 3. pair:
-         type `pair` there (it shows a code), then here Add a device ›
-         Computers & phones › A computer running Kagaz (its address, the
-         code), or `kagaz remote pair <address>`; compare the three words,
-         press They match here and type `confirm` there; 4. hand the
-         session to the PC's own screen from an administrator Command
-         Prompt:
+      picture. **Step 4 built** (2026-11-19): `apps/desktop/src/share.rs`
+      runs kagaz-share `--driven` (found next to Kagaz; `@`-JSON events;
+      settings in `share.json`) only while sharing is on, resumes it at
+      start only if left on, and it exits when Kagaz goes; `ui/share.js`
+      (This computer: switch, who may connect, PIN, paired devices, pair
+      with code and addresses, lock after, record, past sessions, port
+      and networks), `share-ask.html` and `share-sign.html` (small
+      windows on top: the question; the sign with Watch only / Let it
+      control / End), Control and Watch in the viewer's bar for paired
+      computers, "Asking…" kept until the first picture. kagaz-share:
+      `watch`, `control`, `end`, `devices`, `lock`, `--bind`, `--lock`,
+      `sessions.jsonl`, low-level hooks counting the person's own input
+      (for "lock if nobody used it"). Tried here with Kagaz as the
+      sharing side on the test card: started from its settings, a device
+      in with the PIN, asked without it (the owner answered in the real
+      window and used both sign buttons), stopped with Kagaz. Not built
+      yet from the mockup: the QR code, blanking the screen, several
+      devices at once, the viewer's bar following a switch made on the
+      computer. Menu choices shortened and the second key mode renamed
+      "Window active, pointer inside" (the owner, 2026-11-19). **For the
+      owner to try, when ready** (put off 2026-11-18):
+      1. send `dist/kagaz-desktop-windows-x64.exe` and
+         `dist/kagaz-share-windows-x64.exe` to one folder on the PC with
+         Kagaz's Send a file, and open Kagaz there; 2. Add a device ›
+         Computers & phones › Set up sharing: turn Share this computer
+         on (allow it on private networks if the firewall asks) and set
+         a PIN; 3. Pair a device there; here Add a device › Computers &
+         phones › A computer running Kagaz (its address and the code
+         shown there); compare the words, They match here, Pair there;
+         4. hand the session to the PC's own screen from an administrator
+         Command Prompt:
          `for /f "skip=1 tokens=3" %s in ('query user %USERNAME%') do %windir%\System32\tscon.exe %s /dest:console`
          (the PC's monitor then shows the desktop unlocked); 5. connect
-         here: with the PIN, or Ask someone there (Windows' own small
-         question on the PC: Yes control, No watch, Cancel no); to let it
-         in with the PIN alone, type `allow <id> control clipboard files
-         sound unattended` there (`list` shows the id); 6. try mouse, keys,
-         scroll, Num Lock, a video, and read the numbers its window prints
-         every 5 seconds; copy text and a picture each way, send a file
-         and paste it in a folder there, play something (`kagaz remote try
-         "<name>" --sound` prints how its sound arrives); 7. close it and
-         go back to Windows' own Remote Desktop. Until
+         here: with the PIN, or Ask someone there; 6. try mouse, keys,
+         scroll, Num Lock, a video, Control and Watch, the sign's buttons;
+         copy text and a picture each way, send a file and paste it in a
+         folder there, play something (`kagaz remote try "<name>" --sound`
+         prints how its sound arrives); 7. turn sharing off and go back to
+         Windows' own Remote Desktop. Until
       it exists: a VNC server on that laptop, reached over Tailscale,
       with today's Kagaz (not yet tried against a real Windows VNC
       server).

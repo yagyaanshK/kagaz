@@ -3,14 +3,21 @@
 //! (docs/remote-connection.md, step 2). It runs only while sharing is
 //! turned on; until Kagaz starts it, nothing of it runs or listens.
 //!
-//!   kagaz-share [--port 3390] [--local] [--name NAME] [--pin 123456]
+//!   kagaz-share [--port 3390] [--local | --bind IP] [--name NAME] [--pin 123456]
+//!               [--driven] [--lock never|always|unused] [--no-record]
 //!               [--watch] [--rate 30] [--capture dxgi|gdi] [--ask-on-input]
 //!               [--no-sound] [--no-clipboard] [--no-files]
 //!               [--pattern [--size 1280x720] [--card-rate 5] [--tone] [--answer control|watch|deny]]
 //!               [--keep DIR]
 //!
 //! `--port` is the port it listens on (3390 unless said: Windows' own
-//! Remote Desktop keeps 3389). `--local` listens on this computer only.
+//! Remote Desktop keeps 3389). `--local` listens on this computer only,
+//! `--bind` on one address of it (its Tailscale address, say).
+//! `--driven`: Kagaz's window runs it, and reads `@`-lines of JSON from
+//! its output (who connected, a question, a pairing's code and words).
+//! `--lock`: lock Windows when a session ends (never unless said), or
+//! only if nobody here used it meanwhile. Each session is written to
+//! `sessions.jsonl` in its folder unless `--no-record`.
 //! `--name` is what paired devices call it (the computer's name unless
 //! said). `--pin` sets this computer's PIN. `--watch` lets every device
 //! only watch.
@@ -26,7 +33,8 @@
 //! `pair` shows a code to pair a device with; `confirm [what it may do]`
 //! or `cancel` once the words show; `pin <digits>` sets the PIN; `list`;
 //! `allow <id> <what it may do>`; `forget <id>`; `answer <id>
-//! control|watch|deny`. What a device may do is any of `control
+//! control|watch|deny`; during a session `watch`, `control`, `end`;
+//! `devices`; `lock never|always|unused`. What a device may do is any of `control
 //! clipboard files sound unattended`.
 //!
 //! `--pattern` shows the test card instead of the screen, on any system,
@@ -85,6 +93,29 @@ use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+
+/// Lines for the program that runs this one (Kagaz's window, with
+/// `--driven`): `@` and JSON, one event each.
+static DRIVEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn event(value: serde_json::Value) {
+    if DRIVEN.load(Ordering::Relaxed) {
+        say(&format!("@{value}"));
+    }
+}
+
+/// How often the person here has used the mouse and keys (not counting
+/// what came from a viewer).
+pub fn local_input() -> u64 {
+    #[cfg(windows)]
+    {
+        win::local_input()
+    }
+    #[cfg(not(windows))]
+    {
+        0
+    }
+}
 
 pub fn say(line: &str) {
     let mut out = std::io::stdout().lock();
@@ -290,7 +321,27 @@ fn computer_name() -> String {
 }
 
 /// What is typed on the input, a line at a time.
-fn commands(pairing: Arc<pairing::Pairing>, lines: Arc<paired::Lines>) {
+/// What the session going on now needs from the commands.
+struct Now {
+    allowed: paired::Allowed,
+    current: Arc<std::sync::Mutex<Option<paired::Current>>>,
+    quit: std::sync::Mutex<Option<tokio::sync::mpsc::UnboundedSender<ironrdp_server::ServerEvent>>>,
+    /// After a session: lock Windows "never", "always", or "unused" (if
+    /// nobody here used it meanwhile).
+    lock: std::sync::Mutex<String>,
+}
+
+fn devices_event(paired: &paired::Paired) {
+    let store = paired.store.lock().unwrap();
+    let list: Vec<serde_json::Value> = store
+        .devices
+        .iter()
+        .map(|d| serde_json::json!({ "id": d.id, "name": d.name, "may": d.may, "since": d.paired, "seen": d.seen }))
+        .collect();
+    event(serde_json::json!({ "kind": "devices", "devices": list, "pin": store.pin.is_some() }));
+}
+
+fn commands(pairing: Arc<pairing::Pairing>, lines: Arc<paired::Lines>, now: Arc<Now>) {
     std::thread::spawn(move || {
         use std::io::BufRead;
         for line in std::io::stdin().lock().lines() {
@@ -304,7 +355,34 @@ fn commands(pairing: Arc<pairing::Pairing>, lines: Arc<paired::Lines>) {
                 ["stop"] => pairing.stop(),
                 ["confirm", may @ ..] => pairing.decide(Some(paired::May::from_words(may))),
                 ["cancel"] => pairing.decide(None),
-                ["pin", pin] => say(if paired.set_pin(pin) { "the PIN is set" } else { "a PIN is at least 4 digits" }),
+                ["pin", pin] => {
+                    say(if paired.set_pin(pin) { "the PIN is set" } else { "a PIN is at least 4 digits" });
+                    devices_event(paired);
+                }
+                ["devices"] => devices_event(paired),
+                // The person here, during a session: let it only watch, give
+                // it control back (as far as it may), or end it.
+                ["watch"] => {
+                    now.allowed.control.store(false, Ordering::Release);
+                    now.allowed.files.store(false, Ordering::Release);
+                    event(serde_json::json!({ "kind": "mode", "control": false }));
+                    say("watching only now");
+                }
+                ["control"] => {
+                    let may = now.current.lock().unwrap().as_ref().map(|c| c.may);
+                    if let Some(may) = may.filter(|m| m.control) {
+                        now.allowed.control.store(true, Ordering::Release);
+                        now.allowed.files.store(may.files, Ordering::Release);
+                        event(serde_json::json!({ "kind": "mode", "control": true }));
+                        say("it may use the mouse and keys again");
+                    }
+                }
+                ["end"] => {
+                    if let Some(quit) = now.quit.lock().unwrap().as_ref() {
+                        let _ = quit.send(ironrdp_server::ServerEvent::Quit("ended here".into()));
+                    }
+                }
+                ["lock", how @ ("never" | "always" | "unused")] => *now.lock.lock().unwrap() = how.to_string(),
                 ["list"] => {
                     let store = paired.store.lock().unwrap();
                     if store.devices.is_empty() {
@@ -316,9 +394,13 @@ fn commands(pairing: Arc<pairing::Pairing>, lines: Arc<paired::Lines>) {
                     say(if store.pin.is_some() { "a PIN is set" } else { "no PIN set yet: pin <digits>" });
                 }
                 ["allow", id, may @ ..] => {
-                    say(if paired.change(id, paired::May::from_words(may)) { "changed" } else { "no such device" })
+                    say(if paired.change(id, paired::May::from_words(may)) { "changed" } else { "no such device" });
+                    devices_event(paired);
                 }
-                ["forget", id] => say(if paired.forget(id) { "forgotten" } else { "no such device" }),
+                ["forget", id] => {
+                    say(if paired.forget(id) { "forgotten" } else { "no such device" });
+                    devices_event(paired);
+                }
                 ["answer", id, how] => lines.answer(
                     id,
                     match *how {
@@ -330,6 +412,12 @@ fn commands(pairing: Arc<pairing::Pairing>, lines: Arc<paired::Lines>) {
                 [] => {}
                 _ => say("pair, confirm, cancel, pin <digits>, list, allow <id> …, forget <id>, answer <id> control|watch|deny"),
             }
+        }
+        // Kagaz's window that ran it is gone: sharing stops with it, never
+        // left running unseen.
+        if DRIVEN.load(Ordering::Relaxed) {
+            say("Kagaz closed: sharing stops");
+            std::process::exit(0);
         }
     });
 }
@@ -368,13 +456,17 @@ async fn route(stream: tokio::net::TcpStream, sessions: tokio::sync::mpsc::Sende
 fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().collect();
     if args.iter().any(|a| a == "--help" || a == "-h") {
-        say("kagaz-share [--port 3390] [--local] [--name NAME] [--pin 123456] [--watch] [--rate 30] [--capture dxgi|gdi] [--ask-on-input] [--no-sound] [--no-clipboard] [--no-files] [--pattern [--size 1280x720] [--card-rate 5] [--tone] [--answer control|watch|deny]] [--keep DIR]");
+        say("kagaz-share [--port 3390] [--local | --bind IP] [--name NAME] [--driven] [--lock never|always|unused] [--no-record] [--pin 123456] [--watch] [--rate 30] [--capture dxgi|gdi] [--ask-on-input] [--no-sound] [--no-clipboard] [--no-files] [--pattern [--size 1280x720] [--card-rate 5] [--tone] [--answer control|watch|deny]] [--keep DIR]");
         return Ok(());
     }
     #[cfg(windows)]
     win::dpi_aware();
     let port: u16 = value(&args, "--port").map(|p| p.parse()).transpose()?.unwrap_or(3390);
     let local = args.iter().any(|a| a == "--local");
+    let bind: Option<std::net::IpAddr> = value(&args, "--bind").map(|b| b.parse()).transpose()?;
+    if args.iter().any(|a| a == "--driven") {
+        DRIVEN.store(true, Ordering::Relaxed);
+    }
     let rate: u32 = value(&args, "--rate").map(|p| p.parse()).transpose()?.unwrap_or(30).clamp(1, 60);
     let pattern = args.iter().any(|a| a == "--pattern");
     let watch = args.iter().any(|a| a == "--watch");
@@ -396,7 +488,11 @@ fn main() -> anyhow::Result<()> {
         )?;
     let acceptor = TlsAcceptor::from(Arc::new(config));
 
-    let host = if local { std::net::Ipv4Addr::LOCALHOST } else { std::net::Ipv4Addr::UNSPECIFIED };
+    let host: std::net::IpAddr = match bind {
+        Some(ip) => ip,
+        None if local => std::net::Ipv4Addr::LOCALHOST.into(),
+        None => std::net::Ipv4Addr::UNSPECIFIED.into(),
+    };
     let listener = std::net::TcpListener::bind((host, port))?;
     listener.set_nonblocking(true)?;
     let addr = listener.local_addr()?;
@@ -473,7 +569,7 @@ fn main() -> anyhow::Result<()> {
     let fingerprint: String = link::hex(&Sha256::digest(&der));
     // Who answers when a device asks to connect.
     let lines = Arc::new(paired::Lines::default());
-    let asker: Arc<dyn paired::Asker> = if args.iter().any(|a| a == "--ask-on-input") {
+    let asker: Arc<dyn paired::Asker> = if args.iter().any(|a| a == "--ask-on-input" || a == "--driven") {
         lines.clone()
     } else if pattern {
         Arc::new(paired::Always(match value(&args, "--answer").as_deref() {
@@ -491,9 +587,18 @@ fn main() -> anyhow::Result<()> {
             lines.clone()
         }
     };
-    let gate = paired::Gate { paired: paired.clone(), asker, allowed: allowed.clone(), watch_only: watch };
+    let current = Arc::new(std::sync::Mutex::new(None));
+    let gate = paired::Gate { paired: paired.clone(), asker, allowed: allowed.clone(), watch_only: watch, current: current.clone() };
+    let now = Arc::new(Now {
+        allowed: allowed.clone(),
+        current: current.clone(),
+        quit: std::sync::Mutex::new(None),
+        lock: std::sync::Mutex::new(value(&args, "--lock").unwrap_or_else(|| "never".into())),
+    });
+    let record = !args.iter().any(|a| a == "--no-record");
+    let sessions_file = keep.join("sessions.jsonl");
     let pairing = Arc::new(pairing::Pairing::new(paired.clone(), name.clone(), fingerprint.clone(), addr.port()));
-    commands(pairing.clone(), lines);
+    commands(pairing.clone(), lines, now.clone());
     let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
     let viewers = latest.viewers.clone();
     runtime.block_on(async move {
@@ -511,6 +616,9 @@ fn main() -> anyhow::Result<()> {
             .with_honor_client_desktop_size(false)
             .with_credential_validator(Some(Arc::new(gate)))
             .build();
+        *now.quit.lock().unwrap() = Some(server.event_sender().clone());
+        event(serde_json::json!({ "kind": "listening", "address": addr.to_string(), "port": addr.port(), "name": name, "fingerprint": fingerprint }));
+        devices_event(&paired);
         say(&format!("listening {addr} as {name:?}"));
         say(&format!("fingerprint {fingerprint}"));
         {
@@ -542,6 +650,25 @@ fn main() -> anyhow::Result<()> {
             }
             viewers.fetch_sub(1, Ordering::AcqRel);
             allowed.set(paired::May { control: false, clipboard: false, files: false, sound: false, unattended: false });
+            // Who it was: the record, the sign, and locking up after.
+            if let Some(was) = current.lock().unwrap().take() {
+                let secs = was.began.elapsed().as_secs();
+                let used_here = local_input() != was.local_input;
+                event(serde_json::json!({ "kind": "left", "id": was.id, "name": was.name, "seconds": secs }));
+                if record {
+                    let line = serde_json::json!({ "at": paired::now(), "id": was.id, "name": was.name, "seconds": secs });
+                    use std::io::Write as _;
+                    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&sessions_file) {
+                        let _ = writeln!(f, "{line}");
+                    }
+                }
+                let how = now.lock.lock().unwrap().clone();
+                if how == "always" || (how == "unused" && !used_here) {
+                    say("locking this computer: the session is over");
+                    #[cfg(windows)]
+                    win::lock();
+                }
+            }
         }
         Ok(())
     })

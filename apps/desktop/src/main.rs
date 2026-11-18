@@ -28,6 +28,8 @@ mod remote;
 mod remote_vault;
 mod remote_view;
 mod remote_windows;
+#[cfg(not(mobile))]
+mod share;
 #[cfg(desktop)]
 mod ring_notice;
 mod ringtones;
@@ -37,6 +39,13 @@ mod saving;
 mod xiaomi;
 
 /// Run a blocking core call off the UI thread.
+#[cfg(not(mobile))]
+fn share_state() -> share::Share {
+    share::Share::default()
+}
+#[cfg(mobile)]
+fn share_state() -> () {}
+
 async fn blocking<T: Send + 'static>(
     f: impl FnOnce() -> Result<T, String> + Send + 'static,
 ) -> Result<T, String> {
@@ -1923,6 +1932,7 @@ pub fn run() {
         .manage(media::Watches::default())
         .manage(remote_view::Viewers::default())
         .manage(remote_windows::SessionWindows::default())
+        .manage(share_state())
         .manage(xiaomi::XiaomiState::default())
         .plugin(tauri_plugin_dialog::init())
         .plugin(phone_plugin())
@@ -1931,6 +1941,10 @@ pub fn run() {
         .setup(|app| {
             #[cfg(target_os = "linux")]
             follow_dark_style();
+            // Sharing this computer goes on again only if the person left
+            // it on; otherwise nothing of it runs.
+            #[cfg(not(mobile))]
+            share::resume(app.handle());
             // A phone hands out its own folders for settings and caches.
             #[cfg(mobile)]
             {
@@ -2071,6 +2085,14 @@ pub fn run() {
             remote_windows::remote_close_all,
             remote::remote_windows_settings,
             remote::remote_pair_begin,
+            #[cfg(not(mobile))]
+            share::share_status,
+            #[cfg(not(mobile))]
+            share::share_settings,
+            #[cfg(not(mobile))]
+            share::share_send,
+            #[cfg(not(mobile))]
+            share::share_sessions,
             remote::remote_pair_finish,
             remote_view::remote_startup_files,
             remote_view::remote_disconnect,
@@ -2161,6 +2183,8 @@ pub fn run() {
             // go of the fans (a kept connection would block them).
             if let tauri::RunEvent::Exit = event {
                 fans::close_links();
+                #[cfg(not(mobile))]
+                share::shutdown(app);
                 if let Some(state) = app.try_state::<CameraState>() {
                     if let Ok(mut guard) = state.engine.lock() {
                         guard.take();

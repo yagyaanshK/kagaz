@@ -5,7 +5,7 @@
 
 use crate::link;
 use crate::paired::{May, Paired};
-use crate::say;
+use crate::{event, say};
 use serde_json::json;
 use std::net::TcpStream;
 use std::sync::mpsc::{channel, Sender};
@@ -33,6 +33,7 @@ impl Pairing {
         let n = u32::from_le_bytes(b) % 1_000_000;
         let code = format!("{:03} {:03}", n / 1000, n % 1000);
         *self.code.lock().unwrap() = Some((code.clone(), Instant::now() + Duration::from_secs(link::CODE_LASTS)));
+        event(json!({ "kind": "code", "code": code, "seconds": link::CODE_LASTS }));
         say(&format!(
             "pairing code {code}: on the other device, Add a device › Computers & phones › Pair with a code (this computer's address, port {}); good once, for 5 minutes",
             self.port
@@ -89,9 +90,11 @@ impl Pairing {
         let proof = link::read_frame(s)?;
         if !link::same(proof["proof"].as_str().unwrap_or(""), &link::proof(&key, "viewer", &said)) {
             link::write_frame(s, &json!({ "error": "code" }))?;
+            event(json!({ "kind": "not-paired", "name": viewer, "why": "code" }));
             anyhow::bail!("{viewer} typed another code; type pair for a new one");
         }
         link::write_frame(s, &json!({ "proof": link::proof(&key, "host", &said) }))?;
+        event(json!({ "kind": "words", "words": link::words(&key), "name": viewer }));
         say(&format!(
             "words {} from {viewer:?}: if the other device shows the same, type confirm (or confirm with what it may do: control clipboard files sound unattended), else cancel",
             link::words(&key)
@@ -130,10 +133,12 @@ impl Pairing {
                 let id = self.paired.add(&viewer, &link::device_secret(&key), may);
                 link::write_frame(s, &json!({ "ok": true, "id": id, "proof": link::proof(&key, "host ok", &[id.as_bytes()]) }))?;
                 say(&format!("paired {viewer:?} as {id}: {}", may.words()));
+                event(json!({ "kind": "paired", "id": id, "name": viewer }));
             }
             _ => {
                 let _ = link::write_frame(s, &json!({ "ok": false }));
                 say(&format!("not paired with {viewer:?}"));
+                event(json!({ "kind": "not-paired", "name": viewer }));
             }
         }
         Ok(())
