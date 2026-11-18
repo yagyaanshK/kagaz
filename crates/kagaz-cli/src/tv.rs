@@ -224,9 +224,12 @@ fn on_event(e: Event) {
             }
         }
         Event::Playing(m) => println!("Playing at {}x{}, {} pictures a second. Ctrl+C ends it.", m.width, m.height, m.fps),
-        Event::Progress { seconds, frames, kilobits_per_second } => {
-            if seconds % 10 == 0 {
-                println!("  {seconds} s, {frames} pictures, {kilobits_per_second} kbit/s");
+        Event::Progress { seconds, frames, kilobits_per_second, busy_ms, worst_ms, budget_ms, dropped } => {
+            if seconds % 5 == 0 {
+                println!(
+                    "  {seconds} s, {frames} pictures, {kilobits_per_second} kbit/s; \
+                     each took {busy_ms:.1} ms (worst {worst_ms:.0}) of {budget_ms:.1}; {dropped} dropped"
+                );
             }
         }
         Event::KeyFrameAsked => println!("  The TV asked for a fresh picture."),

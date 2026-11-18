@@ -61,6 +61,9 @@ pub struct Screen {
     _portal: Option<Connection>,
     last_seq: u64,
     scaled: Vec<u8>,
+    /// The picture taken out of `latest` for scaling, swapped in and out so
+    /// the desktop's thread never waits for the scaling.
+    taken: Latest,
     /// Pictures that arrived from the desktop.
     pub arrived: Arc<AtomicU64>,
 }
@@ -263,6 +266,7 @@ impl Screen {
             _portal: None,
             last_seq: 0,
             scaled: Vec::new(),
+            taken: Latest::default(),
             arrived,
         })
     }
@@ -292,14 +296,26 @@ impl Screen {
             }
             self.last_seq = 0;
         }
-        let l = self.latest.lock().unwrap();
-        if l.seq != self.last_seq && l.seq > 0 {
-            if let Some(layout) = l.layout {
-                scale(&l.data, l.width, l.height, l.stride, layout, &mut self.scaled, width, height);
+        {
+            // Swap the newest picture out (no copy), leaving the old buffer
+            // for the desktop's thread to fill next.
+            let mut l = self.latest.lock().unwrap();
+            if l.seq == self.last_seq || l.seq == 0 {
+                return &self.scaled;
             }
+            std::mem::swap(&mut self.taken.data, &mut l.data);
+            self.taken.width = l.width;
+            self.taken.height = l.height;
+            self.taken.stride = l.stride;
+            self.taken.layout = l.layout;
             self.last_seq = l.seq;
         }
-        drop(l);
+        let t = &self.taken;
+        if let Some(layout) = t.layout {
+            if t.data.len() >= t.stride * t.height {
+                scale(&t.data, t.width, t.height, t.stride, layout, &mut self.scaled, width, height);
+            }
+        }
         &self.scaled
     }
 }
@@ -337,21 +353,50 @@ fn scale(src: &[u8], sw: usize, sh: usize, stride: usize, layout: Layout, dst: &
     };
     let cols = taps(sw, fw, sw);
     let rows = taps(sh, fh, sh);
-    for (y, &(y0, y1, wy)) in rows.iter().enumerate() {
-        let row0 = &src[y0 * stride..];
-        let row1 = &src[y1 * stride..];
-        let out = &mut dst[((oy + y) * dw + ox) * 4..((oy + y) * dw + ox + fw) * 4];
-        for (px, &(x0, x1, wx)) in out.chunks_exact_mut(4).zip(cols.iter()) {
-            let (a, b2) = (x0 * 4, x1 * 4);
-            for (c, from) in [(0usize, r), (1, 1), (2, b)] {
-                let top = row0[a + from] as u32 * (256 - wx) + row0[b2 + from] as u32 * wx;
-                let bottom = row1[a + from] as u32 * (256 - wx) + row1[b2 + from] as u32 * wx;
-                px[c] = ((top * (256 - wy) + bottom * wy) >> 16) as u8;
-            }
-            px[3] = 255;
+    let same = sw == fw && sh == fh;
+    let band_rows = fh.div_ceil(SCALE_THREADS);
+    let area = &mut dst[oy * dw * 4..(oy + fh) * dw * 4];
+    std::thread::scope(|s| {
+        for (band, chunk) in area.chunks_mut(band_rows * dw * 4).enumerate() {
+            let (cols, rows) = (&cols, &rows);
+            s.spawn(move || {
+                for (k, line) in chunk.chunks_mut(dw * 4).enumerate() {
+                    let y = band * band_rows + k;
+                    let out = &mut line[ox * 4..(ox + fw) * 4];
+                    if same {
+                        // The same size: only the channels change places.
+                        let row = &src[y * stride..y * stride + sw * 4];
+                        for (px, s) in out.chunks_exact_mut(4).zip(row.chunks_exact(4)) {
+                            px[0] = s[r];
+                            px[1] = s[1];
+                            px[2] = s[b];
+                            px[3] = 255;
+                        }
+                        continue;
+                    }
+                    let (y0, y1, wy) = rows[y];
+                    let row0 = &src[y0 * stride..];
+                    let row1 = &src[y1 * stride..];
+                    for (px, &(x0, x1, wx)) in out.chunks_exact_mut(4).zip(cols.iter()) {
+                        let (a, c) = (x0 * 4, x1 * 4);
+                        let mix = |from: usize| {
+                            let top = row0[a + from] as u32 * (256 - wx) + row0[c + from] as u32 * wx;
+                            let bottom = row1[a + from] as u32 * (256 - wx) + row1[c + from] as u32 * wx;
+                            ((top * (256 - wy) + bottom * wy) >> 16) as u8
+                        };
+                        px[0] = mix(r);
+                        px[1] = mix(1);
+                        px[2] = mix(b);
+                        px[3] = 255;
+                    }
+                }
+            });
         }
-    }
+    });
 }
+
+/// Threads that share the scaling of each picture.
+const SCALE_THREADS: usize = 6;
 
 fn run_stream(
     fd: Option<OwnedFd>,
@@ -585,6 +630,19 @@ mod tests {
         }
         eprintln!("sent {} pictures, {} decoded", report.frames, pictures);
         assert!(pictures >= 100, "{pictures} pictures decoded");
+    }
+
+    #[test]
+    #[ignore]
+    fn scale_timing() {
+        let (sw, sh) = (1920usize, 1200usize);
+        let src: Vec<u8> = (0..sw * sh * 4).map(|i| (i * 7 % 251) as u8).collect();
+        let mut dst = vec![0u8; 1920 * 1080 * 4];
+        let a = Instant::now();
+        for _ in 0..20 {
+            scale(&src, sw, sh, sw * 4, Layout::Bgrx, &mut dst, 1920, 1080);
+        }
+        eprintln!("scale 1920x1200 -> 1080p: {:.1} ms", a.elapsed().as_secs_f64() / 20.0 * 1e3);
     }
 
     #[test]

@@ -127,6 +127,20 @@ impl Video {
 
     /// With a ceiling on the quantiser (lower is sharper and larger).
     pub fn tuned(width: usize, height: usize, fps: u32, bits_per_second: u32, max_qp: u8) -> Result<Video, String> {
+        // Measured at 1080p (2026-11-18): Low and Medium give the same
+        // picture on desktop content; Low with four threads is fastest.
+        Video::with(width, height, fps, bits_per_second, max_qp, Complexity::Low, 4)
+    }
+
+    pub fn with(
+        width: usize,
+        height: usize,
+        fps: u32,
+        bits_per_second: u32,
+        max_qp: u8,
+        complexity: Complexity,
+        threads: u16,
+    ) -> Result<Video, String> {
         let level = match (height > 720, fps > 30) {
             (true, true) => Level::Level_4_2,
             (true, false) => Level::Level_4_0,
@@ -145,9 +159,13 @@ impl Video {
             .skip_frames(true)
             .adaptive_quantization(false)
             .background_detection(false)
-            .intra_frame_period(IntraFramePeriod::from_num_frames(fps * 2))
+            // A whole picture every 10 seconds, and whenever the TV asks
+            // (it does when packets go missing): whole pictures are the
+            // biggest and slowest.
+            .intra_frame_period(IntraFramePeriod::from_num_frames(fps * 10))
             .qp(QpRange::new(10, max_qp))
-            .complexity(Complexity::Medium);
+            .complexity(complexity)
+            .num_threads(threads);
         let encoder = Encoder::with_api_config(OpenH264API::from_source(), config)
             .map_err(|e| format!("the H.264 encoder did not start: {e}"))?;
         Ok(Video { encoder, yuv: YUVBuffer::new(width, height), width, height })
@@ -244,6 +262,32 @@ mod quality {
         }
         let mse = err / (w * h) as f64;
         10.0 * (255.0f64 * 255.0 / mse.max(1e-9)).log10()
+    }
+
+    #[test]
+    #[ignore]
+    fn timing() {
+        let (w, h) = (1920, 1080);
+        for (cx, threads) in [(Complexity::Low, 1), (Complexity::Medium, 1), (Complexity::Low, 4), (Complexity::Medium, 4)] {
+            let mut v = Video::with(w, h, 30, 12_000_000, 26, cx, threads).unwrap();
+            let mut d = openh264::decoder::Decoder::new().unwrap();
+            let (mut t_conv, mut t_enc, mut worst, mut last) = (0f64, 0f64, 0f64, 0.0);
+            for t in 0..60 {
+                let src = desktop(w, h, t);
+                let a = std::time::Instant::now();
+                v.yuv.read_rgba8(openh264::formats::RgbaSliceU8::new(&src, (w, h)));
+                let b = std::time::Instant::now();
+                let bits = v.encoder.encode(&v.yuv).unwrap().to_vec();
+                let c = std::time::Instant::now();
+                t_conv += (b - a).as_secs_f64();
+                t_enc += (c - b).as_secs_f64();
+                worst = f64::max(worst, (c - b).as_secs_f64());
+                for nal in openh264::nal_units(&bits) {
+                    if let Ok(Some(y)) = d.decode(nal) { last = psnr(&src, w, h, &y); }
+                }
+            }
+            eprintln!("{cx:?} x{threads}: convert {:.1} ms, encode {:.1} ms (worst {:.1}), {:.1} dB", t_conv / 60.0 * 1e3, t_enc / 60.0 * 1e3, worst * 1e3, last);
+        }
     }
 
     #[test]

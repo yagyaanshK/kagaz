@@ -76,8 +76,18 @@ pub enum Event {
     Abilities(SinkAbilities),
     /// The TV is playing the stream.
     Playing(Mode),
-    /// Once a second while playing.
-    Progress { seconds: u64, frames: u64, kilobits_per_second: u64 },
+    /// Once a second while playing: how many pictures, how fast the stream,
+    /// how long a picture took to make (average and worst, ms) against the
+    /// time it had, and how many were dropped for falling behind.
+    Progress {
+        seconds: u64,
+        frames: u64,
+        kilobits_per_second: u64,
+        busy_ms: f32,
+        worst_ms: f32,
+        budget_ms: f32,
+        dropped: u64,
+    },
     /// The TV asked for a fresh key frame.
     KeyFrameAsked,
 }
@@ -89,6 +99,8 @@ pub struct Report {
     pub mode: Option<Mode>,
     pub frames: u64,
     pub bytes: u64,
+    /// Pictures skipped because making them fell behind.
+    pub dropped: u64,
     /// Who ended it: "you", "the TV" or "time".
     pub ended_by: String,
 }
@@ -365,6 +377,7 @@ pub fn mirror<R>(
         let mut last_keepalive = start;
         let mut last_progress = start;
         let mut bytes_at_progress = 0u64;
+        let (mut busy, mut worst, mut made) = (Duration::ZERO, Duration::ZERO, 0u32);
         loop {
             if stop.load(Ordering::Relaxed) {
                 report.ended_by = "you".into();
@@ -399,8 +412,11 @@ pub fn mirror<R>(
             next_frame += frame_time;
             if Instant::now() > next_frame + frame_time * 4 {
                 // Fell behind (a slow machine): drop the backlog.
+                let behind = (Instant::now() - next_frame).as_secs_f64() / frame_time.as_secs_f64();
+                report.dropped += behind as u64 + 1;
                 next_frame = Instant::now() + frame_time;
             }
+            let began = Instant::now();
             let rgba = pictures.picture(due, w, h);
             let picture = encoder.encode(rgba)?;
             if picture.data.is_empty() {
@@ -418,6 +434,10 @@ pub fn mirror<R>(
                 }
             }
             report.frames += 1;
+            let took = began.elapsed();
+            busy += took;
+            worst = worst.max(took);
+            made += 1;
             if last_keepalive.elapsed() >= Duration::from_secs(20) {
                 let keep = link.request("GET_PARAMETER", "rtsp://localhost/wfd1.0").header("Session", session.clone());
                 link.send(&keep)?;
@@ -429,7 +449,12 @@ pub fn mirror<R>(
                     seconds: start.elapsed().as_secs(),
                     frames: report.frames,
                     kilobits_per_second: ((report.bytes - bytes_at_progress) as f64 * 8.0 / 1000.0 / secs) as u64,
+                    busy_ms: busy.as_secs_f32() * 1000.0 / made.max(1) as f32,
+                    worst_ms: worst.as_secs_f32() * 1000.0,
+                    budget_ms: frame_time.as_secs_f32() * 1000.0,
+                    dropped: report.dropped,
                 });
+                (busy, worst, made) = (Duration::ZERO, Duration::ZERO, 0);
                 bytes_at_progress = report.bytes;
                 last_progress = Instant::now();
             }
