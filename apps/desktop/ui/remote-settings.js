@@ -145,6 +145,15 @@ const KagazRemoteSettings = (() => {
 
     const signIn = el("section", "set-section");
     signIn.append(el("h3", "", "Sign-in"));
+    if (d.paired) {
+      // Paired with Kagaz on it: this device signs in as itself, with
+      // the computer's PIN, or the person there is asked.
+      signIn.append(el("p", "muted small", "Paired with Kagaz on it. It lets this device in with its PIN, or asks the person there."));
+      if (o.canRemember) {
+        signIn.append(switchRow(!!d.remember, "Remember the PIN", "In this computer's password store, once the computer accepts it. Turning this off forgets it.", (on) => o.remember(on)));
+      }
+      return { screen, mouse, keys, signIn };
+    }
     const userRow = el("div", "set-row");
     const userLabel = el("label", "", "Sign in as");
     userLabel.htmlFor = "remote-user";

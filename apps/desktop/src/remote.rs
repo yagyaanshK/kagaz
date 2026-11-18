@@ -268,6 +268,7 @@ pub fn remote_rename(id: String, name: String) -> Result<Devices, String> {
 #[tauri::command]
 pub fn remote_forget(id: String) -> Result<Devices, String> {
     let (gone, devices) = update(|d| d.forget(&id))?;
+    remote::store::forget_link_secret(&Devices::default_path(), &gone.id);
     // Its password goes with it; a store that cannot be reached now does
     // not keep the device.
     let _ = super::remote_vault::forget(&gone.id);
@@ -351,4 +352,59 @@ pub fn remote_settings(id: String, settings: Settings, user: Option<String>, sha
         Ok(())
     })
     .map(|(_, d)| d)
+}
+
+// ---------- pairing with a computer that runs Kagaz ----------
+
+/// The pairing under way, between showing the words and the person's yes.
+static PAIRING: Mutex<Option<remote::pair::Started>> = Mutex::new(None);
+
+#[derive(Serialize)]
+pub struct PairWords {
+    words: String,
+    name: String,
+}
+
+/// This computer's name, as the other one will list it.
+fn my_name() -> String {
+    std::env::var("COMPUTERNAME")
+        .ok()
+        .or_else(|| std::fs::read_to_string("/etc/hostname").ok())
+        .map(|n| n.trim().to_string())
+        .filter(|n| !n.is_empty())
+        .unwrap_or_else(|| "Kagaz".into())
+}
+
+/// Reaches the computer, gives it the code, and returns the three words
+/// to compare.
+#[tauri::command]
+pub async fn remote_pair_begin(host: String, port: Option<u16>, code: String) -> Result<PairWords, String> {
+    blocking(move || {
+        let started = remote::pair::begin(&host, port.unwrap_or(3390), &code, &my_name()).map_err(|e| e.to_string())?;
+        let words = PairWords { words: started.words.clone(), name: started.name.clone() };
+        *PAIRING.lock().map_err(|e| e.to_string())? = Some(started);
+        Ok(words)
+    })
+    .await
+}
+
+#[derive(Serialize)]
+pub struct Paired {
+    id: String,
+    devices: Devices,
+}
+
+/// The person here said the words match, or not; on yes, waits for the
+/// person there, and the computer is saved.
+#[tauri::command]
+pub async fn remote_pair_finish(yes: bool) -> Result<Paired, String> {
+    blocking(move || {
+        let started = PAIRING.lock().map_err(|e| e.to_string())?.take().ok_or("no pairing is under way")?;
+        let id = {
+            let _list = LIST.lock().map_err(|e| e.to_string())?;
+            started.finish(yes, &Devices::default_path()).map_err(|e| e.to_string())?
+        };
+        Ok(Paired { id, devices: load()? })
+    })
+    .await
 }

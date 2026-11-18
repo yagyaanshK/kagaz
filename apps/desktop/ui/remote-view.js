@@ -52,7 +52,8 @@ const KagazRemoteView = (() => {
     return row;
   }
 
-  function connectingCard(d) {
+  // `asking`: a computer running Kagaz is asking the person there.
+  function connectingCard(d, asking) {
     const list = el("ul", "rc-paths");
     for (const p of d.paths) {
       const li = el("li");
@@ -61,9 +62,10 @@ const KagazRemoteView = (() => {
       li.append(el("span", "", `${PATH[p.kind] || p.kind}${p.host ? " · " + p.host : ""}`), state);
       list.append(li);
     }
-    const status = el("p", "muted", "Every way is tried at once; the first to answer is used.");
+    const status = el("p", "muted", asking ? `Waiting for someone at ${d.name} to allow it. No answer in 30 seconds means no.`
+      : "Every way is tried at once; the first to answer is used.");
     status.setAttribute("role", "status");
-    showCard(el("h3", "", `Connecting to ${d.name}`), list, status, buttons(button("", "Cancel", () => close())));
+    showCard(el("h3", "", asking ? `Asking ${d.name}` : `Connecting to ${d.name}`), list, status, buttons(button("", "Cancel", () => close())));
   }
   const PATH = { address: "Local network", name: "Name", tailscale: "Tailscale", gateway: "Its hotspot" };
   // Leaving the viewer goes back to the page it came from, or closes the
@@ -159,6 +161,39 @@ const KagazRemoteView = (() => {
     (!vnc && !user.value ? user : input).focus();
   }
 
+  // A computer running Kagaz, paired with this one: its PIN lets this
+  // device in at once where the computer allows that; without it, the
+  // person there is asked.
+  function pinCard(d) {
+    const form = el("form", "rc-form");
+    const label = el("label", "", "PIN");
+    const input = el("input");
+    input.type = "password";
+    input.inputMode = "numeric";
+    input.autocomplete = "off";
+    label.append(input);
+    const keepLabel = el("label", "switch wrap");
+    const keep = el("input");
+    keep.type = "checkbox";
+    keep.checked = !!d.remember;
+    keepLabel.append(keep, " Remember the PIN in this computer's password store");
+    const go = el("button", "accent", "Connect");
+    go.type = "submit";
+    const ask = button("", "Ask someone there", () => connect({ password: "", remember: null }));
+    form.append(label);
+    if (hooks.canRemember) form.append(keepLabel);
+    form.append(buttons(button("", "Cancel", () => close()), ask, go));
+    form.addEventListener("submit", (ev) => {
+      ev.preventDefault();
+      if (!input.value.trim()) return input.focus();
+      d.remember = keep.checked;
+      connect({ password: input.value.trim(), remember: hooks.canRemember ? keep.checked : null });
+    });
+    showCard(el("h3", "", `Connect to ${d.name}`),
+      el("p", "muted", `Its PIN, or ask someone at ${d.name} to allow it.`), form);
+    input.focus();
+  }
+
   // The computer shows another certificate than the one remembered: the
   // person decides, before anything of the sign-in is sent.
   function certificateCard(d) {
@@ -210,7 +245,7 @@ const KagazRemoteView = (() => {
       state.session = null;
     }
     state.owed = 0;
-    connectingCard(state.device);
+    connectingCard(state.device, state.device.paired && asking.password === "");
     const channel = new window.__TAURI__.core.Channel();
     channel.onmessage = (m) => {
       if (cur === state && attempt === mine) feed(m);
@@ -221,7 +256,8 @@ const KagazRemoteView = (() => {
         id: state.device.id,
         asking: {
           user: asking.user || null,
-          password: asking.password || null,
+          // An empty PIN is an answer too: the person there is asked.
+          password: asking.password == null ? null : asking.password,
           remember: asking.remember == null ? null : asking.remember,
           accept_certificate: !!asking.accept_certificate,
           view: view(),
@@ -231,7 +267,8 @@ const KagazRemoteView = (() => {
     } catch (failed) {
       if (cur !== state || attempt !== mine) return;
       const f = typeof failed === "object" && failed ? failed : { kind: "other", why: String(failed) };
-      if (f.kind === "password" || f.kind === "user") passwordCard(state.device, false);
+      if ((f.kind === "password" || f.kind === "user") && state.device.paired) pinCard(state.device);
+      else if (f.kind === "password" || f.kind === "user") passwordCard(state.device, false);
       else if (f.kind === "certificate") certificateCard(state.device);
       else if (f.kind === "wrong-password") passwordCard(state.device, f.remembered ? "remembered" : "typed");
       else if (f.kind === "unreachable") lostCard(state.device, f);

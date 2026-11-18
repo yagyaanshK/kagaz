@@ -43,16 +43,23 @@ pub struct Speaker {
     agreed: Arc<AtomicU32>,
     /// The rate this computer's sound plays at, for choosing.
     native: u32,
+    /// The device connected may hear it.
+    allowed: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl Speaker {
     /// Starts the thread that takes the sound while a viewer listens.
-    pub fn new(mut open: impl FnMut() -> anyhow::Result<Box<dyn Sound>> + Send + 'static, native: u32) -> Speaker {
+    pub fn new(
+        mut open: impl FnMut() -> anyhow::Result<Box<dyn Sound>> + Send + 'static,
+        native: u32,
+        allowed: Arc<std::sync::atomic::AtomicBool>,
+    ) -> Speaker {
         let speaker = Speaker {
             formats: vec![pcm(48000), pcm(44100)],
             to_viewer: Arc::default(),
             agreed: Arc::default(),
             native,
+            allowed,
         };
         let me = speaker.clone();
         std::thread::spawn(move || me.run(&mut open));
@@ -69,7 +76,7 @@ impl Speaker {
         let (mut blocks, mut since) = (0u32, Instant::now());
         loop {
             let to = self.agreed.load(Ordering::Acquire);
-            if to == 0 {
+            if to == 0 || !self.allowed.load(Ordering::Acquire) {
                 // Nobody listens: let the sound go (it holds the device).
                 source = None;
                 block.clear();

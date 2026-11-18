@@ -953,10 +953,20 @@ fn run(mut s: Running, rx: mpsc::Receiver<Input>, mut waiter: waker::Waiter) -> 
                 Err(_) => return "the connection to the device broke".into(),
             };
             let working = Instant::now();
+            let drew = s.drew;
             let handled = s
                 .stage
                 .process(&mut s.image, action, &payload, s.framed.last_read_at())
-                .map_err(|e| format!("the device sent something Kagaz could not read ({e})"))
+                .map_err(|e| {
+                    // Before anything is drawn, this is how a computer
+                    // running Kagaz turns a device away (its library's
+                    // refusal comes in a form this one does not read).
+                    if drew {
+                        format!("the device sent something Kagaz could not read ({e})")
+                    } else {
+                        "it turned the session away before showing anything (from a computer running Kagaz: not allowed there, or a wrong PIN)".to_string()
+                    }
+                })
                 .and_then(|outputs| s.outputs(outputs));
             s.numbers.add_work(working.elapsed());
             match handled {

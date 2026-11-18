@@ -675,6 +675,60 @@ const KagazRemote = (() => {
     if (data.devices.some((d) => d.id === id)) openDevice(id);
   }
 
+  // ---------- pairing with a computer that runs Kagaz ----------
+  function pairShown(check) {
+    $("remote-pair-form").classList.toggle("hidden", check);
+    $("remote-pair-check").classList.toggle("hidden", !check);
+  }
+  $("remote-pair-form").addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    const host = $("remote-pair-host").value.trim();
+    const code = $("remote-pair-code").value.replace(/\D/g, "");
+    const note = $("remote-pair-note");
+    if (!host) return $("remote-pair-host").focus();
+    if (code.length !== 6) {
+      note.textContent = "The code is six digits.";
+      return $("remote-pair-code").focus();
+    }
+    const go = $("remote-pair-go");
+    go.disabled = true;
+    note.textContent = `Reaching ${host}…`;
+    try {
+      const said = await invoke("remote_pair_begin", { host, port: Number($("remote-pair-port").value) || 3390, code });
+      note.textContent = "";
+      $("remote-pair-said").textContent = `${said.name} shows these words:`;
+      $("remote-pair-words").textContent = said.words;
+      pairShown(true);
+      $("remote-pair-yes").focus();
+    } catch (e) {
+      note.textContent = "Not paired: " + e;
+    } finally {
+      go.disabled = false;
+    }
+  });
+  async function pairFinish(yes) {
+    const note = $("remote-pair-note");
+    $("remote-pair-yes").disabled = $("remote-pair-no").disabled = true;
+    note.textContent = yes ? "Waiting for the person there to confirm too…" : "";
+    try {
+      const done = await invoke("remote_pair_finish", { yes });
+      data = done.devices;
+      $("remote-pair-code").value = "";
+      note.textContent = "";
+      pairShown(false);
+      renderList();
+      if (typeof KagazHome !== "undefined") KagazHome.devicesChanged();
+      openDevice(done.id);
+    } catch (e) {
+      pairShown(false);
+      note.textContent = yes ? "Not paired: " + e : "Not paired.";
+    } finally {
+      $("remote-pair-yes").disabled = $("remote-pair-no").disabled = false;
+    }
+  }
+  $("remote-pair-yes").addEventListener("click", () => pairFinish(true));
+  $("remote-pair-no").addEventListener("click", () => pairFinish(false));
+
   $("remote-rescan").addEventListener("click", rescan);
   $("remote-add").addEventListener("click", () => openAdd());
   $("remote-empty-add").addEventListener("click", () => openAdd());

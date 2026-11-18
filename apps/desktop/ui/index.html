@@ -236,6 +236,25 @@
             <div class="rc-buttons"><button id="remote-add-go" type="submit" class="accent">Add device</button></div>
           </form>
         </section>
+        <!-- A computer running Kagaz that shares itself: paired with its
+             code, then three words compared on both (remote.js). -->
+        <section class="set-section">
+          <h3>A computer running Kagaz</h3>
+          <p class="muted small">Start pairing on it: it shows a code. Both then show three words to compare.</p>
+          <p id="remote-pair-note" class="muted" role="status"></p>
+          <form id="remote-pair-form" class="rc-form">
+            <label>Address<input id="remote-pair-host" type="text" autocapitalize="none" autocorrect="off" spellcheck="false" enterkeyhint="next"><small>Its name or address, as for any computer.</small></label>
+            <label>Code<input id="remote-pair-code" type="text" inputmode="numeric" autocomplete="one-time-code" enterkeyhint="go"><small>Six digits, good once for 5 minutes.</small></label>
+            <label>Port<input id="remote-pair-port" type="number" min="1" max="65535" value="3390"><small>Unless changed on it.</small></label>
+            <div class="rc-buttons"><button id="remote-pair-go" type="submit" class="accent">Pair</button></div>
+          </form>
+          <div id="remote-pair-check" class="hidden">
+            <p id="remote-pair-said"></p>
+            <p class="pair-words" id="remote-pair-words"></p>
+            <p class="muted small">Pair only if it shows the same.</p>
+            <div class="rc-buttons"><button id="remote-pair-no" type="button">Cancel</button><button id="remote-pair-yes" type="button" class="accent">They match</button></div>
+          </div>
+        </section>
       </div>
       <div id="remote-device-view" class="hidden"></div>
       <!-- This kind's own settings, behind its gear (remote.js). -->

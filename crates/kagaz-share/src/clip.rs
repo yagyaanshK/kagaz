@@ -78,9 +78,10 @@ pub struct Clip {
     /// answers do not say what they answer.
     wanted: Arc<Mutex<VecDeque<Wanted>>>,
     taking: Arc<Mutex<Taking>>,
-    /// Take nothing from the viewer (watching only); take no files.
-    pub take: bool,
-    pub files: bool,
+    /// What the device connected may do, and files refused whatever it
+    /// may (`--no-files`).
+    allowed: crate::paired::Allowed,
+    no_files: bool,
     /// Where files from the viewer go, a folder for each sending.
     pub received: PathBuf,
 }
@@ -92,19 +93,38 @@ impl std::fmt::Debug for Clip {
 }
 
 impl Clip {
-    pub fn new(board: Arc<dyn Board>, received: PathBuf) -> Clip {
+    pub fn new(board: Arc<dyn Board>, received: PathBuf, allowed: crate::paired::Allowed, no_files: bool) -> Clip {
         let clip = Clip {
             board,
             to_viewer: Arc::default(),
             wanted: Arc::default(),
             taking: Arc::default(),
-            take: true,
-            files: true,
+            allowed,
+            no_files,
             received,
         };
         let me = clip.clone();
-        clip.board.watch(Box::new(move |holds| me.send(ClipboardMessage::SendInitiateCopy(formats(holds)))));
+        clip.board.watch(Box::new(move |holds| {
+            if me.gives() {
+                me.send(ClipboardMessage::SendInitiateCopy(formats(holds)))
+            }
+        }));
         clip
+    }
+
+    /// What is copied here goes to the viewer.
+    fn gives(&self) -> bool {
+        self.allowed.clipboard.load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    /// What the viewer copies comes here: only for a device that may use
+    /// this computer, not one that watches.
+    fn takes(&self) -> bool {
+        self.gives() && self.allowed.control.load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    fn files(&self) -> bool {
+        !self.no_files && self.allowed.files.load(std::sync::atomic::Ordering::Acquire)
     }
 
     fn send(&self, message: ClipboardMessage) {
@@ -221,7 +241,7 @@ impl CliprdrBackend for Clip {
     }
 
     fn client_capabilities(&self) -> ClipboardGeneralCapabilityFlags {
-        if !self.files {
+        if self.no_files {
             return ClipboardGeneralCapabilityFlags::empty();
         }
         ClipboardGeneralCapabilityFlags::STREAM_FILECLIP_ENABLED
@@ -233,7 +253,8 @@ impl CliprdrBackend for Clip {
     fn on_ready(&mut self) {}
 
     fn on_request_format_list(&mut self) {
-        self.send(ClipboardMessage::SendInitiateCopy(formats(self.board.holds())));
+        let holds = if self.gives() { self.board.holds() } else { Holds::default() };
+        self.send(ClipboardMessage::SendInitiateCopy(formats(holds)));
     }
 
     fn on_process_negotiated_capabilities(&mut self, _capabilities: ClipboardGeneralCapabilityFlags) {}
@@ -241,7 +262,7 @@ impl CliprdrBackend for Clip {
     // The viewer copied something: text and a picture are asked for at
     // once; files it sends are taken at once.
     fn on_remote_copy(&mut self, available: &[ClipboardFormat]) {
-        if !self.take {
+        if !self.takes() {
             return;
         }
         let files = available
@@ -249,8 +270,10 @@ impl CliprdrBackend for Clip {
             .find(|f| f.name().is_some_and(|n| n.value() == ClipboardFormatName::FILE_LIST.value()))
             .map(|f| f.id());
         if let Some(format) = files {
-            if self.files {
+            if self.files() {
                 self.send(ClipboardMessage::SendInitiatePaste(format));
+            } else {
+                say("files from the viewer refused: this device may not send them");
             }
             return;
         }
@@ -290,7 +313,9 @@ impl CliprdrBackend for Clip {
     }
 
     fn on_format_data_request(&mut self, request: FormatDataRequest) {
-        let answer = if request.format == ClipboardFormatId::CF_UNICODETEXT {
+        let answer = if !self.gives() {
+            None
+        } else if request.format == ClipboardFormatId::CF_UNICODETEXT {
             self.board.text().map(|t| FormatDataResponse::new_unicode_string(&t))
         } else if request.format == PNG_HERE {
             self.board.picture(true).map(FormatDataResponse::new_data)

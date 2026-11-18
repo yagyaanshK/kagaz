@@ -72,6 +72,14 @@ pub enum RemoteAction {
     Forget { device: String },
     /// Open the Kagaz window on a device's screen
     Open { device: String },
+    /// Pair with a computer that runs Kagaz and shares itself: its address and the code it shows
+    Pair {
+        /// Its address or name
+        host: String,
+        /// The port it shares on
+        #[arg(long, default_value_t = 3390)]
+        port: u16,
+    },
     /// Open a session with a device and tell it in numbers; no picture is shown or kept
     Try {
         device: String,
@@ -234,10 +242,12 @@ pub fn run(action: Option<RemoteAction>) -> Result<()> {
         }
         RemoteAction::Forget { device } => {
             let (gone, _) = Devices::update(&list_path(), |d| d.forget(&device))?;
+            remote::store::forget_link_secret(&list_path(), &gone.id);
             println!("Forgot {}.", gone.name);
             Ok(())
         }
         RemoteAction::Open { device } => open_window(&device, &[]),
+        RemoteAction::Pair { host, port } => pair(&host, port),
         RemoteAction::Try { device, seconds, picture, sound } => try_session(&device, seconds, picture, sound),
         RemoteAction::Clip { device, text } => clip(&device, text),
         RemoteAction::Send {
@@ -515,12 +525,16 @@ fn open_session(which: &str, picture: Option<u8>, sound: bool) -> Result<(Device
         user: device.user.clone(),
         password: None,
     };
+    // A computer running Kagaz takes the PIN typed here (or none: the
+    // person there is asked), and may take a while to say yes.
+    let paired = device.paired;
+    let wait = device.sign_in_wait(Duration::from_secs(10));
     let mut trust = Trust {
         known: device.identity.certificate.clone(),
         accept_new: false,
     };
     loop {
-        match remote::session::open(answer.addr, answer.way, &sign_in, &settings, &trust, None, Duration::from_secs(10)) {
+        match remote::session::open(answer.addr, answer.way, &sign_in, &settings, &trust, None, wait) {
             Ok(session) => {
                 // Who signed in and the certificate it showed are the
                 // device's from now on.
@@ -557,6 +571,16 @@ fn open_session(which: &str, picture: Option<u8>, sound: bool) -> Result<(Device
                     bail!("not connected");
                 }
                 trust.accept_new = true;
+            }
+            Err(OpenError::NeedsPassword) if paired => {
+                let pin = crate::prompt_secret(&format!("PIN for {} (not shown; leave empty to ask someone there): ", device.name))?;
+                if pin.is_empty() {
+                    println!("Asking someone at {}: they have 30 seconds to allow it.", device.name);
+                }
+                sign_in.password = device.password_from(&list, Some(pin));
+            }
+            Err(OpenError::WrongPassword) if paired => {
+                bail!("{} did not let this device in: not allowed there, or a wrong PIN", device.name);
             }
             Err(OpenError::NeedsPassword) => {
                 sign_in.password = Some(crate::prompt_secret(&format!("Password for {} (not shown): ", device.name))?);
@@ -905,6 +929,23 @@ fn pattern(port: u16, size: &str, password: Option<String>, rate: u32, open: boo
 }
 
 /// One known-hosts entry per device, whichever address it is reached at.
+/// Pairs with a computer running Kagaz: the code it shows, then the three
+/// words both show.
+fn pair(host: &str, port: u16) -> Result<()> {
+    let code = crate::prompt(&format!("The code {host} shows: "))?;
+    let me = std::env::var("HOSTNAME").ok().or_else(|| std::fs::read_to_string("/etc/hostname").ok()).map(|h| h.trim().to_string());
+    let me = me.filter(|m| !m.is_empty()).unwrap_or_else(|| "Kagaz".into());
+    let started = remote::pair::begin(host, port, &code, &me)?;
+    println!("{} shows these words: {}", started.name, started.words);
+    let yes = crate::prompt("Are they the same as there? [y/N] ")?.eq_ignore_ascii_case("y");
+    println!("{}", if yes { "Waiting for the person there to say so too…" } else { "Not paired." });
+    let name = started.name.clone();
+    let id = started.finish(yes, &list_path())?;
+    let d = Devices::load(&list_path())?.find(&id)?.clone();
+    println!("Paired with {name}: it is {:?} here. Connect with: kagaz remote open {:?}", d.name, d.name);
+    Ok(())
+}
+
 fn host_key_alias(d: &Device) -> String {
     format!("HostKeyAlias=kagaz-{}", d.id)
 }

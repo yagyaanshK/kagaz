@@ -360,8 +360,11 @@ pub async fn remote_connect(
             accept_certificate,
             view,
         } = asking;
-        let typed = password.filter(|p| !p.is_empty());
-        let typed_user = user.map(|u| u.trim().to_string()).filter(|u| !u.is_empty());
+        // A computer running Kagaz takes a PIN, and an empty one too (the
+        // person there is asked); its user is its id there, from pairing.
+        let paired = device.paired;
+        let typed = if paired { password } else { password.filter(|p| !p.is_empty()) };
+        let typed_user = if paired { None } else { user.map(|u| u.trim().to_string()).filter(|u| !u.is_empty()) };
         // Nothing typed: the remembered one, if the person asked for that
         // and the store can be reached.
         let kept = match &typed {
@@ -371,7 +374,7 @@ pub async fn remote_connect(
         let remembered = kept.is_some();
         let sign_in = SignIn {
             user: typed_user.clone().or(device.user.clone()),
-            password: typed.clone().or(kept),
+            password: device.password_from(&list, typed.clone().or(kept)),
         };
         let trust = Trust {
             known: device.identity.certificate.clone(),
@@ -385,7 +388,7 @@ pub async fn remote_connect(
             &device.settings,
             &trust,
             view,
-            Duration::from_secs(10),
+            device.sign_in_wait(Duration::from_secs(10)),
         )
         .map_err(|e| match e {
             OpenError::NeedsPassword => Failed::Password,
@@ -414,7 +417,7 @@ pub async fn remote_connect(
             });
         }
         // It was accepted: keep it, or stop keeping one, as asked.
-        if let (Some(password), Some(keep)) = (&typed, remember) {
+        if let (Some(password), Some(keep)) = (typed.as_ref().filter(|p| !p.is_empty()), remember) {
             let stored = if keep { vault::set(&device.id, password) } else { vault::forget(&device.id) };
             if stored.is_ok() && device.remember != keep {
                 let _ = Devices::update(&list, |d| {

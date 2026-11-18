@@ -2070,6 +2070,8 @@ pub fn run() {
             remote_windows::remote_main_show,
             remote_windows::remote_close_all,
             remote::remote_windows_settings,
+            remote::remote_pair_begin,
+            remote::remote_pair_finish,
             remote_view::remote_startup_files,
             remote_view::remote_disconnect,
             fans::room_add,

@@ -205,13 +205,98 @@ pub struct Device {
     pub last_seen: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_path: Option<String>,
+    /// Paired with Kagaz on it (remote/link.rs): it shares its screen, and
+    /// this device signs in with its id there (`user`) and the secret
+    /// made at pairing, kept apart from this list (`secrets_path`) so
+    /// that the list can be shown anywhere.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub paired: bool,
 }
+
+/// Where the secrets of paired computers are kept: next to the list,
+/// readable by this account only.
+pub fn secrets_path(list: &Path) -> PathBuf {
+    list.with_file_name("remote-secrets.toml")
+}
+
+#[derive(Default, Serialize, Deserialize)]
+struct Secrets {
+    #[serde(default)]
+    secrets: std::collections::BTreeMap<String, String>,
+}
+
+fn read_secrets(list: &Path) -> Secrets {
+    std::fs::read_to_string(secrets_path(list)).ok().and_then(|t| toml::from_str(&t).ok()).unwrap_or_default()
+}
+
+fn write_secrets(list: &Path, secrets: &Secrets) -> Result<(), StoreError> {
+    let path = secrets_path(list);
+    let text = toml::to_string(secrets).map_err(|e| StoreError::Parse(e.to_string(), path.clone()))?;
+    let part = path.with_extension("toml.new");
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| StoreError::Io { path: path.clone(), source: e })?;
+    }
+    {
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create(true).truncate(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        use std::io::Write;
+        let mut f = options.open(&part).map_err(|e| StoreError::Io { path: part.clone(), source: e })?;
+        f.write_all(text.as_bytes()).map_err(|e| StoreError::Io { path: part.clone(), source: e })?;
+    }
+    std::fs::rename(&part, &path).map_err(|e| StoreError::Io { path: path.clone(), source: e })
+}
+
+/// The secret a paired computer knows this device by.
+pub fn link_secret(list: &Path, id: &str) -> Option<String> {
+    read_secrets(list).secrets.get(id).cloned()
+}
+
+pub fn keep_link_secret(list: &Path, id: &str, secret: &str) -> Result<(), StoreError> {
+    let mut all = read_secrets(list);
+    all.secrets.insert(id.to_string(), secret.to_string());
+    write_secrets(list, &all)
+}
+
+pub fn forget_link_secret(list: &Path, id: &str) {
+    let mut all = read_secrets(list);
+    if all.secrets.remove(id).is_some() {
+        let _ = write_secrets(list, &all);
+    }
+}
+
+/// How long a computer running Kagaz may take to let a device in: the
+/// person there is asked, and has 30 seconds to answer.
+pub const ASKING_WAIT: std::time::Duration = std::time::Duration::from_secs(45);
 
 fn settings_default(s: &Settings) -> bool {
     *s == Settings::default()
 }
 
 impl Device {
+    /// The password to sign in with, from what the person typed: for a
+    /// computer running Kagaz, that is its PIN (empty asks the person
+    /// there), joined to the secret made at pairing.
+    pub fn password_from(&self, list: &Path, typed: Option<String>) -> Option<String> {
+        match (self.paired, typed) {
+            (true, Some(pin)) => link_secret(list, &self.id).map(|secret| super::link::password(&secret, &pin)),
+            (_, typed) => typed,
+        }
+    }
+
+    /// How long to wait for it to let this device in.
+    pub fn sign_in_wait(&self, usual: std::time::Duration) -> std::time::Duration {
+        if self.paired {
+            usual.max(ASKING_WAIT)
+        } else {
+            usual
+        }
+    }
+
     /// The way in that shows its screen: Remote Desktop before VNC.
     pub fn screen_way(&self) -> Option<Way> {
         [Speaks::Rdp, Speaks::Vnc]

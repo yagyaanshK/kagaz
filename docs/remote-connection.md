@@ -134,7 +134,15 @@ today's viewer works with it unchanged.
   playing here; text and pictures both ways; files sent from the viewer
   land in a folder of their own under the temporary folder and on the
   clipboard, to paste anywhere; files copied on the computer wait for
-  the viewer to take files); (3) pairing, the PIN, the question; (4) the screens; (5) start
+  the viewer to take files); (3) pairing, the PIN, the question (done
+  2026-11-19: pairing over the same port, protected by SPAKE2 with the
+  code, three words compared on both; the device's secret made on both
+  sides and kept here apart from the device list; sign-in inside TLS
+  with the certificate pinned at pairing; the right PIN lets a device
+  allowed to connect without asking straight in, otherwise the person
+  there is asked (control, watch, or no; no answer in 30 s is no); five
+  wrong PINs stop PINs for five minutes; what each device may do is
+  enforced); (4) the screens; (5) start
   with Windows, the helper service.
 - *Connecting:* "Ask here each time" (someone at the computer allows it,
   with control or watch only; no answer in 30 s is no) or "Connect with the

@@ -194,8 +194,9 @@ kagaz remote
 kagaz remote paths "Study laptop"
 kagaz remote ssh "Study laptop"
 kagaz remote open "My phone"
-kagaz remote try "My phone"
+kagaz remote try "My phone" --sound
 kagaz remote send "Study laptop" report.pdf
+kagaz remote pair office-laptop.local
 ```
 
 Your own computers and phones, and the fragile part of using one from
@@ -212,7 +213,12 @@ address is not mistaken for it. `remote nearby` shows what on this network
 shows its screen, and your Tailscale devices (read from Tailscale on this
 computer; nothing is changed there). `remote ssh` and `remote copy` run
 the system's own ssh and scp over the working path, with one known-hosts
-entry per device whichever address it has.
+entry per device whichever address it has. `remote pair` pairs with a computer
+that runs Kagaz and shares its screen while its person goes on using it
+(`kagaz-share`, being built: see docs/remote-connection.md): its code,
+then three words both show; after that this device signs in with the
+computer's PIN, or the person there is asked. `remote try --sound` plays
+a device's sound here and tells how it arrives.
 
 A device's screen can be seen and used from here over Remote Desktop (a
 Windows computer, GNOME's own remote access) or VNC (a phone running a VNC

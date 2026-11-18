@@ -10,6 +10,8 @@
 //! Plan and limits: `docs/remote-connection.md`.
 
 pub mod keys;
+pub mod link;
+pub mod pair;
 pub mod pattern;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub mod rdp;

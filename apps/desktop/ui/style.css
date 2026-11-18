@@ -1325,6 +1325,8 @@ html[data-viewer] #bar .rc-chip.open svg { color: inherit; }
 .sw-panel-body .set-row select, .sw-panel-body .set-row input[type="text"] { max-width: 100%; }
 .sw-panel-device { display: flex; flex-direction: column; gap: 2px; margin: 6px 4px 10px; font-size: 15px; }
 #sw-settings.on { background: rgba(255, 255, 255, 0.22); }
+/* The three words both sides of a pairing show. */
+.pair-words { display: inline-block; margin: 4px 0; padding: 8px 14px; border-radius: 8px; background: var(--hover, rgba(127, 127, 127, 0.12)); font-size: 22px; font-weight: 700; }
 
 /* A row of settings that leads somewhere (a kind's settings: each device). */
 .set-door { flex-wrap: nowrap; cursor: default; }

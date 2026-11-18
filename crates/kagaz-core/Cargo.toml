@@ -24,6 +24,9 @@ hayro = "0.8.0"
 sha2 = "0.11.0"
 toml = "1.1.6"
 hmac = "0.13.0"
+# Pairing with a computer that runs Kagaz: the code goes into SPAKE2
+# (MIT or Apache-2.0), so nobody listening learns it (remote/link.rs).
+spake2 = "0.4"
 sha1 = "0.11.0"
 md-5 = "0.11.0"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }

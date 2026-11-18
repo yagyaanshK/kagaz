@@ -552,23 +552,44 @@ Plan: `docs/remote-connection.md` (agreed 2026-11-16).
       equal) through `kagaz remote clip` / `send`, and the made tone
       through the new `kagaz remote try --sound` to a silent output (303
       blocks, no gaps). Files copied on the computer are not offered:
-      the viewer takes no files from a computer yet. **For the owner to try, when ready** (put off 2026-11-18):
+      the viewer takes no files from a computer yet. **Step 3 built**
+      (2026-11-19): pairing (`remote/link.rs`, built by both programs:
+      SPAKE2 with the code, proofs both ways, three words, the secret
+      derived on both sides; `remote/pair.rs`; `kagaz remote pair`; Add a
+      device › A computer running Kagaz; the secret in
+      `remote-secrets.toml`, 0600, never in the list the page sees),
+      sign-in by TLS + a validator over the paired list (`paired.rs`:
+      PIN as a slow hash, five wrong stop PINs five minutes, the person
+      asked in Windows' own small question or on the input with
+      `--ask-on-input`, each device's permissions enforced on input,
+      clipboard, files and sound), a PIN card and "Asking …" in the
+      viewer. Tried here on the test card: pairing (same words both
+      sides), right PIN, wrong PIN (turned away, and said so), no PIN
+      (asked), forgetting removes the secret. The library sends its
+      refusal in a form the viewer's newer library cannot read; the
+      viewer says "turned away" for a session that breaks before any
+      picture. **For the owner to try, when ready** (put off 2026-11-18):
       1. send `dist/kagaz-share-windows-x64.exe` to the PC with Kagaz's
          Send a file; 2. in Terminal there run
-         `.\kagaz-share-windows-x64.exe --pin <six digits>` and keep it
-         open (allow it on private networks if the firewall asks; it
-         prints whom to sign in as); 3. hand the session to the PC's own
-         screen from an administrator Command Prompt:
+         `.\kagaz-share-windows-x64.exe --pin <4 to 8 digits>` and keep it
+         open (allow it on private networks if the firewall asks); 3. pair:
+         type `pair` there (it shows a code), then here Add a device ›
+         Computers & phones › A computer running Kagaz (its address, the
+         code), or `kagaz remote pair <address>`; compare the three words,
+         press They match here and type `confirm` there; 4. hand the
+         session to the PC's own screen from an administrator Command
+         Prompt:
          `for /f "skip=1 tokens=3" %s in ('query user %USERNAME%') do %windir%\System32\tscon.exe %s /dest:console`
-         (the PC's monitor then shows the desktop unlocked); 4. here, add
-         the PC again with Remote Desktop on port 3390 (or `kagaz remote
-         add <address> --name "PC via Kagaz" --rdp 3390`) and connect with
-         the PIN; 5. try mouse, keys, scroll, Num Lock, a video, and read
-         the numbers its window prints every 5 seconds; also copy text
-         and a picture each way, send a file and paste it in a folder
-         there, and play something (its sound comes here; `kagaz remote
-         try "PC via Kagaz" --sound` prints how it arrives); 6. close it
-         and go back to Windows' own Remote Desktop. Until
+         (the PC's monitor then shows the desktop unlocked); 5. connect
+         here: with the PIN, or Ask someone there (Windows' own small
+         question on the PC: Yes control, No watch, Cancel no); to let it
+         in with the PIN alone, type `allow <id> control clipboard files
+         sound unattended` there (`list` shows the id); 6. try mouse, keys,
+         scroll, Num Lock, a video, and read the numbers its window prints
+         every 5 seconds; copy text and a picture each way, send a file
+         and paste it in a folder there, play something (`kagaz remote try
+         "<name>" --sound` prints how its sound arrives); 7. close it and
+         go back to Windows' own Remote Desktop. Until
       it exists: a VNC server on that laptop, reached over Tailscale,
       with today's Kagaz (not yet tried against a real Windows VNC
       server).
