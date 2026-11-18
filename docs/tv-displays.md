@@ -565,13 +565,85 @@ when that changes: the numbers had re-wrapped the card every second.
 Mirror is a filled button (the accent's own text colour on it); the
 accent on its dark container had read as switched off.
 
+*The phone's sound, hiding, and the switches (2026-11-19).* The
+owner's decisions: sound goes to the TV; a quick switch for the
+sound's place (the TV or the phone); a privacy switch that hides the
+screen on the TV behind frosted glass; a third that hides everything
+at once; **every session starts hidden** (the TV gets the frosted
+picture and no sound until the person shows it); the switches in the
+TV's card in Kagaz, the mirroring notification, the quick panel's
+tiles and a floating button. The volume keys stay the phone's own and
+the TV's volume its remote's, as with Android's own Cast (turning the
+TV's volume from the keys was built, tried and taken out the same
+night at the owner's word). Phone first, computers after.
+
+Seen on the LG by the owner: the hiding, the chips, the notification
+and the floating button work; Instagram's sound plays on the TV;
+Spotify's does not, and cannot this way: Spotify forbids other apps
+its sound (its package lacks Android's playback-capture flag and its
+players carry the no-capture mark, read off the phone), Android hands
+Kagaz silence for it and gives it only to its own Cast. Measured on
+the phone: real sound is handed over at full level (peaks near 28,000
+of 32,767) while the phone's own speaker is silenced, so silencing
+the phone does not touch what goes to the TV.
+
+- **Sound** (`KagazTv.kt`): what the phone plays, taken with the same
+  screen-sharing grant (Android 10 and later; Android files it under
+  the record-audio permission, asked once), encoded as Opus by the
+  phone's own encoder, 20 ms a packet, sent as a second Cast stream
+  (`cast/mod.rs`; each packet stamped by the samples before it, sound
+  packets sent ahead of picture packets). Packets go all the time,
+  silence when the sound stays on the phone, so the TV's player never
+  waits for sound. While the sound is on the TV the phone's speaker is
+  kept quiet: its media volume turned to nothing and put back after,
+  looked at ten times a second (a press of the volume keys raises it a
+  notch; it goes back). After four seconds of silence handed over
+  while something plays, the app playing is taken to forbid its sound:
+  the phone's volume comes back, the card says so, and the phone goes
+  quiet again the moment real sound comes. A sound packet is skipped
+  only when it would surely come too late (the first night skipped
+  about one in eleven on a slow link, each a gap that is heard); with
+  sound the TV plays 300 ms behind, not 200.
+- **Each phone picture is its own Cast picture** now, stamped when it
+  arrives (before, pictures that arrived together went as one); after
+  300 ms with the TV behind, what waits is dropped and the stream
+  starts again from a whole picture.
+- **Hide** (`KagazTvPicture.kt`): the screen's pictures pass through
+  the phone's graphics chip on their way to the encoder; while hidden
+  each is averaged down to about 30 by 17 patches, each patch's colour
+  rounded to 64 steps, and those five hundred colours spread out again
+  smoothly under a dim tint: frosted glass, as the phone's own panels
+  have. It cannot be undone, since the detail is thrown away on the
+  phone, not scrambled: words, faces and shapes are not in what is
+  sent; broad colour and large movement are. On a still screen the
+  last picture is drawn again frosted at once.
+- **The switches** (`KagazTv`): `screenHidden`, `soundOnTv`; hide
+  everything = screen hidden and sound on the phone. Every place turns
+  the same two and hears of each change: the card in Kagaz (Show or
+  Hide everything as Material's filled button, a filter chip each for
+  the screen and the sound); the notification (its own row, the
+  same folded and unfolded: a line saying how things stand, then an
+  eye for everything, a TV for the screen, a speaker for the sound,
+  each always the same picture and struck through while that is kept
+  from the TV, and Stop apart in red; the first try's buttons showed
+  what a tap would do and swapped pictures, which confused); three
+  quick-panel tiles (`KagazTvTiles`:
+  Show on TV, Screen on TV, Sound on TV; lit while that goes to the TV,
+  greyed out when nothing is mirrored; added from the panel's edit
+  screen, whose steps the TV's sheet gives in the phone's own words,
+  or by Android's own offer from Android 13); the floating button
+  (`KagazTvFloat`: off until turned on in the TV's sheet and allowed
+  in Android's "Appear on top"; Kagaz's mark is the handle, a tap
+  opens it into a strip with the same pictures as the notification, a
+  drag moves it; it is part of the screen, so the TV shows it).
+
 Choosing the route (`tv/send.rs`): Miracast over the network when the
 TV takes it there, else Google Cast when the TV has it, else Wi-Fi
 Direct (Linux). `kagaz tv NAME mirror --via cast` asks for Cast; the
 app's Mirror button follows the same order, and a TV with Cast counts
-as ready to mirror. Sound is not sent over Cast yet (nor over
-Miracast); the bit rate is fixed (16 Mbit/s at most at 1080p60), not
-yet fitted to the link as Chrome does.
+as ready to mirror. A computer's sound is not sent yet (nor any sound
+over Miracast); the bit rate is fixed (16 Mbit/s at most at 1080p60),
+not yet fitted to the link as Chrome does.
 
 ## Next, agreed 2026-11-18
 
@@ -587,9 +659,10 @@ yet fitted to the link as Chrome does.
   **Google Cast and AirPlay receiving when feasible** (the owner). The
   phone as a screen later.
 - **Google Cast, further** (the sender itself is built, see above):
-  sound (Opus), the bit rate fitted to the link, a phone held upright
-  sent at its own shape, and a stand-in Cast receiver beside the
-  Miracast one (`kagaz tvs stand-in`).
+  sound, Hide and the switches on computers (the phone has them); the
+  bit rate fitted to the link; a phone held upright sent at its own
+  shape; and a stand-in Cast receiver beside the Miracast one
+  (`kagaz tvs stand-in`).
 - **LG Link** (file transfer between LG Link or gram Link apps, PIN
   pairing): LG's own protocol; learn it from what LG's phone app sends to
   the TV, with step 3 (send media).

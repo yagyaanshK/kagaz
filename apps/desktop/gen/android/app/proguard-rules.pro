@@ -33,3 +33,8 @@
 -keep class app.kagaz.KagazTv {
   public static *;
 }
+# The quick-panel tiles and the mirroring service are named in the
+# manifest; their classes stay.
+-keep class app.kagaz.KagazTvAllTile
+-keep class app.kagaz.KagazTvScreenTile
+-keep class app.kagaz.KagazTvSoundTile

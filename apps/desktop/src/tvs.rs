@@ -182,6 +182,8 @@ fn session(name: &str, what: &str, say: &dyn Fn(String, &'static str)) -> Result
     };
     let report = send::mirror_named(name, None, &opts, pictures.as_mut(), &STOP, |s| match s {
         Said::Line(l) => say(l, "starting"),
+        // A note is for the record (the phone's log), not the page.
+        Said::Event(kagaz_core::tv::miracast::Event::Note(line)) => eprintln!("tv: [note] {line}"),
         Said::Event(e) => {
             let playing = matches!(e, kagaz_core::tv::miracast::Event::Playing(_) | kagaz_core::tv::miracast::Event::Progress { .. });
             if let Some(l) = send::describe(&e) {
@@ -286,6 +288,75 @@ pub async fn tv_phone(app: AppHandle, what: String) -> Result<String, String> {
     }
 }
 
+/// How a phone session's switches stand (KagazTv.kt): whether the TV gets
+/// a blur in place of the screen, and where the sound plays.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Switches {
+    pub live: bool,
+    pub screen_hidden: bool,
+    pub sound_on_tv: bool,
+    /// Whether this phone can send its sound at all.
+    #[serde(default)]
+    pub sound: bool,
+    /// The sound is wanted on the TV but the app playing keeps it to the
+    /// phone (Android hands over silence for it).
+    #[serde(default)]
+    pub sound_kept: bool,
+    /// Android can offer the quick panel's tiles itself (13 and later).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tiles: Option<bool>,
+    /// The floating button is on (and Android allows it); `None` in news
+    /// of a switch, which leaves it as it was.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub floating: Option<bool>,
+}
+
+/// The switches as they stand; `None` on a computer, which has none yet.
+#[tauri::command]
+pub async fn tv_controls(app: AppHandle) -> Result<Option<Switches>, String> {
+    #[cfg(target_os = "android")]
+    {
+        use tauri::Manager;
+        blocking(move || {
+            let phone = app.try_state::<TvPhone>().ok_or("the phone's TV side is not ready")?;
+            phone.0.run_mobile_plugin("controls", Nothing {}).map(Some).map_err(|e| e.to_string())
+        })
+        .await
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = app;
+        Ok(None)
+    }
+}
+
+/// Turns a switch: "screen" (on: shown), "sound" (on: on the TV), "all"
+/// (on: everything shown), "float" (the floating button), "tiles"
+/// (Android's offer to add the quick panel's tiles).
+#[tauri::command]
+pub async fn tv_control(app: AppHandle, what: String, on: bool) -> Result<Option<Switches>, String> {
+    #[cfg(target_os = "android")]
+    {
+        use tauri::Manager;
+        #[derive(Serialize)]
+        struct Turn {
+            what: String,
+            on: bool,
+        }
+        blocking(move || {
+            let phone = app.try_state::<TvPhone>().ok_or("the phone's TV side is not ready")?;
+            phone.0.run_mobile_plugin("control", Turn { what, on }).map(Some).map_err(|e| e.to_string())
+        })
+        .await
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = (app, what, on);
+        Ok(None)
+    }
+}
+
 #[cfg(target_os = "android")]
 struct TvPhone(tauri::plugin::PluginHandle<tauri::Wry>);
 
@@ -308,6 +379,7 @@ pub fn init() -> tauri::plugin::TauriPlugin<tauri::Wry> {
                 use tauri::Manager;
                 let handle = _api.register_android_plugin("app.kagaz", "KagazTvPlugin")?;
                 _app.manage(TvPhone(handle));
+                let _ = phone::APP.set(_app.clone());
                 phone::connect();
             }
             Ok(())
@@ -325,6 +397,36 @@ mod phone {
     use std::sync::OnceLock;
 
     static KAGAZ_TV: OnceLock<(JavaVM, GlobalRef)> = OnceLock::new();
+    /// The app, to tell its page of a change made outside it.
+    pub static APP: OnceLock<tauri::AppHandle> = OnceLock::new();
+
+    /// The switches changed (from the notification, a tile, the floating
+    /// button or the page), or a session began or ended.
+    #[no_mangle]
+    pub extern "system" fn Java_app_kagaz_KagazTv_changed(
+        _env: JNIEnv,
+        _class: JClass,
+        live: jboolean,
+        screen_hidden: jboolean,
+        sound_on_tv: jboolean,
+        sound_kept: jboolean,
+    ) {
+        use tauri::Emitter;
+        if let Some(app) = APP.get() {
+            let _ = app.emit(
+                "tv-controls",
+                super::Switches {
+                    live: live != 0,
+                    screen_hidden: screen_hidden != 0,
+                    sound_on_tv: sound_on_tv != 0,
+                    sound: true,
+                    sound_kept: sound_kept != 0,
+                    tiles: None,
+                    floating: None,
+                },
+            );
+        }
+    }
 
     /// KagazTv.attach, when the plugin loads.
     #[no_mangle]
@@ -342,6 +444,14 @@ mod phone {
     pub extern "system" fn Java_app_kagaz_KagazTv_frame(env: JNIEnv, _class: JClass, data: JByteArray, key: jboolean) {
         if let Ok(bytes) = env.convert_byte_array(&data) {
             external::push(bytes, key != 0);
+        }
+    }
+
+    /// One Opus packet of the phone's sound.
+    #[no_mangle]
+    pub extern "system" fn Java_app_kagaz_KagazTv_sound(env: JNIEnv, _class: JClass, data: JByteArray) {
+        if let Ok(bytes) = env.convert_byte_array(&data) {
+            external::push_sound(bytes);
         }
     }
 
@@ -406,6 +516,7 @@ mod phone {
             || {
                 let _ = call(|env, class| env.call_static_method(class, "stop", "()V", &[]).map(|_| ()));
             },
+            || call(|env, class| env.call_static_method(class, "canSound", "()Z", &[])?.z()).unwrap_or(false),
         );
     }
 }

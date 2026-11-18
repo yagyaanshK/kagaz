@@ -406,6 +406,23 @@ impl AnyVideo {
         }
     }
 
+    /// For an encoder that runs by itself (a phone's): the next picture it
+    /// made, if one waits. `None` for encoders that are handed pictures.
+    pub fn made(&mut self) -> Option<Option<Encoded>> {
+        match self {
+            AnyVideo::External(e) => Some(e.next()),
+            _ => None,
+        }
+    }
+
+    /// For such an encoder: forget what waits and start from a whole
+    /// picture.
+    pub fn start_over(&mut self) {
+        if let AnyVideo::External(e) = self {
+            e.flush()
+        }
+    }
+
     /// Whether this encoder takes pictures straight from graphics memory.
     pub fn takes_gpu(&self) -> bool {
         match self {

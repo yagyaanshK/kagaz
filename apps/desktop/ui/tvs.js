@@ -13,6 +13,13 @@
 // state does: the session's running numbers (pictures a second, the
 // stream's speed) are in the TV's sheet, so nothing on the page moves
 // while mirroring.
+//
+// A phone's session has switches, for privacy: the screen hidden (the TV
+// gets a blur) and the sound's place (the TV or the phone). Every session
+// starts hidden. Under the mirroring TV's card: Show everything (or Hide
+// everything), and a chip each for the screen and the sound. The same
+// switches are in the phone's notification, quick panel and floating
+// button; a change made there shows here.
 // Uses app.js's globals: $, invoke, listen; ask.js's KagazAsk; icons.js's
 // KagazIcons.
 
@@ -29,6 +36,7 @@ const KagazTvs = (() => {
   let playing = false; // its picture is on the TV (before that: connecting)
   let line = ""; // the session's latest news, in full, for the TV's sheet
   let sheetLine = null; // where an open sheet shows it
+  let sw = null; // a phone session's switches: { live, screenHidden, soundOnTv, sound }
   let failed = {}; // TV name -> why its last try failed
 
   function el(tag, cls, text) {
@@ -78,7 +86,10 @@ const KagazTvs = (() => {
 
   // The TV's state in a few words, and how it should look.
   function state(t) {
-    if (showing === t.name) return { text: playing ? "Mirroring" : "Connecting…", tone: "on" };
+    if (showing === t.name) {
+      if (!playing) return { text: "Connecting…", tone: "on" };
+      return { text: sw && sw.screenHidden ? "Hidden" : "Mirroring", tone: "on" };
+    }
     if (failed[t.name]) return { text: "Did not connect", tone: "bad" };
     const here = found.find((f) => f.name === t.name);
     if (here && here.mirror) return { text: "Ready", tone: "ok" };
@@ -159,6 +170,43 @@ const KagazTvs = (() => {
         list.appendChild(b);
       };
       ways.forEach(add);
+      if (OS === "android" && sw) {
+        // Where a mirroring session's switches can also be reached.
+        list.appendChild(el("div", "tv-way-section", "Switches while mirroring"));
+        const float = el("label", "switch wrap tv-way-switch");
+        const box = el("input");
+        box.type = "checkbox";
+        box.checked = !!sw.floating;
+        box.addEventListener("change", async () => {
+          const wanted = box.checked;
+          try {
+            sw = Object.assign({}, sw, await invoke("tv_control", { what: "float", on: wanted }));
+          } catch (e) {
+            toast(String(e));
+          }
+          // Android's own screen may be asking first; the switch shows
+          // on once that is allowed.
+          box.checked = !!sw.floating;
+          if (wanted && !sw.floating) toast("Allow Kagaz to appear on top in Android's screen, then turn this on again.", true);
+        });
+        float.append(box, " Floating button", el("small", "muted", "A small button over every app, with the switches and Stop. Android asks once to let Kagaz appear on top; the TV shows the button too."));
+        list.appendChild(float);
+        // The quick panel's tiles: Android's own offer where it has one
+        // (13 and later), else the steps, in this phone's words.
+        list.appendChild(el("div", "tv-way-section", "Quick panel buttons"));
+        if (sw.tiles) {
+            const addTiles = button("tv-way", null, () => invoke("tv_control", { what: "tiles", on: true }).catch((e) => toast(String(e))));
+            addTiles.append(el("span", "tv-way-name", "Add to the quick panel"), el("span", "tv-way-what muted small", "Android asks for each of the three: Show on TV, Screen on TV, Sound on TV."));
+            list.appendChild(addTiles);
+        } else {
+            const steps = SAMSUNG
+              ? ["Swipe down from the top of the screen twice, so the whole panel of buttons shows.", "Tap the three dots at the top right, then Edit buttons.", "Kagaz's three buttons (Show on TV, Screen on TV, Sound on TV) are in the top part, Available buttons; swipe sideways there to find them.", "Hold one and drag it down among your buttons. Do the same for the other two, then tap Done."]
+              : ["Swipe down from the top of the screen twice.", "Tap the pencil.", "Find Kagaz's three tiles (Show on TV, Screen on TV, Sound on TV) at the bottom.", "Hold one and drag it up among your tiles. Do the same for the other two."];
+            const ol = el("ol", "tv-steps small");
+            steps.forEach((s) => ol.appendChild(el("li", "", s)));
+            list.appendChild(ol);
+        }
+      }
       add({ name: "Remove from your TVs", danger: true, go: () => remove(t) });
       dlg.appendChild(list);
       const row = el("div", "actions");
@@ -206,6 +254,40 @@ const KagazTvs = (() => {
     return tile;
   }
 
+  // Turns a switch, and draws how they stand after.
+  async function turn(what, on) {
+    try {
+      sw = (await invoke("tv_control", { what, on })) || sw;
+    } catch (e) {
+      toast(String(e));
+    }
+    render();
+  }
+
+  // The mirroring TV's switches, under its card: the one button that
+  // shows (or hides) everything, then a chip each for the screen and the
+  // sound, checked while that goes to the TV.
+  function switches() {
+    const row = el("div", "tv-switches");
+    const hiddenSome = sw.screenHidden || !sw.soundOnTv;
+    row.append(
+      hiddenSome
+        ? button("tv-all show", withIcon("eye", "Show everything"), () => turn("all", true), "Show the screen and play the sound on the TV")
+        : button("tv-all", withIcon("lock", "Hide everything"), () => turn("all", false), "Hide the screen and keep the sound on this phone")
+    );
+    const chip = (word, on, what, label) => {
+      const c = button("tv-chip" + (on ? " on" : ""), on ? withIcon("check", word) : word, () => turn(what, !on), label);
+      c.setAttribute("role", "switch");
+      c.setAttribute("aria-checked", String(on));
+      return c;
+    };
+    row.append(chip("Screen on TV", !sw.screenHidden, "screen", "The screen shows on the TV"));
+    if (sw.sound) row.append(chip("Sound on TV", sw.soundOnTv, "sound", "The sound plays on the TV"));
+    // An app that forbids taking its sound: said, not left a puzzle.
+    if (sw.soundOnTv && sw.soundKept) row.append(el("p", "muted small tv-kept", "The app playing now keeps its sound on the phone (it does not let other apps send it)."));
+    return row;
+  }
+
   // A TV found nearby, as Computers & phones lists them.
   function foundRow(f) {
     const li = el("li", "rc-row");
@@ -229,7 +311,7 @@ const KagazTvs = (() => {
   }
 
   function render() {
-    $("tvs-tiles").replaceChildren(...saved.map(tile));
+    $("tvs-tiles").replaceChildren(...saved.flatMap((t) => (showing === t.name && playing && sw && sw.live ? [tile(t), switches()] : [tile(t)])));
     $("tvs-tiles").classList.toggle("hidden", saved.length === 0);
     $("tvs-empty").classList.toggle("hidden", saved.length > 0);
     const others = found.filter((f) => !f.added && !saved.some((s) => s.name === f.name));
@@ -263,6 +345,7 @@ const KagazTvs = (() => {
     try {
       saved = (await invoke("tvs_saved")) || saved;
       showing = (await invoke("tv_showing")) || showing;
+      sw = await invoke("tv_controls").catch(() => null);
     } catch (e) {
       toast("Could not read your TVs: " + e);
     }
@@ -298,6 +381,12 @@ const KagazTvs = (() => {
       sheetLine.classList.toggle("hidden", !line);
     }
     if ([showing, playing, failed[n.tv]].join("|") !== before) render();
+  });
+
+  // The switches changed, here or outside the app.
+  listen("tv-controls", (e) => {
+    sw = Object.assign({}, sw, e.payload);
+    render();
   });
 
   $("tvs").addEventListener("refresh", rescan);

@@ -7,7 +7,7 @@
 
 use super::video::Encoded;
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 /// What the TV settled on, for the phone's encoder.
@@ -23,7 +23,16 @@ struct Hooks {
     start: Box<dyn Fn(Wanted) -> Result<(), String> + Send + Sync>,
     key: Box<dyn Fn() + Send + Sync>,
     stop: Box<dyn Fn() + Send + Sync>,
+    sound: Box<dyn Fn() -> bool + Send + Sync>,
 }
+
+/// The phone's sound, encoded: Opus packets (48 kHz, stereo) in order.
+/// They come all the time the encoder runs, silence included, so the TV's
+/// player never waits for sound that is not coming.
+static SOUND: Mutex<VecDeque<Vec<u8>>> = Mutex::new(VecDeque::new());
+
+/// About two seconds of sound; more waiting means nobody is taking it.
+const MOST_SOUND_WAITING: usize = 100;
 
 static HOOKS: OnceLock<Hooks> = OnceLock::new();
 
@@ -33,18 +42,61 @@ static QUEUE: Mutex<VecDeque<(Vec<u8>, bool)>> = Mutex::new(VecDeque::new());
 /// Pictures the phone's encoder has handed over.
 static DELIVERED: AtomicU64 = AtomicU64::new(0);
 
+/// After pictures were dropped: those that build on them are no use, so
+/// nothing is kept until a whole picture comes.
+static WHOLE_NEXT: AtomicBool = AtomicBool::new(false);
+
 /// More than this waiting means the session stalled: start again from the
 /// next whole picture rather than send old ones late.
 const MOST_WAITING: usize = 30;
 
 /// Connects the phone's encoder (once, when the app starts): how to start
 /// it, ask it for a whole picture, and stop it.
+/// `sound` says whether sound will come with the pictures (the phone has
+/// an Opus encoder).
 pub fn connect(
     start: impl Fn(Wanted) -> Result<(), String> + Send + Sync + 'static,
     key: impl Fn() + Send + Sync + 'static,
     stop: impl Fn() + Send + Sync + 'static,
+    sound: impl Fn() -> bool + Send + Sync + 'static,
 ) {
-    let _ = HOOKS.set(Hooks { start: Box::new(start), key: Box::new(key), stop: Box::new(stop) });
+    let _ = HOOKS.set(Hooks { start: Box::new(start), key: Box::new(key), stop: Box::new(stop), sound: Box::new(sound) });
+}
+
+/// Whether the outside encoder sends sound with its pictures.
+pub fn has_sound() -> bool {
+    HOOKS.get().is_some_and(|h| (h.sound)())
+}
+
+/// One Opus packet of the phone's sound.
+pub fn push_sound(packet: Vec<u8>) {
+    let mut q = SOUND.lock().unwrap();
+    if q.len() >= MOST_SOUND_WAITING {
+        q.pop_front();
+    }
+    q.push_back(packet);
+}
+
+/// The next Opus packet, if one waits.
+pub fn take_sound() -> Option<Vec<u8>> {
+    SOUND.lock().unwrap().pop_front()
+}
+
+/// How long an Opus packet plays, in samples at 48 kHz (from its first
+/// byte: the mode and frame size, and how many frames it holds).
+pub fn opus_samples(packet: &[u8]) -> u32 {
+    let Some(&toc) = packet.first() else { return 0 };
+    let one = match toc >> 3 {
+        c @ 0..=11 => [480, 960, 1920, 2880][(c % 4) as usize],
+        c @ 12..=15 => [480, 960][(c % 2) as usize],
+        c => [120, 240, 480, 960][(c % 4) as usize],
+    };
+    let frames = match toc & 3 {
+        0 => 1,
+        1 | 2 => 2,
+        _ => packet.get(1).map(|b| (b & 0x3f) as u32).unwrap_or(0),
+    };
+    one * frames
 }
 
 /// Whether an outside encoder is connected.
@@ -59,10 +111,17 @@ pub fn push(bytes: Vec<u8>, key: bool) {
     if q.len() >= MOST_WAITING {
         q.clear();
         drop(q);
+        WHOLE_NEXT.store(true, Ordering::Relaxed);
         if let Some(h) = HOOKS.get() {
             (h.key)();
         }
         return;
+    }
+    if WHOLE_NEXT.load(Ordering::Relaxed) {
+        if !key {
+            return;
+        }
+        WHOLE_NEXT.store(false, Ordering::Relaxed);
     }
     q.push_back((bytes, key));
 }
@@ -76,6 +135,8 @@ impl External {
     pub fn open(width: usize, height: usize, fps: u32, bits_per_second: u32) -> Result<External, String> {
         let h = HOOKS.get().ok_or("no encoder outside Kagaz is connected")?;
         QUEUE.lock().unwrap().clear();
+        SOUND.lock().unwrap().clear();
+        WHOLE_NEXT.store(false, Ordering::Relaxed);
         (h.start)(Wanted { width: width as u32, height: height as u32, fps, bits_per_second })?;
         Ok(External { _private: () })
     }
@@ -84,6 +145,20 @@ impl External {
         if let Some(h) = HOOKS.get() {
             (h.key)();
         }
+    }
+
+    /// The oldest picture waiting, by itself (for a stream that sends each
+    /// picture as its own unit).
+    pub fn next(&mut self) -> Option<Encoded> {
+        QUEUE.lock().unwrap().pop_front().map(|(data, key)| Encoded { data, key })
+    }
+
+    /// Drops what waits and asks for a whole picture: after a stall, the
+    /// stream starts again from now, not from old pictures.
+    pub fn flush(&mut self) {
+        QUEUE.lock().unwrap().clear();
+        WHOLE_NEXT.store(true, Ordering::Relaxed);
+        self.key_next();
     }
 
     /// What arrived since the last call, as one picture's worth (empty when
@@ -105,6 +180,7 @@ impl Drop for External {
             (h.stop)();
         }
         QUEUE.lock().unwrap().clear();
+        SOUND.lock().unwrap().clear();
     }
 }
 

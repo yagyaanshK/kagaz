@@ -177,6 +177,7 @@ pub fn describe(e: &Event) -> Option<String> {
             )
         }
         Event::KeyFrameAsked => "  The TV asked for a fresh picture.".into(),
+        Event::Note(line) => format!("  {line}"),
     })
 }
 

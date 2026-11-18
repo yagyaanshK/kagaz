@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The mirroring notification's own row: how things stand, then the
+     switches (each always the same picture, struck through while that is
+     kept from the TV), and Stop apart in red. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:gravity="center_vertical"
+    android:orientation="horizontal">
+
+    <TextView
+        android:id="@+id/tv_state"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:ellipsize="end"
+        android:maxLines="2"
+        android:textAppearance="@android:style/TextAppearance.Material.Notification" />
+
+    <ImageButton
+        android:id="@+id/tv_all"
+        android:layout_width="44dp"
+        android:layout_height="44dp"
+        android:background="?android:attr/selectableItemBackgroundBorderless"
+        android:scaleType="center"
+        android:tint="?android:attr/textColorPrimary" />
+
+    <ImageButton
+        android:id="@+id/tv_screen"
+        android:layout_width="44dp"
+        android:layout_height="44dp"
+        android:background="?android:attr/selectableItemBackgroundBorderless"
+        android:scaleType="center"
+        android:tint="?android:attr/textColorPrimary" />
+
+    <ImageButton
+        android:id="@+id/tv_sound"
+        android:layout_width="44dp"
+        android:layout_height="44dp"
+        android:background="?android:attr/selectableItemBackgroundBorderless"
+        android:scaleType="center"
+        android:tint="?android:attr/textColorPrimary" />
+
+    <ImageButton
+        android:id="@+id/tv_stop"
+        android:layout_width="44dp"
+        android:layout_height="44dp"
+        android:layout_marginStart="8dp"
+        android:background="?android:attr/selectableItemBackgroundBorderless"
+        android:contentDescription="Stop mirroring"
+        android:scaleType="center"
+        android:src="@drawable/ic_tv_stop"
+        android:tint="@color/kagaz_tv_stop" />
+</LinearLayout>

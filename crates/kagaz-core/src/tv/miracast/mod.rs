@@ -155,6 +155,8 @@ pub enum Event {
     },
     /// The TV asked for a fresh key frame.
     KeyFrameAsked,
+    /// A line about how the session is doing, for the record.
+    Note(String),
 }
 
 /// How a session went.

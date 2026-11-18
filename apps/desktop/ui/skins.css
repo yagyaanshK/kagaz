@@ -488,6 +488,17 @@ body {
 #tvs .tile-act { min-width: 88px; }
 [data-layout="bar"] #tvs .tile-act { min-width: 82px; }
 .tv-sheet-line { margin: 2px 0 0; color: var(--text); font-variant-numeric: tabular-nums; }
+/* A phone session's switches, under the mirroring TV's card: Material's
+   filled button for the one that shows everything (tonal once all is
+   showing, to hide it), and a filter chip each for the screen and the
+   sound, filled and checked while that goes to the TV. */
+.tv-switches { display: flex; flex-wrap: wrap; gap: 8px; margin: -4px 0 4px; }
+.tv-all { flex: 1 0 100%; display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 40px; padding: 0 24px; border: none; border-radius: 999px; background: var(--accent-soft); color: var(--nav-active-fg, var(--accent)); font-weight: 600; }
+.tv-all.show { background: var(--accent); color: var(--accent-text); }
+.tv-all svg { width: 18px; height: 18px; }
+.tv-chip { display: inline-flex; align-items: center; gap: 8px; min-height: 32px; padding: 0 16px; border: 1px solid var(--line); border-radius: 8px; background: none; color: var(--muted); font-size: var(--small, 14px); font-weight: 500; }
+.tv-chip.on { padding-left: 8px; border-color: transparent; background: var(--nav-active-bg, var(--accent-soft)); color: var(--nav-active-fg, var(--text)); }
+.tv-chip svg { width: 18px; height: 18px; }
 /* One-off news: Android's snackbar (inverse surface, 4 px corners), a
    floating toast elsewhere (GNOME's and Fluent's are rounded pills). */
 .tv-toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 20; max-width: min(560px, calc(100vw - 32px)); padding: 12px 18px; border-radius: 999px; background: #2E3230; color: #EFF1EE; font-size: var(--small, 14px); box-shadow: 0 3px 8px rgba(0, 0, 0, 0.3); }
@@ -499,6 +510,10 @@ body {
 .tv-way:hover { background: var(--hover, rgba(127, 127, 127, 0.08)); }
 .tv-way-name { font-weight: 600; }
 .tv-way.danger-text .tv-way-name { color: var(--bad); }
+.tv-way-switch { padding: 6px 12px; }
+.tv-way-note { margin: 4px 12px 8px; }
+.tv-steps { margin: 0 12px 8px; padding-left: 20px; color: var(--muted); display: flex; flex-direction: column; gap: 4px; }
+.tv-kept { flex: 1 0 100%; margin: 0; }
 .tv-way-section { margin: 12px 12px 4px; font-size: var(--small, 13px); color: var(--muted); font-weight: 600; }
 /* On a phone it comes up from the bottom, as Android's and iOS's sheets do. */
 [data-os="android"] dialog.ask.sheet, [data-os="ios"] dialog.ask.sheet { margin: auto 0 0; width: 100%; max-width: 100%; border: none; border-radius: 28px 28px 0 0; padding: 12px 16px calc(16px + env(safe-area-inset-bottom)); }
@@ -507,14 +522,17 @@ body {
 /* Material on Android: Add as a tonal pill, the sheet's Close as a text
    button (a sheet also closes with Back or a tap outside). */
 [data-os="android"] #tvs .rc-row > button { min-height: 40px; padding: 0 20px; border: none; border-radius: 999px; background: var(--accent-soft); color: var(--nav-active-fg); font-weight: 600; }
-/* Mirror is the page's main action: Material's filled button (the accent
-   with the text made for it). Stop, while mirroring, is the tonal one,
-   its text the container's own, not the accent on its darker self, which
-   read as switched off. */
-[data-os="android"] #tvs .tile-act { background: var(--accent); color: var(--accent-text); }
+/* A tile's button on Android is Material's tonal button: the accent's
+   container with the text made for it (the accent itself on its darker
+   container read as switched off). On a device page (Computers & phones,
+   TVs) the tile's button is the main action, Connect or Mirror: the
+   filled button. Stop, while mirroring, goes back to the tonal one. */
+[data-os="android"] .tile-act { color: var(--nav-active-fg); }
+[data-os="android"] .rc-tiles .tile-act { background: var(--accent); color: var(--accent-text); }
 [data-os="android"] #tvs .home-tile.live .tile-act { background: var(--accent-soft); color: var(--nav-active-fg); }
 /* GNOME's suggested action and a Mac's default button are filled with
    the accent too; Stop keeps the quieter tint. */
-[data-os="gnome"] #tvs .home-tile:not(.live) .tile-act, [data-os="macos"] #tvs .home-tile:not(.live) .tile-act { background: var(--accent); color: var(--accent-text); }
+[data-os="gnome"] .rc-tiles .tile-act, [data-os="macos"] .rc-tiles .tile-act { background: var(--accent); color: var(--accent-text); }
+[data-os="gnome"] #tvs .home-tile.live .tile-act, [data-os="macos"] #tvs .home-tile.live .tile-act { background: var(--accent-soft); color: var(--accent); }
 [data-os="android"] dialog.ask.sheet .actions button { border: none; background: none; color: var(--accent); font-weight: 600; border-radius: 999px; padding: 0 16px; }
 [data-os="ios"] #tvs .rc-row > button { min-height: 44px; border: none; background: none; color: var(--accent); font-weight: 600; }

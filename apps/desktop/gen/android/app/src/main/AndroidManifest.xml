@@ -25,6 +25,10 @@
     <!-- Showing the phone's screen on a TV (KagazCastService), only after
          Android's own prompt each time. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
+    <!-- The floating button with a mirroring session's switches
+         (KagazTvFloat): only when the person turns it on in Kagaz and
+         allows "Appear on top" in Android's settings. -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
@@ -79,6 +83,40 @@
             android:name=".KagazCastService"
             android:exported="false"
             android:foregroundServiceType="mediaProjection" />
+
+        <!-- A mirroring session's switches as quick-panel tiles
+             (KagazTvTiles.kt); the person adds them from the panel's edit
+             screen. -->
+        <service
+            android:name=".KagazTvAllTile"
+            android:exported="true"
+            android:icon="@drawable/ic_tv_all"
+            android:label="Kagaz: show on TV"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+        <service
+            android:name=".KagazTvScreenTile"
+            android:exported="true"
+            android:icon="@drawable/ic_tv_screen"
+            android:label="Kagaz: screen on TV"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+        <service
+            android:name=".KagazTvSoundTile"
+            android:exported="true"
+            android:icon="@drawable/ic_tv_sound"
+            android:label="Kagaz: sound on TV"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
 
         <!-- Decline on the ring notification, without opening Kagaz. -->
         <receiver

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Stop, on the mirroring notification: Material's error red. -->
+    <color name="kagaz_tv_stop">#C62828</color>
+</resources>

@@ -16,7 +16,7 @@ pub const PACKET: usize = 1500 - 20 - 8;
 /// The RTP header and Cast's own.
 const HEADER: usize = 19;
 /// The picture clock: 90,000 ticks a second.
-pub const CLOCK: u64 = 90_000;
+pub const CLOCK: u32 = 90_000;
 /// In a missing-packet note: none of the picture's packets came.
 const ALL_LOST: u16 = 0xffff;
 /// Picture numbers travel as 8 bits, so no more than this many may wait
@@ -33,8 +33,11 @@ pub struct Agreed {
     pub tv_ssrc: u32,
     pub key: [u8; 16],
     pub iv_mask: [u8; 16],
-    /// Cast's number for the codec (101 for H.264).
+    /// Cast's number for the codec (101 for H.264, 127 for Opus).
     pub payload_type: u8,
+    /// The stream's clock, ticks a second: 90,000 for pictures, the
+    /// sample rate for sound.
+    pub clock: u32,
     /// How long after its moment the TV shows a picture.
     pub delay: Duration,
 }
@@ -146,6 +149,19 @@ impl Sender {
         }
     }
 
+    /// The same clock as another stream's, so the TV can keep sound and
+    /// pictures in step: its reports tell each stream's moments by it.
+    pub fn same_clock_as(mut self, other: &Sender) -> Sender {
+        self.start = other.start;
+        self.ntp_start = other.ntp_start;
+        self
+    }
+
+    /// How long after its moment the TV plays what this stream carries.
+    pub fn delay(&self) -> Duration {
+        self.agreed.delay
+    }
+
     pub fn round_trip(&self) -> Duration {
         self.round_trip
     }
@@ -159,12 +175,20 @@ impl Sender {
     /// behind (a weak link), pictures are skipped before they are made, so
     /// every one made is sent.
     pub fn room(&self, rtp: u32) -> bool {
+        self.room_within(rtp, None)
+    }
+
+    /// The same, with the most time the waiting pictures may cover given
+    /// (sound waits up to its whole delay: a skipped packet is a gap that
+    /// is heard, and the TV itself drops what comes too late).
+    pub fn room_within(&self, rtp: u32, most: Option<Duration>) -> bool {
         if self.next - self.checkpoint > MOST_UNANSWERED {
             return false;
         }
         // The time the waiting pictures cover, a pause counted as 50 ms at
         // most (a still screen sends few pictures, far apart).
-        let ticks = |d: Duration| (d.as_micros() as u64 * CLOCK / 1_000_000) as u32;
+        let clock = self.agreed.clock as u64;
+        let ticks = |d: Duration| (d.as_micros() as u64 * clock / 1_000_000) as u32;
         let most_step = ticks(Duration::from_millis(50));
         let mut covered = 0u32;
         let mut it = self.waiting.iter().peekable();
@@ -176,7 +200,7 @@ impl Sender {
         // least two pictures at 30 a second and a little, at most two
         // thirds of the delay: the oldest then still has time to arrive.
         let floor = Duration::from_micros(81_667);
-        let most = (self.round_trip * 2).clamp(floor, floor.max(self.agreed.delay * 2 / 3));
+        let most = most.unwrap_or_else(|| (self.round_trip * 2).clamp(floor, floor.max(self.agreed.delay * 2 / 3)));
         covered <= ticks(most)
     }
 
@@ -222,7 +246,7 @@ impl Sender {
         self.last_report = Some(now);
         // The picture clock at this very moment.
         let since = now.saturating_duration_since(when);
-        let rtp_now = rtp.wrapping_add((since.as_micros() as u64 * CLOCK / 1_000_000) as u32);
+        let rtp_now = rtp.wrapping_add((since.as_micros() as u64 * self.agreed.clock as u64 / 1_000_000) as u32);
         let mut p = Vec::with_capacity(28);
         p.extend([0x80, 200, 0, 6]);
         p.extend(self.agreed.ssrc.to_be_bytes());
@@ -470,12 +494,16 @@ impl Receiver {
 
     /// A packet from the sender, a picture's part or a report.
     pub fn take(&mut self, p: &[u8], now: Instant) {
+        let its = |at: usize| p.len() >= at + 4 && p[at..at + 4] == self.agreed.ssrc.to_be_bytes();
         if p.len() >= 28 && p[1] == 200 {
+            if !its(4) {
+                return;
+            }
             let ntp = u64::from_be_bytes(p[8..16].try_into().unwrap());
             self.last_report = Some(((ntp >> 16) as u32, now));
             return;
         }
-        if p.len() < HEADER || p[0] != 0x80 || p[1] & 0x7f != self.agreed.payload_type {
+        if p.len() < HEADER || p[0] != 0x80 || p[1] & 0x7f != self.agreed.payload_type || !its(8) {
             return;
         }
         let low = p[13];
@@ -575,7 +603,7 @@ mod tests {
     use super::*;
 
     fn agreed() -> Agreed {
-        Agreed { ssrc: 60_002, tv_ssrc: 60_003, key: *b"0123456789abcdef", iv_mask: *b"fedcba9876543210", payload_type: 101, delay: Duration::from_millis(200) }
+        Agreed { ssrc: 60_002, tv_ssrc: 60_003, key: *b"0123456789abcdef", iv_mask: *b"fedcba9876543210", payload_type: 101, clock: CLOCK, delay: Duration::from_millis(200) }
     }
 
     #[test]

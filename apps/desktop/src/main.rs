@@ -2002,6 +2002,8 @@ pub fn run() {
             tvs::tv_stop,
             tvs::tv_system_sender,
             tvs::tv_phone,
+            tvs::tv_controls,
+            tvs::tv_control,
             saving::save_folder_open,
             saving::save_picture,
             xiaomi::xiaomi_signed_in,
