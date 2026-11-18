@@ -40,8 +40,9 @@ pub enum TvAction {
         /// Wi-Fi Direct otherwise
         #[arg(long, value_enum)]
         via: Option<Via>,
-        /// The tallest picture to send
-        #[arg(long, value_enum, default_value = "720")]
+        /// The tallest picture to send: 1080 is sharper, 720 can move more
+        /// smoothly (60 pictures a second on TVs that take that only at 720)
+        #[arg(long, value_enum, default_value = "1080")]
         size: Size,
         /// Stop after this many seconds
         #[arg(long)]
@@ -50,6 +51,31 @@ pub enum TvAction {
         #[arg(long, default_value = "Kagaz")]
         name: String,
     },
+    /// Use the TV as a second monitor: the desktop makes a new monitor of the
+    /// TV's size (see it in the display settings, drag windows onto it).
+    /// Ctrl+C ends it and the monitor goes away.
+    Extend {
+        /// How to reach the TV; by default the network when the TV is on it,
+        /// Wi-Fi Direct otherwise
+        #[arg(long, value_enum)]
+        via: Option<Via>,
+        /// The new monitor's size
+        #[arg(long, value_enum, default_value = "1080")]
+        size: Size,
+        /// Stop after this many seconds
+        #[arg(long)]
+        seconds: Option<u64>,
+        /// The name the TV shows for this computer
+        #[arg(long, default_value = "Kagaz")]
+        name: String,
+    },
+}
+
+fn height(size: Size) -> u32 {
+    match size {
+        Size::P720 => 720,
+        Size::P1080 => 1080,
+    }
 }
 
 static STOP: AtomicBool = AtomicBool::new(false);
@@ -103,13 +129,21 @@ pub fn list(seconds: f32, direct: bool, json: bool) -> Result<()> {
 pub fn tv(name: &str, action: TvAction) -> Result<()> {
     match action {
         TvAction::Mirror { pattern, window, via, size, seconds, name: shown } => {
-            let mut pictures = pictures(pattern, window)?;
+            let mut pictures = pictures(if pattern { What::Pattern } else if window { What::Window } else { What::Screen }, size)?;
             let opts = Options {
                 name: shown,
-                max_height: match size {
-                    Size::P720 => 720,
-                    Size::P1080 => 1080,
-                },
+                max_height: height(size),
+                length: seconds.map(Duration::from_secs),
+                wait: Duration::from_secs(30),
+            };
+            stop_on_ctrl_c();
+            mirror(name, via, &opts, pictures.as_mut())
+        }
+        TvAction::Extend { via, size, seconds, name: shown } => {
+            let mut pictures = pictures(What::Extend, size)?;
+            let opts = Options {
+                name: shown,
+                max_height: height(size),
                 length: seconds.map(Duration::from_secs),
                 wait: Duration::from_secs(30),
             };
@@ -119,17 +153,36 @@ pub fn tv(name: &str, action: TvAction) -> Result<()> {
     }
 }
 
-/// The pattern, or the screen the owner picks in the desktop's dialog.
-fn pictures(pattern: bool, window: bool) -> Result<Box<dyn Pictures>> {
-    if pattern {
+enum What {
+    Pattern,
+    Screen,
+    Window,
+    Extend,
+}
+
+/// The pattern, or the screen the owner picks in the desktop's dialog, or
+/// a new monitor for the TV.
+fn pictures(what: What, size: Size) -> Result<Box<dyn Pictures>> {
+    if let What::Pattern = what {
         return Ok(Box::new(kagaz_core::tv::miracast::video::Pattern::new(16, 16)));
     }
     #[cfg(target_os = "linux")]
     {
         use kagaz_core::tv::capture::{Choice, Screen};
-        println!("Choose what to show in the desktop's sharing dialog...");
-        let screen = Screen::ask(if window { Choice::Window } else { Choice::Screen }).map_err(|e| anyhow!(e))?;
+        let choice = match what {
+            What::Window => Choice::Window,
+            What::Extend => {
+                let (width, height) = if height(size) > 720 { (1920, 1080) } else { (1280, 720) };
+                Choice::Extend { width, height }
+            }
+            _ => Choice::Screen,
+        };
+        println!("Allow it in the desktop's sharing dialog...");
+        let screen = Screen::ask(choice).map_err(|e| anyhow!(e))?;
         match screen.first_picture(Duration::from_secs(5)) {
+            Some((w, h)) if matches!(what, What::Extend) => {
+                println!("A new {w}x{h} monitor is on the desktop: drag windows onto it.")
+            }
             Some((w, h)) => println!("Sharing {w}x{h}."),
             None => bail!("the desktop sent no picture of the screen"),
         }
@@ -137,7 +190,7 @@ fn pictures(pattern: bool, window: bool) -> Result<Box<dyn Pictures>> {
     }
     #[cfg(not(target_os = "linux"))]
     {
-        let _ = window;
+        let _ = size;
         bail!("showing the screen works on Linux so far; `--pattern` sends the test pattern")
     }
 }

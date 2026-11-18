@@ -40,12 +40,15 @@ struct Latest {
     seq: u64,
 }
 
-/// What can be shown: whole screens, single windows, or both.
+/// What can be shown: whole screens, single windows, or both; or a new
+/// monitor of the given size that exists only for the TV (extending the
+/// desktop onto it).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Choice {
     Screen,
     Window,
     Either,
+    Extend { width: u32, height: u32 },
 }
 
 /// A screen being captured. Dropping it ends the capture (and the
@@ -156,13 +159,21 @@ fn from_portal(choice: Choice) -> Result<(Connection, OwnedFd, u32), String> {
         .ok_or("the portal gave no session")?;
     let session = dbus::Path::from(session);
 
-    // 1 monitors, 2 windows; the cursor drawn into the picture (2) when
-    // the desktop can.
-    let types = match choice {
+    // 1 monitors, 2 windows, 4 a new virtual monitor; the cursor drawn
+    // into the picture (2) when the desktop can.
+    let wanted = match choice {
         Choice::Screen => 1,
         Choice::Window => 2,
         Choice::Either => 3,
-    } & available;
+        Choice::Extend { .. } => 4,
+    };
+    if wanted & available == 0 {
+        return Err(match choice {
+            Choice::Extend { .. } => "this desktop cannot make a monitor for the TV (its screen-sharing portal has no virtual monitors)".into(),
+            _ => "this desktop's screen-sharing portal does not offer that".into(),
+        });
+    }
+    let types = wanted & available;
     let s1 = session.clone();
     portal_request(
         &c,
@@ -207,7 +218,11 @@ impl Screen {
     /// to share, and starts taking pictures of it.
     pub fn ask(choice: Choice) -> Result<Screen, String> {
         let (portal, fd, node) = from_portal(choice)?;
-        let mut s = Screen::from_node(Some(fd), node)?;
+        let size = match choice {
+            Choice::Extend { width, height } => Some((width, height)),
+            _ => None,
+        };
+        let mut s = Screen::start(Some(fd), node, size)?;
         s._portal = Some(portal);
         Ok(s)
     }
@@ -216,6 +231,12 @@ impl Screen {
     /// or this session's PipeWire when `None` (tests, with a stream made
     /// some other way).
     pub fn from_node(fd: Option<OwnedFd>, node: u32) -> Result<Screen, String> {
+        Screen::start(fd, node, None)
+    }
+
+    /// `size` fixes the picture size: a virtual monitor takes the size its
+    /// stream asks for.
+    fn start(fd: Option<OwnedFd>, node: u32, size: Option<(u32, u32)>) -> Result<Screen, String> {
         let latest = Arc::new(Mutex::new(Latest::default()));
         let arrived = Arc::new(AtomicU64::new(0));
         let (quit_tx, quit_rx) = pw::channel::channel::<()>();
@@ -225,7 +246,7 @@ impl Screen {
         let thread = std::thread::Builder::new()
             .name("kagaz-screen".into())
             .spawn(move || {
-                if let Err(e) = run_stream(fd, node, l, count, quit_rx, &ready_tx) {
+                if let Err(e) = run_stream(fd, node, size, l, count, quit_rx, &ready_tx) {
                     let _ = ready_tx.send(Err(e));
                 }
             })
@@ -283,8 +304,9 @@ impl Screen {
     }
 }
 
-/// Scales with a 2x2 average at each target pixel (sharper than nearest
-/// for text, cheap enough for 60 pictures a second), keeping the shape.
+/// Scales smoothly, keeping the shape: bilinear when shrinking a little or
+/// growing (a 1920x1200 screen into 1080 lines), an average of the pixels
+/// covered when shrinking by half or more.
 #[allow(clippy::too_many_arguments)]
 fn scale(src: &[u8], sw: usize, sh: usize, stride: usize, layout: Layout, dst: &mut [u8], dw: usize, dh: usize) {
     if sw == 0 || sh == 0 {
@@ -297,20 +319,34 @@ fn scale(src: &[u8], sw: usize, sh: usize, stride: usize, layout: Layout, dst: &
         Layout::Bgrx => (2, 0),
         Layout::Rgbx => (0, 2),
     };
-    let half_x = (sw / fw).max(1) / 2;
-    let half_y = (sh / fh).max(1) / 2;
-    for y in 0..fh {
-        let sy0 = (y * sh / fh).min(sh - 1);
-        let sy1 = (sy0 + half_y).min(sh - 1);
-        let row0 = &src[sy0 * stride..];
-        let row1 = &src[sy1 * stride..];
+    // Each target column and row: the source positions around it, and the
+    // weight of the second (0..256). Shrinking by half or more first
+    // averages 2x2 blocks by spreading the taps.
+    let taps = |n: usize, f: usize, s: usize| -> Vec<(usize, usize, u32)> {
+        let step = s as f64 / f as f64;
+        let spread = if step >= 2.0 { (step / 2.0).floor() } else { 0.0 };
+        (0..f)
+            .map(|i| {
+                let c = ((i as f64 + 0.5) * step - 0.5 - spread / 2.0).max(0.0);
+                let i0 = (c.floor() as usize).min(n - 1);
+                let w = if spread > 0.0 { 128 } else { ((c - c.floor()) * 256.0) as u32 };
+                let i1 = (i0 + 1 + spread as usize).min(n - 1);
+                (i0, i1, w)
+            })
+            .collect()
+    };
+    let cols = taps(sw, fw, sw);
+    let rows = taps(sh, fh, sh);
+    for (y, &(y0, y1, wy)) in rows.iter().enumerate() {
+        let row0 = &src[y0 * stride..];
+        let row1 = &src[y1 * stride..];
         let out = &mut dst[((oy + y) * dw + ox) * 4..((oy + y) * dw + ox + fw) * 4];
-        for (x, px) in out.chunks_exact_mut(4).enumerate() {
-            let sx0 = (x * sw / fw).min(sw - 1) * 4;
-            let sx1 = ((x * sw / fw + half_x).min(sw - 1)) * 4;
+        for (px, &(x0, x1, wx)) in out.chunks_exact_mut(4).zip(cols.iter()) {
+            let (a, b2) = (x0 * 4, x1 * 4);
             for (c, from) in [(0usize, r), (1, 1), (2, b)] {
-                let sum = row0[sx0 + from] as u16 + row0[sx1 + from] as u16 + row1[sx0 + from] as u16 + row1[sx1 + from] as u16;
-                px[c] = (sum / 4) as u8;
+                let top = row0[a + from] as u32 * (256 - wx) + row0[b2 + from] as u32 * wx;
+                let bottom = row1[a + from] as u32 * (256 - wx) + row1[b2 + from] as u32 * wx;
+                px[c] = ((top * (256 - wy) + bottom * wy) >> 16) as u8;
             }
             px[3] = 255;
         }
@@ -320,6 +356,7 @@ fn scale(src: &[u8], sw: usize, sh: usize, stride: usize, layout: Layout, dst: &
 fn run_stream(
     fd: Option<OwnedFd>,
     node: u32,
+    size: Option<(u32, u32)>,
     latest: Arc<Mutex<Latest>>,
     arrived: Arc<AtomicU64>,
     quit: pw::channel::Receiver<()>,
@@ -396,6 +433,15 @@ fn run_stream(
     use spa::param::format::{FormatProperties, MediaSubtype, MediaType};
     use spa::param::video::VideoFormat;
     use spa::utils::{Fraction, Rectangle};
+    let (want, min, max) = match size {
+        // A virtual monitor: exactly this size.
+        Some((w, h)) => (Rectangle { width: w, height: h }, Rectangle { width: w, height: h }, Rectangle { width: w, height: h }),
+        None => (
+            Rectangle { width: 1920, height: 1080 },
+            Rectangle { width: 1, height: 1 },
+            Rectangle { width: 8192, height: 8192 },
+        ),
+    };
     let obj = spa::pod::object!(
         spa::utils::SpaTypes::ObjectParamFormat,
         spa::param::ParamType::EnumFormat,
@@ -417,9 +463,9 @@ fn run_stream(
             Choice,
             Range,
             Rectangle,
-            Rectangle { width: 1920, height: 1080 },
-            Rectangle { width: 1, height: 1 },
-            Rectangle { width: 8192, height: 8192 }
+            want,
+            min,
+            max
         ),
         spa::pod::property!(
             FormatProperties::VideoFramerate,
@@ -463,6 +509,11 @@ mod tests {
     /// dialog; only `tests/headless-screen.sh` sets this up). Returns the
     /// capture and the session to keep alive.
     fn headless_screen() -> Option<(Screen, Connection)> {
+        headless(None)
+    }
+
+    /// `virtual_size`: a new monitor of that size instead of the existing one.
+    fn headless(virtual_size: Option<(u32, u32)>) -> Option<(Screen, Connection)> {
         if std::env::var_os("KAGAZ_HEADLESS").is_none() {
             eprintln!("skipped: run crates/kagaz-core/tests/headless-screen.sh");
             return None;
@@ -475,9 +526,11 @@ mod tests {
         let s = c.with_proxy(M, session.clone(), Duration::from_secs(5));
         let mut props: PropMap = HashMap::new();
         props.insert("cursor-mode".into(), v(1u32));
-        let (stream,): (dbus::Path<'static>,) = s
-            .method_call(&format!("{M}.Session"), "RecordMonitor", ("", props))
-            .expect("the virtual monitor recorded");
+        let (stream,): (dbus::Path<'static>,) = match virtual_size {
+            None => s.method_call(&format!("{M}.Session"), "RecordMonitor", ("", props)),
+            Some(_) => s.method_call(&format!("{M}.Session"), "RecordVirtual", (props,)),
+        }
+        .expect("recording started");
         let node: Arc<Mutex<Option<u32>>> = Arc::new(Mutex::new(None));
         let n = node.clone();
         let rule = MatchRule::new_signal(format!("{M}.Stream"), "PipeWireStreamAdded").with_path(stream);
@@ -492,7 +545,7 @@ mod tests {
             c.process(Duration::from_millis(100)).unwrap();
         }
         let id = node.lock().unwrap().expect("a PipeWire stream from the compositor");
-        Some((Screen::from_node(None, id).expect("the stream opened"), c))
+        Some((Screen::start(None, id, virtual_size).expect("the stream opened"), c))
     }
 
     #[test]
@@ -507,6 +560,13 @@ mod tests {
         let middle: Vec<&[u8]> = (100..1180).step_by(40).map(|x| px(x, 360)).collect();
         assert!(middle.windows(2).any(|w| w[0] != w[1]), "the desktop is one flat colour");
         eprintln!("pictures so far: {}", screen.arrived.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    #[ignore]
+    fn headless_new_monitor_takes_the_tvs_size() {
+        let Some((screen, _session)) = headless(Some((1920, 1080))) else { return };
+        assert_eq!(screen.first_picture(Duration::from_secs(10)), Some((1920, 1080)));
     }
 
     #[test]
