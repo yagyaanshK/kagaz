@@ -173,6 +173,15 @@ with the commit that closes them.
 
 ## Desktop app polish
 
+- [ ] **The navigation, put in order** (asked 2026-11-18): only the
+      kinds of device the person has added, by name; Home on top; Tools
+      and Settings at the foot; Add a device at the end of the person's
+      kinds; Home's groups in the same order. Mockup in
+      `design/mockups/navigation/` (the app's own stylesheets, every
+      system, wide, icons-only and phone), with two ways for a phone's
+      bar. Waiting for the owner's word on the mockup and on the phone's
+      bar before it is built.
+
 - [x] Illustrations next to each option in the Scan pane and a badge per
       verdict in About (inline SVG, 2026-10-06). Worth a look in the window.
 

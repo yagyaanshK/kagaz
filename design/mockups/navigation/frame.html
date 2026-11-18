@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Kagaz · navigation mockup</title>
+  <!-- The app's own look, system by system: nothing here is redrawn. -->
+  <script src="../../../apps/desktop/ui/platform.js"></script>
+  <link rel="stylesheet" href="../../../apps/desktop/ui/style.css">
+  <link rel="stylesheet" href="../../../apps/desktop/ui/skins.css">
+  <link rel="stylesheet" href="mock.css">
+</head>
+<body>
+  <aside id="sidebar" aria-label="Kagaz">
+    <div class="side-head">
+      <button id="pane-toggle" type="button" class="side-toggle" aria-label="Show or hide the names" title="Navigation"><span class="ic" data-icon="menu"></span></button>
+      <span class="side-title">Kagaz</span>
+    </div>
+    <ul id="categories"></ul>
+  </aside>
+  <div id="column">
+    <header id="bar">
+      <button id="bar-menu" type="button" class="bar-btn hidden" aria-label="Navigation"><span class="ic" data-icon="menu"></span></button>
+      <h1 id="bar-title">Home</h1>
+      <div class="bar-actions"><button id="bar-add" type="button" class="bar-btn" aria-label="Add a device" title="Add a device"><span class="ic" data-icon="plus"></span></button></div>
+    </header>
+    <main id="main"><section id="home" class="pane"></section></main>
+  </div>
+  <nav id="bottom-nav" aria-label="Kagaz"></nav>
+  <script src="../../../apps/desktop/ui/icons.js"></script>
+  <script src="mock.js"></script>
+</body>
+</html>

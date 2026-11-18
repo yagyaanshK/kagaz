@@ -1,0 +1,57 @@
+/* What the proposal adds to the app's own navigation styles (skins.css):
+   the person's kinds as a part of the list that scrolls by itself, its
+   small heading, and Add a device at its end. */
+
+/* The middle of the list: takes the room between Home and the foot. */
+[data-os] #categories li.cat-scroll,
+[data-os] #categories li.cat-scroll:hover {
+  display: block; flex: 1 1 auto; min-height: 0; margin: 0; padding: 0; border-radius: 0; background: none; overflow-y: auto; cursor: default;
+}
+#categories li.cat-scroll::before { display: none; }
+.cat-kinds { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0; }
+[data-os="ios"] .cat-kinds { gap: 2px; }
+[data-os="macos"] .cat-kinds { gap: 1px; }
+/* The list keeps to the window's height; only its middle scrolls. */
+#sidebar { overflow: hidden; }
+#categories { min-height: 0; }
+/* With the middle taking the room, the foot needs no pushing down. */
+[data-os] #categories li.cat-foot { margin-top: 0; }
+
+/* The heading over the person's kinds: each system's own small heading. */
+[data-os] #categories li.cat-head,
+[data-os] #categories li.cat-head:hover {
+  min-height: 0; margin: 0; padding: 14px 16px 4px; background: none; border-radius: 0;
+  font-size: 12px; font-weight: 600; color: var(--muted); letter-spacing: 0;
+}
+[data-os="gnome"] #categories li.cat-head { padding: 12px 16px 4px; }
+[data-os="windows"] #categories li.cat-head { padding: 14px 16px 6px; font-size: 14px; font-weight: 600; color: var(--text); }
+[data-os="macos"] #categories li.cat-head { padding: 12px 8px 3px; font-size: 11px; font-weight: 700; }
+[data-os="ios"] #categories li.cat-head { padding: 18px 12px 6px; font-size: 13px; text-transform: none; }
+[data-os="android"] #categories li.cat-head { padding: 18px 16px 8px; font-size: 14px; font-weight: 500; }
+
+/* Add a device: an entry, quieter than a place. */
+#categories li.cat-add { color: var(--muted); }
+[data-os] #categories li.cat-add .cat-icon { color: var(--muted); }
+
+/* Where only icons fit, a line stands for the heading. */
+[data-layout="rail"] #categories li.cat-head,
+[data-layout="rail"] #categories li.cat-head:hover {
+  height: 1px; padding: 0; margin: 8px 12px; background: var(--line); font-size: 0; overflow: hidden;
+}
+[data-os="android"][data-layout="rail"] #categories li.cat-head { margin: 2px 24px; }
+[data-os="android"][data-layout="rail"] .cat-kinds { gap: 12px; }
+
+/* A line over the foot, where the list above it may scroll under. */
+[data-layout="sidebar"] #categories li.cat-foot { position: relative; }
+[data-layout="sidebar"] #categories li.cat-foot::after,
+[data-layout="rail"] #categories li.cat-foot::after {
+  content: ""; position: absolute; left: 8px; right: 8px; top: -5px; height: 1px; background: var(--line);
+}
+[data-layout="sidebar"] #categories li.cat-foot, [data-layout="rail"] #categories li.cat-foot { margin-top: 9px; position: relative; }
+
+/* A phone's bar with five places keeps their names on one line. */
+#bottom-nav .cat-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+
+/* The middle's own scroll bar: thin beside names, none beside icons. */
+#categories li.cat-scroll { scrollbar-width: thin; }
+[data-layout="rail"] #categories li.cat-scroll { scrollbar-width: none; }

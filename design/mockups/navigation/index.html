@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Kagaz · navigation mockups</title>
+<style>
+  body { margin: 0; padding: 24px; font-family: system-ui, sans-serif; background: #e9e9e6; color: #222; }
+  @media (prefers-color-scheme: dark) { body { background: #1c1c1e; color: #e6e6e6; } p, li, figcaption { color: #b9b9b9 !important; } iframe { border-color: #444 !important; } }
+  h1 { font-size: 20px; margin: 0 0 6px; }
+  h2 { font-size: 16px; margin: 34px 0 4px; }
+  p, li { color: #444; max-width: 880px; line-height: 1.45; margin: 4px 0; }
+  ul { margin: 6px 0 14px; padding-left: 20px; }
+  .row { display: flex; gap: 24px; flex-wrap: wrap; align-items: flex-start; margin-top: 12px; }
+  figure { margin: 0; }
+  figcaption { font-size: 12px; color: #555; margin-bottom: 6px; max-width: 520px; }
+  iframe { border: 1px solid #bbb; background: #fff; border-radius: 10px; display: block; box-shadow: 0 6px 20px rgba(0,0,0,.12); }
+  .wide { width: 1040px; height: 560px; }
+  .short { width: 1000px; height: 440px; }
+  .narrow { width: 800px; height: 560px; }
+  .phone { width: 390px; height: 720px; }
+  .pick { display: inline-block; padding: 1px 8px; border-radius: 10px; background: #2f6f4e; color: #fff; font-size: 12px; font-weight: 600; }
+</style>
+</head>
+<body>
+<h1>Kagaz · the navigation, put in order</h1>
+<p>Drawn with the app's own stylesheets, so each system's look is the real one. Devices and counts are made up. The pages follow your system's light or dark setting.</p>
+<ul>
+  <li><strong>Only what you have added.</strong> A kind of device (Cameras, Fans…) has an entry once its first device is added, and loses it with its last. Today all seven are listed whether or not anything is set up.</li>
+  <li><strong>By name.</strong> Your kinds are in alphabetical order, the same on every device you use, and on Home too.</li>
+  <li><strong>Three parts.</strong> Home on top; your devices in the middle; Tools and Settings at the foot, where they stay. Only the middle scrolls when it outgrows the window.</li>
+  <li><strong>Add a device</strong> closes the list of your kinds: every kind Kagaz knows is behind it, so nothing is lost by hiding the ones you have not got.</li>
+</ul>
+
+<h2>A window wide enough for names</h2>
+<p>Ubuntu, Windows and macOS, each with its own sidebar. Four kinds added.</p>
+<div class="row">
+  <figure><figcaption>Ubuntu (GNOME)</figcaption><iframe class="wide" src="frame.html?os=gnome&have=some"></iframe></figure>
+  <figure><figcaption>Windows 11</figcaption><iframe class="wide" src="frame.html?os=windows&have=some"></iframe></figure>
+  <figure><figcaption>macOS</figcaption><iframe class="wide" src="frame.html?os=macos&have=some"></iframe></figure>
+</div>
+
+<h2>As the list grows, and before it begins</h2>
+<div class="row">
+  <figure><figcaption>Twelve kinds in a short window: the middle scrolls, Home, Tools and Settings stay in reach.</figcaption><iframe class="short" src="frame.html?os=gnome&have=many"></iframe></figure>
+  <figure><figcaption>Nothing added yet: Home, Add a device, Tools, Settings.</figcaption><iframe class="short" src="frame.html?os=gnome&have=none"></iframe></figure>
+  <figure><figcaption>A kind's page open before its first device (reached through Add a device): its entry shows while you are on it, so the list always says where you are.</figcaption><iframe class="short" src="frame.html?os=gnome&have=some&at=purifiers"></iframe></figure>
+</div>
+
+<h2>Narrower windows and tablets: icons</h2>
+<p>The same order with icons only (Windows) or icons over short names (Android). A line stands where the heading was.</p>
+<div class="row">
+  <figure><figcaption>Windows 11 at 800 px</figcaption><iframe class="narrow" src="frame.html?os=windows&have=some"></iframe></figure>
+  <figure><figcaption>Android tablet at 800 px</figcaption><iframe class="narrow" src="frame.html?os=android&have=some"></iframe></figure>
+</div>
+
+<h2>Phones: two ways, yours to choose</h2>
+<p><span class="pick">A · recommended</span> The bar stays Home, Tools, Settings, as today. Home is the list of your kinds, by name, each one tap away. The bar never changes under your thumb.</p>
+<div class="row">
+  <figure><figcaption>A · Android</figcaption><iframe class="phone" src="frame.html?os=android&have=some"></iframe></figure>
+  <figure><figcaption>A · iPhone</figcaption><iframe class="phone" src="frame.html?os=ios&have=some"></iframe></figure>
+</div>
+<p style="margin-top:22px"><strong>B</strong> The bar holds your first three kinds itself, and More holds the rest with Tools and Settings. One tap fewer for those three; the bar changes when you add or remove a kind, and Tools and Settings move one level down.</p>
+<div class="row">
+  <figure><figcaption>B · Android</figcaption><iframe class="phone" src="frame.html?os=android&have=some&phone=own"></iframe></figure>
+  <figure><figcaption>B · iPhone</figcaption><iframe class="phone" src="frame.html?os=ios&have=some&phone=own"></iframe></figure>
+</div>
+</body>
+</html>
