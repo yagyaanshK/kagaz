@@ -130,6 +130,16 @@ const KagazRemote = (() => {
       selectCategory("remote");
       openDevice(ev.payload);
     });
+    // A setting changed behind a session window's gear: the list and an
+    // open page show it.
+    window.__TAURI__.event.listen("remote-device-settings", async (ev) => {
+      if (!ev.payload || ev.payload.from === "main") return;
+      try {
+        data = (await invoke("remote_saved")) || data;
+      } catch (e) {}
+      if (viewIs("device") && openId === ev.payload.id) renderDevice();
+      if (viewIs("settings")) renderSettings();
+    });
   }
   invoke("remote_windows").then(windowsChanged).catch(() => {});
 
@@ -411,6 +421,13 @@ const KagazRemote = (() => {
     }
   }
 
+  // A device's settings changed here: its session window, if open, takes
+  // them at once (session.js).
+  function tellSettings(id) {
+    const x = data.devices.find((y) => y.id === id);
+    if (x && window.__TAURI__) window.__TAURI__.event.emit("remote-device-settings", { id, settings: x.settings || {}, from: "main" }).catch(() => {});
+  }
+
   async function save(change, failed) {
     try {
       data = await change();
@@ -478,131 +495,18 @@ const KagazRemote = (() => {
     const soon = el("p", "muted small", canConnect(d) ? "" : NOT_YET);
     soon.classList.toggle("hidden", canConnect(d));
 
-    // How its screen is shown and driven: kept with the device.
-    const settings = { ...(d.settings || {}) };
-    const keepSettings = () => save(() => invoke("remote_settings", { id: d.id, settings, user: d.user || null, shape: d.shape || null }), "Could not save it");
-    const screen = el("section", "set-section");
-    screen.append(el("h3", "", "Picture"));
-    const picRow = el("div", "set-row");
-    const picLabel = el("label", "", "Picture");
-    picLabel.htmlFor = "remote-picture";
-    const slider = el("span", "rc-slider");
-    const range = el("input");
-    range.id = "remote-picture";
-    range.type = "range";
-    range.min = 0;
-    range.max = 10;
-    range.value = settings.picture == null ? 0 : settings.picture;
-    range.disabled = settings.picture == null;
-    slider.append(el("span", "", "Sharper"), range, el("span", "", "Smoother"));
-    picRow.append(picLabel, slider);
-    const autoRow = el("div", "set-row");
-    const autoLabel = el("label", "switch");
-    const auto = el("input");
-    auto.type = "checkbox";
-    auto.checked = settings.picture == null;
-    autoLabel.append(auto, " Adjust by itself to the connection");
-    autoRow.append(autoLabel);
-    const keepPicture = () => {
-      if (auto.checked) delete settings.picture;
-      else settings.picture = Number(range.value);
-      keepSettings();
-    };
-    range.addEventListener("change", keepPicture);
-    auto.addEventListener("change", keepPicture);
-    if (overRdp(d)) {
-      // Remote Desktop draws its screen for the viewer, and suits the
-      // picture to the connection by itself.
-      screen.replaceChildren(el("h3", "", "Screen and sound"));
-      const sizeRow = el("div", "set-row");
-      const sizeLabel = el("label", "", "Size");
-      sizeLabel.htmlFor = "remote-size";
-      const size = el("select");
-      size.id = "remote-size";
-      for (const [v, w] of [["", "Fit this window, sharp"], ["own", "A fixed size (1920 × 1080), scaled to the window"]]) {
-        const o = el("option", "", w);
-        o.value = v;
-        o.selected = (settings.own_size ? "own" : "") === v;
-        size.append(o);
-      }
-      size.addEventListener("change", () => {
-        if (size.value) settings.own_size = true;
-        else delete settings.own_size;
-        keepSettings();
-      });
-      sizeRow.append(sizeLabel, size);
-      // Remote Desktop's newer picture (H.264 and its companions) is
-      // used unless it comes out wrong on this computer.
-      const olderRow = el("div", "set-row");
-      const olderLabel = el("label", "switch wrap");
-      const older = el("input");
-      older.type = "checkbox";
-      older.checked = !!settings.older_picture;
-      olderLabel.append(older, " Use the older picture", el("small", "muted", "Slower and heavier on the connection, for a computer whose screen otherwise comes out wrong or black. Takes effect at the next connection."));
-      older.addEventListener("change", () => {
-        if (older.checked) settings.older_picture = true;
-        else delete settings.older_picture;
-        keepSettings();
-      });
-      olderRow.append(olderLabel);
-      // Its sound plays here unless turned off for this computer.
-      const soundRow = el("div", "set-row");
-      const soundLabel = el("label", "switch wrap");
-      const sound = el("input");
-      sound.type = "checkbox";
-      sound.checked = !settings.mute;
-      soundLabel.append(sound, " Play its sound here", el("small", "muted", "Instead of on the computer itself. The speaker button over its screen mutes it for now. Takes effect at the next connection."));
-      sound.addEventListener("change", () => {
-        if (sound.checked) delete settings.mute;
-        else settings.mute = true;
-        keepSettings();
-      });
-      soundRow.append(soundLabel);
-      screen.append(sizeRow, olderRow, soundRow, el("p", "muted small", "The computer suits its picture to the connection, and shows one screen sized for this window."));
-    } else {
-      screen.append(picRow, autoRow);
-      if (canConnect(d)) screen.append(el("p", "muted small", "Over VNC the device's whole screen is shown at its own size, fitted to the window. Sound and files need Remote Desktop."));
-    }
-
-    const mouse = el("section", "set-section");
-    mouse.append(el("h3", "", "Mouse"));
-    const swapRow = el("div", "set-row");
-    const swapLabel = el("label", "switch wrap");
-    const swap = el("input");
-    swap.type = "checkbox";
-    swap.checked = !!settings.swapped_buttons;
-    swapLabel.append(swap, " Keep left click on the left", el("small", "muted", "For a device whose mouse buttons are swapped: a left click here stays a left click there."));
-    swap.addEventListener("change", () => {
-      if (swap.checked) settings.swapped_buttons = true;
-      else delete settings.swapped_buttons;
-      keepSettings();
+    // How its screen is shown and driven, and its sign-in: drawn as in a
+    // session's own window (remote-settings.js). What is saved is read
+    // back from the list, so that one change does not undo another.
+    const now = () => data.devices.find((x) => x.id === d.id) || d;
+    const { screen, mouse, keys, signIn } = KagazRemoteSettings.device(d, {
+      rdp: overRdp(d),
+      vnc: canConnect(d),
+      canRemember,
+      settings: (next) => save(() => invoke("remote_settings", { id: d.id, settings: next, user: now().user || null, shape: now().shape || null }), "Could not save it").then(() => tellSettings(d.id)),
+      user: (name) => save(() => invoke("remote_settings", { id: d.id, settings: now().settings || {}, user: name, shape: now().shape || null }), "Could not save it"),
+      remember: (on) => save(() => invoke("remote_remember", { id: d.id, on }), "Could not change it"),
     });
-    swapRow.append(swapLabel);
-    mouse.append(swapRow);
-
-    // Where this computer's own keys go while its screen is used (the
-    // viewer's key menu has the same choice). Each press goes to one
-    // side only.
-    const keys = el("section", "set-section");
-    keys.append(el("h3", "", "Keyboard"));
-    const keysRow = el("div", "set-row");
-    const keysLabel = el("label", "", "This computer's own keys go to it");
-    keysLabel.htmlFor = "remote-system-keys";
-    const keysChoice = el("select");
-    keysChoice.id = "remote-system-keys";
-    for (const [v, w] of [["full-screen", "In full screen only"], ["window", "Whenever the pointer is on Kagaz"], ["never", "Never: they stay with this computer"]]) {
-      const o = el("option", "", w);
-      o.value = v;
-      o.selected = (settings.system_keys || "full-screen") === v;
-      keysChoice.append(o);
-    }
-    keysChoice.addEventListener("change", () => {
-      if (keysChoice.value === "full-screen") delete settings.system_keys;
-      else settings.system_keys = keysChoice.value;
-      keepSettings();
-    });
-    keysRow.append(keysLabel, keysChoice);
-    keys.append(keysRow, el("p", "muted small", "Print Screen, the Windows key, Alt + Tab, Ctrl + Alt + Del and the like, which this computer otherwise keeps. Each press goes to one of the two, never both. Ctrl + Esc leaves full screen; the first time, this computer asks whether Kagaz may have its keys."));
 
     const paths = el("section", "set-section");
     paths.append(el("h3", "", "Ways to reach it"), el("p", "muted", "All are tried at once; the first to answer is used."));
@@ -625,8 +529,6 @@ const KagazRemote = (() => {
     pathButtons.append(again);
     paths.append(pathButtons);
 
-    const signIn = el("section", "set-section");
-    signIn.append(el("h3", "", "Sign-in"));
 
     const about = el("section", "set-section");
     about.append(el("h3", "", "About it"));
@@ -642,32 +544,8 @@ const KagazRemote = (() => {
       shape.append(o);
     }
     shapeRow.append(shapeLabel, shape);
-    const userRow = el("div", "set-row");
-    const userLabel = el("label", "", "Sign in as");
-    userLabel.htmlFor = "remote-user";
-    const user = el("input");
-    user.id = "remote-user";
-    user.type = "text";
-    user.autocomplete = "username";
-    user.placeholder = "the account's user name";
-    user.value = d.user || "";
-    userRow.append(userLabel, user);
-    const keep = () => save(() => invoke("remote_settings", { id: d.id, settings: d.settings || {}, user: user.value, shape: shape.value }), "Could not save it");
-    shape.addEventListener("change", keep);
-    user.addEventListener("change", keep);
+    shape.addEventListener("change", () => save(() => invoke("remote_settings", { id: d.id, settings: now().settings || {}, user: now().user || null, shape: shape.value }), "Could not save it"));
     about.append(shapeRow);
-    signIn.append(userRow);
-    if (canRemember) {
-      const keepRow = el("div", "set-row");
-      const keepLabel = el("label", "switch wrap");
-      const remember = el("input");
-      remember.type = "checkbox";
-      remember.checked = !!d.remember;
-      keepLabel.append(remember, " Remember the password", el("small", "muted", "In this computer's password store, once the device accepts it. Turning this off forgets it."));
-      remember.addEventListener("change", () => save(() => invoke("remote_remember", { id: d.id, on: remember.checked }), "Could not change it"));
-      keepRow.append(keepLabel);
-      signIn.append(keepRow);
-    }
 
     const forget = el("p");
     forget.append(button("danger-text", "Forget this device", async () => {
@@ -700,21 +578,6 @@ const KagazRemote = (() => {
   // ---------- this kind's own settings ----------
   // Behind the gear: what holds for every computer and phone, then a way
   // to each device's own (its page). Settings lists it too.
-  function setRow(label, note, control) {
-    const r = el("div", "set-row");
-    const l = el("label", "set-label");
-    l.append(el("span", "", label));
-    if (note) l.append(el("span", "muted small", note));
-    const c = el("span", "set-control");
-    c.append(control);
-    const field = c.querySelector("input, select");
-    if (field) {
-      field.id = field.id || `remote-set-${label.length}-${label.charCodeAt(0)}`;
-      l.htmlFor = field.id;
-    }
-    r.append(l, c);
-    return r;
-  }
   function renderSettings() {
     const box = $("remote-settings-view");
     const w = { keep_open: false, ring: true, ...(data.windows || {}) };
@@ -730,28 +593,8 @@ const KagazRemote = (() => {
       }
       renderSettings();
     };
-    const win = el("section", "set-section");
-    win.append(el("h3", "", "Session windows"), el("p", "muted small", "Each session has a window of its own; Kagaz's main window stays free for everything else."));
-    const closing = el("select");
-    for (const [v, words] of [["", "End every session, after asking"], ["keep", "Keep the session windows open"]]) {
-      const o = el("option", "", words);
-      o.value = v;
-      o.selected = (w.keep_open ? "keep" : "") === v;
-      closing.append(o);
-    }
-    closing.addEventListener("change", () => keep({ keep_open: closing.value === "keep" }));
-    const ringLabel = el("label", "switch");
-    const ring = el("input");
-    ring.type = "checkbox";
-    ring.checked = w.ring !== false;
-    ring.setAttribute("aria-label", "Show a call at the door in a session's window");
-    ringLabel.append(ring);
-    ring.addEventListener("change", () => keep({ ring: ring.checked }));
-    win.append(
-      setRow("When Kagaz's main window closes", w.keep_open ? "Kagaz stays behind them; the Kagaz button in a session's bar brings its main window back." : "", closing),
-      setRow("Show a call at the door in a session's window", "With Answer and Decline, also in full screen", ringLabel),
-      note,
-    );
+    const win = KagazRemoteSettings.windows(w, keep);
+    win.append(note);
     const each = el("section", "set-section");
     each.append(el("h3", "", "Each device"), el("p", "muted small", "Its keyboard, screen, sound and sign-in are on its own page."));
     for (const d of data.devices.slice().sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }))) {

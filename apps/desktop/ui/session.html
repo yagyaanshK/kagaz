@@ -28,6 +28,7 @@
         <button id="rv-picture" type="button" class="bar-btn" aria-haspopup="true" aria-expanded="false" title="Picture: sharper or smoother, and its size" aria-label="Picture"><span class="ic" data-icon="picture"></span></button>
         <button id="rv-full" type="button" class="bar-btn" title="Full screen" aria-label="Full screen"><span class="ic" data-icon="full"></span></button>
         </span>
+        <button id="sw-settings" type="button" class="bar-btn" title="Settings for this device and its window" aria-label="Settings" aria-expanded="false" aria-controls="sw-panel"><span class="ic" data-icon="settings"></span></button>
         <button id="sw-main" type="button" class="bar-btn" title="Show Kagaz's main window" aria-label="Show Kagaz's main window"><span class="ic" data-icon="home"></span></button>
       </div>
     </header>
@@ -52,6 +53,15 @@
         <div id="rv-pop" class="rc-pop hidden"></div>
         <p id="rv-toast" class="rc-toast hidden" role="status"></p>
         </div>
+        <!-- Settings behind the gear, over the screen's right side (not
+             beside it, so that the device does not redraw its screen). -->
+        <aside id="sw-panel" class="sw-panel hidden" aria-label="Settings">
+          <div class="sw-panel-head">
+            <h2>Settings</h2>
+            <button id="sw-panel-close" type="button" class="icon" title="Close settings" aria-label="Close settings"><span class="ic" data-icon="close"></span></button>
+          </div>
+          <div id="sw-panel-body" class="sw-panel-body"></div>
+        </aside>
         <!-- A narrow window has no room in the bar: the tools sit here. -->
         <div id="rv-touchbar" class="rc-touchbar">
         <button type="button" data-tool="rv-keys"><span class="ic" data-icon="keyboard"></span><span>Keys</span></button>
@@ -70,6 +80,7 @@
   <script src="ask.js"></script>
   <script src="reveal.js"></script>
   <script src="remote-view.js"></script>
+  <script src="remote-settings.js"></script>
   <script src="session.js"></script>
 </body>
 </html>

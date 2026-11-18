@@ -1076,5 +1076,14 @@ const KagazRemoteView = (() => {
     if (ev.target === stage) closePop();
   });
 
-  return { open, close, shown, isOpen: () => !!cur };
+  // The device's settings changed (behind the session window's gear, or
+  // on its page): where this computer's keys go follows at once; the
+  // rest at the next connection.
+  function settings(next) {
+    if (!cur) return;
+    cur.settings = { ...next };
+    wantKeys();
+  }
+
+  return { open, close, shown, settings, isOpen: () => !!cur };
 })();

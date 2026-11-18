@@ -540,10 +540,36 @@ Plan: `docs/remote-connection.md` (agreed 2026-11-16).
       on Windows**. Known gaps: one viewer at a time; the library turns
       the middle button and the sideways wheel of a standard mouse
       message into nothing; no sound, clipboard, files, sign or pairing
-      yet. Until
+      yet. **For the owner to try, when ready** (put off 2026-11-18):
+      1. send `dist/kagaz-share-windows-x64.exe` to the PC with Kagaz's
+         Send a file; 2. in Terminal there run
+         `.\kagaz-share-windows-x64.exe --pin <six digits>` and keep it
+         open (allow it on private networks if the firewall asks; it
+         prints whom to sign in as); 3. hand the session to the PC's own
+         screen from an administrator Command Prompt:
+         `for /f "skip=1 tokens=3" %s in ('query user %USERNAME%') do %windir%\System32\tscon.exe %s /dest:console`
+         (the PC's monitor then shows the desktop unlocked); 4. here, add
+         the PC again with Remote Desktop on port 3390 (or `kagaz remote
+         add <address> --name "PC via Kagaz" --rdp 3390`) and connect with
+         the PIN; 5. try mouse, keys, scroll, Num Lock, a video, and read
+         the numbers its window prints every 5 seconds; 6. close it and go
+         back to Windows' own Remote Desktop. Until
       it exists: a VNC server on that laptop, reached over Tailscale,
       with today's Kagaz (not yet tried against a real Windows VNC
       server).
+- [x] **Settings from a session's own window** (the owner, 2026-11-18:
+      change a setting without leaving the screen): a gear in the green
+      bar opens a sheet over the screen's right side (the device does
+      not redraw for it) with the device's own settings (keyboard, screen
+      and sound, mouse, sign-in; "Kept for this device only") and every
+      session window's, and a way to its page for addresses and the rest.
+      Drawn by `remote-settings.js`, the same code as its page in the
+      main window; a change in either reaches the other
+      (`remote-device-settings`), and where the keys go changes at once.
+      Answered the same day: settings are remembered per device already;
+      the planned "same as all / its own" defaults (design/mockups/settings)
+      come with the settings move. Checked in the headless page and the
+      real window's log on the test card; not yet clicked by a person.
 - [x] **Num Lock came out the other way round on the computer** (the
       owner on the real PC, 2026-11-18): WebKitGTK tells a page about
       Caps Lock only and says "off" for Num Lock and Scroll Lock

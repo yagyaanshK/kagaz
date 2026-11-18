@@ -46,9 +46,120 @@
     edit: () => emit("remote-edit-device", device.id).then(() => invoke("remote_main_show")).catch(() => {}),
     // What is chosen in the viewer is the device's from now on.
     settings(id, settings) {
-      device.settings = settings;
-      invoke("remote_settings", { id, settings, user: device.user || null, shape: device.shape || null }).catch(() => {});
+      keepSettings(settings, false);
     },
+  });
+
+  // ---------- settings behind the gear ----------
+  // This device's own (as on its page in the main window) and every
+  // session window's, without leaving the screen. Where this computer's
+  // keys go changes at once; size, picture and sound at the next
+  // connection, as their notes say.
+  const tell = (what) => emit("remote-device-settings", { id: device.id, settings: device.settings || {}, from: me.label || "session", ...what }).catch(() => {});
+  function keepSettings(settings, toViewer) {
+    device.settings = { ...settings };
+    if (toViewer) KagazRemoteView.settings(device.settings);
+    invoke("remote_settings", { id: device.id, settings: device.settings, user: device.user || null, shape: device.shape || null })
+      .then(() => tell({}))
+      .catch((e) => panelNote("Not saved: " + e));
+    if (panelOpen()) drawPanel();
+  }
+  const panel = $("sw-panel");
+  const gear = $("sw-settings");
+  const panelOpen = () => !panel.classList.contains("hidden");
+  let note = null;
+  const panelNote = (text) => note && (note.textContent = text);
+  function drawPanel() {
+    const body = $("sw-panel-body");
+    const keepScroll = body.scrollTop;
+    note = document.createElement("p");
+    note.className = "muted small";
+    note.setAttribute("role", "status");
+    const { screen, mouse, keys, signIn } = KagazRemoteSettings.device(device, {
+      rdp: !!can.rdp && device.ways.some((w) => w.speaks === "rdp"),
+      vnc: device.ways.some((w) => w.speaks === "vnc"),
+      canRemember: !!can.remember,
+      settings: (next) => keepSettings(next, true),
+      user: (name) => {
+        device.user = name || null;
+        invoke("remote_settings", { id: device.id, settings: device.settings || {}, user: name, shape: device.shape || null })
+          .then(() => tell({})).catch((e) => panelNote("Not saved: " + e));
+      },
+      remember: (on) => {
+        invoke("remote_remember", { id: device.id, on }).then((saved) => {
+          const now = saved && saved.devices && saved.devices.find((d) => d.id === device.id);
+          if (now) device.remember = now.remember;
+          tell({});
+        }).catch((e) => panelNote("Not changed: " + e));
+      },
+    });
+    // Which settings are this device's alone, and which every window's.
+    const head = document.createElement("div");
+    head.className = "sw-panel-device";
+    const name = document.createElement("strong");
+    name.textContent = device.name;
+    const only = document.createElement("span");
+    only.className = "muted small";
+    only.textContent = "Kept for this device only";
+    head.append(name, only);
+    const every = document.createElement("div");
+    every.className = "sw-panel-device";
+    const all = document.createElement("span");
+    all.className = "muted small";
+    all.textContent = "Below: for every session window";
+    every.append(all);
+    const windows = KagazRemoteSettings.windows({ keep_open: false, ring: true, ...(data.windows || {}) }, async (change) => {
+      try {
+        data = (await invoke("remote_windows_settings", { windows: { keep_open: false, ring: true, ...(data.windows || {}), ...change } })) || data;
+        panelNote("");
+      } catch (e) {
+        panelNote("Not saved: " + e);
+      }
+      drawPanel();
+    });
+    // Its addresses, what it is, forgetting it: on its page.
+    const more = document.createElement("p");
+    const page = document.createElement("button");
+    page.type = "button";
+    page.className = "link";
+    page.textContent = "Its addresses and more, in Kagaz's main window";
+    page.addEventListener("click", () => emit("remote-edit-device", device.id).then(() => invoke("remote_main_show")).catch(() => {}));
+    more.append(page);
+    body.replaceChildren(head, note, keys, screen, mouse, signIn, every, windows, more);
+    if (typeof KagazIcons !== "undefined") KagazIcons.fill(body);
+    body.scrollTop = keepScroll;
+  }
+  function showPanel(on) {
+    panel.classList.toggle("hidden", !on);
+    gear.setAttribute("aria-expanded", on ? "true" : "false");
+    gear.classList.toggle("on", on);
+    if (on) {
+      drawPanel();
+      $("sw-panel-close").focus();
+    } else {
+      $("rv-stage").focus();
+    }
+  }
+  gear.addEventListener("click", () => showPanel(!panelOpen()));
+  $("sw-panel-close").addEventListener("click", () => showPanel(false));
+  panel.addEventListener("keydown", (ev) => {
+    if (ev.key === "Escape") {
+      ev.preventDefault();
+      ev.stopPropagation();
+      showPanel(false);
+    }
+  });
+  // Changed on its page in the main window, or in another window.
+  listen("remote-device-settings", (ev) => {
+    const p = ev.payload || {};
+    if (p.id !== device.id || p.from === (me.label || "session")) return;
+    invoke("remote_saved").then((saved) => {
+      const now = saved && saved.devices.find((d) => d.id === device.id);
+      if (!now) return;
+      Object.assign(device, { settings: now.settings || {}, user: now.user, remember: now.remember });
+      KagazRemoteView.settings(device.settings);
+      if (panelOpen()) drawPanel();
+    }).catch(() => {});
   });
 
   // ---------- a call at the door ----------
@@ -71,7 +182,9 @@
   });
   listen("remote-windows-settings", (ev) => {
     ringShown = ev.payload.ring !== false;
+    data.windows = ev.payload;
     showRing();
+    if (panelOpen()) drawPanel();
   });
   $("urgent-answer").addEventListener("click", () => {
     emit("ring-strip-do", "answer");
