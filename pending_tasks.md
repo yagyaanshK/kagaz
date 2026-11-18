@@ -470,7 +470,20 @@ Plan: `docs/remote-connection.md` (agreed 2026-11-16).
       where, the choice saved, the question). **Not yet** tried in the
       real window: the grab itself, GNOME's question, whether the
       laptop's volume and brightness keys still act here in full screen.
-- [ ] **To hear from the owner on the real Windows PC**: the sound now
+- [x] **A pinch zoomed Kagaz, not the PDF on the computer** (2026-11-18,
+      the owner on the real PC): the webview's own pinch-to-zoom enlarged
+      Kagaz's page, the screen's area in it changed with every move of
+      the fingers, and the computer redrew its screen each time. While a
+      device's screen shows, the webview's pinch is off (WebKitGTK keeps
+      it on its widget as `wk-view-zoom-gesture`; its phase is set to
+      none) and Kagaz's own tells the page how far the fingers have
+      spread; that goes to the device as Ctrl + wheel at the pointer, a
+      notch for every eighth. On Kagaz's other pages the pinch is the
+      webview's again. Checked: the page's part in the headless page;
+      in the real window (test card) the webview's pinch is found and
+      turned off. **Not yet** tried with fingers.
+- [ ] **To hear from the owner on the real Windows PC**: a pinch on a
+      PDF there; the sound now
       (gaps, how late), and the log's line on it; this computer's keys
       in full screen and in a window; a picture copied each way; sending
       files; the certificate card; Remember typed in the window.

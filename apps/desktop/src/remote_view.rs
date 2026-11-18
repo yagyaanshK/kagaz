@@ -652,6 +652,79 @@ pub async fn remote_keys(app: AppHandle, window: tauri::WebviewWindow, on: bool,
     }
 }
 
+/// A pinch on the touchpad (or the screen) while a device's screen is
+/// shown is the device's: the page is told how far the fingers have
+/// spread (`remote-pinch`) and passes it on as a zoom there. Left alone,
+/// the webview would enlarge Kagaz's own page instead, the screen's area
+/// in it would change with every move of the fingers, and a Remote
+/// Desktop computer would redraw its screen for each. While `on`, the
+/// webview's own pinch is off; with it off again, Kagaz's other pages
+/// zoom as they always did. Says whether the webview's pinch was found
+/// (it is kept under a name of WebKitGTK's own choosing).
+#[tauri::command]
+pub async fn remote_pinch(window: tauri::WebviewWindow, on: bool) -> Result<bool, String> {
+    #[cfg(target_os = "linux")]
+    {
+        use gtk::glib::translate::from_glib_none;
+        use gtk::prelude::*;
+        use tauri::Emitter;
+        thread_local! {
+            /// Kagaz's own pinch on the webview, and the phase the
+            /// webview's had before it was first turned off.
+            static OURS: std::cell::RefCell<Option<(gtk::GestureZoom, gtk::PropagationPhase)>> = const { std::cell::RefCell::new(None) };
+        }
+        let page = window.clone();
+        let (tx, rx) = mpsc::channel();
+        window
+            .with_webview(move |webview| {
+                let view = webview.inner();
+                // WebKitGTK keeps its pinch under this name on its widget.
+                let theirs: Option<gtk::EventController> = unsafe {
+                    let held = gtk::glib::gobject_ffi::g_object_get_data(view.as_ptr().cast(), c"wk-view-zoom-gesture".as_ptr());
+                    (!held.is_null()).then(|| from_glib_none(held.cast::<gtk::ffi::GtkEventController>()))
+                };
+                // Without it there is nothing to turn off, and a pinch
+                // passed on as well would zoom twice.
+                let _ = tx.send(theirs.is_some());
+                let Some(theirs) = theirs else { return };
+                OURS.with(|ours| {
+                    let mut ours = ours.borrow_mut();
+                    let (mine, was) = ours.get_or_insert_with(|| {
+                        let mine = gtk::GestureZoom::new(&view);
+                        mine.set_propagation_phase(gtk::PropagationPhase::None);
+                        let to = page.clone();
+                        mine.connect_begin(move |_, _| {
+                            let _ = to.emit("remote-pinch", Pinch { scale: 1.0, begin: true });
+                        });
+                        let to = page.clone();
+                        mine.connect_scale_changed(move |_, scale| {
+                            let _ = to.emit("remote-pinch", Pinch { scale, begin: false });
+                        });
+                        (mine, theirs.propagation_phase())
+                    });
+                    theirs.set_propagation_phase(if on { gtk::PropagationPhase::None } else { *was });
+                    mine.set_propagation_phase(if on { gtk::PropagationPhase::Target } else { gtk::PropagationPhase::None });
+                });
+            })
+            .map_err(|e| e.to_string())?;
+        Ok(rx.recv_timeout(Duration::from_secs(4)).unwrap_or(false))
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = (window, on);
+        Err("a pinch stays with this system here".into())
+    }
+}
+
+/// How far the fingers of a pinch have spread since it began (1 at its
+/// beginning, 2 at twice as far apart).
+#[cfg(target_os = "linux")]
+#[derive(Clone, Serialize)]
+struct Pinch {
+    scale: f64,
+    begin: bool,
+}
+
 /// A session is open: closing the window would end it, so the person is
 /// asked first (main.rs holds the window back; the page asks).
 #[cfg(desktop)]

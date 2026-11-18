@@ -477,6 +477,7 @@ const KagazRemoteView = (() => {
     log(`ended: ${why}`);
     releaseKeys(state, true);
     state.session = null;
+    wantKeys();
     setTools(null);
     setChip(null);
     canvas.style.cursor = "";
@@ -538,6 +539,7 @@ const KagazRemoteView = (() => {
     if (!cur || cur.session == null) return;
     locks(ev);
     const p = at(ev);
+    cur.point = p;
     cur.buttons = held(ev);
     // Of moves waiting to go, only the last matters.
     const last = outbox[outbox.length - 1];
@@ -654,6 +656,7 @@ const KagazRemoteView = (() => {
   let pointerIn = document.documentElement.matches(":hover");
   let keysSaid = "", keysTurn = Promise.resolve(), keysLater = null, keysLogged = 0;
   function wantKeys() {
+    wantPinch();
     const mode = keyMode();
     const here = !!cur && cur.session != null && !cur.away && document.activeElement === stage && card.classList.contains("hidden");
     const on = here && (mode === "window" ? pointerIn : mode === "full-screen" && full);
@@ -673,6 +676,39 @@ const KagazRemoteView = (() => {
     if (on) tell();
     else keysLater = setTimeout(tell, 150);
   }
+  // ---------- a pinch ----------
+  // Two fingers spread or closed on the touchpad zoom what is under the
+  // pointer on the device, not Kagaz's own page: while a device's screen
+  // shows, the window keeps the webview from enlarging the page
+  // (remote_pinch) and tells how far the fingers have spread. That goes
+  // on as Ctrl + wheel, a notch for every eighth wider or narrower: what
+  // Windows itself makes of a pinch on its own touchpad, and what
+  // programs everywhere take for zoom.
+  let pinchSaid = false, pinchDone = 0;
+  function wantPinch() {
+    const on = !!cur && cur.session != null && !cur.away;
+    if (on === pinchSaid) return;
+    pinchSaid = on;
+    invoke("remote_pinch", { on }).then((found) => {
+      if (on) log(found ? "a pinch here zooms on the device" : "this webview's own pinch could not be turned off");
+    }).catch(() => {});
+  }
+  function pinch(scale, begin) {
+    if (begin) pinchDone = 0;
+    if (begin || !cur || cur.session == null || cur.away || !(scale > 0)) return;
+    const steps = Math.trunc(Math.log(scale) / Math.log(1.125));
+    const up = steps - pinchDone;
+    if (!up) return;
+    if (!pinchDone) log("a pinch, passed on as zoom");
+    pinchDone = steps;
+    const p = cur.point || { x: Math.round(cur.width / 2), y: Math.round(cur.height / 2) };
+    // With Ctrl already held here, the device has it held too.
+    const ctrl = cur.held.has("ControlLeft") || cur.held.has("ControlRight");
+    if (!ctrl) did({ t: "key", key: "Control", code: "ControlLeft", down: true }, false);
+    did({ t: "wheel", x: p.x, y: p.y, up, right: 0 }, ctrl);
+    if (!ctrl) did({ t: "key", key: "Control", code: "ControlLeft", down: false }, true);
+  }
+
   document.documentElement.addEventListener("mouseenter", () => {
     pointerIn = true;
     wantKeys();
@@ -974,6 +1010,7 @@ const KagazRemoteView = (() => {
   // back): that ends the session, so the person is asked.
   const events = window.__TAURI__ && window.__TAURI__.event;
   if (events && events.listen) {
+    events.listen("remote-pinch", (ev) => pinch(ev.payload.scale, ev.payload.begin));
     events.listen("remote-close-asked", async () => {
       if (cur && cur.session != null) {
         const yes = await KagazAsk.confirm(`Close Kagaz and end the session with ${cur.device.name}?`, "Close Kagaz",

@@ -432,7 +432,9 @@ default: nothing of this computer shows then), **whenever the pointer is
 on Kagaz** while it is in front, or **never**. The first time, this
 computer asks whether Kagaz may have its keys (on GNOME, Super + Esc
 takes them back at any moment). **Ctrl + Esc** leaves full screen.
-Closing Kagaz while a session is open asks first.
+Closing Kagaz while a session is open asks first. A **pinch** on the
+touchpad zooms what is under the pointer on the device (it goes there as
+Ctrl + wheel, as Windows makes of a pinch itself), not Kagaz's own page.
 
 Each page keeps its place: leave a printer's page with a scan under way
 for the cameras, and coming back finds the scan where it was. Camera
