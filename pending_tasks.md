@@ -500,6 +500,18 @@ Plan: `docs/remote-connection.md` (agreed 2026-11-16).
       webview's again. Checked: the page's part in the headless page;
       in the real window (test card) the webview's pinch is found and
       turned off. **Not yet** tried with fingers.
+- [x] **Num Lock came out the other way round on the computer** (the
+      owner on the real PC, 2026-11-18): WebKitGTK tells a page about
+      Caps Lock only and says "off" for Num Lock and Scroll Lock
+      whatever they are, so the computer was told "Num Lock off" at the
+      start of every session; with it on here, the two then stayed
+      apart. The system is asked instead (`remote_locks`, GDK's keymap)
+      when the session opens, when the person comes back to the screen
+      and after a lock key is let go; the log says what was told.
+      Checked in the headless page; **not yet** on the real PC.
+- [x] **Heard from the owner on the real Windows PC** (2026-11-18,
+      evening): the sound "works very well" and everything is "buttery
+      smooth" with Kagaz's own player.
 - [x] **Session windows, built** (2026-11-18, the owner: "proceed as
       recommended"): `remote_windows.rs` (a registry of the windows,
       opening one per Connect, the two closing questions, keeping them

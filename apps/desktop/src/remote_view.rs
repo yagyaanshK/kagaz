@@ -667,6 +667,43 @@ pub async fn remote_keys(app: AppHandle, window: tauri::WebviewWindow, on: bool,
     }
 }
 
+/// Caps Lock, Num Lock and Scroll Lock as they are on this keyboard now.
+#[derive(Debug, Clone, Copy, Serialize)]
+pub struct Locks {
+    caps: bool,
+    num: bool,
+    scroll: bool,
+}
+
+/// The lock keys' state, from the system itself. The page cannot be
+/// asked: WebKitGTK tells a page about Caps Lock only, and says "off" for
+/// the other two whatever they are, so a computer was told that Num Lock
+/// was off at the start of every session and its number pad came out the
+/// other way round from this keyboard's (the owner, 2026-11-18).
+#[tauri::command]
+pub async fn remote_locks(app: AppHandle, window: tauri::WebviewWindow) -> Result<Locks, String> {
+    #[cfg(target_os = "linux")]
+    {
+        use gtk::prelude::*;
+        let (tx, rx) = mpsc::channel();
+        app.run_on_main_thread(move || {
+            let locks = window.gtk_window().ok().and_then(|w| gtk::gdk::Keymap::for_display(&w.display())).map(|keys| Locks {
+                caps: keys.is_caps_locked(),
+                num: keys.is_num_locked(),
+                scroll: keys.is_scroll_locked(),
+            });
+            let _ = tx.send(locks);
+        })
+        .map_err(|e| e.to_string())?;
+        rx.recv_timeout(Duration::from_secs(4)).ok().flatten().ok_or_else(|| "the keyboard's state is not known".to_string())
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = (app, window);
+        Err("the page knows the lock keys here".into())
+    }
+}
+
 /// A pinch on the touchpad (or the screen) while a device's screen is
 /// shown is the device's: the page is told how far the fingers have
 /// spread (`remote-pinch`) and passes it on as a zoom there. Left alone,

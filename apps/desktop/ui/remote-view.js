@@ -258,6 +258,7 @@ const KagazRemoteView = (() => {
     setChip(connected.millis);
     stage.focus();
     wantKeys();
+    askLocks();
     pushClipboard(true);
     // Files the window was started to send (`kagaz remote send`).
     invoke("remote_startup_files").then((paths) => {
@@ -534,14 +535,38 @@ const KagazRemoteView = (() => {
   // can change while the person is elsewhere), so that capitals here are
   // capitals there. Not in the middle of a held key, nor from a lock
   // key's own press, whose state is in between.
+  //
+  // The system is asked how they are (remote_locks), at the moments they
+  // can have changed: when the session opens, when the person comes back
+  // to the screen, and after a lock key is let go. The page's own word is
+  // not enough: this webview says "off" for Num Lock and Scroll Lock
+  // whatever they are, which turned a computer's number pad the other way
+  // round from this keyboard's. Where the system cannot be asked, the
+  // page's word is taken, key by key, as before.
   const LOCKS = ["CapsLock", "NumLock", "ScrollLock"];
-  function locks(ev) {
-    if (!cur || cur.session == null || !cur.info || cur.info.speaks !== "rdp" || !ev.getModifierState) return;
-    if (cur.held.size || LOCKS.includes(ev.code)) return;
-    const now = LOCKS.map((k) => ev.getModifierState(k));
+  let locksAsked = true; // the system answers
+  function tellLocks(now) {
+    if (!cur || cur.session == null || cur.held.size) return;
     if (cur.locks && now.every((on, i) => on === cur.locks[i])) return;
     cur.locks = now;
     did({ t: "locks", caps: now[0], num: now[1], scroll: now[2] }, true);
+    const on = (yes) => (yes ? "on" : "off");
+    log(`lock keys told to the device: Caps ${on(now[0])}, Num ${on(now[1])}, Scroll ${on(now[2])}`);
+  }
+  async function askLocks() {
+    if (!locksAsked || !cur || cur.session == null || !cur.info || cur.info.speaks !== "rdp") return;
+    const state = cur;
+    try {
+      const l = await invoke("remote_locks");
+      if (cur === state) tellLocks([l.caps, l.num, l.scroll]);
+    } catch (e) {
+      locksAsked = false;
+    }
+  }
+  function locks(ev) {
+    if (locksAsked || !cur || cur.session == null || !cur.info || cur.info.speaks !== "rdp" || !ev.getModifierState) return;
+    if (LOCKS.includes(ev.code)) return;
+    tellLocks(LOCKS.map((k) => ev.getModifierState(k)));
   }
 
   function pointer(ev, now) {
@@ -613,6 +638,9 @@ const KagazRemoteView = (() => {
     const id = ev.code || ev.key;
     if (down) cur.held.set(id, { key: ev.key, code: ev.code });
     else cur.held.delete(id);
+    // A lock key let go: the device toggled with it; it is told how the
+    // key stands here now, in case the two were apart.
+    if (!down && LOCKS.includes(ev.code)) setTimeout(askLocks, 80);
     const send = () => did({ t: "key", key: ev.key, code: ev.code, down }, true);
     // Paste: what was copied here goes ahead of the key.
     const paste = down && !ev.repeat && ((ev.ctrlKey && ev.code === "KeyV") || (ev.shiftKey && ev.code === "Insert"));
@@ -635,10 +663,12 @@ const KagazRemoteView = (() => {
   stage.addEventListener("focus", () => {
     pushClipboard(true);
     wantKeys();
+    askLocks();
   });
   window.addEventListener("focus", () => {
     if (cur && cur.session != null) pushClipboard(true);
     wantKeys();
+    askLocks();
   });
   window.addEventListener("blur", () => {
     // Keys held when the window lost the focus are let go there by
