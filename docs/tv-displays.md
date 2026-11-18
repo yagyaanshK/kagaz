@@ -73,6 +73,14 @@ Apple's FairPlay handshake, whose sender side is not published, and no
 open implementation of it was found; it is tried, and if it cannot be
 done Kagaz says so and offers Miracast or Cast to the same TV instead.
 
+**Every way, in one place** (the owner, 2026-11-18): Kagaz offers every
+way a device supports to show or send to a TV, its own and the system's,
+so connecting is the same simple step whatever the devices: Kagaz's
+Miracast (network and Wi-Fi Direct), Cast, AirPlay, and the system's own
+senders (Windows' Connect, a Mac's or iPhone's AirPlay, Android's own Cast
+or Screen Cast, opened from Kagaz with a line on when each is the better
+choice).
+
 ## Shape
 
 A kind of device on Home, **TVs & displays**, with the pattern of the
@@ -240,7 +248,9 @@ faster. The stream as sent is steady (a test decodes what arrives: every
 picture there, the square 4.96 pixels further each time), so the waves
 come from the radio link or the TV's own playback timing; pictures are
 now stamped at exactly even times rather than when each was drawn, to
-give the TV no wobble of Kagaz's own to follow. Not yet seen on the TV.
+give the TV no wobble of Kagaz's own to follow. With that, the owner saw
+the square move smoothly (over the network, the TV's port 7250 open
+again once it had restarted fully).
 All tests on a real TV use the LG for now (the owner, 2026-11-18). Saved TVs (names,
 rooms) come with the window; until then `kagaz tvs` lists the TVs found
 nearby.
@@ -315,7 +325,22 @@ nearby.
   break it in any release, and it rules out the Mac App Store; Kagaz says
   so where the switch is.
 
-### 6. Later, only if agreed: casting from the Kagaz phone app
+### 6. The Kagaz phone app (agreed 2026-11-18, after step 2's screen)
+
+- **Mirror the phone.** Android's own consent prompt each time
+  (MediaProjection), the phone's hardware H.264 encoder (MediaCodec), and
+  the same Miracast session as the computer, over the network. Over Wi-Fi
+  Direct an ordinary app may not set the Wi-Fi Display information that
+  tells a TV it is a screen source (Android keeps that for system apps):
+  tried on the LG, and said plainly if refused.
+- **Android's own Cast or Screen Cast**, opened from Kagaz, for a TV with
+  Google Cast built in.
+- **Extend the phone onto the TV** (advanced): Android lets only the
+  system put apps on a second screen, so this goes through USB debugging
+  (adb, as screen-mirroring tools do): Kagaz on the computer makes a
+  virtual screen on the phone, apps open there, and that screen goes to
+  the TV. Samsung DeX and Android's desktop mode, where a phone has them,
+  are offered too.
 
 ## Rules
 

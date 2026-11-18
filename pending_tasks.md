@@ -637,8 +637,11 @@ first, then sending files, the remote, and extending. Nothing built yet.
       owner's go-ahead at the moment.
 - [x] **Step 2, first part** (2026-11-18): the Miracast sender with the
       test pattern, both routes, played on the LG (720p30, a little stutter).
-- [ ] **Step 2: 60 pictures a second on the LG** (720p60 is now chosen;
-      not yet seen on the TV).
+- [x] **Step 2: 60 pictures a second on the LG** (2026-11-18): smooth once
+      pictures were stamped at even times.
+- [ ] **Step 6: the phone** (agreed 2026-11-18, after the computer's
+      screen): mirror over Miracast, Android's own Cast, and extend through
+      adb.
 - [ ] **Step 2: this computer's screen** (xdg-desktop-portal ScreenCast and
       PipeWire on Linux; Windows.Graphics.Capture; ScreenCaptureKit), sound
       (the LG takes LPCM and AAC), the delay measured, and Windows' own
