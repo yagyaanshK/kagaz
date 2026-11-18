@@ -71,6 +71,10 @@ const KagazIcons = (() => {
     star: '<path d="M12 3.5l2.6 5.3 5.9.9-4.25 4.1 1 5.8L12 16.9l-5.25 2.7 1-5.8L3.5 9.7l5.9-.9z"/>',
     more: '<path d="M5.5 12h.01M12 12h.01M18.5 12h.01" class="dot"/>',
 
+    cast: '<path d="M3 9V6.5A1.5 1.5 0 0 1 4.5 5h15A1.5 1.5 0 0 1 21 6.5v11a1.5 1.5 0 0 1-1.5 1.5H14"/><path d="M3 12.5a6.5 6.5 0 0 1 6.5 6.5M3 16a3 3 0 0 1 3 3"/><path d="M3.25 18.75h.01" class="dot"/>',
+    bin: '<path d="M4.5 6.5h15M9.5 6.5V5a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v1.5M6.5 6.5l.9 12.6A1.5 1.5 0 0 0 8.9 20.5h6.2a1.5 1.5 0 0 0 1.5-1.4l.9-12.6M10 10.5v6M14 10.5v6"/>',
+    floating: '<rect x="6.5" y="2.5" width="11" height="19" rx="2.5"/><circle cx="14" cy="9" r="2.5" class="fill"/>',
+
     // ---- calls and sound ----
     phone: `<path d="${HANDSET}"/>`,
     incoming: `<path d="${HANDSET}"/><path d="M20.5 3.5l-6 6M14.5 4.5v5h5"/>`,

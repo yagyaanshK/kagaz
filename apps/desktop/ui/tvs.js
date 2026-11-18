@@ -128,29 +128,34 @@ const KagazTvs = (() => {
   }
 
   // A TV's sheet (a bottom sheet on a phone, a dialog on a computer, as
-  // for every simple device): its other ways, then the TV itself.
+  // for every simple device): Material's list rows, each an icon, a name,
+  // one short line and what tapping does (an arrow opens something, a
+  // switch turns something on); the TV itself last. On a phone it closes
+  // with a drag down, a tap above it or Back (ask.js), so it has no Close.
   function sheet(t) {
     const ways = [];
     if (PHONE) {
-      ways.push({ name: "The phone's Cast screen", what: "Android's own. Pick the TV there; turn on Wireless display at the top for TVs that take screen mirroring.", go: () => system("systemCast") });
-      if (SAMSUNG) ways.push({ name: "Samsung DeX", what: "A desktop of its own on the TV, not a copy of the phone. Link to Windows has to be off.", go: () => system("dex") });
+      if (OS === "ios") ways.push({ icon: "cast", name: "Screen Mirroring", what: "The iPhone's own, for TVs with AirPlay", go: () => system("systemCast") });
+      else ways.push({ icon: "cast", name: "Android's Cast", what: "The phone's own, with every app's sound", go: () => system("systemCast") });
+      if (SAMSUNG) ways.push({ icon: "computer", name: "Samsung DeX", what: "A separate desktop on the TV", go: () => system("dex") });
     } else {
       if (OS === "gnome") {
-        ways.push({ name: "Mirror one window", what: "Only the window you choose goes to the TV.", go: () => show(t, "window"), disabled: !!showing });
-        ways.push({ name: "Use the TV as a second screen", what: "A new monitor on the TV: drag windows onto it.", go: () => show(t, "extend"), disabled: !!showing });
+        ways.push({ icon: "picture", name: "Mirror one window", what: "Only the window you choose", go: () => show(t, "window"), disabled: !!showing });
+        ways.push({ icon: "screens", name: "Second screen", what: "The TV as a new monitor", go: () => show(t, "extend"), disabled: !!showing });
       }
       const own = {
-        windows: ["Windows' Cast", "Windows' own (Win+K); it also reaches TVs on no network."],
-        macos: ["AirPlay", "The Mac's own, for TVs with AirPlay."],
-        gnome: ["The system's own sender", "GNOME Network Displays, if it is installed."],
+        windows: ["Windows' Cast", "Win+K; also reaches TVs on no network"],
+        macos: ["AirPlay", "The Mac's own, for TVs with AirPlay"],
+        gnome: ["GNOME Network Displays", "The system's own sender, if installed"],
       }[OS] || ["The system's own sender", ""];
-      ways.push({ name: own[0], what: own[1], go: () => system("system") });
+      ways.push({ icon: "cast", name: own[0], what: own[1], go: () => system("system") });
     }
     KagazAsk.ask((dlg, finish) => {
-      dlg.classList.add("sheet");
+      dlg.classList.add("sheet", "tv-sheet");
       dlg.appendChild(el("h3", "ask-title", t.name));
       const st = state(t);
-      dlg.appendChild(el("p", "muted small", [t.model, st.text].filter(Boolean).join(" · ")));
+      const model = t.model && !t.name.includes(t.model) ? t.model : "";
+      dlg.appendChild(el("p", "tv-sheet-state muted small", [model, st.text].filter(Boolean).join(" · ")));
       // The session's news as it comes: here there is room for it.
       sheetLine = el("p", "tv-sheet-line small", showing === t.name ? line : "");
       sheetLine.setAttribute("aria-live", "polite");
@@ -158,24 +163,37 @@ const KagazTvs = (() => {
       dlg.appendChild(sheetLine);
       if (failed[t.name]) dlg.appendChild(el("p", "cap-warn small", failed[t.name]));
       const list = el("div", "tv-ways");
-      list.appendChild(el("div", "tv-way-section", "Other ways"));
-      const add = (c) => {
-        const b = button("tv-way" + (c.danger ? " danger-text" : ""), null, () => {
+      const section = (text) => list.appendChild(el("div", "tv-way-section", text));
+      // One row: icon, name and line, then the row's end (an arrow, a
+      // switch, a chevron).
+      const row = (tag, cls, c, end) => {
+        const r = el(tag, "tv-way" + (cls ? " " + cls : ""));
+        const words = el("span", "tv-way-words");
+        words.appendChild(el("span", "tv-way-name", c.name));
+        if (c.what) words.appendChild(el("span", "tv-way-what", c.what));
+        r.append(icon(c.icon), words);
+        if (end) r.appendChild(end);
+        list.appendChild(r);
+        return r;
+      };
+      const opens = (c) => {
+        const b = row("button", c.danger ? "danger-text" : "", c, c.danger ? null : icon("forward"));
+        b.type = "button";
+        b.disabled = !!c.disabled;
+        b.addEventListener("click", () => {
           finish(null);
           c.go();
         });
-        b.appendChild(el("span", "tv-way-name", c.name));
-        if (c.what) b.appendChild(el("span", "tv-way-what muted small", c.what));
-        b.disabled = !!c.disabled;
-        list.appendChild(b);
+        return b;
       };
-      ways.forEach(add);
+      section("Other ways");
+      ways.forEach(opens);
       if (OS === "android" && sw) {
         // Where a mirroring session's switches can also be reached.
-        list.appendChild(el("div", "tv-way-section", "Switches while mirroring"));
-        const float = el("label", "switch wrap tv-way-switch");
-        const box = el("input");
+        section("While mirroring");
+        const box = el("input", "tv-switch");
         box.type = "checkbox";
+        box.setAttribute("role", "switch");
         box.checked = !!sw.floating;
         box.addEventListener("change", async () => {
           const wanted = box.checked;
@@ -189,29 +207,41 @@ const KagazTvs = (() => {
           box.checked = !!sw.floating;
           if (wanted && !sw.floating) toast("Allow Kagaz to appear on top in Android's screen, then turn this on again.", true);
         });
-        float.append(box, " Floating button", el("small", "muted", "A small button over every app, with the switches and Stop. Android asks once to let Kagaz appear on top; the TV shows the button too."));
-        list.appendChild(float);
+        row("label", "", { icon: "floating", name: "Floating button", what: "Controls over every app" }, box);
         // The quick panel's tiles: Android's own offer where it has one
-        // (13 and later), else the steps, in this phone's words.
-        list.appendChild(el("div", "tv-way-section", "Quick panel buttons"));
+        // (13 and later), else the steps, in this phone's words, folded
+        // away until asked for.
+        const tiles = { icon: "grid", name: "Quick panel buttons", what: "Show, Screen and Sound on TV" };
         if (sw.tiles) {
-            const addTiles = button("tv-way", null, () => invoke("tv_control", { what: "tiles", on: true }).catch((e) => toast(String(e))));
-            addTiles.append(el("span", "tv-way-name", "Add to the quick panel"), el("span", "tv-way-what muted small", "Android asks for each of the three: Show on TV, Screen on TV, Sound on TV."));
-            list.appendChild(addTiles);
+          const b = row("button", "", tiles, icon("plus"));
+          b.type = "button";
+          b.addEventListener("click", () => invoke("tv_control", { what: "tiles", on: true }).catch((e) => toast(String(e))));
         } else {
-            const steps = SAMSUNG
-              ? ["Swipe down from the top of the screen twice, so the whole panel of buttons shows.", "Tap the three dots at the top right, then Edit buttons.", "Kagaz's three buttons (Show on TV, Screen on TV, Sound on TV) are in the top part, Available buttons; swipe sideways there to find them.", "Hold one and drag it down among your buttons. Do the same for the other two, then tap Done."]
-              : ["Swipe down from the top of the screen twice.", "Tap the pencil.", "Find Kagaz's three tiles (Show on TV, Screen on TV, Sound on TV) at the bottom.", "Hold one and drag it up among your tiles. Do the same for the other two."];
-            const ol = el("ol", "tv-steps small");
-            steps.forEach((s) => ol.appendChild(el("li", "", s)));
-            list.appendChild(ol);
+          const fold = icon("down");
+          fold.classList.add("tv-fold");
+          const b = row("button", "", Object.assign(tiles, { what: "How to add them" }), fold);
+          b.type = "button";
+          b.setAttribute("aria-expanded", "false");
+          const steps = SAMSUNG
+            ? ["Swipe down twice from the top.", "Tap ⋮, then Edit buttons.", "Find Show on TV, Screen on TV and Sound on TV at the top.", "Drag each one down, then tap Done."]
+            : ["Swipe down twice from the top.", "Tap the pencil.", "Find Show on TV, Screen on TV and Sound on TV.", "Drag each one up among your tiles."];
+          const ol = el("ol", "tv-steps small hidden");
+          steps.forEach((x) => ol.appendChild(el("li", "", x)));
+          list.appendChild(ol);
+          b.addEventListener("click", () => {
+            const open = ol.classList.toggle("hidden") === false;
+            b.setAttribute("aria-expanded", String(open));
+          });
         }
       }
-      add({ name: "Remove from your TVs", danger: true, go: () => remove(t) });
+      list.appendChild(el("div", "tv-way-rule"));
+      opens({ icon: "bin", name: "Remove this TV", danger: true, go: () => remove(t) });
       dlg.appendChild(list);
-      const row = el("div", "actions");
-      row.appendChild(button("", "Close", () => finish(null)));
-      dlg.appendChild(row);
+      if (!PHONE) {
+        const actions = el("div", "actions");
+        actions.appendChild(button("", "Close", () => finish(null)));
+        dlg.appendChild(actions);
+      }
     });
   }
 

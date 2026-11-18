@@ -19,6 +19,7 @@ const KagazAsk = (() => {
         dlg.close();
       };
       build(dlg, finish);
+      if (dlg.classList.contains("sheet")) sheetGestures(dlg, finish);
       dlg.addEventListener("close", () => {
         if (open === dlg) open = null;
         dlg.remove();
@@ -30,6 +31,64 @@ const KagazAsk = (() => {
       KagazNav.push("ask", () => dlg.close());
       dlg.showModal();
     });
+  }
+
+  // A bottom sheet goes as Android's and iOS's do: a tap on the dimmed
+  // screen above it, or a drag down (from anywhere on it while its list is
+  // at the top; a drag that starts upwards scrolls the list instead).
+  function sheetGestures(dlg, finish) {
+    dlg.addEventListener("click", (e) => {
+      if (e.target !== dlg) return;
+      const r = dlg.getBoundingClientRect();
+      if (e.clientY < r.top || e.clientY > r.bottom || e.clientX < r.left || e.clientX > r.right) finish(null);
+    });
+    let startY = null;
+    let lastY = 0;
+    let lastT = 0;
+    let speed = 0;
+    let dragging = false;
+    dlg.addEventListener("touchstart", (e) => {
+      if (e.touches.length !== 1) return;
+      startY = lastY = e.touches[0].clientY;
+      lastT = e.timeStamp;
+      speed = 0;
+      dragging = false;
+    }, { passive: true });
+    dlg.addEventListener("touchmove", (e) => {
+      if (startY === null) return;
+      const y = e.touches[0].clientY;
+      const dy = y - startY;
+      if (!dragging) {
+        if (Math.abs(dy) < 8) return;
+        if (dy < 0 || dlg.scrollTop > 0) {
+          startY = null;
+          return;
+        }
+        dragging = true;
+        dlg.style.transition = "none";
+      }
+      e.preventDefault();
+      speed = (y - lastY) / Math.max(1, e.timeStamp - lastT);
+      lastY = y;
+      lastT = e.timeStamp;
+      dlg.style.transform = `translateY(${Math.max(0, dy)}px)`;
+    }, { passive: false });
+    const end = () => {
+      if (startY === null) return;
+      const dy = lastY - startY;
+      startY = null;
+      if (!dragging) return;
+      dragging = false;
+      dlg.style.transition = "transform 200ms cubic-bezier(0.2, 0, 0, 1)";
+      if (dy > dlg.offsetHeight * 0.3 || speed > 0.6) {
+        dlg.style.transform = `translateY(${dlg.offsetHeight}px)`;
+        setTimeout(() => finish(null), 180);
+      } else {
+        dlg.style.transform = "";
+      }
+    };
+    dlg.addEventListener("touchend", end);
+    dlg.addEventListener("touchcancel", end);
   }
 
   function buttons(dlg, keepLabel, actionLabel, danger, finish) {
