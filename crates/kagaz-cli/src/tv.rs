@@ -310,7 +310,20 @@ fn pictures(what: What, size: Size, engine: video::Engine) -> Result<Box<dyn Pic
         }
         Ok(Box::new(screen))
     }
-    #[cfg(not(any(target_os = "linux", windows)))]
+    #[cfg(target_os = "macos")]
+    {
+        let _ = (size, engine);
+        if !matches!(what, What::Screen) {
+            bail!("on a Mac Kagaz shows the main display so far; a window or a new monitor for the TV come later");
+        }
+        let screen = kagaz_core::tv::capture_mac::Screen::main().map_err(|e| anyhow!(e))?;
+        match screen.first_picture(Duration::from_secs(5)) {
+            Some((w, h)) => println!("Sharing the main display, {w}x{h}."),
+            None => bail!("macOS sent no picture of the screen"),
+        }
+        Ok(Box::new(screen))
+    }
+    #[cfg(not(any(target_os = "linux", windows, target_os = "macos")))]
     {
         let _ = (size, engine);
         bail!("showing the screen works on Linux so far; `--pattern` sends the test pattern")

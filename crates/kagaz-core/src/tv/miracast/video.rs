@@ -269,6 +269,8 @@ pub enum AnyVideo {
     Nvenc(super::nvenc::Nvenc),
     #[cfg(windows)]
     Mf(super::mf::MfEncoder),
+    #[cfg(target_os = "macos")]
+    Vt(super::vt::VtEncoder),
 }
 
 impl AnyVideo {
@@ -317,7 +319,19 @@ impl AnyVideo {
         } else {
             None
         };
-        #[cfg(not(any(target_os = "linux", windows)))]
+        #[cfg(target_os = "macos")]
+        let hardware_error = if engine != Engine::Software {
+            match super::vt::VtEncoder::open(width, height, fps, bits_per_second, priority) {
+                Ok(v) => {
+                    let line = v.described.clone();
+                    return Ok((AnyVideo::Vt(v), line));
+                }
+                Err(e) => Some(e),
+            }
+        } else {
+            None
+        };
+        #[cfg(not(any(target_os = "linux", windows, target_os = "macos")))]
         let hardware_error = (engine != Engine::Software).then(|| "no hardware encoder on this system yet".to_string());
         let _ = priority;
         if engine == Engine::Hardware {
@@ -340,6 +354,8 @@ impl AnyVideo {
             AnyVideo::Nvenc(v) => v.key_next(),
             #[cfg(windows)]
             AnyVideo::Mf(v) => v.key_next(),
+            #[cfg(target_os = "macos")]
+            AnyVideo::Vt(v) => v.key_next(),
         }
     }
 
@@ -353,6 +369,8 @@ impl AnyVideo {
             AnyVideo::Nvenc(_) => false,
             #[cfg(windows)]
             AnyVideo::Mf(_) => false,
+            #[cfg(target_os = "macos")]
+            AnyVideo::Vt(_) => false,
         }
     }
 
@@ -374,6 +392,8 @@ impl AnyVideo {
             AnyVideo::Nvenc(v) => v.encode(rgba).map(|(data, key)| Encoded { data, key }),
             #[cfg(windows)]
             AnyVideo::Mf(v) => v.encode(rgba).map(|(data, key)| Encoded { data, key }),
+            #[cfg(target_os = "macos")]
+            AnyVideo::Vt(v) => v.encode(rgba).map(|(data, key)| Encoded { data, key }),
         }
     }
 }

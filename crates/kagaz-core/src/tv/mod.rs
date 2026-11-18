@@ -13,6 +13,8 @@ pub mod picture;
 pub mod capture;
 #[cfg(windows)]
 pub mod capture_win;
+#[cfg(target_os = "macos")]
+pub mod capture_mac;
 #[cfg(target_os = "linux")]
 pub mod p2p;
 #[cfg(target_os = "linux")]

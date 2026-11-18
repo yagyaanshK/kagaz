@@ -126,6 +126,16 @@ windows = { version = "0.62", features = [
 [target.'cfg(all(not(windows), not(any(target_os = "android", target_os = "ios"))))'.dependencies]
 opus2 = { version = "0.4", features = ["bundled"] }
 
+[target.'cfg(target_os = "macos")'.dependencies]
+# Mirroring to a TV from a Mac: the screen through ScreenCaptureKit
+# (Objective-C, through objc2's bindings, MIT); VideoToolbox, CoreMedia and
+# CoreVideo are called through their C functions.
+objc2 = "0.6"
+block2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSError", "NSString"] }
+objc2-screen-capture-kit = { version = "0.3", default-features = false, features = ["std", "SCStream", "SCShareableContent", "objc2-core-media", "block2", "dispatch2"] }
+objc2-core-media = { version = "0.3", default-features = false, features = ["std", "CMSampleBuffer", "CMTime", "CMBase"] }
+
 [target.'cfg(target_os = "linux")'.dependencies]
 # NetworkManager's Wi-Fi Direct for TVs on no network (already built for btleplug).
 dbus = "0.9"

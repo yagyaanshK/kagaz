@@ -20,6 +20,8 @@ mod nv_sys;
 pub mod nvenc;
 #[cfg(windows)]
 pub mod mf;
+#[cfg(target_os = "macos")]
+pub mod vt;
 
 use rtsp::{Message, Mode, SinkAbilities};
 use std::io::{ErrorKind, Read, Write};
@@ -77,6 +79,17 @@ impl Pictures for super::capture_win::Screen {
 
     fn delivered(&self) -> u64 {
         self.arrived
+    }
+}
+
+#[cfg(target_os = "macos")]
+impl Pictures for super::capture_mac::Screen {
+    fn picture(&mut self, _due: Duration, width: usize, height: usize) -> &[u8] {
+        super::capture_mac::Screen::picture(self, width, height)
+    }
+
+    fn delivered(&self) -> u64 {
+        self.arrived()
     }
 }
 

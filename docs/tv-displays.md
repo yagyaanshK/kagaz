@@ -366,8 +366,17 @@ memory into the encoder.
 Cast panel on Windows, GNOME Network Displays on Linux where installed,
 and on a Mac it says where AirPlay's Screen Mirroring is.
 
-Still to do for other graphics: macOS (VideoToolbox), with its screen
-capture.
+*A Mac* (2026-11-18): `tv/capture_mac.rs` takes the main display through
+ScreenCaptureKit (macOS 12.3 or newer, pointer included; macOS asks once
+for Screen Recording permission), and `miracast/vt.rs` encodes through
+VideoToolbox (the Mac's own hardware encoder, real-time, Constrained
+Baseline, no reordering, low-latency rate control), turning its
+length-prefixed output into the start-code form the TV takes, with the
+headers before each whole picture. Over the network only (macOS has no
+Wi-Fi Direct for apps); `kagaz tv NAME system` points to AirPlay's Screen
+Mirroring. **Not built for macOS here** (this computer has no macOS SDK):
+both files are type-checked for macOS in a small crate of their own with
+objc2's bindings; the rest of Kagaz could not be checked for macOS.
 All tests on a real TV use the LG for now (the owner, 2026-11-18). Saved TVs (names,
 rooms) come with the window; until then `kagaz tvs` lists the TVs found
 nearby.
