@@ -482,6 +482,12 @@ body {
 #bar-refresh.working::before { width: 18px; height: 18px; margin: 0; vertical-align: middle; }
 .tv-about { margin-top: 20px; }
 .home-tile.live { border-color: var(--accent); }
+/* Mirror and Stop are one width, and a card's state while connecting
+   and mirroring is a word that fits one line (tvs.js), so the card keeps
+   its shape from idle through mirroring. */
+#tvs .tile-act { min-width: 88px; }
+[data-layout="bar"] #tvs .tile-act { min-width: 82px; }
+.tv-sheet-line { margin: 2px 0 0; color: var(--text); font-variant-numeric: tabular-nums; }
 /* One-off news: Android's snackbar (inverse surface, 4 px corners), a
    floating toast elsewhere (GNOME's and Fluent's are rounded pills). */
 .tv-toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 20; max-width: min(560px, calc(100vw - 32px)); padding: 12px 18px; border-radius: 999px; background: #2E3230; color: #EFF1EE; font-size: var(--small, 14px); box-shadow: 0 3px 8px rgba(0, 0, 0, 0.3); }
@@ -500,6 +506,15 @@ body {
 [data-os="ios"] dialog.ask.sheet { border-radius: 12px 12px 0 0; }
 /* Material on Android: Add as a tonal pill, the sheet's Close as a text
    button (a sheet also closes with Back or a tap outside). */
-[data-os="android"] #tvs .rc-row > button { min-height: 40px; padding: 0 20px; border: none; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+[data-os="android"] #tvs .rc-row > button { min-height: 40px; padding: 0 20px; border: none; border-radius: 999px; background: var(--accent-soft); color: var(--nav-active-fg); font-weight: 600; }
+/* Mirror is the page's main action: Material's filled button (the accent
+   with the text made for it). Stop, while mirroring, is the tonal one,
+   its text the container's own, not the accent on its darker self, which
+   read as switched off. */
+[data-os="android"] #tvs .tile-act { background: var(--accent); color: var(--accent-text); }
+[data-os="android"] #tvs .home-tile.live .tile-act { background: var(--accent-soft); color: var(--nav-active-fg); }
+/* GNOME's suggested action and a Mac's default button are filled with
+   the accent too; Stop keeps the quieter tint. */
+[data-os="gnome"] #tvs .home-tile:not(.live) .tile-act, [data-os="macos"] #tvs .home-tile:not(.live) .tile-act { background: var(--accent); color: var(--accent-text); }
 [data-os="android"] dialog.ask.sheet .actions button { border: none; background: none; color: var(--accent); font-weight: 600; border-radius: 999px; padding: 0 16px; }
 [data-os="ios"] #tvs .rc-row > button { min-height: 44px; border: none; background: none; color: var(--accent); font-weight: 600; }

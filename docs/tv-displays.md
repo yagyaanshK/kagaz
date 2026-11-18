@@ -554,6 +554,17 @@ On the LG from the laptop: the test pattern for 20 seconds at
 1080p60, 1,179 pictures, the session held throughout; the owner saw
 the pattern, moving smoothly.
 
+From the phone (Galaxy S10) to the LG, the app's Mirror button: Cast
+chosen by itself, 1920x1080 on the phone's Exynos encoder, 95 seconds
+until the owner stopped it, about 10 pictures a second on a still
+screen, the TV 16 ms away, 96 packets sent again, no whole picture
+asked for. The phone's sound stays on the phone: sound is not sent yet.
+On the page, a TV's card now says only "Connecting…" then "Mirroring"
+(the running numbers are in the TV's sheet) and is drawn again only
+when that changes: the numbers had re-wrapped the card every second.
+Mirror is a filled button (the accent's own text colour on it); the
+accent on its dark container had read as switched off.
+
 Choosing the route (`tv/send.rs`): Miracast over the network when the
 TV takes it there, else Google Cast when the TV has it, else Wi-Fi
 Direct (Linux). `kagaz tv NAME mirror --via cast` asks for Cast; the

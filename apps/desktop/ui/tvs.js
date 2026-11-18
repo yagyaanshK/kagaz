@@ -8,7 +8,11 @@
 //
 // Layout: the TVs first, each a card with its state and one main button
 // (mirror, or stop while mirroring); the other ways in a sheet; news in a
-// snackbar at the bottom, a failure inside the card it belongs to.
+// snackbar at the bottom, a failure inside the card it belongs to. A
+// card's state is a word or two on one line and changes only when the
+// state does: the session's running numbers (pictures a second, the
+// stream's speed) are in the TV's sheet, so nothing on the page moves
+// while mirroring.
 // Uses app.js's globals: $, invoke, listen; ask.js's KagazAsk; icons.js's
 // KagazIcons.
 
@@ -22,7 +26,9 @@ const KagazTvs = (() => {
   let scanning = false;
   let lastScan = 0;
   let showing = null; // the TV this screen is on now
-  let line = ""; // the session's latest news
+  let playing = false; // its picture is on the TV (before that: connecting)
+  let line = ""; // the session's latest news, in full, for the TV's sheet
+  let sheetLine = null; // where an open sheet shows it
   let failed = {}; // TV name -> why its last try failed
 
   function el(tag, cls, text) {
@@ -72,10 +78,10 @@ const KagazTvs = (() => {
 
   // The TV's state in a few words, and how it should look.
   function state(t) {
-    if (showing === t.name) return { text: line || "Starting…", tone: "on" };
+    if (showing === t.name) return { text: playing ? "Mirroring" : "Connecting…", tone: "on" };
     if (failed[t.name]) return { text: "Did not connect", tone: "bad" };
     const here = found.find((f) => f.name === t.name);
-    if (here && here.mirror) return { text: "Ready to mirror", tone: "ok" };
+    if (here && here.mirror) return { text: "Ready", tone: "ok" };
     if (here) return { text: "On the network, not taking mirroring now", tone: "" };
     return { text: lastScan ? "Not found on this network" : "Looking…", tone: "" };
   }
@@ -92,7 +98,8 @@ const KagazTvs = (() => {
       }
       await invoke("tv_show", { name: t.name, what });
       showing = t.name;
-      line = "Starting…";
+      playing = false;
+      line = "";
     } catch (e) {
       failed[t.name] = String(e);
     }
@@ -133,6 +140,11 @@ const KagazTvs = (() => {
       dlg.appendChild(el("h3", "ask-title", t.name));
       const st = state(t);
       dlg.appendChild(el("p", "muted small", [t.model, st.text].filter(Boolean).join(" · ")));
+      // The session's news as it comes: here there is room for it.
+      sheetLine = el("p", "tv-sheet-line small", showing === t.name ? line : "");
+      sheetLine.setAttribute("aria-live", "polite");
+      sheetLine.classList.toggle("hidden", showing !== t.name || !line);
+      dlg.appendChild(sheetLine);
       if (failed[t.name]) dlg.appendChild(el("p", "cap-warn small", failed[t.name]));
       const list = el("div", "tv-ways");
       list.appendChild(el("div", "tv-way-section", "Other ways"));
@@ -258,23 +270,34 @@ const KagazTvs = (() => {
     if (Date.now() - lastScan > 2 * 60 * 1000) rescan();
   }
 
-  // A session's news: the live line in the card, the end in a snackbar,
-  // a failure in the card.
+  // A session's news: the card says connecting, then mirroring; the
+  // running numbers go to the TV's sheet; the end in a snackbar, a
+  // failure in the card. The page is drawn again only when what a card
+  // says changes, not with every second's numbers.
   listen("tv-session", (e) => {
     const n = e.payload || {};
+    const before = [showing, playing, failed[n.tv]].join("|");
     if (n.phase === "ended") {
       showing = null;
+      playing = false;
+      line = "";
       toast(n.line);
     } else if (n.phase === "failed") {
       showing = null;
+      playing = false;
+      line = "";
       failed[n.tv] = n.line;
     } else {
       showing = n.tv;
-      // The progress line, shortened for the card.
+      playing = playing || n.phase === "playing";
       const m = /(\d+) s, (\d+) pictures, (\d+) kbit\/s; the screen gave (\d+)\/s/.exec(n.line);
-      line = m ? `Mirroring · ${m[4]} pictures a second · ${(m[3] / 1000).toFixed(1)} Mbit/s` : n.line;
+      line = m ? `${m[4]} pictures a second · ${(m[3] / 1000).toFixed(1)} Mbit/s` : String(n.line || "").trim();
     }
-    render();
+    if (sheetLine && sheetLine.isConnected) {
+      sheetLine.textContent = line;
+      sheetLine.classList.toggle("hidden", !line);
+    }
+    if ([showing, playing, failed[n.tv]].join("|") !== before) render();
   });
 
   $("tvs").addEventListener("refresh", rescan);
