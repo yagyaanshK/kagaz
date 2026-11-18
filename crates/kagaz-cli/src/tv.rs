@@ -22,6 +22,8 @@ pub enum Via {
     Network,
     /// Wi-Fi Direct: a link of this computer's own, for a TV on no network
     Direct,
+    /// Google Cast, for TVs with Cast built in, on the same network
+    Cast,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -97,8 +99,8 @@ pub enum TvAction {
         /// Share one window instead of a whole screen
         #[arg(long)]
         window: bool,
-        /// How to reach the TV; by default the network when the TV is on it,
-        /// Wi-Fi Direct otherwise
+        /// How to reach the TV; by default Miracast over the network when the
+        /// TV takes it, else Google Cast, else Wi-Fi Direct
         #[arg(long, value_enum)]
         via: Option<Via>,
         /// The tallest picture to send: 1080 is sharper, 720 can move more
@@ -127,8 +129,8 @@ pub enum TvAction {
     /// TV's size (see it in the display settings, drag windows onto it).
     /// Ctrl+C ends it and the monitor goes away.
     Extend {
-        /// How to reach the TV; by default the network when the TV is on it,
-        /// Wi-Fi Direct otherwise
+        /// How to reach the TV; by default Miracast over the network when the
+        /// TV takes it, else Google Cast, else Wi-Fi Direct
         #[arg(long, value_enum)]
         via: Option<Via>,
         /// The new monitor's size
@@ -361,6 +363,7 @@ fn mirror(name: &str, via: Option<Via>, opts: &Options, pictures: &mut dyn Pictu
     let via = via.map(|v| match v {
         Via::Network => send::Via::Network,
         Via::Direct => send::Via::Direct,
+        Via::Cast => send::Via::Cast,
     });
     let report = send::mirror_named(name, via, opts, pictures, &STOP, on_said).map_err(|e| {
         anyhow!(if e.starts_with("no TV called") { format!("{e} (`kagaz tvs` lists the ones that do)") } else { e })

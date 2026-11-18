@@ -168,6 +168,11 @@ pub struct Report {
     pub dropped: u64,
     /// Who ended it: "you", "the TV" or "time".
     pub ended_by: String,
+    /// Over Google Cast, where the TV says what it missed: packets sent
+    /// again, times it asked for a whole picture, and the round trip to it.
+    pub sent_again: u64,
+    pub whole_asked: u64,
+    pub round_trip_ms: Option<f32>,
 }
 
 struct Link {
@@ -268,7 +273,7 @@ fn local_address_towards(peer: IpAddr) -> Option<IpAddr> {
     s.local_addr().ok().map(|a| a.ip())
 }
 
-fn random_bytes<const N: usize>() -> [u8; N] {
+pub(crate) fn random_bytes<const N: usize>() -> [u8; N] {
     let mut out = [0u8; N];
     for chunk in out.chunks_mut(16) {
         let id = uuid::Uuid::new_v4();

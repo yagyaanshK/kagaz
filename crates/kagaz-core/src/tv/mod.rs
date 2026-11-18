@@ -8,6 +8,8 @@
 #[cfg(not(target_os = "ios"))]
 pub mod miracast;
 #[cfg(not(target_os = "ios"))]
+pub mod cast;
+#[cfg(not(target_os = "ios"))]
 pub mod send;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub mod picture;

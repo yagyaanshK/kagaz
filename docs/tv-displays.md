@@ -517,6 +517,51 @@ does, and reports what arrives in numbers only (no picture shown or
 kept). Checked first with the laptop's own sender and the test pattern:
 479 of 481 pictures decoded at 1080p60, none lost.
 
+*Google Cast, Kagaz's own sender (2026-11-19).* The LG's network
+mirroring service stayed off: it no longer announced `_display._tcp`,
+port 7250 stayed closed through an unplugging and a restart watched from
+the laptop (Cast, AirPlay and the remote's ports all came back), so
+neither the phone nor the laptop reached it over the network. An Android
+app cannot use Miracast over Wi-Fi Direct (the system keeps it for its
+own Cast screen), which left Google Cast as the phone's one route of
+Kagaz's own. Checked first on the LG: it starts Chrome's mirroring
+receiver (app `0F5096E8`) for a sender Google has not certified, says it
+plays H.264, HEVC, VP8, VP9, Opus and AAC on a 3840x2160 screen at 60,
+and answers an offer of H.264 alone at 1080p60 (it chose H.264 over VP8
+when offered both). H.264 means every encoder Kagaz has serves Cast too.
+
+`tv/cast/`: `channel.rs` is the Cast channel (TLS to port 8009, each
+message a length and a small protobuf record written by hand, JSON
+inside; the TV's certificate is taken as shown, since Cast TVs make
+their own, the LG's in the old version 1 form that certificate
+libraries refuse); `stream.rs` is one Cast Streaming stream (each
+picture encrypted with AES-128 in counter mode, the nonce from the
+picture's number; cut into packets with Cast's header; kept until the
+TV's report says it arrived; missing packets sent again; a sender
+report every half second; a whole picture when the TV says it lost
+one; pictures skipped before encoding when the TV falls behind);
+`mod.rs` is the session (start the app, offer, answer, then the same
+picture sources and encoders as Miracast, packets paced, the app
+stopped at the end so the TV returns to what it showed). The TV shows
+each picture 200 ms after its moment. The format was learned from
+Chromium's Open Screen source (BSD); the code is Kagaz's own.
+
+Tests: the cipher against NIST's counter-mode vector; 400 pictures
+through a link losing every 13th packet, each arriving whole and
+unchanged; a whole stream over loopback to a stand-in receiver
+(`stream::Receiver`) losing every 20th packet, decoded by OpenH264.
+On the LG from the laptop: the test pattern for 20 seconds at
+1080p60, 1,179 pictures, the session held throughout; the owner saw
+the pattern, moving smoothly.
+
+Choosing the route (`tv/send.rs`): Miracast over the network when the
+TV takes it there, else Google Cast when the TV has it, else Wi-Fi
+Direct (Linux). `kagaz tv NAME mirror --via cast` asks for Cast; the
+app's Mirror button follows the same order, and a TV with Cast counts
+as ready to mirror. Sound is not sent over Cast yet (nor over
+Miracast); the bit rate is fixed (16 Mbit/s at most at 1080p60), not
+yet fitted to the link as Chrome does.
+
 ## Next, agreed 2026-11-18
 
 - **This computer as a screen** (the owner approved the plan): on the TVs
@@ -530,11 +575,10 @@ kept). Checked first with the laptop's own sender and the test pattern:
   then over Wi-Fi Direct (so a phone's own Cast screen lists it), then
   **Google Cast and AirPlay receiving when feasible** (the owner). The
   phone as a screen later.
-- **Kagaz's own Google Cast sender** (after the phone reaches the LG):
-  Cast's mirroring as Chrome does it (the Open Screen library's Cast
-  Streaming, BSD); the dependable route to TVs with Cast built in, from
-  the phone and computers alike. First check whether the LG accepts a
-  sender Google has not certified. Needs the TV on a network.
+- **Google Cast, further** (the sender itself is built, see above):
+  sound (Opus), the bit rate fitted to the link, a phone held upright
+  sent at its own shape, and a stand-in Cast receiver beside the
+  Miracast one (`kagaz tvs stand-in`).
 - **LG Link** (file transfer between LG Link or gram Link apps, PIN
   pairing): LG's own protocol; learn it from what LG's phone app sends to
   the TV, with step 3 (send media).

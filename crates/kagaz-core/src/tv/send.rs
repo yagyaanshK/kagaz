@@ -1,8 +1,11 @@
-//! Sending the screen to a TV named by its owner: over the network when
-//! the TV is on it, else over Wi-Fi Direct (Linux for now), with a second
-//! try when a Wi-Fi Direct link does not come up the first time. Used by
-//! the command line and the app alike.
+//! Sending the screen to a TV named by its owner: Miracast over the
+//! network when the TV takes it there, else Google Cast when the TV has
+//! it (nothing to switch on at the TV, and this device stays on its
+//! network), else Miracast over Wi-Fi Direct (Linux for now), with a
+//! second try when a Wi-Fi Direct link does not come up the first time.
+//! Used by the command line and the app alike.
 
+use super::cast;
 use super::miracast::{self, Event, Options, Pictures, Report, Route};
 use super::{nearby, Tv, Way};
 use std::net::IpAddr;
@@ -12,8 +15,12 @@ use std::time::Duration;
 /// How to reach the TV; `None` lets Kagaz choose.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Via {
+    /// Miracast over the ordinary network.
     Network,
+    /// Miracast over Wi-Fi Direct.
     Direct,
+    /// Google Cast, over the ordinary network.
+    Cast,
 }
 
 /// What a session says as it goes: a line for the owner, or the session's
@@ -46,17 +53,29 @@ pub fn mirror_named(
     mut say: impl FnMut(Said),
 ) -> Result<Report, String> {
     // A typed address goes straight to the network route.
-    if let (Ok(ip), None | Some(Via::Network)) = (name.parse::<IpAddr>(), via) {
-        return miracast::mirror(Route::Network(ip), opts, pictures, stop, || Ok(()), |e| say(Said::Event(e)));
+    match (name.parse::<IpAddr>(), via) {
+        (Ok(ip), None | Some(Via::Network)) => {
+            return miracast::mirror(Route::Network(ip), opts, pictures, stop, || Ok(()), |e| say(Said::Event(e)))
+        }
+        (Ok(ip), Some(Via::Cast)) => return cast::mirror(ip, opts, pictures, stop, |e| say(Said::Event(e))),
+        _ => {}
     }
     if via != Some(Via::Direct) {
         let tvs = nearby(Duration::from_secs(4), false)?;
         match find_one(tvs, name) {
-            Ok(t) if t.has(Way::MiracastNetwork) => {
+            Ok(t) if via != Some(Via::Cast) && t.has(Way::MiracastNetwork) => {
                 say(Said::Line(format!("Mirroring to {} over the network.", t.name)));
                 let ip = t.address.ok_or("the TV gave no address")?;
                 return miracast::mirror(Route::Network(ip), opts, pictures, stop, || Ok(()), |e| say(Said::Event(e)));
             }
+            // Not taking Miracast over the network now (or Cast was asked
+            // for): Google Cast.
+            Ok(t) if via != Some(Via::Network) && t.has(Way::GoogleCast) => {
+                say(Said::Line(format!("Mirroring to {} through Google Cast.", t.name)));
+                let ip = t.address.ok_or("the TV gave no address")?;
+                return cast::mirror(ip, opts, pictures, stop, |e| say(Said::Event(e)));
+            }
+            Ok(t) if via == Some(Via::Cast) => return Err(format!("{} does not answer Google Cast", t.name)),
             // Found, not taking mirroring now, and no Wi-Fi Direct here.
             Ok(t) if via == Some(Via::Network) || !cfg!(target_os = "linux") => {
                 return Err(format!(
@@ -66,7 +85,7 @@ pub fn mirror_named(
                     if cfg!(target_os = "linux") { ", or reach it over Wi-Fi Direct" } else { ", or use this system's own sender" }
                 ))
             }
-            Err(e) if via == Some(Via::Network) => return Err(e),
+            Err(e) if via == Some(Via::Network) || via == Some(Via::Cast) => return Err(e),
             _ => {}
         }
     }
@@ -169,5 +188,12 @@ pub fn ended(report: &Report) -> String {
         "the TV" => "the TV ended it",
         _ => "it ended",
     };
-    format!("Mirroring stopped: {by}. {} pictures, {:.1} MB sent.", report.frames, report.bytes as f64 / 1_000_000.0)
+    let mut line = format!("Mirroring stopped: {by}. {} pictures, {:.1} MB sent.", report.frames, report.bytes as f64 / 1_000_000.0);
+    if let Some(ms) = report.round_trip_ms {
+        line.push_str(&format!(
+            " The TV was {ms:.0} ms away; {} packets went again, and it asked for a whole picture {} times.",
+            report.sent_again, report.whole_asked
+        ));
+    }
+    line
 }

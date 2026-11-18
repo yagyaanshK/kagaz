@@ -32,7 +32,8 @@ pub struct Found {
     pub address: Option<String>,
     /// What it takes, in words.
     pub ways: Vec<String>,
-    /// It takes Kagaz's screen mirroring over the network right now.
+    /// It takes Kagaz's screen mirroring over the network right now
+    /// (Miracast or Google Cast).
     pub mirror: bool,
     pub added: bool,
 }
@@ -86,7 +87,7 @@ pub async fn tvs_search() -> Result<Vec<Found>, String> {
             .into_iter()
             .map(|t| Found {
                 added: saved.iter().any(|s| s.name == t.name),
-                mirror: t.has(Way::MiracastNetwork),
+                mirror: t.has(Way::MiracastNetwork) || t.has(Way::GoogleCast),
                 ways: t.ways.iter().map(|w| w.label().to_string()).collect(),
                 address: t.address.map(|a| a.to_string()),
                 model: t.model,
