@@ -51,6 +51,8 @@
       <button id="bar-back" type="button" class="bar-btn bar-back hidden" aria-label="Back"><span class="ic" data-icon="back"></span><span class="bar-back-word">Back</span></button>
       <h1 id="bar-title">Home</h1>
       <div class="bar-actions">
+        <!-- A page that can look again (data-refresh on its section) gets this. -->
+        <button id="bar-refresh" type="button" class="bar-btn hidden" aria-label="Look again" title="Look again"><span class="ic" data-icon="reload"></span></button>
         <button id="bar-add" type="button" class="bar-btn" aria-label="Add a device" title="Add a device"><span class="ic" data-icon="plus"></span></button>
         <!-- The viewer's tools, while a device's screen is shown (remote-view.js). -->
         <span id="bar-remote" class="bar-remote hidden">
@@ -174,23 +176,18 @@
 
     <!-- TVs & displays (tvs.js): the TVs added and found nearby, and every
          way this device can show its screen on one. -->
-    <section id="tvs" class="pane hidden">
+    <section id="tvs" class="pane hidden" data-refresh>
       <button type="button" class="back to-home">&#x2190; Home</button>
-      <div class="pane-head">
-        <h2>TVs &amp; displays</h2>
-        <button id="tvs-rescan" type="button" title="Look again for TVs on the network">Look again</button>
+      <div id="tvs-tiles" class="home-tiles rc-tiles" aria-label="Your TVs"></div>
+      <div id="tvs-empty" class="rc-empty hidden">
+        <span class="rc-empty-icon ic" data-icon="tv"></span>
+        <h3>No TVs yet</h3>
+        <p class="muted">TVs on this network appear below. Add one to keep it here.</p>
       </div>
-      <p class="muted small">Show this screen on a TV: Kagaz's own way (screen mirroring), or this system's own. The system asks before anything is shared.</p>
-      <div id="tvs-live" class="purifier-card tv-live hidden" role="status">
-        <div class="name" id="tvs-live-title"></div>
-        <div class="caps muted" id="tvs-live-line"></div>
-        <div class="actions"><button id="tvs-stop" type="button" class="danger-text">Stop</button></div>
-      </div>
-      <p id="tvs-note" class="muted" role="status"></p>
-      <p id="tvs-empty" class="muted">No TVs added yet. Add one found nearby to keep it here.</p>
-      <ul id="tvs-list" class="cards"></ul>
       <h3 id="tvs-found-head" class="list-head hidden">Found nearby</h3>
-      <ul id="tvs-found" class="cards"></ul>
+      <ul id="tvs-found" class="rc-rows"></ul>
+      <p class="muted small tv-about">The system asks before anything on this screen is shared.</p>
+      <div id="tvs-toast" class="tv-toast hidden" role="status" aria-live="polite"></div>
     </section>
 
     <!-- Computers & phones (remote.js): the person's own devices, every way

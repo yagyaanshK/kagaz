@@ -156,6 +156,7 @@ const KagazShell = (() => {
     const step = pane && pane.dataset.title;
     $("bar-title").textContent = view === "add" ? $("add-title").textContent || TITLES.add : step || TITLES[view] || "Kagaz";
     $("bar-add").classList.toggle("hidden", view !== "home");
+    $("bar-refresh").classList.toggle("hidden", !(pane && "refresh" in pane.dataset));
     $("bar-menu").classList.toggle("hidden", layout !== "minimal");
     root.dataset.view = view;
   }
@@ -167,6 +168,8 @@ const KagazShell = (() => {
     else selectCategory("home");
   });
   $("bar-add").addEventListener("click", () => KagazHome.openAdd());
+  // The page looks again itself (it hears "refresh" on its section).
+  $("bar-refresh").addEventListener("click", () => { const p = $(view); if (p) p.dispatchEvent(new Event("refresh")); });
   KagazNav.watch(() => updateBar());
   // Add a device names its step (a kind's name once one is chosen).
   new MutationObserver(() => view === "add" && updateBar()).observe($("add-title"), { childList: true, characterData: true, subtree: true });
