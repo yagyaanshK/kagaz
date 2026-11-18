@@ -14,6 +14,10 @@ pub mod h264;
 mod va_sys;
 #[cfg(target_os = "linux")]
 pub mod vaapi;
+#[cfg(target_os = "linux")]
+mod nv_sys;
+#[cfg(target_os = "linux")]
+pub mod nvenc;
 
 use rtsp::{Message, Mode, SinkAbilities};
 use std::io::{ErrorKind, Read, Write};

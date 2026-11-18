@@ -265,6 +265,8 @@ pub enum AnyVideo {
     Software(Video),
     #[cfg(target_os = "linux")]
     Vaapi(super::vaapi::Vaapi),
+    #[cfg(target_os = "linux")]
+    Nvenc(super::nvenc::Nvenc),
 }
 
 impl AnyVideo {
@@ -283,12 +285,20 @@ impl AnyVideo {
                 Priority::Battery => super::vaapi::Power::Battery,
                 Priority::Performance => super::vaapi::Power::Performance,
             };
+            // VA-API first (AMD and Intel, and it takes the screen straight
+            // from graphics memory), then an NVIDIA chip.
             match super::vaapi::Vaapi::open(width, height, fps, bits_per_second, power) {
                 Ok(v) => {
                     let line = format!("the graphics chip ({})", v.described);
                     return Ok((AnyVideo::Vaapi(v), line));
                 }
-                Err(e) => Some(e),
+                Err(va) => match super::nvenc::Nvenc::open(width, height, fps, bits_per_second, power) {
+                    Ok(v) => {
+                        let line = format!("the NVIDIA chip ({})", v.described);
+                        return Ok((AnyVideo::Nvenc(v), line));
+                    }
+                    Err(nv) => Some(format!("{va}; {nv}")),
+                },
             }
         } else {
             None
@@ -312,6 +322,8 @@ impl AnyVideo {
             AnyVideo::Software(v) => v.key_next(),
             #[cfg(target_os = "linux")]
             AnyVideo::Vaapi(v) => v.key_next(),
+            #[cfg(target_os = "linux")]
+            AnyVideo::Nvenc(v) => v.key_next(),
         }
     }
 
@@ -321,6 +333,8 @@ impl AnyVideo {
             AnyVideo::Software(_) => false,
             #[cfg(target_os = "linux")]
             AnyVideo::Vaapi(_) => true,
+            #[cfg(target_os = "linux")]
+            AnyVideo::Nvenc(_) => false,
         }
     }
 
@@ -328,7 +342,7 @@ impl AnyVideo {
     #[cfg(target_os = "linux")]
     pub fn encode_gpu(&mut self, g: Option<&crate::tv::capture::GpuPicture>) -> Result<Encoded, String> {
         match self {
-            AnyVideo::Software(_) => Err("the processor's encoder takes pictures in memory".into()),
+            AnyVideo::Software(_) | AnyVideo::Nvenc(_) => Err("this encoder takes pictures in memory".into()),
             AnyVideo::Vaapi(v) => v.encode_gpu(g).map(|(data, key)| Encoded { data, key }),
         }
     }
@@ -338,6 +352,8 @@ impl AnyVideo {
             AnyVideo::Software(v) => v.encode(rgba),
             #[cfg(target_os = "linux")]
             AnyVideo::Vaapi(v) => v.encode(rgba).map(|(data, key)| Encoded { data, key }),
+            #[cfg(target_os = "linux")]
+            AnyVideo::Nvenc(v) => v.encode(rgba).map(|(data, key)| Encoded { data, key }),
         }
     }
 }

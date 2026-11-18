@@ -330,11 +330,25 @@ sent to the stand-in TV decodes. Colours match the processor's
 conversion to within 1 (declaring the input as sRGB made the chip change
 the tone curve too: mid-grey 132 instead of 126); smooth pictures match
 the processor's scaling at 58 dB, and fine text at 31 dB, as the two
-scalers blur 1-pixel lines differently. Still to check on the real
-laptop screen: how many of 60 arrive.
+scalers blur 1-pixel lines differently. On the laptop's real screen
+(numbers only, through the owner's dialog), 59 to 60 a second arrived
+for most of 30 seconds, against about 35 before; on the LG, 1080p at 60
+for a minute, every picture sent, about 3 ms each to make, and the owner
+found it much smoother. When only the pointer moves, GNOME draws no new
+frame and records the pointer at the moment of the mouse event, which
+again trips its "too early" check: about 40 a second, a GNOME limit.
 
-Still to do for other graphics: NVIDIA (NVENC, Linux and Windows),
-Windows for every vendor (Media Foundation), macOS (VideoToolbox).
+*NVIDIA on Linux* (2026-11-18): `miracast/nvenc.rs`, NVENC through
+NVIDIA's own driver (libcuda and libnvidia-encode opened only when used;
+the structures generated from NVIDIA's MIT header, API 12.0, driver 520
+or newer). Tried after VA-API: same Constrained Baseline stream, no
+reordering, Kagaz's own BT.601 conversion so colours match; battery takes
+the fastest preset. **Not yet run on an NVIDIA chip** (there is none
+here): the test skips without the driver.
+
+Still to do for other graphics: Windows for every vendor (Media
+Foundation, which covers NVIDIA, AMD and Intel there), macOS
+(VideoToolbox); both wait on screen capture for those systems.
 All tests on a real TV use the LG for now (the owner, 2026-11-18). Saved TVs (names,
 rooms) come with the window; until then `kagaz tvs` lists the TVs found
 nearby.
