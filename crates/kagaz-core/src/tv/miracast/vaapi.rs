@@ -214,10 +214,13 @@ impl Vaapi {
                 (lib.terminate)(dpy);
                 return Err("the graphics chip's encoder takes no 4:2:0 pictures".into());
             }
-            let rc = if attrs[1].value & VA_RC_CBR != 0 {
-                VA_RC_CBR
-            } else if attrs[1].value & VA_RC_VBR != 0 {
+            // Variable bitrate: a still screen costs next to nothing (constant
+            // bitrate pads with filler, measured at 25 Mbit/s for a still
+            // desktop on AMD).
+            let rc = if attrs[1].value & VA_RC_VBR != 0 {
                 VA_RC_VBR
+            } else if attrs[1].value & VA_RC_CBR != 0 {
+                VA_RC_CBR
             } else {
                 VA_RC_CQP
             };
@@ -508,7 +511,8 @@ impl Vaapi {
 
                 let mut rc: VAEncMiscParameterRateControl = std::mem::zeroed();
                 rc.bits_per_second = self.bits_per_second;
-                rc.target_percentage = 90;
+                // With variable bitrate: up to the full rate in big changes.
+                rc.target_percentage = 70;
                 rc.window_size = 500;
                 rc.initial_qp = 26;
                 rc.min_qp = 10;
