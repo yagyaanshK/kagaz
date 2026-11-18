@@ -522,7 +522,11 @@ Plan: `docs/remote-connection.md` (agreed 2026-11-16).
       PIN, start with Windows off by default, three ways for the
       sign-in screen and administrator prompts including an optional
       helper service, watch or control from either end); mockups in
-      `design/mockups/windows-host/`, waiting for approval. Until
+      `design/mockups/windows-host/`, approved with changes: shorter
+      words, off until "Share this computer" is chosen (nothing runs or
+      listens before), several devices at once. The host speaks Remote
+      Desktop on a port of its own. First tried on the Windows PC the
+      owner already reaches by Remote Desktop. Until
       it exists: a VNC server on that laptop, reached over Tailscale,
       with today's Kagaz (not yet tried against a real Windows VNC
       server).

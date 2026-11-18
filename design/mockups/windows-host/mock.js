@@ -2,9 +2,10 @@
 // it goes on using it. Drawn with made-up devices.
 //   host.html?os=windows|gnome|macos
 //            &scene=settings|device|pair|desk|viewer|add
+//            &off=1                             (settings: sharing off, as it is until turned on)
 //            &ask=service                       (settings: the helper service's question)
-//            &step=code|words                   (pair, add: before and after the code is typed)
-//            &pop=ask|sign|watch                (desk: the question, or the sign while connected)
+//            &step=choose|code|words            (add: the ways in; pair, add: before and after the code)
+//            &pop=ask|sign|watch|two            (desk: the question, or the sign while connected)
 //            &wait=1                            (viewer: waiting for someone at the computer)
 //            &mode=control|watch                (viewer)
 (() => {
@@ -146,19 +147,25 @@
     // On the computer being shared: Computers & phones › This computer.
     $("bar-title").textContent = "This computer";
     back("Computers & phones");
-    const on = section("Sharing this computer", "Paired devices see this screen while you go on using it, over the local network or Tailscale. Nothing passes through anyone else's servers.");
-    on.append(row("Let paired devices connect", "", onoff(true)),
-      row("Start Kagaz when I sign in to Windows", "It waits in the tray, so a device can connect when nobody has opened Kagaz", onoff(false)),
-      row("When a paired device connects", "Asking needs someone at this computer. Each device can be given its own below",
+    const off = q.get("off");
+    const on = section("Sharing this computer", "Off until you turn it on. While off, nothing of it runs or listens.");
+    on.append(row("Share this computer", "Paired devices only · local network and Tailscale", onoff(!off)));
+    if (off) {
+      if (typeof KagazIcons !== "undefined") KagazIcons.fill(document);
+      return;
+    }
+    on.append(row("Start with Windows", "Waits in the tray", onoff(false)),
+      row("When a paired device connects", "Each device can have its own",
         select(["Ask here each time", "Connect with the PIN, without asking"])),
-      row("This computer's PIN", "Typed on the device that connects", button("Change")));
-    const during = section("While a device is connected", "A sign at the top of this screen names the device and can end the session. It is always shown.");
-    during.append(row("Blank this computer's screen", "For when nobody should see what is done on it", select(["Never", "When I connect without asking", "Ask each time"])),
+      row("This computer's PIN", "", button("Change")));
+    const during = section("While connected", "A sign at the top of the screen always names who is connected.");
+    during.append(row("Blank this screen", "", select(["Never", "When I connect without asking", "Ask each time"])),
       row("Lock Windows when the session ends", "", select(["If nobody used it during the session", "Always", "Never"])),
-      row("Keep a record of sessions", "Kept on this computer only", onoff(true)),
+      row("Keep a record of sessions", "On this computer only", onoff(true)),
+      row("Several devices at once", "", select(["Yes", "One at a time"])),
       door("past", "Past sessions", "12 sessions, the last today at 10:40"));
-    const admin = section("Sign-in screen and administrator prompts", "Kagaz runs as the person signed in, so it cannot see the sign-in screen or Windows' administrator prompts.");
-    admin.append(row("When one appears", "The helper service is installed once, with an administrator's password",
+    const admin = section("Sign-in screen and administrator prompts", "Kagaz can't see these on its own.");
+    admin.append(row("When one appears", "",
       select(["Someone at this computer answers it", "Windows' own Remote Desktop (Windows Pro)", "Kagaz's helper service"], q.get("ask") === "service" ? 2 : 0)));
     const paired = section("Paired devices");
     paired.append(door("laptop", "Asha's ThinkPad", "Watch, control, clipboard, files, sound · connects with the PIN"),
@@ -167,15 +174,15 @@
     paired.append(add);
     if (q.get("ask") === "service") {
       question("Install Kagaz's helper service?",
-        ["It lets a paired device see and answer the sign-in screen and administrator prompts on this computer. Windows asks for an administrator's password once to install it.",
-          "It runs with the system's rights whenever this computer is on, also when nobody is signed in. Turning this setting back removes it."],
+        ["Lets a paired device answer the sign-in screen and administrator prompts.",
+          "Needs an administrator's password once. Runs with system rights while the computer is on. Changing this setting back removes it."],
         "Not now", "Install");
     }
   } else if (scene === "device") {
     // One paired device: what it may do here.
     $("bar-title").textContent = "Asha's ThinkPad";
     back("This computer");
-    const p = section("What it may do", "Watching is what pairing gives; everything else is chosen here and can change at any time.");
+    const p = section("What it may do");
     p.append(perms([true, true, true, true, true, true, false]));
     const c = section("Connecting");
     c.append(row("When it connects", "", select(["Same as all: ask here each time", "Ask here each time", "Connect with the PIN, without asking"], 2)),
@@ -185,33 +192,39 @@
     $("bar-title").textContent = "Pair a device";
     back("This computer");
     if (q.get("step") === "words") {
-      const w = section("Check the words", "The other device shows three words. Pair only if they are the same.");
+      const w = section("Check the words", "Pair only if the other device shows the same.");
       w.append(el("div", "host-words", "maple · river · seven"));
-      const g = section("What Asha's ThinkPad may do", "Chosen now, changed later in its settings.");
+      const g = section("What Asha's ThinkPad may do", "Can be changed later.");
       g.append(perms());
       const r = el("div", "actions");
       r.append(button("Cancel"), button("Pair", "accent"));
       body.append(r);
     } else {
-      const s = section("On the other device", "Kagaz › Add a device › Computers & phones › Pair with a code. Scan this or type the number. It works for 5 minutes, once.");
+      const s = section("On the other device", "Add a device › Computers & phones › Pair with a code. Works once, for 5 minutes.");
       const code = el("div", "pair-code");
       code.append(el("div", "pair-qr"), el("div", "pair-digits", "482 917"));
       s.append(code);
-      s.append(el("p", "muted small", "Found nearby also lists this computer while this page is open."));
     }
+  } else if (scene === "add" && q.get("step") === "choose") {
+    // Add a device › Computers & phones: the two ways, each chosen on purpose.
+    $("bar-title").textContent = "Computers & phones";
+    back("Add a device");
+    const s = section("What would you like to do?");
+    s.append(door("computer", "Connect to a computer or phone", "Use another device from here"),
+      door("laptop", "Pair with a computer running Kagaz", "With its code or QR code"),
+      door("screens", "Share this computer", "Let paired devices see and use it"));
   } else if (scene === "add") {
     // Pairing, on the device that will connect.
     $("bar-title").textContent = "Pair with a code";
     back("Add a device");
     if (q.get("step") === "words") {
-      const w = section("Check the words", "Office laptop shows three words. Pair only if they are the same.");
+      const w = section("Check the words", "Pair only if Office laptop shows the same.");
       w.append(el("div", "host-words", "maple · river · seven"));
-      w.append(el("p", "muted small", "Then type Office laptop's PIN the first time you connect; Kagaz remembers it in this computer's password store if you let it."));
       const r = el("div", "actions");
       r.append(button("Cancel"), button("They match", "accent"));
       body.append(r);
     } else {
-      const s = section("The computer's code", "On the computer: Kagaz › Computers & phones › This computer › Pair a device.");
+      const s = section("The computer's code", "On the computer: This computer › Pair a device.");
       const t = el("input");
       t.type = "text";
       t.inputMode = "numeric";
@@ -249,8 +262,8 @@
     stage.append(desk);
     if (q.get("wait")) {
       const w = el("div", "rc-wait");
-      w.append(icon("guard"), el("strong", "", "Waiting for someone at Office laptop to allow it"),
-        el("span", "muted small", "Office laptop asks each time. It says no by itself after 30 seconds."), button("Cancel"));
+      w.append(icon("guard"), el("strong", "", "Waiting for Office laptop to allow it"),
+        el("span", "muted small", "No answer in 30 seconds means no."), button("Cancel"));
       stage.append(w);
     }
     view.append(stage);
@@ -267,17 +280,18 @@
       const box = el("div", "host-pop");
       const h = el("h4");
       h.append(icon("guard"), el("span", "", "Asha's ThinkPad wants to connect"));
-      box.append(h, el("p", "muted small", "A paired device, over the local network."));
-      box.append(choices("how", [["Let it use the mouse and keys", "You both can; whoever moves last is in control"], ["Watch only", "It sees this screen; only you use it"]]));
+      box.append(h);
+      box.append(choices("how", [["Watch and use the mouse and keys"], ["Watch only"]]));
       const r = el("div", "actions");
       r.append(button("Don't allow"), button("Allow", "accent"));
-      box.append(r, el("p", "muted small", "Not allowed by itself in 30 seconds if nobody answers."));
+      box.append(r, el("p", "muted small", "No answer in 30 seconds means no."));
       d.append(box);
     } else {
       const sign = el("div", "host-sign");
       const watch = pop === "watch";
-      sign.append(el("span", "sw-dot"), el("span", "", watch ? "Asha's ThinkPad is watching this screen" : "Asha's ThinkPad can use this computer"),
-        button(watch ? "Let it control" : "Watch only"), button("End", "end"));
+      const two = pop === "two";
+      sign.append(el("span", "sw-dot"), el("span", "", two ? "2 connected: Asha's ThinkPad (control), Asha's phone (watching)" : watch ? "Asha's ThinkPad is watching" : "Asha's ThinkPad is in control"),
+        button(two ? "Who" : watch ? "Let it control" : "Watch only"), button(two ? "End all" : "End", "end"));
       d.append(sign);
     }
   }

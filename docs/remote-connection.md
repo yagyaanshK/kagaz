@@ -108,7 +108,16 @@ one device to the other, over the local network or Tailscale.
 
 **On Windows** (the owner's answers, 2026-11-18: every choice a setting).
 Kagaz shares the screen of the person signed in, who goes on using it; the
-device connecting shows it in a session window as any computer today.
+device connecting shows it in a session window as any computer today. The
+host speaks Remote Desktop (agreed 2026-11-18), on a port of its own, so
+today's viewer works with it unchanged.
+- *Off until turned on* (the owner: one use must not cloud another). Kagaz
+  is installed for many reasons; nothing of the host runs, listens or sits
+  in the tray until someone chooses "Share this computer" (Add a device ›
+  Computers & phones, or This computer in its settings). Turning it off
+  stops all of it.
+- *Several devices at once* (a setting, yes by default); the sign on the
+  computer names each and whether it watches or controls.
 - *Connecting:* "Ask here each time" (someone at the computer allows it,
   with control or watch only; no answer in 30 s is no) or "Connect with the
   PIN, without asking"; the computer's choice is the default, each paired
