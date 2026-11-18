@@ -579,6 +579,24 @@ Plan: `docs/remote-connection.md` (agreed 2026-11-16).
       offer alone; the clipboard on Windows and macOS (comes with their
       viewers in step 2); a "Third-party licences" page in About.
 
+## TVs & displays
+
+Plan in [docs/tv-displays.md](docs/tv-displays.md) (2026-11-18): mirroring
+first, then sending files, the remote, and extending. Nothing built yet.
+
+- [ ] **Step 0: Wi-Fi Direct on this laptop** with the LG in Screen Share
+      mode: through NetworkManager and wpa_supplicant, with the home Wi-Fi up
+      (2.4 and 5 GHz) and with the TV on no network. Needs the owner's
+      go-ahead at the moment, since the TV shows a prompt.
+- [ ] **Step 0: what the LG accepts**: webOS pairing, Cast's media receiver,
+      a Cast mirroring session from a sender that is not Chrome, Miracast over
+      the network (MS-MICE, port 7250, announced as `_display._tcp`),
+      Wake-on-LAN over Wi-Fi.
+- [ ] **Step 0: each library's licence** checked before it is added.
+- [ ] **The TV on no network**: brand and model to hear from the owner.
+- [ ] **Mockups** of the TVs list, Add and a TV's screen, approved before
+      building.
+
 ## Roadmap, not yet started
 
 - [x] M3 driverless print over IPP: `kagaz print` sends PWG Raster; one test
