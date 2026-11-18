@@ -513,12 +513,16 @@ Plan: `docs/remote-connection.md` (agreed 2026-11-16).
       in the real window (test card) the webview's pinch is found and
       turned off. **Not yet** tried with fingers.
 - [ ] **Kagaz on the computer being used: the Windows side, next**
-      (the owner, 2026-11-18: an office laptop he teaches his team on
-      from afar, while they go on using it; Windows' Remote Desktop
-      gives the screen to one person, and he does not trust a service
-      that sends the screen through its maker's servers). Moved ahead
-      of the phone's viewer in `docs/remote-connection.md` (now step
-      2). Questions on how it should behave are with the owner. Until
+      (the owner, 2026-11-18: an office laptop the owner teaches the
+      team on from afar, while they go on using it; Windows' Remote
+      Desktop gives the screen to one person, and a service that sends
+      the screen through its maker's servers is not trusted). Moved
+      ahead of the phone's viewer in `docs/remote-connection.md` (now
+      step 2). Answers in (every choice a setting: ask each time or the
+      PIN, start with Windows off by default, three ways for the
+      sign-in screen and administrator prompts including an optional
+      helper service, watch or control from either end); mockups in
+      `design/mockups/windows-host/`, waiting for approval. Until
       it exists: a VNC server on that laptop, reached over Tailscale,
       with today's Kagaz (not yet tried against a real Windows VNC
       server).

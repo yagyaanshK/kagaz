@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Kagaz · Windows host mockups</title>
+<style>
+  body { margin: 0; padding: 24px; font-family: system-ui, sans-serif; background: #e9e9e6; color: #222; }
+  @media (prefers-color-scheme: dark) { body { background: #1c1c1e; color: #e6e6e6; } p, li, figcaption { color: #b9b9b9 !important; } .win { border-color: #444 !important; } .win > .title { background: #2a2a2d !important; color: #ddd !important; } }
+  h1 { font-size: 20px; margin: 0 0 6px; }
+  h2 { font-size: 16px; margin: 34px 0 4px; }
+  p, li { color: #444; max-width: 920px; line-height: 1.45; margin: 4px 0; }
+  ul { margin: 6px 0 14px; padding-left: 20px; }
+  .row { display: flex; gap: 24px; flex-wrap: wrap; align-items: flex-start; margin-top: 12px; }
+  figure { margin: 0; }
+  figcaption { font-size: 12px; color: #555; margin-bottom: 6px; max-width: 640px; }
+  .win { border: 1px solid #bbb; border-radius: 10px; overflow: hidden; box-shadow: 0 6px 20px rgba(0,0,0,.18); display: inline-block; }
+  .win > .title { display: flex; align-items: center; justify-content: center; position: relative; height: 30px; font-size: 13px; font-weight: 600; background: #dcdcd8; color: #333; }
+  .win > .title::after { content: "–  ▢  ✕"; position: absolute; right: 12px; font-weight: 400; letter-spacing: 2px; opacity: .7; }
+  iframe { border: 0; display: block; background: #fff; }
+  .set { width: 860px; height: 700px; }
+  .mid { width: 860px; height: 470px; }
+  .scr { width: 640px; height: 400px; }
+</style>
+</head>
+<body>
+<h1>Kagaz · a Windows computer shared while its person goes on using it</h1>
+<p>Drawn with the app's own stylesheets: the shared computer in the Windows look, the device connecting in the Ubuntu look. Devices and names are made up; the "screens" are coloured stand-ins.</p>
+<ul>
+  <li><strong>Two Kagaz, two roles.</strong> Kagaz on the office laptop shares its screen; Kagaz here connects to it and shows it in a session window, as with any computer today: picture, sound, clipboard, files.</li>
+  <li><strong>Both people use the same desktop.</strong> Nobody is signed out. The device connecting can watch only or use the mouse and keys; the person at the laptop can switch it to watch only, or end it, at any time.</li>
+  <li><strong>Every choice is a setting</strong> (your answers of 18 November): ask each time or connect with the PIN, start with Windows (off unless turned on), three ways for the sign-in screen and administrator prompts, watch or control from either end.</li>
+  <li><strong>Straight from one device to the other</strong>, over the local network or Tailscale; nothing passes through anyone else's servers.</li>
+</ul>
+
+<h2>On the office laptop: its settings</h2>
+<div class="row">
+  <figure><figcaption>Computers &amp; phones › This computer. Start with Windows is off until turned on. "When a paired device connects" is the default for new devices; each can have its own.</figcaption><div class="win"><div class="title">Kagaz</div><iframe class="set" src="host.html?os=windows&scene=settings"></iframe></div></figure>
+  <figure><figcaption>Choosing the helper service: what it does and what it costs, before Windows asks for an administrator's password.</figcaption><div class="win"><div class="title">Kagaz</div><iframe class="set" src="host.html?os=windows&scene=settings&ask=service"></iframe></div></figure>
+  <figure><figcaption>One paired device: what it may do here. Watching comes with pairing; the rest is a switch each. The terminal comes later, off until given.</figcaption><div class="win"><div class="title">Kagaz</div><iframe class="mid" src="host.html?os=windows&scene=device"></iframe></div></figure>
+</div>
+
+<h2>Pairing, once per device</h2>
+<div class="row">
+  <figure><figcaption>On the laptop: a QR code and a number, good for 5 minutes and once.</figcaption><div class="win"><div class="title">Kagaz</div><iframe class="mid" src="host.html?os=windows&scene=pair"></iframe></div></figure>
+  <figure><figcaption>Here: Add a device › Computers &amp; phones › Pair with a code (or the laptop under Found nearby).</figcaption><div class="win"><div class="title">Kagaz</div><iframe class="mid" src="host.html?os=gnome&scene=add"></iframe></div></figure>
+  <figure><figcaption>Both screens then show the same three words; each side confirms. The laptop chooses what this device may do.</figcaption><div class="win"><div class="title">Kagaz</div><iframe class="set" src="host.html?os=windows&scene=pair&step=words"></iframe></div></figure>
+  <figure><figcaption>Here, the same words.</figcaption><div class="win"><div class="title">Kagaz</div><iframe class="mid" src="host.html?os=gnome&scene=add&step=words"></iframe></div></figure>
+</div>
+
+<h2>Connecting</h2>
+<div class="row">
+  <figure><figcaption>On the laptop, when it asks each time: a small window over whatever is open, with a choice of control or watching. Nobody answering means no.</figcaption><div class="win"><div class="title">Office laptop (its own screen)</div><iframe class="scr" src="host.html?os=windows&scene=desk&pop=ask"></iframe></div></figure>
+  <figure><figcaption>Here, meanwhile.</figcaption><div class="win"><div class="title">Office laptop · Kagaz</div><iframe class="scr" src="host.html?os=gnome&scene=viewer&wait=1"></iframe></div></figure>
+</div>
+
+<h2>During the session</h2>
+<div class="row">
+  <figure><figcaption>On the laptop, for the whole session: a sign at the top naming the device, with Watch only and End. Kagaz's icon sits in the tray.</figcaption><div class="win"><div class="title">Office laptop (its own screen)</div><iframe class="scr" src="host.html?os=windows&scene=desk&pop=sign"></iframe></div></figure>
+  <figure><figcaption>Here: the session window as today, with Control and Watch in the green bar. Watch keeps this computer's mouse and keys to itself while you explain.</figcaption><div class="win"><div class="title">Office laptop · Kagaz</div><iframe class="scr" src="host.html?os=gnome&scene=viewer"></iframe></div></figure>
+  <figure><figcaption>When the laptop switched it to watch only, its sign says so and offers control back; the bar here shows Watch.</figcaption><div class="win"><div class="title">Office laptop (its own screen)</div><iframe class="scr" src="host.html?os=windows&scene=desk&pop=watch"></iframe></div></figure>
+</div>
+</body>
+</html>

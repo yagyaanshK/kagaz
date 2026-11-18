@@ -106,10 +106,26 @@ one device to the other, over the local network or Tailscale.
 - **Terminal.** A shell and running one command inside Kagaz's own
   session, as its own permission, off until granted.
 
-**On Windows.** Runs while signed in, without administrator rights and without a service.
-The login screen and administrator prompts go through Windows' own Remote
-Desktop, which Kagaz already speaks. The mouse-button setting is read and
-corrected without a switch.
+**On Windows** (the owner's answers, 2026-11-18: every choice a setting).
+Kagaz shares the screen of the person signed in, who goes on using it; the
+device connecting shows it in a session window as any computer today.
+- *Connecting:* "Ask here each time" (someone at the computer allows it,
+  with control or watch only; no answer in 30 s is no) or "Connect with the
+  PIN, without asking"; the computer's choice is the default, each paired
+  device can have its own.
+- *Starting:* runs while Kagaz is open; "Start Kagaz when I sign in to
+  Windows" (to the tray) is a setting, off by default.
+- *Sign-in screen and administrator prompts:* a setting with three ways:
+  someone at the computer answers them; Windows' own Remote Desktop, which
+  Kagaz already speaks (Windows Pro); or Kagaz's helper service, installed
+  only when chosen, with an administrator's password, and removed when the
+  setting goes back. Without it nothing of Kagaz runs with raised rights.
+- *Watch or control* from either end: Control and Watch in the viewer's
+  bar; Watch only and End on the computer's sign; watch-only as a
+  permission per device.
+- Mockups: `design/mockups/windows-host/`.
+
+The mouse-button setting is read and corrected without a switch.
 
 ### 3. The viewer on Android and Windows
 
@@ -162,9 +178,10 @@ as a viewer.
 ## Limits
 
 - Windows Home has no Remote Desktop server: such a computer is reachable
-  only once the Windows host (step 5) exists.
-- Without a service, Kagaz's own Windows session cannot show the login
-  screen or administrator prompts; those go through RDP.
+  only once the Windows host (step 2) exists.
+- Without the helper service, Kagaz's own Windows session cannot show the
+  login screen or administrator prompts; those go through RDP or the person
+  at the computer.
 - If Google Play signs the app with its own key, moving between the Play
   build and the full build means uninstalling first; giving Play the app's
   existing key at enrolment avoids it.

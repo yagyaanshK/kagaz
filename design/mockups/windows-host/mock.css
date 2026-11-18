@@ -1,0 +1,39 @@
+/* Only what the Windows host adds to the app's own styles. */
+
+/* The real desktop of the computer being shared, with Kagaz's own small
+   windows on it (the question, the sign while someone is connected). */
+html[data-scene="desk"] #sidebar, html[data-scene="desk"] #column, html[data-scene="desk"] #bottom-nav { display: none; }
+#desktop { position: fixed; inset: 0; }
+#desktop .desk { position: absolute; inset: 0; }
+#desktop .desk.dim::after { content: ""; position: absolute; inset: 0; background: #000; }
+
+/* Kagaz's own windows on that desktop. */
+.host-pop { position: absolute; right: 14px; bottom: 44px; width: 340px; padding: 16px 18px; border-radius: 10px; background: var(--panel); color: var(--text); border: 1px solid var(--line); box-shadow: 0 12px 36px rgba(0, 0, 0, 0.45); font-size: 14px; }
+.host-pop h4 { margin: 0 0 4px; font-size: 15px; display: flex; align-items: center; gap: 8px; }
+.host-pop h4 svg { width: 18px; height: 18px; color: var(--accent); }
+.host-pop p { margin: 4px 0; }
+.host-pop .actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; margin-top: 12px; }
+.host-pop .ask-choices { margin: 10px 0 4px; }
+.host-words { display: inline-block; margin: 6px 0; padding: 8px 14px; border-radius: 8px; background: var(--hover, rgba(127, 127, 127, 0.12)); font-size: 22px; font-weight: 700; }
+
+/* The sign at the top of the shared screen, for the whole session. */
+.host-sign { position: absolute; left: 50%; top: 10px; transform: translateX(-50%); display: flex; align-items: center; gap: 10px; padding: 6px 8px 6px 14px; border-radius: 999px; background: var(--accent); color: #fff; font-size: 13px; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35); white-space: nowrap; }
+.host-sign .sw-dot { background: #fff; box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.3); }
+.host-sign button { min-height: 28px; padding: 0 12px; border-radius: 999px; border: 1px solid rgba(255, 255, 255, 0.6); background: transparent; color: #fff; font: inherit; }
+.host-sign button.end { background: #fff; color: #1d1d1d; border-color: #fff; }
+.host-tray { position: absolute; right: 120px; bottom: 6px; width: 18px; height: 18px; border-radius: 4px; background: var(--accent); }
+
+/* The viewer: watching or in control. */
+.rc-mode { display: inline-flex; border: 1px solid currentColor; border-color: color-mix(in srgb, currentColor 45%, transparent); border-radius: 999px; overflow: hidden; }
+.rc-mode button { min-height: 28px; padding: 0 12px; border: none; border-radius: 0; background: transparent; color: inherit; font: inherit; font-size: 13px; }
+.rc-mode button.on { background: rgba(255, 255, 255, 0.22); font-weight: 600; }
+.rc-wait { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; text-align: center; color: var(--text); background: var(--bg); padding: 24px; }
+.rc-wait svg { width: 40px; height: 40px; color: var(--accent); }
+
+/* Pairing. */
+.pair-code { display: flex; gap: 22px; align-items: center; flex-wrap: wrap; padding: 6px 0 12px; }
+.pair-qr { width: 132px; height: 132px; border-radius: 8px; background:
+  repeating-linear-gradient(90deg, #111 0 9px, #fff 9px 15px),
+  repeating-linear-gradient(0deg, #111 0 7px, #fff 7px 12px); background-blend-mode: screen; border: 8px solid #fff; outline: 1px solid var(--line); }
+.pair-digits { font-size: 30px; font-weight: 700; letter-spacing: 6px; }
+.perm-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 4px 14px; }

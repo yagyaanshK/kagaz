@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Kagaz · Windows host mockup</title>
+  <!-- The app's own look: nothing of it is redrawn here. -->
+  <script src="../../../apps/desktop/ui/platform.js"></script>
+  <link rel="stylesheet" href="../../../apps/desktop/ui/style.css">
+  <link rel="stylesheet" href="../../../apps/desktop/ui/skins.css">
+  <link rel="stylesheet" href="../settings/mock.css">
+  <link rel="stylesheet" href="../session-windows/mock.css">
+  <link rel="stylesheet" href="mock.css">
+</head>
+<body>
+  <aside id="sidebar" aria-label="Kagaz">
+    <div class="side-head"><button id="pane-toggle" type="button" class="side-toggle" aria-label="Navigation"><span class="ic" data-icon="menu"></span></button><span class="side-title">Kagaz</span></div>
+    <ul id="categories"></ul>
+  </aside>
+  <div id="column">
+    <header id="bar">
+      <button id="bar-back" type="button" class="bar-btn bar-back hidden" aria-label="Back"><span class="ic" data-icon="back"></span><span class="bar-back-word">Settings</span></button>
+      <h1 id="bar-title"></h1>
+      <div class="bar-actions"><span id="bar-remote" class="bar-remote hidden"></span></div>
+    </header>
+    <main id="main">
+      <section id="settings" class="pane"><div id="settings-body"></div></section>
+      <section id="remote" class="pane hidden"></section>
+    </main>
+  </div>
+  <nav id="bottom-nav"></nav>
+  <div id="desktop" class="hidden"></div>
+  <script src="../../../apps/desktop/ui/icons.js"></script>
+  <script src="mock.js"></script>
+</body>
+</html>
