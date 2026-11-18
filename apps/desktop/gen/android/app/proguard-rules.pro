@@ -27,3 +27,9 @@
 -keep class app.kagaz.KagazNative {
   public static *;
 }
+# The same for the phone's screen going to a TV (tvs.rs calls KagazTv's
+# start, keyFrame and stop by name; dropped like the above on 2026-11-18,
+# "Java exception was thrown" at the first picture).
+-keep class app.kagaz.KagazTv {
+  public static *;
+}

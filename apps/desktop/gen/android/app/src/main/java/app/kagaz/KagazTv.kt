@@ -9,6 +9,7 @@ import android.media.MediaFormat
 import android.media.projection.MediaProjection
 import android.os.Build
 import android.os.Bundle
+import android.util.Log
 import android.view.Surface
 
 /** The phone's screen for a TV: Android's own H.264 encoder (MediaCodec)
@@ -47,6 +48,7 @@ object KagazTv {
     /** From Rust, when the TV has chosen: "" once encoding, else why not. */
     @JvmStatic
     fun start(width: Int, height: Int, fps: Int, bitrate: Int): String {
+        Log.i("KagazTv", "start ${width}x$height at $fps, $bitrate bit/s; grant held: ${projection != null}")
         val mp = projection ?: return "screen sharing was not allowed on the phone yet"
         val context = app ?: return "Kagaz is not ready yet"
         release(false)
@@ -55,6 +57,7 @@ object KagazTv {
             try {
                 c.configure(format(width, height, fps, bitrate, true), null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
             } catch (e: Exception) {
+                Log.i("KagazTv", "the encoder refused the low-delay settings: $e")
                 // Some encoders refuse the profile or the low-delay wishes.
                 c.reset()
                 c.configure(format(width, height, fps, bitrate, false), null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
@@ -69,8 +72,10 @@ object KagazTv {
                 DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR, s, null, null
             )
             drainer = Thread({ drain(c) }, "kagaz-tv-encoder").also { it.start() }
+            Log.i("KagazTv", "encoding on ${c.name}")
             ""
         } catch (e: Throwable) {
+            Log.w("KagazTv", "the encoder did not start", e)
             release(false)
             e.message ?: e.toString()
         }
@@ -133,9 +138,11 @@ object KagazTv {
             // The headers before each whole picture, where the encoder did
             // not put them there itself.
             val out = if (key && h != null && !startsWithHeaders(bytes)) h + bytes else bytes
+            if (key) Log.i("KagazTv", "a whole picture, ${out.size} bytes")
             try {
                 frame(out, key)
             } catch (e: Throwable) {
+                Log.w("KagazTv", "Kagaz did not take a picture", e)
                 break
             }
         }

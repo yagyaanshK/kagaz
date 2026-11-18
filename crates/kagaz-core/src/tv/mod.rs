@@ -204,7 +204,7 @@ pub fn nearby(wait: Duration, direct: bool) -> Result<Vec<Tv>, String> {
             }
             // The announcement of network mirroring comes and goes; the
             // port says it for sure.
-            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            #[cfg(not(target_os = "ios"))]
             if !tv.has(Way::MiracastNetwork) && answers(a, miracast::mice::PORT) {
                 tv.ways.push(Way::MiracastNetwork);
             }

@@ -57,6 +57,32 @@ pub fn stop_projection(name: &str, source_id: &[u8; 16]) -> Vec<u8> {
     message(STOP_PROJECTION, &t)
 }
 
+/// A message as the TV reads it: (command, the source's name, its RTSP
+/// port), or `None` when it is not one. 1 is "ready", 2 "stopped".
+pub fn read(m: &[u8]) -> Option<(u8, String, Option<u16>)> {
+    let size = u16::from_be_bytes([*m.first()?, *m.get(1)?]) as usize;
+    if size < 4 || m.len() < size || m[2] != VERSION {
+        return None;
+    }
+    let (mut name, mut port) = (String::new(), None);
+    let mut at = 4;
+    while at + 3 <= size {
+        let kind = m[at];
+        let len = u16::from_be_bytes([m[at + 1], m[at + 2]]) as usize;
+        let value = m.get(at + 3..at + 3 + len)?;
+        match kind {
+            FRIENDLY_NAME => {
+                let units: Vec<u16> = value.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+                name = String::from_utf16_lossy(&units);
+            }
+            RTSP_PORT if len == 2 => port = Some(u16::from_be_bytes([value[0], value[1]])),
+            _ => {}
+        }
+        at += 3 + len;
+    }
+    Some((m[3], name, port))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -73,6 +99,12 @@ mod tests {
         assert_eq!(&m[11..16], &[0x02, 0x00, 0x02, 0x1c, 0x44]);
         assert_eq!(&m[16..19], &[0x03, 0x00, 0x10]);
         assert_eq!(m.len(), 0x23);
+    }
+
+    #[test]
+    fn reads_what_it_writes() {
+        let m = source_ready("Phone", 7236, &[1; 16]);
+        assert_eq!(read(&m), Some((1, "Phone".to_string(), Some(7236))));
     }
 
     #[test]

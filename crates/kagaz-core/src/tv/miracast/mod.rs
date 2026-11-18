@@ -11,6 +11,8 @@ pub mod ts;
 pub mod video;
 pub mod h264;
 pub mod external;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+pub mod stand_in;
 #[cfg(target_os = "linux")]
 mod va_sys;
 #[cfg(target_os = "linux")]

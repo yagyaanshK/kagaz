@@ -73,6 +73,16 @@ pub enum TvsAction {
         #[arg(long, value_enum)]
         encoder: Option<EncoderChoice>,
     },
+    /// Be a stand-in TV: this computer announces itself on the network as
+    /// a screen-mirroring TV, takes a sender's session (Kagaz on a phone,
+    /// Windows' Cast) and reports what arrives, in numbers only (no
+    /// picture is shown or kept). For checking a sender without a TV.
+    /// Ctrl+C ends it.
+    StandIn {
+        /// The name senders list it under
+        #[arg(long, default_value = "Kagaz stand-in TV")]
+        name: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -178,9 +188,15 @@ fn ways(tv: &Tv) -> String {
     tv.ways.iter().map(|w| w.label()).collect::<Vec<_>>().join(", ")
 }
 
-/// `kagaz tvs settings`
+/// `kagaz tvs settings` and `kagaz tvs stand-in`
 pub fn settings(action: TvsAction) -> Result<()> {
-    let TvsAction::Settings { power, encoder } = action;
+    let (power, encoder) = match action {
+        TvsAction::Settings { power, encoder } => (power, encoder),
+        TvsAction::StandIn { name } => {
+            stop_on_ctrl_c();
+            return kagaz_core::tv::miracast::stand_in::run(&name, &STOP, |l| println!("{l}")).map_err(|e| anyhow!(e));
+        }
+    };
     if let Some(p) = power {
         kagaz_core::paths::set_setting("power", Some(video::Priority::from(p).name()))?;
     }

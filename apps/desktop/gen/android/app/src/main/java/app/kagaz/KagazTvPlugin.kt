@@ -66,8 +66,8 @@ class KagazTvPlugin(private val activity: Activity) : Plugin(activity) {
             ComponentName("com.samsung.android.smartmirroring", "com.samsung.android.smartmirroring.CaptureActivity")
         )
         val opened = when {
-            samsung && tryOpen(smartView) -> "Smart View is open: pick the TV there."
-            tryOpen(Intent("android.settings.CAST_SETTINGS")) -> "Android's Cast screen is open: pick the TV there."
+            samsung && tryOpen(smartView) -> "Samsung's Smart View is open: pick the TV there."
+            tryOpen(Intent("android.settings.CAST_SETTINGS")) -> "The phone's Cast screen is open: pick the TV there (turn on Wireless display at the top for Miracast TVs)."
             tryOpen(Intent("android.settings.WIFI_DISPLAY_SETTINGS")) -> "Android's wireless display screen is open: pick the TV there."
             samsung -> "Open Smart View from the quick panel (swipe down twice), then pick the TV."
             else -> "Open Cast or Screen Cast from the quick panel (swipe down twice), then pick the TV."
@@ -76,7 +76,8 @@ class KagazTvPlugin(private val activity: Activity) : Plugin(activity) {
         invoke.resolve(ret)
     }
 
-    /** Samsung DeX: a desktop on the TV, through Smart View. */
+    /** Samsung DeX: a desktop on the TV. Opens DeX's own start screen
+     *  (what its quick-panel tile opens), else its settings. */
     @Command
     fun dex(invoke: Invoke) {
         val ret = JSObject()
@@ -86,14 +87,17 @@ class KagazTvPlugin(private val activity: Activity) : Plugin(activity) {
             invoke.resolve(ret)
             return
         }
-        val settings = Intent().setComponent(
-            ComponentName("com.sec.android.desktopmode.uiservice", "com.sec.android.desktopmode.uiservice.activity.settings.SettingsActivity")
-        )
-        val opened = tryOpen(settings)
+        val pkg = "com.sec.android.desktopmode.uiservice"
+        val toggle = Intent(Intent.ACTION_VIEW).setComponent(ComponentName(pkg, "$pkg.activity.ModeToggleActivity"))
+        val settings = Intent().setComponent(ComponentName(pkg, "$pkg.activity.settings.SettingsActivity"))
+        val linkNote = " DeX needs Link to Windows turned off (Settings, Connected devices)."
         ret.put(
             "said",
-            if (opened) "DeX settings are open. To start DeX on the TV: quick panel, DeX, then pick the TV."
-            else "Start DeX from the quick panel (swipe down twice, DeX), then pick the TV."
+            when {
+                tryOpen(toggle) -> "DeX is starting: pick the TV on the phone." + linkNote
+                tryOpen(settings) -> "DeX settings are open." + linkNote
+                else -> "Start DeX from the quick panel (swipe down twice, DeX)." + linkNote
+            }
         )
         invoke.resolve(ret)
     }

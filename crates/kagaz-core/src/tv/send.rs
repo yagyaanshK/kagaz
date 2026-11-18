@@ -57,11 +57,13 @@ pub fn mirror_named(
                 let ip = t.address.ok_or("the TV gave no address")?;
                 return miracast::mirror(Route::Network(ip), opts, pictures, stop, || Ok(()), |e| say(Said::Event(e)));
             }
-            Ok(t) if via == Some(Via::Network) => {
+            // Found, not taking mirroring now, and no Wi-Fi Direct here.
+            Ok(t) if via == Some(Via::Network) || !cfg!(target_os = "linux") => {
                 return Err(format!(
-                    "{} is not taking screen mirroring over the network right now (it may be starting up, \
-                     or in standby); Wi-Fi Direct reaches it",
-                    t.name
+                    "{} is on the network but not taking screen mirroring right now. Some TVs stop taking it \
+                     after a session that did not end properly: turn the TV off and on again{}",
+                    t.name,
+                    if cfg!(target_os = "linux") { ", or reach it over Wi-Fi Direct" } else { ", or use this system's own sender" }
                 ))
             }
             Err(e) if via == Some(Via::Network) => return Err(e),

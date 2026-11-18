@@ -148,6 +148,8 @@ pub fn tv_show(app: AppHandle, name: String, what: String) -> Result<(), String>
         .name("kagaz-tv".into())
         .spawn(move || {
             let say = |line: String, phase: &'static str| {
+                // Also in the system's log (logcat on a phone), for finding faults.
+                eprintln!("tv: [{phase}] {line}");
                 let _ = app.emit("tv-session", News { tv: name.clone(), line, phase });
             };
             say("Starting...".into(), "starting");
@@ -353,10 +355,21 @@ mod phone {
         let mut env = vm.attach_current_thread().map_err(|e| e.to_string())?;
         let class: &JClass = class.as_obj().into();
         let out = f(&mut env, class);
+        // Name the Java exception, not just that there was one.
+        let mut thrown = None;
         if env.exception_check().unwrap_or(false) {
+            let e = env.exception_occurred().ok();
             let _ = env.exception_clear();
+            if let Some(e) = e {
+                thrown = env
+                    .call_method(&e, "toString", "()Ljava/lang/String;", &[])
+                    .and_then(|v| v.l())
+                    .ok()
+                    .and_then(|o| env.get_string(&JString::from(o)).ok().map(String::from));
+                let _ = env.exception_clear();
+            }
         }
-        out.map_err(|e| e.to_string())
+        out.map_err(|e| thrown.unwrap_or_else(|| e.to_string()))
     }
 
     pub fn connect() {

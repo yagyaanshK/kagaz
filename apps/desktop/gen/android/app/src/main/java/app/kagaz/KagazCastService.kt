@@ -108,6 +108,7 @@ class KagazCastService : Service() {
     }
 
     private fun finish(error: String?) {
+        android.util.Log.i("KagazTv", "screen-sharing grant: ${error ?: "held"}")
         val d = done
         done = null
         d?.invoke(error)

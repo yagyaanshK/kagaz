@@ -73,29 +73,39 @@ const KagazTvs = (() => {
   }
 
   function ways(t) {
+    const box = el("div", "tv-ways");
     const row = el("div", "actions");
     const busy = !!showing;
+    let help;
     if (PHONE) {
-      const b = button("accent", "Show this phone", () => show(t, "screen"));
+      const b = button("accent", "Mirror this phone with Kagaz", () => show(t, "screen"));
       b.disabled = busy;
       row.appendChild(b);
-      row.appendChild(button("", SAMSUNG ? "Smart View" : "Android's Cast", () => system("systemCast"), "Use the phone's own way to the TV"));
-      if (SAMSUNG) row.appendChild(button("", "Samsung DeX", () => system("dex"), "A desktop on the TV with Samsung DeX"));
+      row.appendChild(button("", "Mirror with the phone's Cast", () => system("systemCast")));
+      if (SAMSUNG) row.appendChild(button("", "Start Samsung DeX on the TV", () => system("dex")));
+      help = SAMSUNG
+        ? "Both copy this phone's screen to the TV: Kagaz's own way, or the phone's Cast screen (its Wireless display entries are Smart View's way, the others Google Cast). DeX instead gives the TV a desktop of its own (Link to Windows has to be off for DeX)."
+        : "Both copy this phone's screen to the TV: Kagaz's own way, or the phone's built-in one.";
     } else {
-      const b = button("accent", "Show this screen", () => show(t, "screen"));
+      const b = button("accent", "Mirror this computer with Kagaz", () => show(t, "screen"));
       b.disabled = busy;
       row.appendChild(b);
       if (OS === "gnome") {
-        const w = button("", "Show a window", () => show(t, "window"));
+        const w = button("", "Mirror one window", () => show(t, "window"));
         w.disabled = busy;
-        const x = button("", "Use as a second screen", () => show(t, "extend"), "Make the TV a second screen for this computer");
+        const x = button("", "Use the TV as a second screen", () => show(t, "extend"));
         x.disabled = busy;
         row.append(w, x);
       }
-      const own = { windows: "Windows' Cast", macos: "AirPlay", gnome: "The system's own" }[OS] || "The system's own";
-      row.appendChild(button("", own, () => system("system"), "Use this computer's own way to the TV"));
+      const own = { windows: "Mirror with Windows' Cast", macos: "Mirror with AirPlay", gnome: "Mirror with the system's own sender" }[OS] || "Mirror with the system's own sender";
+      row.appendChild(button("", own, () => system("system")));
+      help = OS === "gnome"
+        ? "Mirroring copies this screen (or one window) to the TV; a second screen makes the TV an extra monitor you can drag windows onto."
+        : "Mirroring copies this screen to the TV: Kagaz's own way, or this computer's built-in one.";
     }
-    return row;
+    box.appendChild(row);
+    box.appendChild(el("p", "muted small", help));
+    return box;
   }
 
   function card(t) {
