@@ -632,6 +632,54 @@ mod tests {
         assert!(pictures >= 100, "{pictures} pictures decoded");
     }
 
+    /// On the owner's real desktop, only when asked (`KAGAZ_REAL_SCREEN=1`,
+    /// the desktop's dialog asks too): for each picture the desktop
+    /// delivers, the time and the share of the screen that changed since
+    /// the one before. Numbers only; no picture is kept or written.
+    #[test]
+    #[ignore]
+    fn real_screen_changes() {
+        if std::env::var_os("KAGAZ_REAL_SCREEN").is_none() {
+            return;
+        }
+        let screen = Screen::ask(Choice::Screen).expect("screen shared");
+        screen.first_picture(Duration::from_secs(10)).expect("a picture");
+        let start = Instant::now();
+        let mut last_seq = 0;
+        let mut prev: Vec<u8> = Vec::new();
+        let mut lines = Vec::new();
+        while start.elapsed() < Duration::from_secs(30) {
+            let (seq, sample) = {
+                let l = screen.latest.lock().unwrap();
+                if l.seq == last_seq {
+                    drop(l);
+                    std::thread::sleep(Duration::from_millis(2));
+                    continue;
+                }
+                // A grid of 160 x 100 points, one channel each.
+                let mut s = Vec::with_capacity(16_000);
+                for gy in 0..100 {
+                    for gx in 0..160 {
+                        let (x, y) = (gx * l.width / 160, gy * l.height / 100);
+                        s.push(l.data[y * l.stride + x * 4 + 1]);
+                    }
+                }
+                (l.seq, s)
+            };
+            let changed = if prev.is_empty() {
+                0.0
+            } else {
+                sample.iter().zip(&prev).filter(|(a, b)| a.abs_diff(**b) > 8).count() as f64 / 160.0
+            };
+            lines.push(format!("{:6} ms  #{seq:<5} changed {changed:5.1}%", start.elapsed().as_millis()));
+            prev = sample;
+            last_seq = seq;
+        }
+        for l in &lines {
+            eprintln!("{l}");
+        }
+    }
+
     #[test]
     #[ignore]
     fn scale_timing() {

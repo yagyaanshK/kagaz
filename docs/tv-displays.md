@@ -378,6 +378,12 @@ nearby.
   black when captured; that is the service's choice, and Kagaz says so if
   a picture comes out black.
 - No HDCP: a TV that demands it for mirroring refuses Kagaz.
+- Some desktop effects never reach screen sharing, so no screen-sharing
+  app shows them on a TV. Found 2026-11-18 with the Magic Lamp minimise
+  effect on GNOME 50: the desktop's stream went from window to no window
+  in one picture (a numbers-only check, `real_screen_changes`), and with
+  the effect switched off GNOME's own minimise animation did show on the
+  TV.
 - A TV on no network can only be mirrored to, over Wi-Fi Direct: sending
   a file, the remote and Cast all need the TV on a network.
 - macOS has no Wi-Fi Direct or Miracast for apps: a Mac reaches a TV on
