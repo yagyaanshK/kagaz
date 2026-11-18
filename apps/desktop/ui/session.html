@@ -21,7 +21,7 @@
         <span id="bar-remote" class="bar-remote hidden">
         <span id="rv-chip" class="rc-chip" title="How this session travels"><span id="rv-chip-icon" class="ic" data-icon="lock"></span><span id="rv-chip-path" class="rc-chip-path"></span><span id="rv-chip-text"></span></span>
         <button id="rv-keys" type="button" class="bar-btn" aria-haspopup="true" aria-expanded="false" title="Send keys such as Ctrl + Alt + Del" aria-label="Send keys"><span class="ic" data-icon="keyboard"></span></button>
-        <button id="rv-clip" type="button" class="bar-btn" title="Send what is on this computer's clipboard (text or a picture) to the device; what is copied there arrives here by itself" aria-label="Send the clipboard"><span class="ic" data-icon="clipboard"></span></button>
+        <button id="rv-clip" type="button" class="bar-btn" title="Send this computer's clipboard (text or a picture) to the device; what is copied there arrives here by itself" aria-label="Send the clipboard"><span class="ic" data-icon="clipboard"></span></button>
         <button id="rv-file" type="button" class="bar-btn" aria-label="Send a file" disabled><span class="ic" data-icon="file"></span></button>
         <button id="rv-sound" type="button" class="bar-btn" aria-label="The device's sound" disabled><span class="ic" data-icon="speaker"></span></button>
         <button id="rv-screens" type="button" class="bar-btn" aria-label="Choose a monitor" disabled><span class="ic" data-icon="screens"></span></button>
@@ -45,7 +45,7 @@
               <button id="urgent-decline" type="button" class="urgent-btn">Decline</button>
             </span>
           </div>
-        <div id="rv-banner" class="rc-banner hidden" role="status"><span class="ic" data-icon="unlock"></span><span><strong>Not encrypted on this network.</strong> The screen and what you type can be read by others on it. Through Tailscale they are protected.</span></div>
+        <div id="rv-banner" class="rc-banner hidden" role="status"><span class="ic" data-icon="unlock"></span><span><strong>Not encrypted on this network.</strong> Others on it can read the screen and what you type; over Tailscale they can't.</span></div>
         <div id="rv-stage" class="rc-stage" tabindex="0" aria-label="The device's screen. Keys typed here go to the device.">
         <canvas id="rv-canvas" class="rc-screen hidden"></canvas>
         <div id="rv-card" class="rc-card hidden"></div>

@@ -322,7 +322,7 @@ async function select(i) {
   $("scan-form").classList.toggle("hidden", !scannable);
   if (!scannable) {
     $("scan-unavailable-text").textContent = has(d, "SaneNet")
-      ? "This device was seen only with its vendor's own scanning protocol, which needs the vendor's driver (see About). No driverless scan service (eSCL or WSD) answered this time."
+      ? "Only the vendor's own scanning protocol was seen, which needs its driver (see About). No driverless scan service (eSCL or WSD) answered this time."
       : "No driverless scan service (eSCL or WSD) was seen on this device, so Kagaz cannot scan from it.";
   }
 
@@ -517,7 +517,7 @@ function renderResolutions() {
   const note = $("engine-note");
   if (ec && !ec.resolutions.includes(dpi)) {
     const other = engSel.value === "Driver" ? "no driver" : "the installed vendor driver";
-    note.textContent = `${dpi} dpi is not offered via ${ec.via}; it is offered with "${other}". Scanning will refuse as set.`;
+    note.textContent = `${dpi} dpi is not offered via ${ec.via}, only with "${other}". Scanning will refuse as set.`;
     note.classList.add("cap-warn");
   } else if (ec) {
     note.textContent = `via ${ec.via}: ${ec.resolutions.join(", ")} dpi` + (ec.feeder ? ", glass and feeder" : ", glass only") + (ec.duplex ? ", both sides" : "");
@@ -975,7 +975,7 @@ function xmStep(step, r) {
   } else if (step === "page") {
     xmPageUrl = r.url;
     $("xm-note").textContent = /security information/.test(r.title)
-      ? "Xiaomi wants an email address added to the account before it lets a new device in. Add it on Xiaomi's page; Kagaz carries on by itself when you are done."
+      ? "Xiaomi wants an email address on the account before it lets a new device in. Add it on Xiaomi's page; Kagaz carries on by itself when you are done."
       : `Xiaomi wants this finished on its own page${r.title ? ` (${r.title})` : ""}; Kagaz carries on by itself when you are done.`;
   }
 }
@@ -1403,7 +1403,7 @@ function failPlayback(tile, cam, reason, at) {
   }
   if (/-52402/.test(String(reason))) {
     tile._paused = true;
-    setState(tile, "lost", "This camera does not allow playing its recordings over the internet (it refuses every request). Click to try again.");
+    setState(tile, "lost", "This camera refuses to play its recordings over the internet. Click to try again.");
     return;
   }
   if (tile._fails >= MAX_FAILS) {
@@ -1479,7 +1479,7 @@ async function mountPlayback(tile, cam, from, opts = {}) {
   tile._playback = { token: handle.token, stream: handle.stream, from, to, speed, asked: tile._askedAt || Date.now(), firstFrame: false };
   setState(tile, "connecting", handle.cached ? "loading from your disk…"
     : clips ? "asking the camera for its recording…"
-    : "no recording list for this camera; asking the camera whether it has this time…");
+    : "no recording list for this camera; asking it whether it has this time…");
   if (!builtin) {
     const player = document.createElement("video");
     player.autoplay = true;
@@ -2424,7 +2424,7 @@ function tlBands(ids) {
     for (const r of l.restarts || []) {
       if (isSet(r.offset) || isSet(r.corrected_at) || r.unsure_until <= r.resumed) continue;
       out.push({ start: r.resumed, end: r.unsure_until, kind: "unsure",
-        title: `${who}the camera restarted at ${clockText(r.stopped)} and did not set its clock from the internet: the times from here to ${clockText(r.unsure_until)} may be wrong. Use Clock… under the camera to correct them.` });
+        title: `${who}the camera restarted at ${clockText(r.stopped)} without setting its clock from the internet: times from here to ${clockText(r.unsure_until)} may be wrong. Correct them with Clock… under the camera.` });
     }
     for (const c of l.corrections || []) {
       out.push({ start: c.from, end: c.until, kind: "fixed",
@@ -3078,7 +3078,7 @@ function clockForm(wrap, cam, tile) {
   form.innerHTML = `the camera's clock showed <input type="time" class="ck-shown" value="${shown}" step="1">`
     + ` when the real time was <input type="time" class="ck-real" value="${shown}" step="1">`
     + ` <button type="button" class="ck-save">Correct</button><span class="muted ck-note"></span>`
-    + `<div class="muted ck-help">Read the time printed on the video, and the real time from another camera or anything else you know. It applies from the restart before that moment to the next restart or the end of the day.</div>`
+    + `<div class="muted ck-help">Read the time printed on the video, and the real time from another camera or anything you know. It applies from the restart before that moment until the next restart or the day's end.</div>`
     + fixes.map((c) => `<div class="ck-row">${clockText(c.from)} – ${clockText(c.until)}: ${offsetText(c.offset)}${c.note ? " (" + c.note + ")" : ""} <button type="button" class="ck-remove" data-from="${c.camera_from}">Remove</button></div>`).join("");
   const note = form.querySelector(".ck-note");
   const date = $("pb-date").value;
@@ -3409,7 +3409,7 @@ async function lookForStations() {
     const n = doorFound.length;
     $("door-note").textContent = n
       ? `${n} SIP device${n === 1 ? "" : "s"} answered.`
-      : "Nothing answered on this network. A station that is off, or on another network, cannot be found; you can still add it by address.";
+      : "Nothing answered on this network. A station that is off or on another network cannot be found; add it by address instead.";
   } catch (e) {
     $("door-note").textContent = "Could not look: " + e;
   }

@@ -277,7 +277,7 @@ const KagazDoorbellSettings = (() => {
     style.value = s.silent ? "silent" : "ring";
     style.setAttribute("aria-label", "When someone rings");
     const note = () => (style.value === "silent"
-      ? "On this device. The notification only; tap it to open the call. The tones below play again if you switch back."
+      ? "On this device. Just the notification; tap it to open the call. The tones below return if you switch back."
       : phone ? "On this device. Follows the phone's silent, vibrate and Do Not Disturb modes; a volume key quiets a ring." : "On this device.");
     const styleRow = row("When someone rings", note(), style);
     box.appendChild(styleRow);
@@ -304,7 +304,7 @@ const KagazDoorbellSettings = (() => {
 
   function drawAll(box) {
     const s = listing.settings;
-    const sec = section("Every doorbell", "The ring for any doorbell, unless its own section below says otherwise.");
+    const sec = section("Every doorbell", "The ring for any doorbell not set on its own below.");
     sec.appendChild(ringStyle());
     sec.appendChild(kindTone("all", "Ringtone", "Calm tones made by Kagaz, or your own."));
     const range = document.createElement("input");
@@ -389,7 +389,7 @@ const KagazDoorbellSettings = (() => {
       if ($("calls-enabled")) $("calls-enabled").checked = sw.checked;
     }, () => { sw.checked = !sw.checked; }));
     sec.appendChild(ringRow = row("Ring me here", /Android/i.test(navigator.userAgent)
-      ? "Ring on this phone for calls to your OneTouch account, also after you close Kagaz (a small “Ready for doorbell calls” notification shows it is listening). If it stops after a while, let Kagaz run in the background in Android's battery settings."
+      ? "Ring on this phone for calls to your OneTouch account, even after you close Kagaz (a small “Ready for doorbell calls” notification shows it is listening). If it stops after a while, allow Kagaz to run in the background in Android's battery settings."
       : "Ring on this computer for calls to your OneTouch account.", sw));
     sec.appendChild(kindTone("doorbell", "Door stations and monitors", "A ring from a door station, an indoor monitor or a guard phone."));
     sec.appendChild(kindTone("family", "Family", "A call from someone in your home with their own login."));
@@ -546,7 +546,7 @@ const KagazSettings = (() => {
     t.type = "checkbox";
     t.checked = on;
     t.setAttribute("aria-label", "Ring during Do Not Disturb");
-    const r = row("Ring during Do Not Disturb", "Doorbell calls ring and vibrate even in Do Not Disturb, Bedtime and Sleep modes. Android keeps this switch: Kagaz opens its page, where you turn Override Do Not Disturb on or off.", t);
+    const r = row("Ring during Do Not Disturb", "Doorbell calls ring and vibrate even in Do Not Disturb, Bedtime and Sleep modes. Android holds this switch: Kagaz opens its page to turn Override Do Not Disturb on or off.", t);
     t.addEventListener("change", () => {
       t.checked = !t.checked; // only Android's page changes it
       KagazSet.attempt(r, () => invoke("ring_dnd_settings"));

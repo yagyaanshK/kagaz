@@ -282,7 +282,7 @@ const KagazFans = (() => {
       extras.appendChild(dim);
     }
     const sb = toggle("Sleep", !!(s && s.sleep), `Sleep mode of ${f.name}`, (v) => send(f, { kind: "sleep", value: v }, c));
-    sb.title = "Sleep mode: the fan's own feature (on some remotes, such as the Efficio's; the Aris's remote has no button for it); what it does through the night is not yet known";
+    sb.title = "Sleep mode: the fan's own feature (on some remotes, such as the Efficio's, not the Aris's); what it does through the night is not yet known";
     extras.appendChild(sb);
     const timer = el("label", "fan-timer", "Turn off after ");
     const sel = el("select");
@@ -342,7 +342,7 @@ const KagazFans = (() => {
   }
 
   async function forget(f) {
-    if (await KagazAsk.confirm(`Forget ${f.name}?`, "Forget fan", "It stays as it is; it is just not listed here any more. It shows under Found nearby when it is within reach.")) {
+    if (await KagazAsk.confirm(`Forget ${f.name}?`, "Forget fan", "The fan stays as it is, just not listed here. It shows under Found nearby when within reach.")) {
       menus.delete(f.id);
       await apply(() => invoke("fan_forget", { id: f.id }));
     }

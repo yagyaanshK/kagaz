@@ -164,7 +164,7 @@ const KagazRemoteView = (() => {
   function certificateCard(d) {
     showCard(
       el("h3", "", `${d.name} shows another certificate`),
-      el("p", "", "It is not the one Kagaz remembered for this computer. Windows renews its certificate about twice a year, and a reinstalled computer has a new one. It also happens when another device answers in its place."),
+      el("p", "", "It differs from the one Kagaz remembered. Windows renews its certificate about twice a year, and a reinstalled computer gets a new one. Another device answering in its place also causes this."),
       el("p", "muted", "If you did not expect this, cancel and check the computer and its address."),
       buttons(
         button("", "Cancel", () => close()),
@@ -337,7 +337,7 @@ const KagazRemoteView = (() => {
     for (const id of ["rv-keys", "rv-clip", "rv-picture", "rv-full"]) $(id).disabled = !on;
     document.querySelectorAll("#rv-touchbar button").forEach((b) => (b.disabled = !on));
     const not = (what) => (info && info.speaks === "rdp" ? `${what} over Remote Desktop is not built yet`
-      : `${what}: VNC carries none of this; the device needs Remote Desktop for it`);
+      : `${what}: not over VNC; the device needs Remote Desktop for it`);
     const set = (id, has, title, without) => {
       $(id).disabled = !(on && has);
       $(id).title = on && !has ? without : title;
@@ -346,7 +346,7 @@ const KagazRemoteView = (() => {
     // The device's sound plays here unless its page says not to; the
     // button turns it off and on for the moment.
     const noSound = info && info.speaks === "rdp" ? "Its sound is turned off for this computer on its page"
-      : "VNC carries no sound; the device needs Remote Desktop for it";
+      : "VNC has no sound; the device needs Remote Desktop for it";
     set("rv-sound", info && info.sound, "", noSound);
     if (cur) cur.soundOff = false;
     soundButton();
@@ -780,7 +780,7 @@ const KagazRemoteView = (() => {
     try {
       const sent = await invoke("remote_clipboard_push", { session: cur.session, asked: !quietly });
       if (quietly) return;
-      toast(sent.picture ? `Offered the picture on this computer's clipboard to ${cur.device.name}. Paste there to use it.`
+      toast(sent.picture ? `Offered this computer's clipboard picture to ${cur.device.name}. Paste there to use it.`
         : sent.characters == null ? "There is no text or picture on this computer's clipboard."
         : `Offered ${sent.characters} characters to ${cur.device.name}. Paste there to use them.`);
     } catch (e) {
@@ -955,7 +955,7 @@ const KagazRemoteView = (() => {
     const chooses = !cur.info || cur.info.picture_setting;
     const note = el("p", "muted", chooses
       ? "Smoother lets the device send areas of many colours as JPEG, when its VNC server can."
-      : "Over Remote Desktop the computer suits its picture to the connection by itself, and draws its screen at this window's size.");
+      : "Over Remote Desktop the computer suits its picture to the connection and draws its screen at this window's size.");
     // What cannot be chosen here is not offered.
     const parts = chooses ? [slider, autoLabel, sizeLabel] : [];
     if (openPop("rv-picture", "picture", [el("strong", "", "Picture"), ...parts, line, note])) {

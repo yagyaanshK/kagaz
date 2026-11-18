@@ -87,7 +87,7 @@ const KagazRemote = (() => {
   // Can a session be opened with it from here?
   const canConnect = (d) => d.ways.some((w) => w.speaks === "vnc" || (canRdp && w.speaks === "rdp"));
   const overRdp = (d) => canRdp && d.ways.some((w) => w.speaks === "rdp");
-  const NOT_YET = "Remote Desktop sessions are not on this kind of device yet. A device that speaks VNC can be connected to.";
+  const NOT_YET = "Remote Desktop sessions are not on this kind of device yet; VNC devices can be connected to.";
 
   // On a computer every session has a window of its own, and several
   // run at once (remote_windows.rs); the list says which devices have
@@ -102,8 +102,8 @@ const KagazRemote = (() => {
     let again = false;
     if (windowsOf(id).length && !show) {
       again = await KagazAsk.confirm(`${d.name} already has a window open`, "Connect again",
-        "A Windows computer usually gives each account one screen: connecting again takes that screen over, and the window already open loses it. "
-        + "With a different account, or on a computer that allows it, the two run side by side.", "Show that window");
+        "Windows usually gives each account one screen: connecting again takes it over from the window already open. "
+        + "With another account, or on a computer that allows it, both run side by side.", "Show that window");
     }
     try {
       const label = await invoke("remote_window_open", { device: id, again });
@@ -146,7 +146,7 @@ const KagazRemote = (() => {
       const n = names.length;
       const yes = await KagazAsk.confirm(n === 1 ? `Close Kagaz and end the session with ${names[0]}?` : `Close Kagaz and end ${n} sessions?`, "Close Kagaz",
         `${n === 1 ? "Everything open on it stays open there." : names.join(", ") + ". Everything open on them stays open there."} `
-        + "The settings of Computers & phones can keep session windows open when this window closes.", "Stay");
+        + "Computers & phones settings can keep session windows open when this window closes.", "Stay");
       if (yes) invoke("remote_close_all").catch(() => {});
     });
   }
@@ -307,7 +307,7 @@ const KagazRemote = (() => {
         found = { ...found, ways: [{ speaks, port: speaks === "vnc" ? 5900 : 3389 }], banners: [""] };
       }
       if (!found.ways.length) {
-        note.textContent = `Nothing answered at ${found.host} for Remote Desktop, VNC or SSH. Check that it is on and that remote access is switched on there. To add it anyway, choose what it speaks under "By its address".`;
+        note.textContent = `Nothing answered at ${found.host} for Remote Desktop, VNC or SSH. Check it is on, with remote access switched on. To add it anyway, choose what it speaks under "By its address".`;
         note.classList.remove("working");
         const words = note.textContent;
         if (!viewIs("add")) openAdd(host, name);
@@ -538,7 +538,7 @@ const KagazRemote = (() => {
       const older = el("input");
       older.type = "checkbox";
       older.checked = !!settings.older_picture;
-      olderLabel.append(older, " Use the older picture", el("small", "muted", "Slower and heavier on the connection. For a computer whose screen comes out wrong or stays black otherwise. Takes effect at the next connection."));
+      olderLabel.append(older, " Use the older picture", el("small", "muted", "Slower and heavier on the connection, for a computer whose screen otherwise comes out wrong or black. Takes effect at the next connection."));
       older.addEventListener("change", () => {
         if (older.checked) settings.older_picture = true;
         else delete settings.older_picture;
@@ -551,14 +551,14 @@ const KagazRemote = (() => {
       const sound = el("input");
       sound.type = "checkbox";
       sound.checked = !settings.mute;
-      soundLabel.append(sound, " Play its sound here", el("small", "muted", "Instead of on the computer itself. The speaker button over its screen turns it off for the moment. Takes effect at the next connection."));
+      soundLabel.append(sound, " Play its sound here", el("small", "muted", "Instead of on the computer itself. The speaker button over its screen mutes it for now. Takes effect at the next connection."));
       sound.addEventListener("change", () => {
         if (sound.checked) delete settings.mute;
         else settings.mute = true;
         keepSettings();
       });
       soundRow.append(soundLabel);
-      screen.append(sizeRow, olderRow, soundRow, el("p", "muted small", "The computer suits its picture to the connection by itself, and shows one screen, made for this window."));
+      screen.append(sizeRow, olderRow, soundRow, el("p", "muted small", "The computer suits its picture to the connection, and shows one screen sized for this window."));
     } else {
       screen.append(picRow, autoRow);
       if (canConnect(d)) screen.append(el("p", "muted small", "Over VNC the device's whole screen is shown at its own size, fitted to the window. Sound and files need Remote Desktop."));
@@ -602,7 +602,7 @@ const KagazRemote = (() => {
       keepSettings();
     });
     keysRow.append(keysLabel, keysChoice);
-    keys.append(keysRow, el("p", "muted small", "Print Screen, the Windows key, Alt + Tab, Ctrl + Alt + Del and the like, which this computer otherwise acts on itself. A press goes to one of the two, never both. Ctrl + Esc leaves full screen; the first time, this computer asks whether Kagaz may have its keys."));
+    keys.append(keysRow, el("p", "muted small", "Print Screen, the Windows key, Alt + Tab, Ctrl + Alt + Del and the like, which this computer otherwise keeps. Each press goes to one of the two, never both. Ctrl + Esc leaves full screen; the first time, this computer asks whether Kagaz may have its keys."));
 
     const paths = el("section", "set-section");
     paths.append(el("h3", "", "Ways to reach it"), el("p", "muted", "All are tried at once; the first to answer is used."));
@@ -663,7 +663,7 @@ const KagazRemote = (() => {
       const remember = el("input");
       remember.type = "checkbox";
       remember.checked = !!d.remember;
-      keepLabel.append(remember, " Remember the password", el("small", "muted", "In this computer's password store, once the device has accepted it. Turning this off forgets the one that is kept."));
+      keepLabel.append(remember, " Remember the password", el("small", "muted", "In this computer's password store, once the device accepts it. Turning this off forgets it."));
       remember.addEventListener("change", () => save(() => invoke("remote_remember", { id: d.id, on: remember.checked }), "Could not change it"));
       keepRow.append(keepLabel);
       signIn.append(keepRow);

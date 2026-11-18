@@ -91,14 +91,14 @@
     const note = $("print-target-note");
     if (!sel.options.length) {
       note.textContent = queueInfo
-        ? "This device takes no driverless printing and no print queue on this computer matches it. Installing its driver adds one."
+        ? "This device takes no driverless printing, and no print queue here matches it. Installing its driver adds one."
         : "Looking for this computer's print queues…";
       return;
     }
     note.textContent = sel.value.startsWith("queue:")
       ? "Copies, sides, paper and colour go to the driver with this job; the driver's own settings stay as they are."
       : sel.value === "system"
-        ? "Opens the phone's print dialog, which uses the print service installed for this printer."
+        ? "Opens the phone's print dialog, using the print service installed for this printer."
         : "Kagaz prepares the pages itself and sends them straight to the printer.";
   }
 
@@ -564,7 +564,7 @@
     $("copy-unavailable").classList.toggle("hidden", scannable);
     $("copy-unavailable").textContent = scannable
       ? ""
-      : "Copying needs the scanner of this device, and no scan service was seen on it. To copy, pick a device that scans.";
+      : "Copying needs this device's scanner, and no scan service was seen on it. Pick a device that scans.";
     $("print-check").disabled = false;
     fillTargets($("print-target"), false);
     fillTargets($("copy-target"), true);

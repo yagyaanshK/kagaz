@@ -55,7 +55,7 @@
         <span id="bar-remote" class="bar-remote hidden">
           <span id="rv-chip" class="rc-chip" title="How this session travels"><span id="rv-chip-icon" class="ic" data-icon="lock"></span><span id="rv-chip-path" class="rc-chip-path"></span><span id="rv-chip-text"></span></span>
           <button id="rv-keys" type="button" class="bar-btn" aria-haspopup="true" aria-expanded="false" title="Send keys such as Ctrl + Alt + Del" aria-label="Send keys"><span class="ic" data-icon="keyboard"></span></button>
-          <button id="rv-clip" type="button" class="bar-btn" title="Send what is on this computer's clipboard (text or a picture) to the device; what is copied there arrives here by itself" aria-label="Send the clipboard"><span class="ic" data-icon="clipboard"></span></button>
+          <button id="rv-clip" type="button" class="bar-btn" title="Send this computer's clipboard (text or a picture) to the device; what is copied there arrives here by itself" aria-label="Send the clipboard"><span class="ic" data-icon="clipboard"></span></button>
           <button id="rv-file" type="button" class="bar-btn" aria-label="Send a file" disabled><span class="ic" data-icon="file"></span></button>
           <button id="rv-sound" type="button" class="bar-btn" aria-label="The device's sound" disabled><span class="ic" data-icon="speaker"></span></button>
           <button id="rv-screens" type="button" class="bar-btn" aria-label="Choose a monitor" disabled><span class="ic" data-icon="screens"></span></button>
@@ -83,7 +83,7 @@
         <div id="home-favs" class="home-tiles"></div>
       </div>
       <div class="section-head"><h2 id="home-all-title" class="section-title">All devices</h2><button id="home-fav-choose" type="button" class="link hidden">Choose favourites</button></div>
-      <p id="home-fav-hint" class="muted small hidden">Tap the star on the devices you use most. They show at the top of Home.</p>
+      <p id="home-fav-hint" class="muted small hidden">Star the devices you use most to show them at the top of Home.</p>
       <div id="home-groups"></div>
       <div id="home-empty" class="empty-state hidden">
         <p>Nothing set up yet.</p>
@@ -129,7 +129,7 @@
       </div>
       <div id="print-brands" class="chips" role="group" aria-label="Brand"></div>
       <h3 class="list-head">My printers</h3>
-      <p id="mine-empty" class="muted">None added yet. Add a printer from the ones found nearby, and it shows here every time, with whether it is ready.</p>
+      <p id="mine-empty" class="muted">None added yet. Add one found nearby to keep it here, with whether it is ready.</p>
       <ul id="devices"></ul>
       <h3 id="found-head" class="list-head">Found nearby</h3>
       <p id="search-note" class="muted" role="status"></p>
@@ -148,7 +148,7 @@
         </div>
       </div>
       <p id="fans-note" class="muted" role="status"></p>
-      <p id="fans-empty" class="muted">No fans added yet. Add one from the fans found nearby, and it shows here every time, with how it is, even when it is out of reach.</p>
+      <p id="fans-empty" class="muted">No fans added yet. Add one found nearby to keep it here, with how it is, even out of reach.</p>
       <div id="fan-rooms"></div>
       <h3 id="fans-found-head" class="list-head hidden">Found nearby</h3>
       <p id="fans-found-note" class="muted" role="status"></p>
@@ -163,9 +163,9 @@
         <h2>Air purifiers</h2>
         <button id="purifiers-rescan" type="button" title="Look again for purifiers on the Wi-Fi network">Look again</button>
       </div>
-      <p class="muted small">Kagaz finds Philips purifiers on your Wi-Fi and keeps them here. Switching them and reading their air comes next, once their way of talking is checked against a purifier.</p>
+      <p class="muted small">Kagaz finds Philips purifiers on your Wi-Fi and keeps them here. Switching them and reading their air come next, once how they talk is checked on a real purifier.</p>
       <p id="purifiers-note" class="muted" role="status"></p>
-      <p id="purifiers-empty" class="muted">No purifiers added yet. Add one from the ones found nearby, and it shows here every time, with whether it is on the network.</p>
+      <p id="purifiers-empty" class="muted">No purifiers added yet. Add one found nearby to keep it here, with whether it is on the network.</p>
       <ul id="purifiers-list" class="cards"></ul>
       <h3 id="purifiers-found-head" class="list-head hidden">Found nearby</h3>
       <ul id="purifiers-found" class="cards"></ul>
@@ -188,7 +188,7 @@
         <div id="remote-empty" class="rc-empty hidden">
           <span class="rc-empty-icon ic" data-icon="computer"></span>
           <h3>No computers or phones yet</h3>
-          <p class="muted">Add one of yours, and Kagaz keeps every way to reach it and shows how it does. Seeing its screen here comes next.</p>
+          <p class="muted">Add one of yours; Kagaz keeps every way to reach it and shows how it does.</p>
           <button id="remote-empty-add" type="button" class="accent"><span class="ic" data-icon="plus"></span><span>Add a computer or phone</span></button>
         </div>
         <div id="remote-tiles" class="home-tiles rc-tiles"></div>
@@ -223,7 +223,7 @@
       <div id="remote-settings-view" class="hidden"></div>
       <!-- The viewer (remote-view.js): the window is the device's screen. -->
       <div id="remote-viewer-view" class="rc-viewer hidden">
-        <div id="rv-banner" class="rc-banner hidden" role="status"><span class="ic" data-icon="unlock"></span><span><strong>Not encrypted on this network.</strong> The screen and what you type can be read by others on it. Through Tailscale they are protected.</span></div>
+        <div id="rv-banner" class="rc-banner hidden" role="status"><span class="ic" data-icon="unlock"></span><span><strong>Not encrypted on this network.</strong> Others on it can read the screen and what you type; over Tailscale they can't.</span></div>
         <div id="rv-stage" class="rc-stage" tabindex="0" aria-label="The device's screen. Keys typed here go to the device.">
           <canvas id="rv-canvas" class="rc-screen hidden"></canvas>
           <div id="rv-card" class="rc-card hidden"></div>
@@ -263,9 +263,9 @@
           <p id="mg-note" class="muted small" role="status"></p>
         </div>
         <div id="mg-main" class="hidden">
-          <p id="mg-sample" class="sample-banner hidden">Sample entries, to see how this looks. Nothing here is real. <button id="mg-sample-off" type="button" class="small">Leave the sample</button></p>
+          <p id="mg-sample" class="sample-banner hidden">Sample entries to show how this looks; none are real. <button id="mg-sample-off" type="button" class="small">Leave the sample</button></p>
           <h3 class="list-head">At the gate now</h3>
-          <p id="mg-pending-empty" class="muted">Nobody is waiting. When someone comes for you, they show here with Allow and Deny.</p>
+          <p id="mg-pending-empty" class="muted">Nobody is waiting. Visitors for you show here with Allow and Deny.</p>
           <div id="mg-pending" class="gate-list"></div>
           <h3 class="list-head">Allow future entry</h3>
           <p class="muted small">Say who is coming and the guard lets them in without asking you. A guest gets a code to show at the gate.</p>
@@ -294,9 +294,9 @@
           <p id="pp-note" class="muted small" role="status"></p>
         </div>
         <div id="pp-main" class="hidden">
-          <p id="pp-sample" class="sample-banner hidden">Sample entries, to see how this looks. Nothing here is real. <button id="pp-sample-off" type="button" class="small">Leave the sample</button></p>
+          <p id="pp-sample" class="sample-banner hidden">Sample entries to show how this looks; none are real. <button id="pp-sample-off" type="button" class="small">Leave the sample</button></p>
           <h3 class="list-head">Your vehicles</h3>
-          <p id="pp-vehicles-empty" class="muted">No vehicles yet. Add one with its tag, and its comings and goings show below.</p>
+          <p id="pp-vehicles-empty" class="muted">No vehicles yet. Add one with its tag to see its comings and goings below.</p>
           <div id="pp-vehicles" class="gate-list"></div>
           <div class="actions"><button id="pp-add" type="button">Add a vehicle</button></div>
           <label class="switch"><input id="pp-alerts" type="checkbox" checked> Tell me on every entry and exit</label>
@@ -316,7 +316,7 @@
     <section id="tools" class="pane hidden">
       <button type="button" class="back to-home">&#x2190; Home</button>
       <div class="pane-head"><h2>Tools</h2></div>
-      <p class="muted">Tidy, crop or make smaller a PDF, JPEG or PNG on this device: a scan, a photo of a document, a signature. You see each change first; saving makes a new file, and the original stays as it was.</p>
+      <p class="muted">Tidy, crop or shrink a PDF, JPEG or PNG on this device: a scan, a photo of a document, a signature. You see each change first; saving makes a new file and leaves the original as it was.</p>
       <div class="actions"><button type="button" id="tools-open" class="accent">Open a file…</button></div>
       <p id="tools-note" class="small" role="status"></p>
       <div id="tools-bench" class="hidden"></div>
@@ -401,7 +401,7 @@
           </label>
           <div id="ot-legacy-settings" class="cam-login-row hidden">
             <label>Device MAC (optional)<input id="ot-legacy-device" placeholder="From OTIPVDP advanced settings" autocomplete="off"></label>
-            <p class="muted small">Leave blank to use OTIPVDP’s default server discovery. Legacy sign-in uses the older service’s HTTP protocol.</p>
+            <p class="muted small">Leave blank for OTIPVDP’s default server discovery. Legacy sign-in uses the older service’s HTTP protocol.</p>
           </div>
           <div class="cam-login-row">
             <label>Account username <input id="ot-username" autocomplete="username" autocapitalize="none" spellcheck="false" aria-describedby="ot-username-help" required></label>
@@ -413,7 +413,7 @@
               </div>
             </div>
           </div>
-          <p id="ot-username-help" class="muted small">Use the login username from your phone app or welcome email. It may differ from your contact email address.</p>
+          <p id="ot-username-help" class="muted small">The login username from your phone app or welcome email; it may differ from your contact email.</p>
           <label id="ot-remember-label" class="ot-remember"><input id="ot-remember" type="checkbox" checked> Remember sign-in securely on this device</label>
           <p id="ot-remember-help" class="muted small">If your session expires, Kagaz signs in again by itself. Signing out keeps the saved sign-in; Forget saved sign-in removes it.</p>
           <p id="ot-session-note" class="muted small">OneTouch may sign you out of the phone app when you sign in here.</p>
@@ -448,7 +448,7 @@
           <!-- The home's family members: each uses these devices with their own
                OneTouch login (up to ten). -->
           <div id="ot-family-pane" class="hidden">
-            <p class="muted small">Up to ten family members can see and answer these devices with their own OneTouch login. Invite one with their email or mobile number; OneTouch sends them their login.</p>
+            <p class="muted small">Up to ten family members can see and answer these devices with their own OneTouch login. Invite one by email or mobile number; OneTouch sends them the login.</p>
             <p id="ot-family-count" class="muted small"></p>
             <div id="ot-family-list" class="activity-list"></div>
             <div class="actions"><button id="ot-family-invite" type="button" class="accent">Invite a family member</button></div>
@@ -482,7 +482,7 @@
       <div id="door-list">
         <h3>Door stations</h3>
         <!-- Shown when adding one from Add a device: what this kind is. -->
-        <p id="door-add-intro" class="muted">A door station that rings this device directly over your network (Direct IP, SIP), with no account to sign in to. Kagaz looks for stations that answer on this network: pick one, or add yours by its address.</p>
+        <p id="door-add-intro" class="muted">A door station that rings this device directly over your network (Direct IP, SIP), with no account to sign in to. Pick one Kagaz found on this network, or add yours by its address.</p>
         <p id="door-note" class="muted"></p>
         <div id="door-add-again" class="actions"><button id="door-add-rescan" type="button">Look again</button></div>
         <ul id="door-stations" class="cards"></ul>
@@ -581,7 +581,7 @@
         <input type="hidden" id="pb-date"><input type="hidden" id="pb-time">
         <button id="pb-play" type="button" class="accent" title="Play every camera shown from this time">Play all</button>
         <button id="pb-pause" type="button" title="Pause or resume every camera"><span class="ic" data-icon="pause"></span><span>Pause all</span></button>
-        <div id="pb-seek" title="Every camera shown: recordings, and what the cameras detected. Click or drag to move all of them; scroll to zoom, shift + scroll to move along"></div>
+        <div id="pb-seek" title="All cameras shown: recordings and detections. Click or drag to move them all; scroll to zoom, shift + scroll to move along"></div>
         <span id="pb-seek-at" class="muted">—</span>
         <span class="tl-legend"><i class="tl-key tl-key-rec"></i>recording <i class="tl-key tl-key-motion"></i>motion <i class="tl-key tl-key-person"></i>person <i class="tl-key tl-key-unsure"></i>clock unsure after a restart <i class="tl-key tl-key-fixed"></i>clock corrected</span>
         <label id="pb-speed-box" title="Playback speed; sound plays at 1x only">
@@ -597,7 +597,7 @@
       </div>
       <div id="cam-login-form" class="hidden">
         <h3>Sign in with Tapo</h3>
-        <p class="muted">Your TP-Link (Tapo) account. The password is sent to TP-Link only, the same way the Tapo app does; Kagaz keeps the session token in a private file, never the password.</p>
+        <p class="muted">Your TP-Link (Tapo) account. The password goes to TP-Link only, as in the Tapo app; Kagaz keeps the session token in a private file, never the password.</p>
         <div class="cam-login-row">
           <span class="cam-field"><label for="cam-login-email">Email</label><input type="email" id="cam-login-email" autocomplete="username" autocapitalize="none" spellcheck="false"></span>
           <span class="cam-field"><label for="cam-login-password">Password</label><input type="password" id="cam-login-password" autocomplete="current-password"></span>
@@ -613,7 +613,7 @@
       </div>
       <div id="xm-login-form" class="hidden">
         <h3>Sign in with Xiaomi</h3>
-        <p class="muted">Your Xiaomi (Mi Home) account. Kagaz talks to Xiaomi only, the way Xiaomi's own sign-in page does, and keeps Xiaomi's sign-in token in a private file, never your password.</p>
+        <p class="muted">Your Xiaomi (Mi Home) account. Kagaz talks to Xiaomi only, as Xiaomi's own sign-in page does, and keeps its sign-in token in a private file, never your password.</p>
         <nav class="tabs" role="tablist" aria-label="How to sign in">
           <button class="tab active" type="button" role="tab" aria-selected="true" data-way="phone">Text message</button>
           <button class="tab" type="button" role="tab" aria-selected="false" data-way="password">Password</button>
@@ -631,7 +631,7 @@
         <div class="xm-qr hidden" data-pane="qr">
           <img id="xm-qr-image" alt="QR code to sign in to Xiaomi">
           <div>
-            <p>Scan it with your phone's camera or Google Lens, or on a Xiaomi phone in Settings, then Xiaomi Account. Xiaomi's sign-in page opens on the phone; signing in there signs in Kagaz.</p>
+            <p>Scan it with your phone's camera or Google Lens, or on a Xiaomi phone in Settings, then Xiaomi Account. Signing in on the Xiaomi page that opens there signs in Kagaz too.</p>
             <p class="muted small" id="xm-qr-tips"></p>
             <p class="muted small">Or open this link on a phone signed in to Xiaomi (it may fail with error 70036): <a id="xm-qr-link" href="#" title="Copies the link, to paste on the phone">copy the sign-in link</a></p>
             <button id="xm-qr-new" type="button">New code</button>
@@ -740,7 +740,7 @@
           </div>
           <div class="actions bar">
             <button type="submit" id="print-go" class="accent">Print</button>
-            <button type="button" id="print-check" title="Ask the printer whether it takes these settings, without printing">Check settings</button>
+            <button type="button" id="print-check" title="Ask the printer if it takes these settings, without printing">Check settings</button>
             <span id="print-state" class="muted"></span>
           </div>
         </form>
@@ -750,7 +750,7 @@
       <div id="tab-scan" class="tab-pane hidden">
         <div id="scan-unavailable" class="hidden">
           <p id="scan-unavailable-text"></p>
-          <p class="muted">If this device does scan over the network, it may just have been slow to answer: try "Look again".</p>
+          <p class="muted">If it does scan over the network, it may have been slow to answer: try "Look again".</p>
         </div>
         <form id="scan-form">
           <div class="grid">
@@ -823,7 +823,7 @@
 
         <section id="button-panel" class="hidden">
           <h3>The printer's own Scan button</h3>
-          <p class="muted">What the printer's own Scan to PC button does when it picks this computer. These are Brother's settings, kept in Brother's files; Kagaz writes only your personal copy and "Brother default" removes it.</p>
+          <p class="muted">What the printer's Scan to PC button does when it picks this computer. These are Brother's settings, in Brother's files; Kagaz writes only your personal copy, and "Brother default" removes it.</p>
         <table id="button-table">
           <thead><tr><th>Action</th><th>Resolution</th><th>Paper</th><th>Both sides</th><th>Comes from</th><th></th></tr></thead>
           <tbody></tbody>

@@ -74,7 +74,7 @@ const KagazBench = (() => {
           <label>Height <input type="number" class="bench-custom-h" min="0.1" step="any" inputmode="decimal" value="45"></label>
           <label>In <select class="bench-custom-unit"><option value="mm">mm (true size)</option><option value="in">inches (true size)</option><option value="r">a shape only (like 3 : 2)</option></select></label>
         </div>
-        <p class="bench-shape-note small muted">Drag the frame's corners around what to keep (a photo, a signature), or drag inside it to move it. A tilted frame comes out level, along its bottom side.</p>
+        <p class="bench-shape-note small muted">Drag the frame's corners around what to keep (a photo, a signature), or inside it to move it. A tilted frame comes out level, along its bottom side.</p>
         <div class="bench-crop-editor"></div>
         <fieldset class="bench-modes"><legend class="small">Then</legend>
           <label class="switch"><input type="radio" name="${bench}-crop-mode" value="Area" checked> Just the cropped area, at its real size</label>
@@ -173,7 +173,7 @@ const KagazBench = (() => {
     }
     const fmm = (n) => (Math.round(n * 10) / 10).toString();
     function shapeNote(chosen) {
-      const base = "Drag the frame's corners around what to keep (a photo, a signature), or drag inside it to move it. A tilted frame comes out level, along its bottom side.";
+      const base = "Drag the frame's corners around what to keep (a photo, a signature), or inside it to move it. A tilted frame comes out level, along its bottom side.";
       q(".bench-shape-note").textContent = !chosen
         ? "Give a width and a height above zero."
         : chosen.mm

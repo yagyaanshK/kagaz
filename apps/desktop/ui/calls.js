@@ -547,7 +547,7 @@
     micRestarting = true;
     micRestarts++;
     invoke("page_log", { line: `call microphone: ${why}; opening it again (${micRestarts})` }).catch(() => {});
-    if (micRestarts > 2) note("They may not hear you: another app may be using the microphone, or it is switched off in the phone's quick settings. Kagaz keeps trying.");
+    if (micRestarts > 2) note("They may not hear you: another app may be using the microphone, or it is off in the phone's quick settings. Kagaz keeps trying.");
     else if (micRestarts === 2) note("Reconnecting the microphone\u2026");
     releaseMic();
     // Not too often: a microphone that stays silent is tried every few seconds.

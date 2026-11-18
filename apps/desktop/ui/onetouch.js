@@ -228,7 +228,7 @@ function otRenderDevices() {
     else if (c.call && !lineUp && !busy) note.textContent = calls && calls.line === "off" ? "Turn on “Ring me here” above to call." : "Calls connect once the call line is up.";
     else if (!canWatch && !c.call) {
       note.textContent = c.live ? "OneTouch does not allow live view of this device."
-        : c.kind === "apps" ? "Every phone signed in with your login shares one number, so they ring together. Family members with their own login are listed on their own."
+        : c.kind === "apps" ? "Phones on your login share one number and ring together. Family members with their own login are listed separately."
         : c.kind === "family" ? "OneTouch did not give a call number for this member yet."
         : "";
     }
@@ -433,7 +433,7 @@ function otQrHandle(res) {
   }
   if (res.kind === 'encrypted') {
     otQrDone = true; otQrStop();
-    otQrNote('This is a OneTouch sign-in code. It is encrypted, so sign in with the username and password printed in the same welcome email.');
+    otQrNote('This OneTouch sign-in code is encrypted; sign in with the username and password in the same welcome email.');
     return true;
   }
   // Some other code: show a little of it and keep scanning.
@@ -690,7 +690,7 @@ $('ot-family-invite').addEventListener('click', async () => {
     remark.addEventListener('input', () => { count.textContent = `${remark.value.length}/255`; });
     const country = KagazCountries.select('mf-country'); country.autocomplete = 'tel-country-code';
     const mobile = text('mf-mobile', 'tel-national', 20, { type: 'tel', inputmode: 'tel' });
-    const note = document.createElement('p'); note.className = 'muted small'; note.textContent = 'OneTouch makes them a login on this home and sends it to them: by email, or by text message when only a mobile number is given.';
+    const note = document.createElement('p'); note.className = 'muted small'; note.textContent = 'OneTouch makes them a login on this home and sends it by email, or by text message if only a mobile number is given.';
     const formErr = document.createElement('p'); formErr.className = 'mf-error'; formErr.setAttribute('role', 'alert');
     const row = document.createElement('div'); row.className = 'actions';
     const cancel = document.createElement('button'); cancel.type = 'button'; cancel.textContent = 'Cancel'; cancel.addEventListener('click', () => finish(null));
