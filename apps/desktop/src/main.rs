@@ -31,6 +31,7 @@ mod remote_windows;
 #[cfg(desktop)]
 mod ring_notice;
 mod ringtones;
+mod prefs;
 mod saving;
 mod xiaomi;
 
@@ -1974,6 +1975,8 @@ pub fn run() {
             saving::save_folder,
             saving::save_folder_choose,
             saving::save_folder_reset,
+            prefs::pref_get,
+            prefs::pref_set,
             saving::save_folder_open,
             saving::save_picture,
             xiaomi::xiaomi_signed_in,

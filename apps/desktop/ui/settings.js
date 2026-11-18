@@ -590,6 +590,41 @@ const KagazSettings = (() => {
     body.appendChild(box);
   }
 
+  // Battery or performance, app-wide; and which encoder sends the screen
+  // to a TV.
+  async function drawPower(body) {
+    let power, encoder;
+    try {
+      [power, encoder] = await Promise.all([invoke("pref_get", { key: "power" }), invoke("pref_get", { key: "tv_encoder" })]);
+    } catch (_) {
+      return;
+    }
+    const box = section("Power");
+    const choice = (key, value, options) => {
+      const s = el("select");
+      for (const [v, text] of options) {
+        const o = el("option", "", text);
+        o.value = v;
+        s.appendChild(o);
+      }
+      s.value = value;
+      let saved = value;
+      s.addEventListener("change", () => {
+        const r = s.closest(".set-row");
+        KagazSet.attempt(r, async () => {
+          await invoke("pref_set", { key, value: s.value });
+          saved = s.value;
+        }, () => { s.value = saved; });
+      });
+      return s;
+    };
+    box.appendChild(row("Optimise for", "Battery uses less power: the screen goes to a TV at up to 30 pictures a second, on the graphics chip's low-power encoder where it has one.",
+      choice("power", power, [["performance", "Performance"], ["battery", "Battery"]])));
+    box.appendChild(row("Screen to a TV, encoded by", "The graphics chip is faster and frees the processor; Automatic uses it when it can.",
+      choice("tv_encoder", encoder, [["auto", "Automatic"], ["hardware", "The graphics chip only"], ["software", "The processor only"]])));
+    body.appendChild(box);
+  }
+
   function drawAbout(body) {
     const box = section("About Kagaz");
     box.appendChild(el("p", "muted small", "Free to use, source-available under the Kagaz License. Brand names and logos belong to their owners and are shown only to say which devices Kagaz works with."));
@@ -602,6 +637,7 @@ const KagazSettings = (() => {
     await drawAccounts(body);
     await drawRinging(body);
     await drawSaving(body);
+    await drawPower(body);
     await drawDevices(body);
     drawAbout(body);
   }
