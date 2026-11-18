@@ -29,13 +29,13 @@ const KagazShell = (() => {
   const TITLES = {
     home: "Home", add: "Add a device", settings: "Settings", tools: "Tools",
     doorbell: "Doorbell", cameras: "Security cameras", print: "Printers & scanners",
-    fans: "Fans", purifiers: "Air purifiers", society: "Society gate",
+    fans: "Fans", purifiers: "Air purifiers", tvs: "TVs & displays", society: "Society gate",
     remote: "Computers & phones",
   };
   // Places the navigation itself reaches: there, Back has nowhere to go
   // unless something is open inside the page.
   const PHONE_ROOTS = new Set(["home", "tools", "settings"]);
-  const ALL_ROOTS = new Set(["home", "tools", "settings", "doorbell", "cameras", "print", "fans", "purifiers", "society", "remote"]);
+  const ALL_ROOTS = new Set(["home", "tools", "settings", "doorbell", "cameras", "print", "fans", "purifiers", "tvs", "society", "remote"]);
 
   let view = "home";
   let layout = "";
@@ -159,7 +159,7 @@ const KagazShell = (() => {
     $("bar-menu").classList.toggle("hidden", layout !== "minimal");
     root.dataset.view = view;
   }
-  const SHORT = { cameras: "Cameras", print: "Print & scan", fans: "Fans", purifiers: "Purifiers", remote: "Computers" };
+  const SHORT = { cameras: "Cameras", print: "Print & scan", fans: "Fans", purifiers: "Purifiers", tvs: "TVs", remote: "Computers" };
   const shortTitle = (v) => SHORT[v] || TITLES[v];
 
   $("bar-back").addEventListener("click", () => {

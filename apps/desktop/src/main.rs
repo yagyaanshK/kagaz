@@ -32,6 +32,7 @@ mod remote_windows;
 mod ring_notice;
 mod ringtones;
 mod prefs;
+mod tvs;
 mod saving;
 mod xiaomi;
 
@@ -1926,6 +1927,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(phone_plugin())
         .plugin(os_plugin())
+        .plugin(tvs::init())
         .setup(|app| {
             #[cfg(target_os = "linux")]
             follow_dark_style();
@@ -1977,6 +1979,15 @@ pub fn run() {
             saving::save_folder_reset,
             prefs::pref_get,
             prefs::pref_set,
+            tvs::tvs_saved,
+            tvs::tvs_search,
+            tvs::tv_add,
+            tvs::tv_forget,
+            tvs::tv_show,
+            tvs::tv_showing,
+            tvs::tv_stop,
+            tvs::tv_system_sender,
+            tvs::tv_phone,
             saving::save_folder_open,
             saving::save_picture,
             xiaomi::xiaomi_signed_in,

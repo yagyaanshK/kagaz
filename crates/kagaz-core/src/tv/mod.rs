@@ -5,8 +5,10 @@
 //! over the network, the maker's remote control, Wi-Fi Direct); each TV is
 //! one entry with the ways it was found in.
 
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[cfg(not(target_os = "ios"))]
 pub mod miracast;
+#[cfg(not(target_os = "ios"))]
+pub mod send;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub mod picture;
 #[cfg(target_os = "linux")]

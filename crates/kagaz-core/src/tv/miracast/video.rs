@@ -1,11 +1,14 @@
 //! Pictures for the TV: a generated test pattern (what every test sends,
 //! never this computer's screen), and the H.264 encoder.
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use openh264::encoder::{
     BitRate, Complexity, Encoder, EncoderConfig, FrameRate, FrameType, IntraFramePeriod, Level, Profile,
     QpRange, RateControlMode, UsageType,
 };
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use openh264::formats::{RgbaSliceU8, YUVBuffer};
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use openh264::OpenH264API;
 
 /// The test pattern: colour bars, a white square crossing them once every
@@ -104,14 +107,32 @@ impl Pattern {
 }
 
 /// The quantiser ceiling: text stays crisp.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 const QUALITY: u8 = 26;
 
 /// H.264, Constrained Baseline, as every Wi-Fi Display TV takes.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub struct Video {
     encoder: Encoder,
     yuv: YUVBuffer,
     width: usize,
     height: usize,
+}
+
+/// On a phone the phone's own encoder works (the pictures come encoded,
+/// see `external`); there is no processor encoder.
+#[cfg(any(target_os = "android", target_os = "ios"))]
+pub struct Video;
+
+#[cfg(any(target_os = "android", target_os = "ios"))]
+impl Video {
+    pub fn new(_: usize, _: usize, _: u32, _: u32) -> Result<Video, String> {
+        Err("a phone encodes its screen with its own encoder".into())
+    }
+    pub fn key_next(&mut self) {}
+    pub fn encode(&mut self, _: &[u8]) -> Result<Encoded, String> {
+        Err("a phone encodes its screen with its own encoder".into())
+    }
 }
 
 /// One encoded picture.
@@ -120,6 +141,7 @@ pub struct Encoded {
     pub key: bool,
 }
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 impl Video {
     pub fn new(width: usize, height: usize, fps: u32, bits_per_second: u32) -> Result<Video, String> {
         Video::tuned(width, height, fps, bits_per_second, QUALITY)
@@ -263,6 +285,8 @@ impl Priority {
 /// The encoder in use, hardware or OpenH264.
 pub enum AnyVideo {
     Software(Video),
+    /// Encoded outside Kagaz's Rust (a phone's own encoder).
+    External(super::external::External),
     #[cfg(target_os = "linux")]
     Vaapi(super::vaapi::Vaapi),
     #[cfg(target_os = "linux")]
@@ -276,6 +300,28 @@ pub enum AnyVideo {
 impl AnyVideo {
     /// Opens an encoder; with it, a line saying which.
     pub fn open(
+        width: usize,
+        height: usize,
+        fps: u32,
+        bits_per_second: u32,
+        engine: Engine,
+        priority: Priority,
+    ) -> Result<(AnyVideo, String), String> {
+        // A phone: its own encoder, fed from a virtual display.
+        #[cfg(any(target_os = "android", target_os = "ios"))]
+        {
+            let _ = (engine, priority);
+            let e = super::external::External::open(width, height, fps, bits_per_second)?;
+            Ok((AnyVideo::External(e), "the phone's own encoder".into()))
+        }
+        #[cfg(not(any(target_os = "android", target_os = "ios")))]
+        AnyVideo::open_here(width, height, fps, bits_per_second, engine, priority)
+    }
+
+    /// On a computer: the graphics chip's encoder where there is one, else
+    /// the processor's.
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    fn open_here(
         width: usize,
         height: usize,
         fps: u32,
@@ -348,6 +394,7 @@ impl AnyVideo {
     pub fn key_next(&mut self) {
         match self {
             AnyVideo::Software(v) => v.key_next(),
+            AnyVideo::External(v) => v.key_next(),
             #[cfg(target_os = "linux")]
             AnyVideo::Vaapi(v) => v.key_next(),
             #[cfg(target_os = "linux")]
@@ -362,7 +409,7 @@ impl AnyVideo {
     /// Whether this encoder takes pictures straight from graphics memory.
     pub fn takes_gpu(&self) -> bool {
         match self {
-            AnyVideo::Software(_) => false,
+            AnyVideo::Software(_) | AnyVideo::External(_) => false,
             #[cfg(target_os = "linux")]
             AnyVideo::Vaapi(_) => true,
             #[cfg(target_os = "linux")]
@@ -378,7 +425,7 @@ impl AnyVideo {
     #[cfg(target_os = "linux")]
     pub fn encode_gpu(&mut self, g: Option<&crate::tv::capture::GpuPicture>) -> Result<Encoded, String> {
         match self {
-            AnyVideo::Software(_) | AnyVideo::Nvenc(_) => Err("this encoder takes pictures in memory".into()),
+            AnyVideo::Software(_) | AnyVideo::External(_) | AnyVideo::Nvenc(_) => Err("this encoder takes pictures in memory".into()),
             AnyVideo::Vaapi(v) => v.encode_gpu(g).map(|(data, key)| Encoded { data, key }),
         }
     }
@@ -386,6 +433,7 @@ impl AnyVideo {
     pub fn encode(&mut self, rgba: &[u8]) -> Result<Encoded, String> {
         match self {
             AnyVideo::Software(v) => v.encode(rgba),
+            AnyVideo::External(v) => Ok(v.encode()),
             #[cfg(target_os = "linux")]
             AnyVideo::Vaapi(v) => v.encode(rgba).map(|(data, key)| Encoded { data, key }),
             #[cfg(target_os = "linux")]

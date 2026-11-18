@@ -32,6 +32,7 @@
           <li class="hidden" data-cat="doorbell" tabindex="0" role="button" title="Doorbell"><span class="cat-icon" data-icon="doorbell" aria-hidden="true"></span><span class="cat-name">Doorbell</span><span class="cat-note muted">video intercom</span></li>
           <li class="hidden" data-cat="fans" tabindex="0" role="button" title="Fans"><span class="cat-icon" data-icon="fan" aria-hidden="true"></span><span class="cat-name">Fans</span><span class="cat-note muted">Atomberg, over Bluetooth</span></li>
           <li class="hidden has-short" data-cat="print" tabindex="0" role="button" title="Printers and scanners"><span class="cat-icon" data-icon="print" aria-hidden="true"></span><span class="cat-name">Printers &amp; scanners</span><span class="cat-short">Printers</span><span class="cat-note muted">on the network and USB</span></li>
+          <li class="hidden" data-cat="tvs" tabindex="0" role="button" title="TVs and displays"><span class="cat-icon" data-icon="tv" aria-hidden="true"></span><span class="cat-name">TVs &amp; displays</span><span class="cat-note muted">show your screen</span></li>
           <li class="hidden has-short" data-cat="purifiers" tabindex="0" role="button" title="Air purifiers"><span class="cat-icon" data-icon="purifier" aria-hidden="true"></span><span class="cat-name">Air purifiers</span><span class="cat-short">Purifiers</span><span class="cat-note muted">Philips, on the network</span></li>
           <li class="hidden has-short" data-cat="society" tabindex="0" role="button" title="Society gate"><span class="cat-icon" data-icon="society" aria-hidden="true"></span><span class="cat-name">Society gate</span><span class="cat-short">Society</span><span class="cat-note muted">MyGate, Park+</span></li>
           <li data-cat="add" tabindex="0" role="button" class="cat-add" title="Add a device"><span class="cat-icon" data-icon="plus" aria-hidden="true"></span><span class="cat-name">Add a device</span></li>
@@ -169,6 +170,27 @@
       <ul id="purifiers-list" class="cards"></ul>
       <h3 id="purifiers-found-head" class="list-head hidden">Found nearby</h3>
       <ul id="purifiers-found" class="cards"></ul>
+    </section>
+
+    <!-- TVs & displays (tvs.js): the TVs added and found nearby, and every
+         way this device can show its screen on one. -->
+    <section id="tvs" class="pane hidden">
+      <button type="button" class="back to-home">&#x2190; Home</button>
+      <div class="pane-head">
+        <h2>TVs &amp; displays</h2>
+        <button id="tvs-rescan" type="button" title="Look again for TVs on the network">Look again</button>
+      </div>
+      <p class="muted small">Show this screen on a TV: Kagaz's own way (screen mirroring), or this system's own. The system asks before anything is shared.</p>
+      <div id="tvs-live" class="purifier-card tv-live hidden" role="status">
+        <div class="name" id="tvs-live-title"></div>
+        <div class="caps muted" id="tvs-live-line"></div>
+        <div class="actions"><button id="tvs-stop" type="button" class="danger-text">Stop</button></div>
+      </div>
+      <p id="tvs-note" class="muted" role="status"></p>
+      <p id="tvs-empty" class="muted">No TVs added yet. Add one found nearby to keep it here.</p>
+      <ul id="tvs-list" class="cards"></ul>
+      <h3 id="tvs-found-head" class="list-head hidden">Found nearby</h3>
+      <ul id="tvs-found" class="cards"></ul>
     </section>
 
     <!-- Computers & phones (remote.js): the person's own devices, every way
@@ -941,6 +963,7 @@
   <script src="brands.js"></script>
   <script src="fans.js"></script>
   <script src="purifiers.js"></script>
+  <script src="tvs.js"></script>
   <script src="society.js"></script>
   <script src="remote-view.js"></script>
   <script src="remote.js"></script>

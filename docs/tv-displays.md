@@ -468,6 +468,30 @@ nearby.
   the TV. Samsung DeX and Android's desktop mode, where a phone has them,
   are offered too.
 
+*Built 2026-11-18* (the owner: Windows, then the settings, the Mac and
+the phone, no mockups):
+
+- **The TVs page in the window** (`apps/desktop/ui/tvs.js`,
+  `apps/desktop/src/tvs.rs`): TVs is a kind in Add a device; the TVs added
+  (kept in `<config>/tvs.json`) and the ones found nearby; on each, every
+  way this device has: on a computer, Show this screen (and on Linux a
+  window, or the TV as a second screen) and the system's own sender; on a
+  phone, Show this phone, Android's Cast or Samsung's Smart View, and
+  Samsung DeX. A session's lines show on the page, with Stop. Finding a
+  TV by name, then the network or Wi-Fi Direct, is shared with the
+  command line (`tv/send.rs`).
+- **The phone's screen** (`KagazTv.kt`, `KagazCastService.kt`,
+  `KagazTvPlugin.kt`): Android's own prompt, then a foreground service
+  (Android 14 hands over the grant only inside one, and shows its
+  notification with Stop all along); once the TV has chosen a size, the
+  phone's H.264 encoder takes a virtual display mirroring the screen
+  (Android fits the phone's shape into the TV's with bars), Constrained
+  Baseline, no B pictures, low latency, headers before each whole picture;
+  each encoded picture goes to Kagaz's Rust (`miracast/external.rs`), which
+  runs the same Miracast session as on a computer, over the network.
+- **Smart View, Android's Cast and DeX** are opened, not driven: Kagaz
+  opens the screen where the person picks the TV.
+
 ## Rules
 
 - **Nothing reaches a real TV without the owner's go-ahead at that

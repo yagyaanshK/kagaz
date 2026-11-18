@@ -232,6 +232,16 @@ const KagazHome = (() => {
     return { id: "purifiers", icon: "purifier", title: "Air purifiers", status: "Philips", devices: devs, open, chips: [], count: devs.length };
   }
 
+  // The TVs the person added.
+  async function tvsKind() {
+    if (typeof KagazTvs === "undefined") return null;
+    const list = await KagazTvs.saved();
+    if (!list || !list.length) return null;
+    const open = () => selectCategory("tvs");
+    const devs = list.map((t) => ({ key: favKey("tvs", t.name), name: t.name, sub: KagazTvs.homeWords(t), icon: "tv", open }));
+    return { id: "tvs", icon: "tv", title: "TVs & displays", status: "", devices: devs, open, chips: [], count: devs.length };
+  }
+
   // The person's computers and phones, as last known (their page checks
   // them; Home does not, so it opens at once).
   async function remoteKind() {
@@ -267,7 +277,7 @@ const KagazHome = (() => {
   // and so does the navigation (shell.js), each by the name it shows.
   const byTitle = (a, b) => a.title.localeCompare(b.title, undefined, { sensitivity: "base" });
   async function kindsNow() {
-    const kinds = await Promise.all([doorbellKind(), camerasKind(), printersKind(), fansKind(), purifiersKind(), remoteKind(), societyKind()]);
+    const kinds = await Promise.all([doorbellKind(), camerasKind(), printersKind(), fansKind(), purifiersKind(), tvsKind(), remoteKind(), societyKind()]);
     return kinds.filter(Boolean).sort(byTitle);
   }
   function tellShell(kinds) {
@@ -337,7 +347,7 @@ const KagazHome = (() => {
 
   // The navigation's kinds carry a short note ("2 devices", "none added
   // yet"); the sidebar shows it where it has room for it.
-  const KIND_EMPTY = { doorbell: "not set up yet", cameras: "not signed in yet", print: "none added yet", fans: "none added yet", purifiers: "none added yet", remote: "none added yet", society: "not signed in yet" };
+  const KIND_EMPTY = { doorbell: "not set up yet", cameras: "not signed in yet", print: "none added yet", fans: "none added yet", purifiers: "none added yet", tvs: "none added yet", remote: "none added yet", society: "not signed in yet" };
   function kindNotes(kinds) {
     for (const [cat, empty] of Object.entries(KIND_EMPTY)) {
       const note = document.querySelector(`#categories li[data-cat="${cat}"] .cat-note`);
@@ -409,6 +419,9 @@ const KagazHome = (() => {
     } else if (kind.id === "purifier") {
       selectCategory("purifiers");
       KagazPurifiers.rescan();
+    } else if (kind.id === "tv") {
+      selectCategory("tvs");
+      KagazTvs.rescan();
     } else if (kind.id === "computer") {
       selectCategory("remote");
       KagazRemote.openAdd();
