@@ -5,6 +5,8 @@
 # The real session's screen is never captured.
 #
 #   crates/kagaz-core/tests/headless-screen.sh     (needs gnome-shell, pipewire, wireplumber)
+#   KAGAZ_ONLY=headless_rate ...   one test;  KAGAZ_SHM=1   shared memory, not graphics memory
+#   MUTTER_DEBUG=screen-cast KEEP=1 ...   the compositor's screen-cast log, kept in the folder
 set -u
 SRC="$(cd "$(dirname "$0")/../../.." && pwd)"
 R=$(mktemp -d /tmp/kagaz-screen-XXXXXX)
@@ -39,7 +41,7 @@ dbus-run-session -- bash -c "
     pipewire > $R/pipewire.log 2>&1 &
     sleep 0.5
     wireplumber > $R/wireplumber.log 2>&1 &
-    exec gnome-shell --headless --wayland --no-x11 --virtual-monitor 1280x800 --unsafe-mode" \
+    exec env MUTTER_DEBUG=${MUTTER_DEBUG:-} gnome-shell --headless --wayland --no-x11 --virtual-monitor 1280x800 --unsafe-mode" \
     > $R/shell.log 2>&1 &
 
 for i in $(seq 1 40); do
@@ -51,7 +53,7 @@ timeout 3 tail -f /dev/null
 
 cd "$SRC"
 DBUS_SESSION_BUS_ADDRESS="$(cat $R/bus)" KAGAZ_HEADLESS=1 \
-    cargo test -p kagaz-core --lib tv::capture::tests::headless -- --ignored --nocapture --test-threads 1
+    cargo test -p kagaz-core --lib tv::capture::tests::${KAGAZ_ONLY:-headless} -- --ignored --nocapture --test-threads 1
 status=$?
 [ $status -ne 0 ] && { echo "--- shell.log"; tail -20 $R/shell.log; echo "--- pipewire.log"; tail -5 $R/pipewire.log; }
 exit $status

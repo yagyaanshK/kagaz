@@ -208,11 +208,13 @@ pub fn list(seconds: f32, direct: bool, json: bool) -> Result<()> {
 pub fn tv(name: &str, action: TvAction) -> Result<()> {
     match action {
         TvAction::Mirror { pattern, window, via, size, seconds, name: shown, power, encoder } => {
-            let mut pictures = pictures(if pattern { What::Pattern } else if window { What::Window } else { What::Screen }, size)?;
+            let engine = encoder.map(Into::into).unwrap_or_else(video::Engine::from_settings);
+            let what = if pattern { What::Pattern } else if window { What::Window } else { What::Screen };
+            let mut pictures = pictures(what, size, engine)?;
             let opts = Options {
                 name: shown,
                 max_height: height(size),
-                engine: encoder.map(Into::into).unwrap_or_else(video::Engine::from_settings),
+                engine,
                 priority: power.map(Into::into).unwrap_or_else(video::Priority::from_settings),
                 length: seconds.map(Duration::from_secs),
                 wait: Duration::from_secs(30),
@@ -221,11 +223,12 @@ pub fn tv(name: &str, action: TvAction) -> Result<()> {
             mirror(name, via, &opts, pictures.as_mut())
         }
         TvAction::Extend { via, size, seconds, name: shown, power, encoder } => {
-            let mut pictures = pictures(What::Extend, size)?;
+            let engine = encoder.map(Into::into).unwrap_or_else(video::Engine::from_settings);
+            let mut pictures = pictures(What::Extend, size, engine)?;
             let opts = Options {
                 name: shown,
                 max_height: height(size),
-                engine: encoder.map(Into::into).unwrap_or_else(video::Engine::from_settings),
+                engine,
                 priority: power.map(Into::into).unwrap_or_else(video::Priority::from_settings),
                 length: seconds.map(Duration::from_secs),
                 wait: Duration::from_secs(30),
@@ -245,7 +248,7 @@ enum What {
 
 /// The pattern, or the screen the owner picks in the desktop's dialog, or
 /// a new monitor for the TV.
-fn pictures(what: What, size: Size) -> Result<Box<dyn Pictures>> {
+fn pictures(what: What, size: Size, engine: video::Engine) -> Result<Box<dyn Pictures>> {
     if let What::Pattern = what {
         return Ok(Box::new(kagaz_core::tv::miracast::video::Pattern::new(16, 16)));
     }
@@ -261,7 +264,9 @@ fn pictures(what: What, size: Size) -> Result<Box<dyn Pictures>> {
             _ => Choice::Screen,
         };
         println!("Allow it in the desktop's sharing dialog...");
-        let screen = Screen::ask(choice).map_err(|e| anyhow!(e))?;
+        // Pictures stay in graphics memory when the graphics chip encodes.
+        let gpu = engine.wants_gpu_pictures();
+        let screen = Screen::ask(choice, gpu).map_err(|e| anyhow!(e))?;
         match screen.first_picture(Duration::from_secs(5)) {
             Some((w, h)) if matches!(what, What::Extend) => {
                 println!("A new {w}x{h} monitor is on the desktop: drag windows onto it.")
@@ -273,7 +278,7 @@ fn pictures(what: What, size: Size) -> Result<Box<dyn Pictures>> {
     }
     #[cfg(not(target_os = "linux"))]
     {
-        let _ = size;
+        let _ = (size, engine);
         bail!("showing the screen works on Linux so far; `--pattern` sends the test pattern")
     }
 }

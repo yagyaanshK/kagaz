@@ -45,6 +45,13 @@ pub trait Pictures {
     fn delivered(&self) -> u64 {
         0
     }
+
+    /// When the pictures stay in graphics memory: the newest, or `Some(None)`
+    /// when nothing new came. `None` when they do not.
+    #[cfg(target_os = "linux")]
+    fn gpu_picture(&mut self) -> Option<Option<std::sync::Arc<super::capture::GpuPicture>>> {
+        None
+    }
 }
 
 impl Pictures for video::Pattern {
@@ -64,6 +71,10 @@ impl Pictures for super::capture::Screen {
 
     fn delivered(&self) -> u64 {
         self.arrived.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    fn gpu_picture(&mut self) -> Option<Option<std::sync::Arc<super::capture::GpuPicture>>> {
+        super::capture::Screen::gpu_picture(self)
     }
 }
 
@@ -433,6 +444,8 @@ pub fn mirror<R>(
         // packets (and freezes until a whole picture comes).
         let mut queue: std::collections::VecDeque<Vec<u8>> = Default::default();
         let mut per_ms = 1usize;
+        #[cfg(target_os = "linux")]
+        let mut gpu_ok = true;
         loop {
             if stop.load(Ordering::Relaxed) {
                 report.ended_by = "you".into();
@@ -483,8 +496,30 @@ pub fn mirror<R>(
                 next_frame = Instant::now() + frame_time;
             }
             let began = Instant::now();
-            let rgba = pictures.picture(due, w, h);
-            let picture = encoder.encode(rgba)?;
+            // Straight from graphics memory to the chip's encoder when both
+            // can; otherwise through the processor.
+            #[cfg(target_os = "linux")]
+            let from_gpu = if gpu_ok && encoder.takes_gpu() {
+                match pictures.gpu_picture() {
+                    Some(g) => match encoder.encode_gpu(g.as_deref()) {
+                        Ok(p) => Some(p),
+                        Err(e) => {
+                            gpu_ok = false;
+                            event(Event::Encoder(format!("the screen goes through the processor now: {e}")));
+                            None
+                        }
+                    },
+                    None => None,
+                }
+            } else {
+                None
+            };
+            #[cfg(not(target_os = "linux"))]
+            let from_gpu = None;
+            let picture = match from_gpu {
+                Some(p) => p,
+                None => encoder.encode(pictures.picture(due, w, h))?,
+            };
             if picture.data.is_empty() {
                 continue;
             }
@@ -667,13 +702,23 @@ pub(crate) mod tests {
 
     /// The same with pictures from anywhere.
     pub fn session_with_stand_in_from(pictures: &mut dyn Pictures, length: Duration) -> (Report, Vec<u8>) {
+        session_with_stand_in_using(pictures, length, video::Engine::Software, |_| {})
+    }
+
+    /// The same with a chosen encoder, hearing the session's events.
+    pub fn session_with_stand_in_using(
+        pictures: &mut dyn Pictures,
+        length: Duration,
+        engine: video::Engine,
+        event: impl FnMut(Event),
+    ) -> (Report, Vec<u8>) {
         let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
         let received = Arc::new(Mutex::new(Vec::new()));
         let tv = std::cell::Cell::new(None);
         let opts = Options {
             name: "Kagaz test".into(),
             max_height: 720,
-            engine: video::Engine::Software,
+            engine,
             priority: video::Priority::Performance,
             length: Some(length),
             wait: Duration::from_secs(5),
@@ -688,7 +733,7 @@ pub(crate) mod tests {
                 tv.set(Some(stand_in_tv(received.clone())));
                 Ok(())
             },
-            |_| {},
+            event,
         )
         .unwrap();
         tv.take().unwrap().join().unwrap();

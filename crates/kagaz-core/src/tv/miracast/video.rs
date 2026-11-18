@@ -227,6 +227,20 @@ impl Engine {
     }
 }
 
+impl Engine {
+    /// Whether screen pictures should stay in graphics memory for this
+    /// choice: only when the graphics chip will encode them (the processor
+    /// reads graphics memory slowly, so it gets ordinary memory).
+    pub fn wants_gpu_pictures(self) -> bool {
+        #[cfg(target_os = "linux")]
+        {
+            self != Engine::Software && super::vaapi::Vaapi::takes_gpu_pictures()
+        }
+        #[cfg(not(target_os = "linux"))]
+        false
+    }
+}
+
 impl Priority {
     pub fn name(self) -> &'static str {
         match self {
@@ -298,6 +312,24 @@ impl AnyVideo {
             AnyVideo::Software(v) => v.key_next(),
             #[cfg(target_os = "linux")]
             AnyVideo::Vaapi(v) => v.key_next(),
+        }
+    }
+
+    /// Whether this encoder takes pictures straight from graphics memory.
+    pub fn takes_gpu(&self) -> bool {
+        match self {
+            AnyVideo::Software(_) => false,
+            #[cfg(target_os = "linux")]
+            AnyVideo::Vaapi(_) => true,
+        }
+    }
+
+    /// A picture in graphics memory (`None`: the last one again).
+    #[cfg(target_os = "linux")]
+    pub fn encode_gpu(&mut self, g: Option<&crate::tv::capture::GpuPicture>) -> Result<Encoded, String> {
+        match self {
+            AnyVideo::Software(_) => Err("the processor's encoder takes pictures in memory".into()),
+            AnyVideo::Vaapi(v) => v.encode_gpu(g).map(|(data, key)| Encoded { data, key }),
         }
     }
 

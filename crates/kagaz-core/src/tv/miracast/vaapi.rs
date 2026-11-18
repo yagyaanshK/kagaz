@@ -7,6 +7,7 @@
 //! pictures only, a whole picture every ten seconds or when the TV asks.
 
 use super::va_sys::*;
+use crate::tv::capture::GpuPicture;
 use std::ffi::{c_char, c_int, c_uint, c_void, CStr};
 use std::os::fd::AsRawFd;
 
@@ -46,6 +47,9 @@ struct Lib {
     create_image: unsafe extern "C" fn(Dpy, *mut VAImageFormat, c_int, c_int, *mut VAImage) -> St,
     put_image: unsafe extern "C" fn(Dpy, VASurfaceID, VAImageID, c_int, c_int, c_uint, c_uint, c_int, c_int, c_uint, c_uint) -> St,
     destroy_image: unsafe extern "C" fn(Dpy, VAImageID) -> St,
+    /// For tests: hands a picture out the way the desktop hands the screen in.
+    #[cfg_attr(not(test), allow(dead_code))]
+    export_surface_handle: unsafe extern "C" fn(Dpy, VASurfaceID, u32, u32, *mut c_void) -> St,
 }
 
 unsafe fn open(name: &str) -> Option<*mut c_void> {
@@ -105,6 +109,7 @@ impl Lib {
                 create_image: f!(va, "vaCreateImage"),
                 put_image: f!(va, "vaPutImage"),
                 destroy_image: f!(va, "vaDestroyImage"),
+                export_surface_handle: f!(va, "vaExportSurfaceHandle"),
             })
         }
     }
@@ -156,6 +161,12 @@ pub struct Vaapi {
     derived: bool,
     /// The driver takes Kagaz's own sequence and picture headers.
     packed: bool,
+    /// The chip's picture processor, for pictures already in graphics
+    /// memory: (config, context), made when the first comes.
+    vpp: Option<(VAConfigID, VAContextID)>,
+    /// Where the last picture from graphics memory went in the input
+    /// (the rest is black).
+    placed: Option<VARectangle>,
     /// Which chip and entry point: for the record.
     pub described: String,
 }
@@ -308,6 +319,8 @@ impl Vaapi {
                 image: None,
                 derived: true,
                 packed: packed != 0,
+                vpp: None,
+                placed: None,
                 described,
             })
         }
@@ -315,6 +328,12 @@ impl Vaapi {
 
     pub fn key_next(&mut self) {
         self.key_next = true;
+    }
+
+    /// Whether this computer's chip can encode and also take pictures
+    /// straight from graphics memory (scale them on its picture processor).
+    pub fn takes_gpu_pictures() -> bool {
+        Vaapi::open(256, 256, 30, 1_000_000, Power::Performance).and_then(|mut v| v.vpp().map(|_| ())).is_ok()
     }
 
     fn stream(&self) -> super::h264::Stream {
@@ -395,6 +414,14 @@ impl Vaapi {
     /// Writes the RGBA picture into the input surface as NV12.
     fn upload(&mut self, rgba: &[u8]) -> Result<(), String> {
         let (w, h) = (self.width, self.height);
+        self.placed = None;
+        self.write_input(|y, yp, uv, uvp| rgba_to_nv12(rgba, w, h, y, yp, uv, uvp))
+    }
+
+    /// Lets `fill` write the input surface's planes: (Y, its pitch, UV, its
+    /// pitch).
+    fn write_input(&mut self, fill: impl FnOnce(&mut [u8], usize, &mut [u8], usize)) -> Result<(), String> {
+        let (w, h) = (self.width, self.height);
         unsafe {
             if self.image.is_none() {
                 let mut img: VAImage = std::mem::zeroed();
@@ -424,7 +451,7 @@ impl Vaapi {
                 std::slice::from_raw_parts_mut(base.add(img.offsets[0] as usize), img.pitches[0] as usize * h);
             let uv_plane =
                 std::slice::from_raw_parts_mut(base.add(img.offsets[1] as usize), img.pitches[1] as usize * h / 2);
-            rgba_to_nv12(rgba, w, h, y_plane, img.pitches[0] as usize, uv_plane, img.pitches[1] as usize);
+            fill(y_plane, img.pitches[0] as usize, uv_plane, img.pitches[1] as usize);
             self.lib.check("picture upload", (self.lib.unmap_buffer)(self.dpy, img.buf))?;
             if !self.derived {
                 self.lib.check(
@@ -452,6 +479,194 @@ impl Vaapi {
     /// (key) picture.
     pub fn encode(&mut self, rgba: &[u8]) -> Result<(Vec<u8>, bool), String> {
         self.upload(rgba)?;
+        self.encode_input()
+    }
+
+    /// Encodes a picture that is already in graphics memory: the chip
+    /// scales it and turns it into NV12 itself, so it never passes through
+    /// the processor. `None`: nothing new, the last one again.
+    pub fn encode_gpu(&mut self, g: Option<&GpuPicture>) -> Result<(Vec<u8>, bool), String> {
+        if let Some(g) = g {
+            self.process(g)?;
+        }
+        self.encode_input()
+    }
+
+    /// The chip's picture processor, made the first time.
+    fn vpp(&mut self) -> Result<(VAConfigID, VAContextID), String> {
+        if let Some(v) = self.vpp {
+            return Ok(v);
+        }
+        let l = &self.lib;
+        unsafe {
+            let mut config = 0;
+            l.check(
+                "picture processor",
+                (l.create_config)(
+                    self.dpy,
+                    VAProfile::VAProfileNone as c_int,
+                    VAEntrypoint::VAEntrypointVideoProc as c_int,
+                    std::ptr::null_mut(),
+                    0,
+                    &mut config,
+                ),
+            )?;
+            let mut context = 0;
+            let s = (l.create_context)(
+                self.dpy,
+                config,
+                self.width as c_int,
+                self.height as c_int,
+                VA_PROGRESSIVE as c_int,
+                self.surfaces.as_mut_ptr(),
+                1,
+                &mut context,
+            );
+            if let Err(e) = l.check("picture processor", s) {
+                (l.destroy_config)(self.dpy, config);
+                return Err(e);
+            }
+            self.vpp = Some((config, context));
+        }
+        Ok(self.vpp.unwrap())
+    }
+
+    /// Brings a picture in graphics memory into the chip's view, without a
+    /// copy.
+    fn import(&self, g: &GpuPicture) -> Result<VASurfaceID, String> {
+        use crate::tv::pw;
+        let fourcc = |c: &[u8; 4]| u32::from_le_bytes(*c);
+        let (va_fourcc, drm_fourcc) = match g.format {
+            pw::BGRX => (VA_FOURCC_BGRX, fourcc(b"XR24")),
+            pw::BGRA => (VA_FOURCC_BGRA, fourcc(b"AR24")),
+            pw::RGBX => (VA_FOURCC_RGBX, fourcc(b"XB24")),
+            pw::RGBA => (VA_FOURCC_RGBA, fourcc(b"AB24")),
+            _ => return Err("a pixel layout the chip is not given".into()),
+        };
+        let fd = g.fd.as_raw_fd();
+        // SAFETY: lseek on a descriptor Kagaz holds; the descriptor and
+        // `desc` outlive the call that reads them.
+        unsafe {
+            let size = match libc::lseek(fd, 0, libc::SEEK_END) {
+                n if n > 0 => n as u32,
+                _ => g.offset + g.stride * g.height,
+            };
+            let mut desc: VADRMPRIMESurfaceDescriptor = std::mem::zeroed();
+            desc.fourcc = va_fourcc;
+            desc.width = g.width;
+            desc.height = g.height;
+            desc.num_objects = 1;
+            desc.objects[0].fd = fd;
+            desc.objects[0].size = size;
+            desc.objects[0].drm_format_modifier = g.modifier;
+            desc.num_layers = 1;
+            desc.layers[0].drm_format = drm_fourcc;
+            desc.layers[0].num_planes = 1;
+            desc.layers[0].offset[0] = g.offset;
+            desc.layers[0].pitch[0] = g.stride;
+            let mut attribs = [
+                VASurfaceAttrib {
+                    type_: VASurfaceAttribType_VASurfaceAttribMemoryType,
+                    flags: VA_SURFACE_ATTRIB_SETTABLE,
+                    value: VAGenericValue {
+                        type_: VAGenericValueType_VAGenericValueTypeInteger,
+                        value: _VAGenericValue__bindgen_ty_1 { i: VA_SURFACE_ATTRIB_MEM_TYPE_DRM_PRIME_2 as i32 },
+                    },
+                },
+                VASurfaceAttrib {
+                    type_: VASurfaceAttribType_VASurfaceAttribExternalBufferDescriptor,
+                    flags: VA_SURFACE_ATTRIB_SETTABLE,
+                    value: VAGenericValue {
+                        type_: VAGenericValueType_VAGenericValueTypePointer,
+                        value: _VAGenericValue__bindgen_ty_1 { p: &mut desc as *mut _ as *mut c_void },
+                    },
+                },
+            ];
+            let mut surface = VA_INVALID_SURFACE;
+            self.lib.check(
+                "taking the screen from graphics memory",
+                (self.lib.create_surfaces)(
+                    self.dpy,
+                    VA_RT_FORMAT_RGB32,
+                    g.width,
+                    g.height,
+                    &mut surface,
+                    1,
+                    attribs.as_mut_ptr() as *mut c_void,
+                    2,
+                ),
+            )?;
+            Ok(surface)
+        }
+    }
+
+    /// Scales a picture in graphics memory into the input surface, keeping
+    /// its shape (black bars where it differs), as BT.601 video range like
+    /// the headers say.
+    fn process(&mut self, g: &GpuPicture) -> Result<(), String> {
+        let (dw, dh) = (self.width as u32, self.height as u32);
+        let (sw, sh) = (g.width, g.height);
+        if sw == 0 || sh == 0 {
+            return Ok(());
+        }
+        let (fw, fh) = if sw * dh > sh * dw { (dw, (sh * dw / sw).max(2) & !1) } else { ((sw * dh / sh).max(2) & !1, dh) };
+        let out = VARectangle { x: ((dw - fw) / 2) as i16, y: ((dh - fh) / 2) as i16, width: fw as u16, height: fh as u16 };
+        let same_place = self.placed.is_some_and(|p| (p.x, p.y, p.width, p.height) == (out.x, out.y, out.width, out.height));
+        if !same_place && (fw, fh) != (dw, dh) {
+            // The bars: black once; the processor writes only inside.
+            self.write_input(|y, _, uv, _| {
+                y.fill(16);
+                uv.fill(128);
+            })?;
+        }
+        self.placed = Some(out);
+        let (_, context) = self.vpp()?;
+        let input = self.import(g)?;
+        let l = &self.lib;
+        let whole = VARectangle { x: 0, y: 0, width: sw as u16, height: sh as u16 };
+        unsafe {
+            let mut p: VAProcPipelineParameterBuffer = std::mem::zeroed();
+            p.surface = input;
+            p.surface_region = &whole;
+            p.surface_color_standard = _VAProcColorStandardType_VAProcColorStandardBT601;
+            p.output_region = &out;
+            p.output_background_color = 0xff00_0000;
+            p.output_color_standard = _VAProcColorStandardType_VAProcColorStandardBT601;
+            p.filter_flags = VA_FILTER_SCALING_HQ;
+            p.input_color_properties.color_range = VA_SOURCE_RANGE_FULL as u8;
+            p.output_color_properties.color_range = VA_SOURCE_RANGE_REDUCED as u8;
+            let result = (|| {
+                let mut buf = 0;
+                l.check(
+                    "scaling on the chip",
+                    (l.create_buffer)(
+                        self.dpy,
+                        context,
+                        VABufferType_VAProcPipelineParameterBufferType,
+                        std::mem::size_of::<VAProcPipelineParameterBuffer>() as c_uint,
+                        1,
+                        &mut p as *mut _ as *mut c_void,
+                        &mut buf,
+                    ),
+                )?;
+                let r = (|| {
+                    l.check("scaling on the chip", (l.begin_picture)(self.dpy, context, self.surfaces[0]))?;
+                    l.check("scaling on the chip", (l.render_picture)(self.dpy, context, &mut buf, 1))?;
+                    l.check("scaling on the chip", (l.end_picture)(self.dpy, context))?;
+                    // Done reading the desktop's buffer before it goes back.
+                    l.check("scaling on the chip", (l.sync_surface)(self.dpy, self.surfaces[0]))
+                })();
+                (l.destroy_buffer)(self.dpy, buf);
+                r
+            })();
+            let mut input = input;
+            (l.destroy_surfaces)(self.dpy, &mut input, 1);
+            result
+        }
+    }
+
+    /// Encodes what is in the input surface.
+    fn encode_input(&mut self) -> Result<(Vec<u8>, bool), String> {
         let idr = self.key_next || self.since_key >= self.fps * 10;
         if idr {
             self.frame_num = 0;
@@ -620,6 +835,10 @@ impl Drop for Vaapi {
             if let Some(img) = self.image.take() {
                 (self.lib.destroy_image)(self.dpy, img.image_id);
             }
+            if let Some((config, context)) = self.vpp.take() {
+                (self.lib.destroy_context)(self.dpy, context);
+                (self.lib.destroy_config)(self.dpy, config);
+            }
             (self.lib.destroy_buffer)(self.dpy, self.coded);
             (self.lib.destroy_context)(self.dpy, self.context);
             (self.lib.destroy_surfaces)(self.dpy, self.surfaces.as_mut_ptr(), 3);
@@ -717,6 +936,185 @@ mod tests {
         }
         eprintln!("60 pictures in {:?}, {decoded} decoded", start.elapsed());
         assert!(decoded >= 58, "{decoded} of 60 decoded");
+    }
+}
+
+#[cfg(test)]
+mod from_graphics_memory {
+    use super::*;
+    use crate::tv::miracast::video::quality::{desktop, psnr};
+    use std::os::fd::{FromRawFd, OwnedFd};
+
+    /// Draws an RGBA picture into a new BGRx surface on the chip and hands
+    /// it out as the desktop would (a DMA-BUF).
+    fn on_the_chip(v: &Vaapi, rgba: &[u8], w: u32, h: u32) -> (VASurfaceID, GpuPicture) {
+        let l = &v.lib;
+        unsafe {
+            let mut attrib = VASurfaceAttrib {
+                type_: VASurfaceAttribType_VASurfaceAttribPixelFormat,
+                flags: VA_SURFACE_ATTRIB_SETTABLE,
+                value: VAGenericValue {
+                    type_: VAGenericValueType_VAGenericValueTypeInteger,
+                    value: _VAGenericValue__bindgen_ty_1 { i: VA_FOURCC_BGRX as i32 },
+                },
+            };
+            let mut surface = 0;
+            l.check(
+                "source",
+                (l.create_surfaces)(v.dpy, VA_RT_FORMAT_RGB32, w, h, &mut surface, 1, &mut attrib as *mut _ as *mut c_void, 1),
+            )
+            .unwrap();
+            let mut fmt: VAImageFormat = std::mem::zeroed();
+            fmt.fourcc = VA_FOURCC_BGRX;
+            fmt.byte_order = 1;
+            fmt.bits_per_pixel = 32;
+            fmt.depth = 24;
+            fmt.red_mask = 0x00ff_0000;
+            fmt.green_mask = 0x0000_ff00;
+            fmt.blue_mask = 0x0000_00ff;
+            let mut img: VAImage = std::mem::zeroed();
+            l.check("source image", (l.create_image)(v.dpy, &mut fmt, w as c_int, h as c_int, &mut img)).unwrap();
+            let mut p: *mut c_void = std::ptr::null_mut();
+            l.check("map", (l.map_buffer)(v.dpy, img.buf, &mut p)).unwrap();
+            for y in 0..h as usize {
+                let row = std::slice::from_raw_parts_mut(
+                    (p as *mut u8).add(img.offsets[0] as usize + y * img.pitches[0] as usize),
+                    w as usize * 4,
+                );
+                for (o, i) in row.chunks_exact_mut(4).zip(rgba[y * w as usize * 4..].chunks_exact(4)) {
+                    o.copy_from_slice(&[i[2], i[1], i[0], 255]);
+                }
+            }
+            l.check("unmap", (l.unmap_buffer)(v.dpy, img.buf)).unwrap();
+            l.check("put", (l.put_image)(v.dpy, surface, img.image_id, 0, 0, w, h, 0, 0, w, h)).unwrap();
+            (l.destroy_image)(v.dpy, img.image_id);
+            l.check("sync", (l.sync_surface)(v.dpy, surface)).unwrap();
+            let mut desc: VADRMPRIMESurfaceDescriptor = std::mem::zeroed();
+            l.check(
+                "export",
+                (l.export_surface_handle)(
+                    v.dpy,
+                    surface,
+                    VA_SURFACE_ATTRIB_MEM_TYPE_DRM_PRIME_2,
+                    VA_EXPORT_SURFACE_READ_ONLY | VA_EXPORT_SURFACE_COMPOSED_LAYERS,
+                    &mut desc as *mut _ as *mut c_void,
+                ),
+            )
+            .unwrap();
+            let g = GpuPicture {
+                fd: OwnedFd::from_raw_fd(desc.objects[0].fd),
+                offset: desc.layers[0].offset[0],
+                stride: desc.layers[0].pitch[0],
+                modifier: desc.objects[0].drm_format_modifier,
+                format: crate::tv::pw::BGRX,
+                width: w,
+                height: h,
+            };
+            (surface, g)
+        }
+    }
+
+    /// Flat colours through the chip, same size: the Y, U, V it makes
+    /// (BT.601 video range wants red 81/90/240, white 235/128/128).
+    #[test]
+    #[ignore]
+    fn colours_on_the_chip() {
+        let Ok(mut v) = Vaapi::open(640, 480, 30, 8_000_000, Power::Performance) else { return };
+        let mut decoder = openh264::decoder::Decoder::new().unwrap();
+        for (name, c) in [("red", [255u8, 0, 0]), ("green", [0, 255, 0]), ("blue", [0, 0, 255]), ("white", [255, 255, 255]), ("grey", [128, 128, 128]), ("black", [0, 0, 0])] {
+            let src: Vec<u8> = (0..640 * 480).flat_map(|_| [c[0], c[1], c[2], 255]).collect();
+            let (mut surface, g) = on_the_chip(&v, &src, 640, 480);
+            v.key_next();
+            let (bytes, _) = v.encode_gpu(Some(&g)).unwrap();
+            unsafe { (v.lib.destroy_surfaces)(v.dpy, &mut surface, 1) };
+            let (cpu, _) = {
+                let mut sw = Vaapi::open(640, 480, 30, 8_000_000, Power::Performance).unwrap();
+                sw.encode(&src).unwrap()
+            };
+            let read = |d: &mut openh264::decoder::Decoder, b: &[u8]| {
+                use openh264::formats::YUVSource;
+                let mut out = (0, 0, 0);
+                for nal in openh264::nal_units(b) {
+                    if let Ok(Some(y)) = d.decode(nal) {
+                        let (ys, us, vs) = y.strides();
+                        out = (y.y()[240 * ys + 320], y.u()[120 * us + 160], y.v()[120 * vs + 160]);
+                    }
+                }
+                out
+            };
+            let chip = read(&mut decoder, &bytes);
+            let mut d2 = openh264::decoder::Decoder::new().unwrap();
+            let proc_ = read(&mut d2, &cpu);
+            eprintln!("{name:6} chip {chip:?}  processor {proc_:?}");
+        }
+    }
+
+    /// Smooth shading and large blocks: where scalers agree, so a picture
+    /// put in the wrong place or in the wrong colours shows.
+    fn smooth(w: usize, h: usize, t: usize) -> Vec<u8> {
+        let mut p = Vec::with_capacity(w * h * 4);
+        for y in 0..h {
+            for x in 0..w {
+                let block = ((x + t * 8) / 160 + y / 160) % 3;
+                let shade = (x * 255 / w) as u8;
+                let px = match block {
+                    0 => [shade, (y * 255 / h) as u8, 90],
+                    1 => [200, shade / 2, 255 - shade],
+                    _ => [40, 160, shade],
+                };
+                p.extend_from_slice(&[px[0], px[1], px[2], 255]);
+            }
+        }
+        p
+    }
+
+    /// A 1920x1200 screen into 1080p entirely on the chip: it decodes, the
+    /// bars are black, and it matches the processor's own scaling.
+    #[test]
+    fn screen_in_graphics_memory_to_1080p() {
+        let Ok(mut v) = Vaapi::open(1920, 1080, 60, 24_000_000, Power::Performance) else {
+            eprintln!("skipped: no VA-API H.264 encoder here");
+            return;
+        };
+        let (sw, sh) = (1920u32, 1200u32);
+        let mut decoder = openh264::decoder::Decoder::new().unwrap();
+        let (mut worst_ms, mut decoded) = (0f64, 0);
+        let (mut smooth_db, mut text_db, mut bar) = (0f64, 0f64, 0u8);
+        for t in 0..12 {
+            // Smooth pictures, then text-like ones.
+            let text = t >= 6;
+            let src = if text { desktop(sw as usize, sh as usize, t) } else { smooth(sw as usize, sh as usize, t) };
+            let (mut surface, g) = on_the_chip(&v, &src, sw, sh);
+            let a = std::time::Instant::now();
+            let (bytes, key) = v.encode_gpu(Some(&g)).unwrap();
+            if t > 0 {
+                worst_ms = f64::max(worst_ms, a.elapsed().as_secs_f64() * 1e3);
+            }
+            assert_eq!(key, t == 0);
+            unsafe { (v.lib.destroy_surfaces)(v.dpy, &mut surface, 1) };
+            // What the processor's scaling makes of the same picture.
+            let mut want = vec![0u8; 1920 * 1080 * 4];
+            for px in want.chunks_exact_mut(4) {
+                px[3] = 255;
+            }
+            crate::tv::capture::scale_rgba(&src, sw as usize, sh as usize, &mut want, 1920, 1080);
+            for nal in openh264::nal_units(&bytes) {
+                if let Ok(Some(y)) = decoder.decode(nal) {
+                    use openh264::formats::YUVSource;
+                    decoded += 1;
+                    let db = psnr(&want, 1920, 1080, &y);
+                    if text { text_db = db } else { smooth_db = db }
+                    bar = y.y()[540 * y.strides().0 + 4];
+                }
+            }
+        }
+        eprintln!(
+            "{}; 1920x1200 in graphics memory to 1080p: worst {worst_ms:.1} ms a picture; against the processor's scaling {smooth_db:.1} dB smooth, {text_db:.1} dB fine text (the scalers blur thin lines differently)",
+            v.described
+        );
+        assert_eq!(decoded, 12);
+        assert!(bar <= 18, "the bars are not black: luma {bar}");
+        assert!(smooth_db > 38.0, "{smooth_db:.1} dB");
     }
 }
 

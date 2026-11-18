@@ -293,10 +293,48 @@ the Wi-Fi link dropped. Now:
 - No picture is skipped by the encoder; each picture's packets are
   spread over its time slot; the send buffer holds a whole picture.
 
+The owner saw 1080p at 60 through R2 on the LG, encoded on the chip:
+smoother than every earlier run. The desktop still gave only about 35
+pictures a second.
+
+*All the desktop's pictures, without a copy (2026-11-18).* Why only ~35
+of 60 arrived: when GNOME (mutter 50) hands pictures over in shared
+memory, it records each one at an idle moment after drawing and stamps it
+with that moment, and its "no faster than the screen" check then finds
+about a third of them too early and drops them. Handed over in graphics
+memory (DMA-BUF), each picture is stamped with the screen's own refresh
+time, so none should be too early. Kagaz now asks for graphics memory,
+laid out row after row, when the graphics chip encodes:
+
+- `tv/pw.rs` offers DMA-BUF formats first (then shared memory), says
+  which memory it takes once the format is settled, and passes each
+  buffer on as a descriptor; `tv/capture.rs` keeps a duplicate of the
+  newest.
+- `miracast/vaapi.rs` brings that buffer into the chip's view (no copy),
+  and the chip's picture processor scales it to the TV's size with black
+  bars and turns it into BT.601 video-range NV12 for the encoder. Nothing
+  passes through the processor.
+- Only when the chip can take them (`Engine::wants_gpu_pictures` tries
+  first). The processor reads graphics memory slowly (12 to 14 ms a
+  picture with 270 ms stalls, against 7 to 8 from shared memory), so
+  OpenH264 gets shared memory; if the chip refuses a buffer mid-session,
+  Kagaz carries on through the processor and says so.
+
+Measured: in a sealed test desktop with a square sliding on every frame
+(60 drawn a second), 32 to 37 pictures arrived through shared memory and
+46 to 49 through graphics memory. GNOME's debug log shows the rest
+dropped as "too early" still, since a test desktop with no real screen
+has wobbling refresh times. On the AMD chip, a 1920x1200 screen to 1080p
+takes 2.2 to 2.6 ms a picture from desktop to encoded, and every picture
+sent to the stand-in TV decodes. Colours match the processor's
+conversion to within 1 (declaring the input as sRGB made the chip change
+the tone curve too: mid-grey 132 instead of 126); smooth pictures match
+the processor's scaling at 58 dB, and fine text at 31 dB, as the two
+scalers blur 1-pixel lines differently. Still to check on the real
+laptop screen: how many of 60 arrive.
+
 Still to do for other graphics: NVIDIA (NVENC, Linux and Windows),
-Windows for every vendor (Media Foundation), macOS (VideoToolbox); then
-taking the screen straight from the graphics memory into the encoder
-(zero copy) on Linux.
+Windows for every vendor (Media Foundation), macOS (VideoToolbox).
 All tests on a real TV use the LG for now (the owner, 2026-11-18). Saved TVs (names,
 rooms) come with the window; until then `kagaz tvs` lists the TVs found
 nearby.

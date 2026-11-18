@@ -28,6 +28,22 @@ enum Layout {
     Rgbx,
 }
 
+/// A picture left in graphics memory (DMA-BUF), laid out row after row:
+/// what the graphics chip's encoder takes without a copy.
+#[derive(Debug)]
+pub struct GpuPicture {
+    /// Kagaz's own duplicate of the buffer's descriptor.
+    pub fd: OwnedFd,
+    pub offset: u32,
+    pub stride: u32,
+    /// How the memory is laid out (drm_fourcc.h); row after row so far.
+    pub modifier: u64,
+    /// PipeWire's name for the pixel layout ([`pw::BGRX`] ...).
+    pub format: u32,
+    pub width: u32,
+    pub height: u32,
+}
+
 /// The newest picture of the screen, as it came.
 #[derive(Default)]
 struct Latest {
@@ -36,6 +52,8 @@ struct Latest {
     stride: usize,
     layout: Option<Layout>,
     data: Vec<u8>,
+    /// Instead of `data`, when the pictures come in graphics memory.
+    gpu: Option<Arc<GpuPicture>>,
     /// Counts pictures; 0 until the first arrives.
     seq: u64,
 }
@@ -59,6 +77,7 @@ pub struct Screen {
     /// Kept so the portal session lives as long as the capture.
     _portal: Option<Connection>,
     last_seq: u64,
+    last_gpu_seq: u64,
     scaled: Vec<u8>,
     /// The picture taken out of `latest` for scaling, swapped in and out so
     /// the desktop's thread never waits for the scaling.
@@ -213,14 +232,16 @@ fn from_portal(choice: Choice) -> Result<(Connection, OwnedFd, u32), String> {
 
 impl Screen {
     /// Asks the owner, through the desktop's dialog, which screen or window
-    /// to share, and starts taking pictures of it.
-    pub fn ask(choice: Choice) -> Result<Screen, String> {
+    /// to share, and starts taking pictures of it. `gpu`: take them in
+    /// graphics memory where the desktop can (for the graphics chip's
+    /// encoder; the processor's still gets them, through a mapping).
+    pub fn ask(choice: Choice, gpu: bool) -> Result<Screen, String> {
         let (portal, fd, node) = from_portal(choice)?;
         let size = match choice {
             Choice::Extend { width, height } => Some((width, height)),
             _ => None,
         };
-        let mut s = Screen::start(Some(fd), node, size)?;
+        let mut s = Screen::start(Some(fd), node, size, gpu)?;
         s._portal = Some(portal);
         Ok(s)
     }
@@ -228,25 +249,47 @@ impl Screen {
     /// Takes pictures from a PipeWire stream: over `fd` (from the portal),
     /// or this session's PipeWire when `None` (tests, with a stream made
     /// some other way).
-    pub fn from_node(fd: Option<OwnedFd>, node: u32) -> Result<Screen, String> {
-        Screen::start(fd, node, None)
+    pub fn from_node(fd: Option<OwnedFd>, node: u32, gpu: bool) -> Result<Screen, String> {
+        Screen::start(fd, node, None, gpu)
     }
 
     /// `size` fixes the picture size: a virtual monitor takes the size its
     /// stream asks for.
-    fn start(fd: Option<OwnedFd>, node: u32, size: Option<(u32, u32)>) -> Result<Screen, String> {
+    fn start(fd: Option<OwnedFd>, node: u32, size: Option<(u32, u32)>, gpu: bool) -> Result<Screen, String> {
         let latest = Arc::new(Mutex::new(Latest::default()));
         let arrived = Arc::new(AtomicU64::new(0));
-        let stream = run_stream(fd, node, size, latest.clone(), arrived.clone())?;
+        let stream = run_stream(fd, node, size, gpu, latest.clone(), arrived.clone())?;
         Ok(Screen {
             latest,
             stream: Some(stream),
             _portal: None,
             last_seq: 0,
+            last_gpu_seq: 0,
             scaled: Vec::new(),
             taken: Latest::default(),
             arrived,
         })
+    }
+
+    /// How pictures come from the desktop.
+    pub fn route(&self) -> &'static str {
+        match self.latest.lock().unwrap().gpu {
+            Some(_) => "graphics memory",
+            None => "shared memory",
+        }
+    }
+
+    /// The newest picture when the pictures come in graphics memory: `None`
+    /// when they do not, `Some(None)` when nothing new came since the last
+    /// call.
+    pub fn gpu_picture(&mut self) -> Option<Option<Arc<GpuPicture>>> {
+        let l = self.latest.lock().unwrap();
+        let g = l.gpu.clone()?;
+        if l.seq == self.last_gpu_seq {
+            return Some(None);
+        }
+        self.last_gpu_seq = l.seq;
+        Some(Some(g))
     }
 
     /// Waits up to `wait` for the first picture; its size.
@@ -279,6 +322,14 @@ impl Screen {
             // for the desktop's thread to fill next.
             let mut l = self.latest.lock().unwrap();
             if l.seq == self.last_seq || l.seq == 0 {
+                return &self.scaled;
+            }
+            if let Some(g) = l.gpu.clone() {
+                self.last_seq = l.seq;
+                drop(l);
+                if let Err(e) = scale_mapped(&g, &mut self.scaled, width, height) {
+                    eprintln!("kagaz: a picture in graphics memory could not be read: {e}");
+                }
                 return &self.scaled;
             }
             std::mem::swap(&mut self.taken.data, &mut l.data);
@@ -373,6 +424,51 @@ fn scale(src: &[u8], sw: usize, sh: usize, stride: usize, layout: Layout, dst: &
     });
 }
 
+/// Reads a picture in graphics memory through a mapping (for the
+/// processor's encoder) and scales it.
+fn scale_mapped(g: &GpuPicture, dst: &mut [u8], dw: usize, dh: usize) -> Result<(), String> {
+    read_mapped(g, |src, w, h, stride, layout| scale(src, w, h, stride, layout, dst, dw, dh))
+}
+
+/// Lends the pixels of a picture in graphics memory: (pixels, width,
+/// height, stride, layout).
+fn read_mapped<T>(g: &GpuPicture, read: impl FnOnce(&[u8], usize, usize, usize, Layout) -> T) -> Result<T, String> {
+    use std::os::fd::AsRawFd;
+    let layout = match g.format {
+        pw::BGRX | pw::BGRA => Layout::Bgrx,
+        pw::RGBX | pw::RGBA => Layout::Rgbx,
+        _ => return Err("an unknown pixel layout".into()),
+    };
+    let (w, h) = (g.width as usize, g.height as usize);
+    let stride = if g.stride == 0 { w * 4 } else { g.stride as usize };
+    let len = g.offset as usize + stride * h;
+    // DMA_BUF_IOCTL_SYNC (linux/dma-buf.h): reads start / end.
+    const SYNC: libc::c_ulong = 0x4008_6200;
+    const READ_START: u64 = 1;
+    const READ_END: u64 = 1 | 4;
+    // SAFETY: a read-only shared mapping of a buffer Kagaz holds a
+    // descriptor of, unmapped before returning; the slice lives only
+    // between the two.
+    unsafe {
+        let p = libc::mmap(std::ptr::null_mut(), len, libc::PROT_READ, libc::MAP_SHARED, g.fd.as_raw_fd(), 0);
+        if p == libc::MAP_FAILED {
+            return Err(std::io::Error::last_os_error().to_string());
+        }
+        libc::ioctl(g.fd.as_raw_fd(), SYNC, &READ_START);
+        let src = std::slice::from_raw_parts((p as *const u8).add(g.offset as usize), stride * h);
+        let out = read(src, w, h, stride, layout);
+        libc::ioctl(g.fd.as_raw_fd(), SYNC, &READ_END);
+        libc::munmap(p, len);
+        Ok(out)
+    }
+}
+
+/// [`scale`] from RGBA, for tests elsewhere.
+#[cfg(test)]
+pub(crate) fn scale_rgba(src: &[u8], sw: usize, sh: usize, dst: &mut [u8], dw: usize, dh: usize) {
+    scale(src, sw, sh, sw * 4, Layout::Rgbx, dst, dw, dh);
+}
+
 /// Threads that share the scaling of each picture.
 const SCALE_THREADS: usize = 6;
 
@@ -381,27 +477,54 @@ fn run_stream(
     fd: Option<OwnedFd>,
     node: u32,
     size: Option<(u32, u32)>,
+    gpu: bool,
     latest: Arc<Mutex<Latest>>,
     arrived: Arc<AtomicU64>,
 ) -> Result<pw::VideoStream, String> {
-    let layout = Arc::new(Mutex::new(None::<(Layout, usize, usize)>));
-    let lay = layout.clone();
+    let settled = Arc::new(Mutex::new(None::<(Layout, pw::VideoFormat)>));
+    let set = settled.clone();
     pw::VideoStream::open(
         fd,
         node,
         size,
+        gpu,
         move |f| {
             let l = match f.format {
                 pw::BGRX | pw::BGRA => Layout::Bgrx,
                 pw::RGBX | pw::RGBA => Layout::Rgbx,
                 _ => return,
             };
-            *lay.lock().unwrap() = Some((l, f.width as usize, f.height as usize));
+            *set.lock().unwrap() = Some((l, f));
         },
         move |frame| {
-            let Some((l, w, h)) = *layout.lock().unwrap() else { return };
-            let (bytes, offset, size) = (frame.bytes, frame.offset, frame.size);
-            let stride = match frame.stride.max(0) as usize {
+            let Some((l, f)) = *settled.lock().unwrap() else { return };
+            let (w, h) = (f.width as usize, f.height as usize);
+            let (bytes, offset, size, stride) = match frame {
+                pw::Frame::Memory { bytes, offset, size, stride } => (bytes, offset, size, stride),
+                pw::Frame::Gpu { fd, offset, stride } => {
+                    let Ok(fd) = fd.try_clone_to_owned() else { return };
+                    let g = GpuPicture {
+                        fd,
+                        offset,
+                        stride,
+                        modifier: f.modifier.unwrap_or(pw::MODIFIER_LINEAR),
+                        format: f.format,
+                        width: f.width,
+                        height: f.height,
+                    };
+                    let mut t = latest.lock().unwrap();
+                    t.width = w;
+                    t.height = h;
+                    t.layout = Some(l);
+                    // The one it replaces is closed after the lock is let go.
+                    let _old = t.gpu.replace(Arc::new(g));
+                    t.seq += 1;
+                    drop(t);
+                    arrived.fetch_add(1, Ordering::Relaxed);
+                    return;
+                }
+            };
+            let stride = match stride.max(0) as usize {
                 0 => w * 4,
                 s => s,
             };
@@ -414,6 +537,7 @@ fn run_stream(
             t.height = h;
             t.stride = stride;
             t.layout = Some(l);
+            t.gpu = None;
             t.data.clear();
             t.data.extend_from_slice(&bytes[offset..offset + stride * h]);
             t.seq += 1;
@@ -430,11 +554,17 @@ mod tests {
     /// dialog; only `tests/headless-screen.sh` sets this up). Returns the
     /// capture and the session to keep alive.
     fn headless_screen() -> Option<(Screen, Connection)> {
-        headless(None)
+        headless(None, wants_gpu())
+    }
+
+    /// Whether the headless tests ask for graphics memory (the default) or
+    /// shared memory (`KAGAZ_SHM=1`).
+    fn wants_gpu() -> bool {
+        std::env::var_os("KAGAZ_SHM").is_none()
     }
 
     /// `virtual_size`: a new monitor of that size instead of the existing one.
-    fn headless(virtual_size: Option<(u32, u32)>) -> Option<(Screen, Connection)> {
+    fn headless(virtual_size: Option<(u32, u32)>, gpu: bool) -> Option<(Screen, Connection)> {
         if std::env::var_os("KAGAZ_HEADLESS").is_none() {
             eprintln!("skipped: run crates/kagaz-core/tests/headless-screen.sh");
             return None;
@@ -466,7 +596,7 @@ mod tests {
             c.process(Duration::from_millis(100)).unwrap();
         }
         let id = node.lock().unwrap().expect("a PipeWire stream from the compositor");
-        Some((Screen::start(None, id, virtual_size).expect("the stream opened"), c))
+        Some((Screen::start(None, id, virtual_size, gpu).expect("the stream opened"), c))
     }
 
     #[test]
@@ -486,17 +616,28 @@ mod tests {
     #[test]
     #[ignore]
     fn headless_new_monitor_takes_the_tvs_size() {
-        let Some((screen, _session)) = headless(Some((1920, 1080))) else { return };
+        let Some((screen, _session)) = headless(Some((1920, 1080)), wants_gpu()) else { return };
         assert_eq!(screen.first_picture(Duration::from_secs(10)), Some((1920, 1080)));
     }
 
     #[test]
     #[ignore]
     fn headless_desktop_to_a_stand_in_tv() {
-        let Some((mut screen, _session)) = headless_screen() else { return };
+        // The processor's encoder takes ordinary memory (graphics memory is
+        // slow for it to read).
+        let Some((mut screen, _session)) = headless(None, false) else { return };
         screen.first_picture(Duration::from_secs(10)).expect("a picture");
-        let (report, es) =
-            crate::tv::miracast::tests::session_with_stand_in_from(&mut screen, Duration::from_millis(2000));
+        let mut lines = Vec::new();
+        let (report, es) = crate::tv::miracast::tests::session_with_stand_in_using(
+            &mut screen,
+            Duration::from_millis(2000),
+            crate::tv::miracast::video::Engine::Software,
+            |e| {
+                if let crate::tv::miracast::Event::Progress { busy_ms, worst_ms, .. } = e {
+                    lines.push(format!("{busy_ms:.1} ms a picture (worst {worst_ms:.1})"))
+                }
+            },
+        );
         let mut decoder = openh264::decoder::Decoder::new().unwrap();
         let mut pictures = 0;
         for nal in openh264::nal_units(&es) {
@@ -504,8 +645,78 @@ mod tests {
                 pictures += 1;
             }
         }
-        eprintln!("sent {} pictures, {} decoded", report.frames, pictures);
+        eprintln!("{}: sent {} pictures, {} decoded; {}", screen.route(), report.frames, pictures, lines.join("; "));
         assert!(pictures >= 100, "{pictures} pictures decoded");
+    }
+
+    /// Starts a square sliding across the test desktop for good: the stage
+    /// changes on every frame the compositor draws.
+    fn animate_test_desktop(c: &Connection) {
+        let shell = c.with_proxy("org.gnome.Shell", "/org/gnome/Shell", Duration::from_secs(5));
+        let script = "const Clutter = imports.gi.Clutter; \
+            const a = new imports.gi.St.Widget({width: 200, height: 200, x: 0, y: 300, \
+              style: 'background-color: red'}); \
+            global.stage.add_child(a); \
+            const t = new Clutter.Timeline({actor: a, duration: 2000, repeat_count: -1}); \
+            globalThis.kagazFrames = 0; \
+            t.connect('new-frame', () => { a.x = (t.get_elapsed_time() / 2000) * 1000; globalThis.kagazFrames++; }); \
+            t.start(); globalThis.kagazTimeline = t; 'ok'";
+        let (ok, answer): (bool, String) =
+            shell.method_call("org.gnome.Shell", "Eval", (script,)).expect("the test shell takes a script");
+        assert!(ok, "the animation did not start: {answer}");
+    }
+
+    /// Pictures a second while the whole stage changes each frame (60 is
+    /// the most a 60 Hz monitor gives).
+    #[test]
+    #[ignore]
+    fn headless_rate_while_animating() {
+        let Some((screen, session)) = headless_screen() else { return };
+        screen.first_picture(Duration::from_secs(10)).expect("a picture");
+        animate_test_desktop(&session);
+        std::thread::sleep(Duration::from_secs(1));
+        let shell = session.with_proxy("org.gnome.Shell", "/org/gnome/Shell", Duration::from_secs(5));
+        let drawn = || -> u64 {
+            let (_, n): (bool, String) =
+                shell.method_call("org.gnome.Shell", "Eval", ("globalThis.kagazFrames",)).expect("frames drawn");
+            n.trim_matches('"').parse().unwrap_or(0)
+        };
+        let (mut rates, mut frames) = (Vec::new(), Vec::new());
+        for _ in 0..5 {
+            let (before, drawn_before) = (screen.arrived.load(Ordering::Relaxed), drawn());
+            std::thread::sleep(Duration::from_secs(1));
+            rates.push(screen.arrived.load(Ordering::Relaxed) - before);
+            frames.push(drawn() - drawn_before);
+        }
+        eprintln!("pictures a second ({}): {rates:?}; the desktop drew {frames:?}", screen.route());
+    }
+
+    /// The test desktop's screen, kept in graphics memory, encoded by the
+    /// graphics chip for the stand-in TV (skipped without VA-API).
+    #[test]
+    #[ignore]
+    fn headless_desktop_to_a_stand_in_tv_on_the_chip() {
+        use crate::tv::miracast::{video::Engine, Event};
+        let Some((mut screen, session)) = headless_screen() else { return };
+        screen.first_picture(Duration::from_secs(10)).expect("a picture");
+        animate_test_desktop(&session);
+        let mut lines = Vec::new();
+        let (report, es) = crate::tv::miracast::tests::session_with_stand_in_using(
+            &mut screen,
+            Duration::from_millis(3000),
+            Engine::Auto,
+            |e| match e {
+                Event::Encoder(s) => lines.push(s),
+                Event::Progress { busy_ms, worst_ms, delivered_per_second, .. } => {
+                    lines.push(format!("{busy_ms:.1} ms a picture (worst {worst_ms:.1}), {delivered_per_second} from the desktop"))
+                }
+                _ => {}
+            },
+        );
+        let mut decoder = openh264::decoder::Decoder::new().unwrap();
+        let decoded = openh264::nal_units(&es).filter(|n| matches!(decoder.decode(n), Ok(Some(_)))).count();
+        eprintln!("{} ({}): {}; sent {}, {decoded} decoded", screen.route(), lines.join("; "), report.frames, report.frames);
+        assert!(decoded as u64 + 2 >= report.frames && decoded >= 100, "{decoded} of {} decoded", report.frames);
     }
 
     /// On the owner's real desktop, only when asked (`KAGAZ_REAL_SCREEN=1`,
@@ -518,7 +729,7 @@ mod tests {
         if std::env::var_os("KAGAZ_REAL_SCREEN").is_none() {
             return;
         }
-        let screen = Screen::ask(Choice::Screen).expect("screen shared");
+        let screen = Screen::ask(Choice::Screen, std::env::var_os("KAGAZ_SHM").is_none()).expect("screen shared");
         screen.first_picture(Duration::from_secs(10)).expect("a picture");
         let start = Instant::now();
         let mut last_seq = 0;
@@ -533,13 +744,20 @@ mod tests {
                     continue;
                 }
                 // A grid of 160 x 100 points, one channel each.
-                let mut s = Vec::with_capacity(16_000);
-                for gy in 0..100 {
-                    for gx in 0..160 {
-                        let (x, y) = (gx * l.width / 160, gy * l.height / 100);
-                        s.push(l.data[y * l.stride + x * 4 + 1]);
+                let grid = |data: &[u8], w: usize, h: usize, stride: usize| {
+                    let mut s = Vec::with_capacity(16_000);
+                    for gy in 0..100 {
+                        for gx in 0..160 {
+                            let (x, y) = (gx * w / 160, gy * h / 100);
+                            s.push(data[y * stride + x * 4 + 1]);
+                        }
                     }
-                }
+                    s
+                };
+                let s = match &l.gpu {
+                    Some(g) => read_mapped(g, |d, w, h, stride, _| grid(d, w, h, stride)).expect("mapped"),
+                    None => grid(&l.data, l.width, l.height, l.stride),
+                };
                 (l.seq, s)
             };
             let changed = if prev.is_empty() {

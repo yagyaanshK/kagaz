@@ -5,7 +5,7 @@
 //! PipeWire's own headers (MIT).
 
 use std::ffi::{c_char, c_int, c_void};
-use std::os::fd::{IntoRawFd, OwnedFd};
+use std::os::fd::{BorrowedFd, IntoRawFd, OwnedFd};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::ptr::null_mut;
 use std::sync::OnceLock;
@@ -32,6 +32,7 @@ struct Lib {
     stream_connect: unsafe extern "C" fn(Ptr, u32, u32, u32, *mut *const c_void, u32) -> c_int,
     stream_dequeue_buffer: unsafe extern "C" fn(Ptr) -> *mut PwBuffer,
     stream_queue_buffer: unsafe extern "C" fn(Ptr, *mut PwBuffer) -> c_int,
+    stream_update_params: unsafe extern "C" fn(Ptr, *mut *const c_void, u32) -> c_int,
     stream_destroy: unsafe extern "C" fn(Ptr),
 }
 
@@ -81,6 +82,7 @@ fn load() -> Result<Lib, String> {
             stream_connect: f!("pw_stream_connect"),
             stream_dequeue_buffer: f!("pw_stream_dequeue_buffer"),
             stream_queue_buffer: f!("pw_stream_queue_buffer"),
+            stream_update_params: f!("pw_stream_update_params"),
             stream_destroy: f!("pw_stream_destroy"),
         };
         init(null_mut(), null_mut());
@@ -164,25 +166,39 @@ const FLAG_MAP_BUFFERS: u32 = 1 << 2;
 
 // Pod types (spa/utils/type.h).
 const TYPE_ID: u32 = 3;
+const TYPE_INT: u32 = 4;
+const TYPE_LONG: u32 = 5;
 const TYPE_RECTANGLE: u32 = 10;
 const TYPE_FRACTION: u32 = 11;
 const TYPE_OBJECT: u32 = 15;
 const TYPE_CHOICE: u32 = 19;
 const OBJECT_FORMAT: u32 = 0x40003;
-// Param ids (spa/param/param.h).
+const OBJECT_PARAM_BUFFERS: u32 = 0x40004;
+// Param ids (spa/param/param.h) and the Buffers keys (spa/param/buffers.h).
 const PARAM_ENUM_FORMAT: u32 = 3;
 const PARAM_FORMAT: u32 = 4;
+const PARAM_BUFFERS: u32 = 5;
+const BUFFERS_DATA_TYPE: u32 = 6;
+// How a buffer's memory comes (spa/buffer/buffer.h).
+const DATA_MEM_PTR: u32 = 1;
+const DATA_MEM_FD: u32 = 2;
+const DATA_DMA_BUF: u32 = 3;
 // Format keys (spa/param/format.h) and their values.
 const FORMAT_MEDIA_TYPE: u32 = 1;
 const FORMAT_MEDIA_SUBTYPE: u32 = 2;
 const FORMAT_VIDEO_FORMAT: u32 = 0x20001;
+const FORMAT_VIDEO_MODIFIER: u32 = 0x20002;
 const FORMAT_VIDEO_SIZE: u32 = 0x20003;
 const FORMAT_VIDEO_FRAMERATE: u32 = 0x20004;
 const MEDIA_TYPE_VIDEO: u32 = 2;
 const MEDIA_SUBTYPE_RAW: u32 = 1;
-// Choices (spa/pod/pod.h).
+// Choices and property flags (spa/pod/pod.h).
 const CHOICE_RANGE: u32 = 1;
 const CHOICE_ENUM: u32 = 3;
+const PROP_MANDATORY: u32 = 1 << 3;
+const PROP_DONT_FIXATE: u32 = 1 << 4;
+/// Graphics memory laid out row after row (drm_fourcc.h).
+pub const MODIFIER_LINEAR: u64 = 0;
 
 // Video formats (spa/param/video/raw.h).
 pub const RGBX: u32 = 7;
@@ -212,22 +228,40 @@ fn choice(how: u32, kind: u32, each: usize, values: &[u32]) -> Vec<u32> {
 /// to 8192x8192 (1920x1080 preferred) or exactly `size`; up to 1000
 /// pictures a second (60 preferred). Words in this machine's byte order.
 pub fn video_offer(size: Option<(u32, u32)>) -> Vec<u32> {
+    offer(choice(CHOICE_ENUM, TYPE_ID, 1, &[BGRX, BGRX, RGBX, BGRA, RGBA]), None, size)
+}
+
+/// The same in graphics memory (DMA-BUF), one layout at a time, laid out
+/// row after row. GNOME times these by the screen's own refresh, so all of
+/// them arrive (through shared memory about a third are dropped).
+pub fn gpu_offer(format: u32, size: Option<(u32, u32)>) -> Vec<u32> {
+    let [lo, hi] = [MODIFIER_LINEAR as u32, (MODIFIER_LINEAR >> 32) as u32];
+    let words = if cfg!(target_endian = "little") { [lo, hi] } else { [hi, lo] };
+    let modifiers = choice(CHOICE_ENUM, TYPE_LONG, 2, &[words[0], words[1], words[0], words[1]]);
+    offer(pod(TYPE_ID, &[format]), Some(modifiers), size)
+}
+
+fn offer(formats: Vec<u32>, modifiers: Option<Vec<u32>>, size: Option<(u32, u32)>) -> Vec<u32> {
     let mut body = vec![OBJECT_FORMAT, PARAM_ENUM_FORMAT];
-    let mut prop = |key: u32, value: Vec<u32>| {
-        body.extend_from_slice(&[key, 0]);
+    let mut prop = |key: u32, flags: u32, value: Vec<u32>| {
+        body.extend_from_slice(&[key, flags]);
         body.extend(value);
     };
-    prop(FORMAT_MEDIA_TYPE, pod(TYPE_ID, &[MEDIA_TYPE_VIDEO]));
-    prop(FORMAT_MEDIA_SUBTYPE, pod(TYPE_ID, &[MEDIA_SUBTYPE_RAW]));
-    prop(FORMAT_VIDEO_FORMAT, choice(CHOICE_ENUM, TYPE_ID, 1, &[BGRX, BGRX, RGBX, BGRA, RGBA]));
+    prop(FORMAT_MEDIA_TYPE, 0, pod(TYPE_ID, &[MEDIA_TYPE_VIDEO]));
+    prop(FORMAT_MEDIA_SUBTYPE, 0, pod(TYPE_ID, &[MEDIA_SUBTYPE_RAW]));
+    prop(FORMAT_VIDEO_FORMAT, 0, formats);
+    if let Some(m) = modifiers {
+        prop(FORMAT_VIDEO_MODIFIER, PROP_MANDATORY | PROP_DONT_FIXATE, m);
+    }
     prop(
         FORMAT_VIDEO_SIZE,
+        0,
         match size {
             Some((w, h)) => pod(TYPE_RECTANGLE, &[w, h]),
             None => choice(CHOICE_RANGE, TYPE_RECTANGLE, 2, &[1920, 1080, 1, 1, 8192, 8192]),
         },
     );
-    prop(FORMAT_VIDEO_FRAMERATE, choice(CHOICE_RANGE, TYPE_FRACTION, 2, &[60, 1, 0, 1, 1000, 1]));
+    prop(FORMAT_VIDEO_FRAMERATE, 0, choice(CHOICE_RANGE, TYPE_FRACTION, 2, &[60, 1, 0, 1, 1000, 1]));
     pod(TYPE_OBJECT, &body)
 }
 
@@ -238,6 +272,8 @@ pub struct VideoFormat {
     pub format: u32,
     pub width: u32,
     pub height: u32,
+    /// Set when the pictures come in graphics memory: how it is laid out.
+    pub modifier: Option<u64>,
 }
 
 /// Reads the video format and size out of a Format pod. A value may come
@@ -249,7 +285,7 @@ pub fn video_format(pod: &[u8]) -> Option<VideoFormat> {
         return None;
     }
     let pod = pod.get(..8 + size)?;
-    let (mut format, mut dims) = (None, None);
+    let (mut format, mut dims, mut modifier) = (None, None, None);
     // Properties: key, flags, then the value pod.
     let mut at = 16;
     while at + 16 <= pod.len() {
@@ -266,21 +302,41 @@ pub fn video_format(pod: &[u8]) -> Option<VideoFormat> {
         match (key, kind) {
             (FORMAT_VIDEO_FORMAT, TYPE_ID) => format = word(value, 0),
             (FORMAT_VIDEO_SIZE, TYPE_RECTANGLE) => dims = word(value, 0).zip(word(value, 4)),
+            (FORMAT_VIDEO_MODIFIER, TYPE_LONG) => {
+                modifier = value.get(..8).map(|b| u64::from_ne_bytes(b.try_into().unwrap()))
+            }
             _ => {}
         }
         at += 16 + len.div_ceil(8) * 8;
     }
     let (width, height) = dims?;
-    Some(VideoFormat { format: format?, width, height })
+    Some(VideoFormat { format: format?, width, height, modifier })
 }
 
-/// A picture as it lies in PipeWire's buffer: `bytes` is all the mapped
-/// memory; the picture starts at `offset`.
-pub struct Frame<'a> {
-    pub bytes: &'a [u8],
-    pub offset: usize,
-    pub size: usize,
-    pub stride: i32,
+/// A picture as it lies in PipeWire's buffer.
+pub enum Frame<'a> {
+    /// In memory Kagaz can read: `bytes` is all the mapped memory; the
+    /// picture starts at `offset`.
+    Memory { bytes: &'a [u8], offset: usize, size: usize, stride: i32 },
+    /// In graphics memory, reached through the descriptor (good only
+    /// during the call; keep a duplicate).
+    Gpu { fd: BorrowedFd<'a>, offset: u32, stride: u32 },
+}
+
+/// The Buffers answer: which kind of memory Kagaz takes.
+fn buffers_param(gpu: bool) -> Vec<u32> {
+    let types = if gpu { 1 << DATA_DMA_BUF } else { (1 << DATA_MEM_PTR) | (1 << DATA_MEM_FD) };
+    let mut body = vec![OBJECT_PARAM_BUFFERS, PARAM_BUFFERS, BUFFERS_DATA_TYPE, 0];
+    body.extend(pod(TYPE_INT, &[types]));
+    pod(TYPE_OBJECT, &body)
+}
+
+/// Pods are read in place, so they go to PipeWire on 8-byte boundaries.
+fn aligned(words: &[u32]) -> Vec<u64> {
+    let mut out = vec![0u64; words.len().div_ceil(2)];
+    // SAFETY: `out` holds at least as many bytes as `words`.
+    unsafe { std::ptr::copy_nonoverlapping(words.as_ptr(), out.as_mut_ptr() as *mut u32, words.len()) };
+    out
 }
 
 /// What the stream's events reach; lives in a box the stream points at.
@@ -302,6 +358,13 @@ unsafe extern "C" fn on_param_changed(data: Ptr, id: u32, param: *const c_void) 
         (&mut *(data as *mut Callbacks), std::slice::from_raw_parts(param as *const u8, 8 + size))
     };
     if let Some(f) = video_format(pod) {
+        // Say which memory is wanted: graphics memory only when that was
+        // settled on (its layout comes with the format).
+        let p = aligned(&buffers_param(f.modifier.is_some()));
+        let mut params = [p.as_ptr() as *const c_void];
+        // SAFETY: called on PipeWire's thread, inside its event, with a
+        // whole pod that lives through the call.
+        unsafe { (cb.lib.stream_update_params)(cb.stream, params.as_mut_ptr(), 1) };
         let _ = catch_unwind(AssertUnwindSafe(|| (cb.format)(f)));
     }
 }
@@ -318,15 +381,28 @@ unsafe extern "C" fn on_process(data: Ptr) {
         let sb = (*b).buffer;
         if !sb.is_null() && (*sb).n_datas > 0 && !(*sb).datas.is_null() {
             let d = &*(*sb).datas;
-            if !d.data.is_null() && !d.chunk.is_null() {
+            if !d.chunk.is_null() {
                 let c = &*d.chunk;
-                let frame = Frame {
-                    bytes: std::slice::from_raw_parts(d.data as *const u8, d.maxsize as usize),
-                    offset: c.offset as usize,
-                    size: c.size as usize,
-                    stride: c.stride,
+                let frame = if d.kind == DATA_DMA_BUF && d.fd >= 0 {
+                    // An empty chunk: the picture did not change.
+                    (c.size > 0).then(|| Frame::Gpu {
+                        fd: BorrowedFd::borrow_raw(d.fd as c_int),
+                        offset: c.offset,
+                        stride: c.stride.max(0) as u32,
+                    })
+                } else if !d.data.is_null() {
+                    Some(Frame::Memory {
+                        bytes: std::slice::from_raw_parts(d.data as *const u8, d.maxsize as usize),
+                        offset: c.offset as usize,
+                        size: c.size as usize,
+                        stride: c.stride,
+                    })
+                } else {
+                    None
                 };
-                let _ = catch_unwind(AssertUnwindSafe(|| (cb.frame)(frame)));
+                if let Some(frame) = frame {
+                    let _ = catch_unwind(AssertUnwindSafe(|| (cb.frame)(frame)));
+                }
             }
         }
         (cb.lib.stream_queue_buffer)(cb.stream, b);
@@ -352,11 +428,13 @@ unsafe impl Send for VideoStream {}
 impl VideoStream {
     /// Connects over `fd` (from the portal), or to this session's PipeWire
     /// when `None`, and takes in `node`. `format` hears the settled format,
-    /// `frame` each picture; both run on PipeWire's thread.
+    /// `frame` each picture; both run on PipeWire's thread. `gpu`: offer to
+    /// take pictures in graphics memory first.
     pub fn open(
         fd: Option<OwnedFd>,
         node: u32,
         size: Option<(u32, u32)>,
+        gpu: bool,
         format: impl FnMut(VideoFormat) + Send + 'static,
         frame: impl FnMut(Frame<'_>) + Send + 'static,
     ) -> Result<VideoStream, String> {
@@ -391,14 +469,14 @@ impl VideoStream {
                 return Err(err("could not start its thread"));
             }
             (lib.thread_loop_lock)(thread_loop);
-            let r = s.connect(fd, node, size);
+            let r = s.connect(fd, node, size, gpu);
             (lib.thread_loop_unlock)(thread_loop);
             r.map(|()| s)
         }
     }
 
     /// Called with the loop locked.
-    unsafe fn connect(&mut self, fd: Option<OwnedFd>, node: u32, size: Option<(u32, u32)>) -> Result<(), String> {
+    unsafe fn connect(&mut self, fd: Option<OwnedFd>, node: u32, size: Option<(u32, u32)>, gpu: bool) -> Result<(), String> {
         let lib = self.lib;
         // SAFETY: see `open`; the hook and callbacks are boxed, so they stay
         // put for as long as the stream.
@@ -419,18 +497,23 @@ impl VideoStream {
             self.callbacks.stream = self.stream;
             let data = &mut *self.callbacks as *mut Callbacks as Ptr;
             (lib.stream_add_listener)(self.stream, &mut *self.hook, &EVENTS, data);
-            // Pods are read in place, so keep the offer on an 8-byte boundary.
-            let words = video_offer(size);
-            let mut offer = vec![0u64; words.len().div_ceil(2)];
-            std::ptr::copy_nonoverlapping(words.as_ptr(), offer.as_mut_ptr() as *mut u32, words.len());
-            let mut params = [offer.as_ptr() as *const c_void];
+            // Graphics memory first when wanted, in the layouts GNOME
+            // draws; then ordinary memory.
+            let mut offers: Vec<Vec<u64>> = Vec::new();
+            if gpu {
+                for f in [BGRX, BGRA, RGBX, RGBA] {
+                    offers.push(aligned(&gpu_offer(f, size)));
+                }
+            }
+            offers.push(aligned(&video_offer(size)));
+            let mut params: Vec<*const c_void> = offers.iter().map(|o| o.as_ptr() as *const c_void).collect();
             let r = (lib.stream_connect)(
                 self.stream,
                 DIRECTION_INPUT,
                 node,
                 FLAG_AUTOCONNECT | FLAG_MAP_BUFFERS,
                 params.as_mut_ptr(),
-                1,
+                params.len() as u32,
             );
             if r < 0 {
                 return Err(format!("PipeWire refused the stream: {}", std::io::Error::from_raw_os_error(-r)));
@@ -510,14 +593,20 @@ mod tests {
             0x20001, 0, 4, TYPE_ID, 11, 0,
             0x20003, 0, 8, TYPE_RECTANGLE, 1280, 800,
         ]);
-        assert_eq!(video_format(&pod), Some(VideoFormat { format: RGBA, width: 1280, height: 800 }));
+        assert_eq!(video_format(&pod), Some(VideoFormat { format: RGBA, width: 1280, height: 800, modifier: None }));
     }
 
     #[test]
     fn reads_choices_and_its_own_offer() {
         // The offer itself reads as its preferred values.
         let offer = bytes(&video_offer(None));
-        assert_eq!(video_format(&offer), Some(VideoFormat { format: BGRX, width: 1920, height: 1080 }));
+        assert_eq!(video_format(&offer), Some(VideoFormat { format: BGRX, width: 1920, height: 1080, modifier: None }));
+        // The graphics-memory offer reads with its layout.
+        let gpu = bytes(&gpu_offer(BGRA, Some((1280, 720))));
+        assert_eq!(
+            video_format(&gpu),
+            Some(VideoFormat { format: BGRA, width: 1280, height: 720, modifier: Some(MODIFIER_LINEAR) })
+        );
         let fixed = bytes(&video_offer(Some((1920, 1080))));
         assert_eq!(video_format(&fixed).map(|f| (f.width, f.height)), Some((1920, 1080)));
     }
