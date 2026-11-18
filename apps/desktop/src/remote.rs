@@ -323,6 +323,20 @@ pub fn remote_path_remove(id: String, host: String) -> Result<Devices, String> {
 }
 
 /// The device's screen, mouse and sound settings, its shape and its account.
+/// What holds for every session's window (the page of Computers &
+/// phones' own settings).
+#[tauri::command]
+pub fn remote_windows_settings(app: tauri::AppHandle, windows: kagaz_core::remote::store::Windows) -> Result<Devices, String> {
+    use tauri::Emitter;
+    let (_, list) = update(|d| {
+        d.windows = windows;
+        Ok(())
+    })?;
+    // A session's window follows at once (a call at the door shown or not).
+    let _ = app.emit("remote-windows-settings", windows);
+    Ok(list)
+}
+
 #[tauri::command]
 pub fn remote_settings(id: String, settings: Settings, user: Option<String>, shape: Option<String>) -> Result<Devices, String> {
     update(|d| {

@@ -5,6 +5,12 @@
 // Kagaz never sends more than the page can show. The mouse, the wheel and
 // the keys typed while the screen has the focus go to the device.
 // Uses app.js's globals: $, invoke; icons.js; nav.js.
+//
+// On a computer each session has a window of its own (session.html, with
+// session.js in app.js's place): there `hooks.window` is set, leaving the
+// viewer closes the window, and the questions speak of the session, not
+// of Kagaz. On a phone, and wherever a window cannot be opened, the
+// viewer takes over the main window as before.
 
 const KagazRemoteView = (() => {
   const LEFT = 1, MIDDLE = 2, RIGHT = 4;
@@ -60,6 +66,9 @@ const KagazRemoteView = (() => {
     showCard(el("h3", "", `Connecting to ${d.name}`), list, status, buttons(button("", "Cancel", () => close())));
   }
   const PATH = { address: "Local network", name: "Name", tailscale: "Tailscale", gateway: "Its hotspot" };
+  // Leaving the viewer goes back to the page it came from, or closes the
+  // session's own window.
+  const leave = () => (hooks.window ? "Close window" : "Back");
 
   function lostCard(d, failed) {
     const list = el("ul", "rc-paths");
@@ -73,7 +82,7 @@ const KagazRemoteView = (() => {
       el("p", "", failed.why),
       list,
       buttons(
-        button("", "Edit its addresses", () => close()),
+        button("", "Edit its addresses", () => (hooks.edit ? hooks.edit() : close())),
         button("accent", "Try again", () => connect()),
       ),
     );
@@ -83,7 +92,7 @@ const KagazRemoteView = (() => {
     showCard(
       el("h3", "", `Could not connect to ${d.name}`),
       el("p", "", why),
-      buttons(button("", "Back", () => close()), button("accent", "Try again", () => connect())),
+      buttons(button("", leave(), () => close()), button("accent", "Try again", () => connect())),
     );
   }
 
@@ -91,7 +100,7 @@ const KagazRemoteView = (() => {
     showCard(
       el("h3", "", `The session with ${d.name} ended`),
       el("p", "", why.charAt(0).toUpperCase() + why.slice(1) + "."),
-      buttons(button("", "Back", () => close()), button("accent", "Connect again", () => connect())),
+      buttons(button("", leave(), () => close()), button("accent", "Connect again", () => connect())),
     );
   }
 
@@ -1008,13 +1017,19 @@ const KagazRemoteView = (() => {
 
   // The window is being closed with a session open (main.rs holds it
   // back): that ends the session, so the person is asked.
+  // Both are said to this window alone (each session has its own): heard
+  // through the window's own ear, which hears what is said to all too.
   const events = window.__TAURI__ && window.__TAURI__.event;
+  const mine = window.__TAURI__ && window.__TAURI__.webviewWindow && window.__TAURI__.webviewWindow.getCurrentWebviewWindow
+    ? window.__TAURI__.webviewWindow.getCurrentWebviewWindow() : null;
+  const hear = (name, fn) => (mine ? mine.listen(name, fn) : events.listen(name, fn));
   if (events && events.listen) {
-    events.listen("remote-pinch", (ev) => pinch(ev.payload.scale, ev.payload.begin));
-    events.listen("remote-close-asked", async () => {
+    hear("remote-pinch", (ev) => pinch(ev.payload.scale, ev.payload.begin));
+    hear("remote-close-asked", async () => {
       if (cur && cur.session != null) {
-        const yes = await KagazAsk.confirm(`Close Kagaz and end the session with ${cur.device.name}?`, "Close Kagaz",
-          "Everything open on it stays open there.", "Stay");
+        const yes = await KagazAsk.confirm(
+          hooks.window ? `End the session with ${cur.device.name}?` : `Close Kagaz and end the session with ${cur.device.name}?`,
+          hooks.window ? "End session" : "Close Kagaz", "Everything open on it stays open there.", "Stay");
         if (!yes) {
           if (!cur.away) stage.focus();
           return;

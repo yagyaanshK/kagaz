@@ -432,7 +432,19 @@ default: nothing of this computer shows then), **whenever the pointer is
 on Kagaz** while it is in front, or **never**. The first time, this
 computer asks whether Kagaz may have its keys (on GNOME, Super + Esc
 takes them back at any moment). **Ctrl + Esc** leaves full screen.
-Closing Kagaz while a session is open asks first. A **pinch** on the
+On a computer **each session has a window of its own**, named after its
+device, so several run at once and Kagaz's main window stays free for a
+call at the door, the cameras or another Connect. A device with a window
+says so in the list, and its button brings that window to the front;
+Connect on its page asks before opening another (most Windows computers
+give an account one screen, so the window already open would lose it;
+Kagaz connects all the same if you say so). Closing a session's window
+ends that session, after a question. Closing the main window ends them
+all after one question, or, if you choose so behind the gear of
+Computers & phones, leaves the session windows open (the house button in
+a session's bar brings the main window back). A call at the door shows
+in the session's window too, with Answer and Decline, unless turned off
+there. A **pinch** on the
 touchpad zooms what is under the pointer on the device (it goes there as
 Ctrl + wheel, as Windows makes of a pinch itself), not Kagaz's own page.
 

@@ -181,6 +181,7 @@
           <div class="fan-tools">
             <button id="remote-rescan" type="button" title="Check your devices again and look for others on this network and in Tailscale"><span class="ic" data-icon="reload"></span><span>Look again</span></button>
             <button id="remote-add" type="button" class="accent" title="Add a computer or phone"><span class="ic" data-icon="plus"></span><span>Add</span></button>
+            <button id="remote-gear" type="button" class="icon" title="Settings for computers and phones" aria-label="Settings for computers and phones"><span class="ic" data-icon="settings"></span></button>
           </div>
         </div>
         <p id="remote-note" class="muted" role="status"></p>
@@ -218,6 +219,8 @@
         </section>
       </div>
       <div id="remote-device-view" class="hidden"></div>
+      <!-- This kind's own settings, behind its gear (remote.js). -->
+      <div id="remote-settings-view" class="hidden"></div>
       <!-- The viewer (remote-view.js): the window is the device's screen. -->
       <div id="remote-viewer-view" class="rc-viewer hidden">
         <div id="rv-banner" class="rc-banner hidden" role="status"><span class="ic" data-icon="unlock"></span><span><strong>Not encrypted on this network.</strong> The screen and what you type can be read by others on it. Through Tailscale they are protected.</span></div>

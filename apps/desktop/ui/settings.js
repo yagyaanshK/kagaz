@@ -473,16 +473,19 @@ const KagazSettings = (() => {
 
   function drawDevices(body) {
     const box = section("Device settings", "Each kind of device keeps its settings on its own page, behind its ⚙ button.");
-    const go = (label, cat) => {
-      const b = el("button", "", "Open doorbell settings");
+    const go = (label, cat, word) => {
+      const b = el("button", "", word);
       b.type = "button";
       b.addEventListener("click", () => {
         selectCategory(cat);
         if (cat === "doorbell") doorSettings(true);
+        if (cat === "remote" && typeof KagazRemote !== "undefined") KagazRemote.openSettings();
       });
       return row(label, "", b);
     };
-    box.append(go("Doorbell: ringtones, ringing here, stations on this network", "doorbell"));
+    // By name, as everywhere.
+    box.append(go("Computers & phones: session windows, each device", "remote", "Open their settings"));
+    box.append(go("Doorbell: ringtones, ringing here, stations on this network", "doorbell", "Open doorbell settings"));
     body.appendChild(box);
   }
 

@@ -42,9 +42,11 @@ struct Open {
     /// Pictures sent that the page has not painted yet.
     unpainted: Arc<(Mutex<u32>, Condvar)>,
     stop: Arc<AtomicBool>,
+    /// The window that shows it.
+    window: String,
 }
 
-/// The sessions open in the window.
+/// The sessions open, in whichever window each is shown.
 #[derive(Default)]
 pub struct Viewers {
     list: Mutex<HashMap<u64, Open>>,
@@ -325,6 +327,7 @@ pub struct Asking {
 #[tauri::command]
 pub async fn remote_connect(
     app: AppHandle,
+    window: tauri::WebviewWindow,
     id: String,
     asking: Asking,
     channel: Channel<InvokeResponseBody>,
@@ -429,6 +432,7 @@ pub async fn remote_connect(
             numbers: session.numbers.clone(),
             unpainted: Arc::new((Mutex::new(0), Condvar::new())),
             stop: Arc::new(AtomicBool::new(false)),
+            window: window.label().to_string(),
         };
         let (width, height) = session.screen.size();
         let path = &device.paths[answer.path];
@@ -616,14 +620,17 @@ pub async fn remote_keys(app: AppHandle, window: tauri::WebviewWindow, on: bool,
     #[cfg(target_os = "linux")]
     {
         use gtk::prelude::*;
-        static HELD: AtomicBool = AtomicBool::new(false);
+        // Which window has them: one at a time, the one in front.
+        static HELD: Mutex<Option<String>> = Mutex::new(None);
         let (tx, rx) = mpsc::channel();
+        let label = window.label().to_string();
         app.run_on_main_thread(move || {
+            let Ok(mut holder) = HELD.lock() else { return };
+            let was = holder.as_deref() == Some(label.as_str());
             let held = (|| {
                 let window = window.gtk_window().ok()?;
                 let display = window.display();
                 let wayland = display.type_().name().contains("Wayland");
-                let was = HELD.load(Ordering::Acquire);
                 let want = if wayland && !focused { was } else { on && focused };
                 if want == was {
                     return Some(was);
@@ -633,13 +640,21 @@ pub async fn remote_keys(app: AppHandle, window: tauri::WebviewWindow, on: bool,
                     seat.ungrab();
                     return Some(false);
                 }
+                // Another of Kagaz's windows had them: they pass to this one.
+                if holder.is_some() {
+                    seat.ungrab();
+                }
                 // The keyboard alone: a grab of it by itself is what tells
                 // a Wayland system to leave its shortcuts to the window.
                 let status = seat.grab(&window.window()?, gtk::gdk::SeatCapabilities::KEYBOARD, true, None, None, None);
                 Some(status == gtk::gdk::GrabStatus::Success)
             })()
             .unwrap_or(false);
-            HELD.store(held, Ordering::Release);
+            if held {
+                *holder = Some(label);
+            } else if was {
+                *holder = None;
+            }
             let _ = tx.send(held);
         })
         .map_err(|e| e.to_string())?;
@@ -669,9 +684,9 @@ pub async fn remote_pinch(window: tauri::WebviewWindow, on: bool) -> Result<bool
         use gtk::prelude::*;
         use tauri::Emitter;
         thread_local! {
-            /// Kagaz's own pinch on the webview, and the phase the
-            /// webview's had before it was first turned off.
-            static OURS: std::cell::RefCell<Option<(gtk::GestureZoom, gtk::PropagationPhase)>> = const { std::cell::RefCell::new(None) };
+            /// For each window: Kagaz's own pinch on its webview, and
+            /// the phase the webview's had before it was first turned off.
+            static OURS: std::cell::RefCell<HashMap<String, (gtk::GestureZoom, gtk::PropagationPhase)>> = std::cell::RefCell::new(HashMap::new());
         }
         let page = window.clone();
         let (tx, rx) = mpsc::channel();
@@ -689,16 +704,16 @@ pub async fn remote_pinch(window: tauri::WebviewWindow, on: bool) -> Result<bool
                 let Some(theirs) = theirs else { return };
                 OURS.with(|ours| {
                     let mut ours = ours.borrow_mut();
-                    let (mine, was) = ours.get_or_insert_with(|| {
+                    let (mine, was) = ours.entry(page.label().to_string()).or_insert_with(|| {
                         let mine = gtk::GestureZoom::new(&view);
                         mine.set_propagation_phase(gtk::PropagationPhase::None);
                         let to = page.clone();
                         mine.connect_begin(move |_, _| {
-                            let _ = to.emit("remote-pinch", Pinch { scale: 1.0, begin: true });
+                            let _ = to.emit_to(to.label(), "remote-pinch", Pinch { scale: 1.0, begin: true });
                         });
                         let to = page.clone();
                         mine.connect_scale_changed(move |_, scale| {
-                            let _ = to.emit("remote-pinch", Pinch { scale, begin: false });
+                            let _ = to.emit_to(to.label(), "remote-pinch", Pinch { scale, begin: false });
                         });
                         (mine, theirs.propagation_phase())
                     });
@@ -725,11 +740,28 @@ struct Pinch {
     begin: bool,
 }
 
-/// A session is open: closing the window would end it, so the person is
-/// asked first (main.rs holds the window back; the page asks).
+/// A session is open in that window: closing it would end the session,
+/// so the person is asked first (remote_windows.rs holds the window back;
+/// the page asks).
 #[cfg(desktop)]
-pub fn any_open(app: &AppHandle) -> bool {
-    app.try_state::<Viewers>().is_some_and(|viewers| viewers.list.lock().is_ok_and(|list| !list.is_empty()))
+pub fn open_in(app: &AppHandle, window: &str) -> bool {
+    app.try_state::<Viewers>()
+        .is_some_and(|viewers| viewers.list.lock().is_ok_and(|list| list.values().any(|open| open.window == window)))
+}
+
+/// That window is gone: so are the sessions it showed.
+#[cfg(desktop)]
+pub fn end_in(app: &AppHandle, window: &str) {
+    let Some(viewers) = app.try_state::<Viewers>() else { return };
+    let Ok(mut list) = viewers.list.lock() else { return };
+    let gone: Vec<u64> = list.iter().filter(|(_, open)| open.window == window).map(|(id, _)| *id).collect();
+    for id in gone {
+        if let Some(open) = list.remove(&id) {
+            open.stop.store(true, Ordering::Release);
+            open.input.send(Input::Close);
+            open.unpainted.1.notify_all();
+        }
+    }
 }
 
 /// The person said yes: the window closes, and its sessions with it.

@@ -192,9 +192,34 @@ const KagazShell = (() => {
     else rings.delete(source);
     showRing();
   }
+  // A session with a computer or phone has a window of its own
+  // (session.html): the ring shows there too, and its Answer and Decline
+  // come back here, where the call is.
+  const tauriEvents = window.__TAURI__ && window.__TAURI__.event;
+  let stripSaid = "";
+  function tellWindows(last, again) {
+    if (!tauriEvents || !tauriEvents.emit) return;
+    const strip = last ? { title: last.title, sub: last.sub || "" } : null;
+    const say = JSON.stringify(strip);
+    if (say === stripSaid && !again) return;
+    stripSaid = say;
+    tauriEvents.emit("ring-strip", strip).catch(() => {});
+  }
+  if (tauriEvents && tauriEvents.listen) {
+    tauriEvents.listen("ring-strip-do", (ev) => {
+      const last = [...rings.values()].pop();
+      if (!last) return;
+      if (ev.payload === "answer") last.answer();
+      else last.decline();
+    });
+    // A session's window that opened in the middle of a ring.
+    tauriEvents.listen("ring-strip-ask", () => tellWindows([...rings.values()].pop(), true));
+  }
+
   function showRing() {
     const box = $("urgent");
     const last = [...rings.values()].pop();
+    tellWindows(last);
     const shown = !!last && view !== "doorbell";
     box.classList.toggle("hidden", !shown);
     if (!shown) return;

@@ -27,6 +27,7 @@ mod purifiers;
 mod remote;
 mod remote_vault;
 mod remote_view;
+mod remote_windows;
 #[cfg(desktop)]
 mod ring_notice;
 mod ringtones;
@@ -1902,19 +1903,10 @@ pub fn run() {
     #[cfg(target_os = "linux")]
     own_app_scope();
     tauri::Builder::default()
-        // Closing the window ends an open session with a computer or
-        // phone, and whatever was being done there: the person is asked.
-        .on_window_event(|window, event| {
-            #[cfg(desktop)]
-            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                if remote_view::any_open(window.app_handle()) {
-                    api.prevent_close();
-                    let _ = window.emit("remote-close-asked", ());
-                }
-            }
-            #[cfg(not(desktop))]
-            let _ = (window, event);
-        })
+        // Closing a window that shows a session ends it; closing the
+        // main one with sessions in windows of their own ends them all,
+        // or leaves them (remote_windows.rs): the person is asked.
+        .on_window_event(remote_windows::on_event)
         .manage(CameraState {
             engine: std::sync::Mutex::new(None),
             downloading: std::sync::Mutex::new(std::collections::HashSet::new()),
@@ -1928,6 +1920,7 @@ pub fn run() {
         .manage(onetouch::OneTouchState::default())
         .manage(media::Watches::default())
         .manage(remote_view::Viewers::default())
+        .manage(remote_windows::SessionWindows::default())
         .manage(xiaomi::XiaomiState::default())
         .plugin(tauri_plugin_dialog::init())
         .plugin(phone_plugin())
@@ -2057,6 +2050,11 @@ pub fn run() {
             remote_view::remote_keys,
             remote_view::remote_pinch,
             remote_view::remote_close_window,
+            remote_windows::remote_windows,
+            remote_windows::remote_window_open,
+            remote_windows::remote_main_show,
+            remote_windows::remote_close_all,
+            remote::remote_windows_settings,
             remote_view::remote_startup_files,
             remote_view::remote_disconnect,
             fans::room_add,

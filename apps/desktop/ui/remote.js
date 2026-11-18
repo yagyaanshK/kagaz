@@ -74,10 +74,12 @@ const KagazRemote = (() => {
   function stateLine(d, withSystem) {
     const r = reachWords(d);
     const line = el("span", "tile-sub");
-    line.append(el("span", "rc-dot" + (r.ok ? " ok" : "")));
+    const shown = windowsOf(d.id).length;
+    line.append(el("span", "rc-dot" + (r.ok || shown ? " ok" : "")));
     const sys = SYSTEM[d.system];
     if (withSystem && sys) line.append(el("span", "rc-what", sys + " · "));
-    line.append(r.text);
+    // A session is open with it: that says more than how it was reached.
+    line.append(shown ? (shown > 1 ? `In ${shown} windows of its own` : "In its own window") : r.text);
     return line;
   }
 
@@ -87,7 +89,69 @@ const KagazRemote = (() => {
   const overRdp = (d) => canRdp && d.ways.some((w) => w.speaks === "rdp");
   const NOT_YET = "Remote Desktop sessions are not on this kind of device yet. A device that speaks VNC can be connected to.";
 
-  function connect(id) {
+  // On a computer every session has a window of its own, and several
+  // run at once (remote_windows.rs); the list says which devices have
+  // one. A device that has a window is asked about before another is
+  // opened for it: what a second connection does is the device's to say,
+  // and most Windows computers give an account one screen.
+  let windows = []; // [{ label, device, name }]
+  const windowsOf = (id) => windows.filter((w) => w.device === id);
+  async function connect(id, show) {
+    const d = data.devices.find((x) => x.id === id);
+    if (!d) return;
+    let again = false;
+    if (windowsOf(id).length && !show) {
+      again = await KagazAsk.confirm(`${d.name} already has a window open`, "Connect again",
+        "A Windows computer usually gives each account one screen: connecting again takes that screen over, and the window already open loses it. "
+        + "With a different account, or on a computer that allows it, the two run side by side.", "Show that window");
+    }
+    try {
+      const label = await invoke("remote_window_open", { device: id, again });
+      invoke("page_log", { line: `remote: ${label} is the window for this session${again ? " (another for the same device)" : ""}` }).catch(() => {});
+      return;
+    } catch (e) {
+      // No windows of their own here (a phone): the viewer takes this one.
+      invoke("page_log", { line: "remote: no window of its own here; the session shows in this one" }).catch(() => {});
+    }
+    connectHere(id);
+  }
+  function windowsChanged(list) {
+    const before = new Set(windows.map((w) => w.device));
+    windows = list || [];
+    renderList();
+    if (viewIs("device")) renderDevice();
+    // A session that ended may have changed how its device does.
+    for (const id of before) if (!windowsOf(id).length) check(id);
+  }
+  if (window.__TAURI__.event && window.__TAURI__.event.listen) {
+    window.__TAURI__.event.listen("remote-windows", (ev) => windowsChanged(ev.payload));
+    // From a session's window: its device's page, to edit its addresses.
+    window.__TAURI__.event.listen("remote-edit-device", (ev) => {
+      selectCategory("remote");
+      openDevice(ev.payload);
+    });
+  }
+  invoke("remote_windows").then(windowsChanged).catch(() => {});
+
+  // Kagaz's main window is being closed with sessions open in windows of
+  // their own (remote_windows.rs holds it back): that ends them all, so
+  // the person is asked once. (Where they chose to keep those windows,
+  // nothing is asked: the main window steps out of sight.)
+  {
+    const tauri = window.__TAURI__;
+    const here = tauri.webviewWindow && tauri.webviewWindow.getCurrentWebviewWindow ? tauri.webviewWindow.getCurrentWebviewWindow() : null;
+    const hear = (name, fn) => (here ? here.listen(name, fn) : tauri.event && tauri.event.listen ? tauri.event.listen(name, fn) : null);
+    hear("main-close-asked", async (ev) => {
+      const names = ev.payload || [];
+      const n = names.length;
+      const yes = await KagazAsk.confirm(n === 1 ? `Close Kagaz and end the session with ${names[0]}?` : `Close Kagaz and end ${n} sessions?`, "Close Kagaz",
+        `${n === 1 ? "Everything open on it stays open there." : names.join(", ") + ". Everything open on them stays open there."} `
+        + "The settings of Computers & phones can keep session windows open when this window closes.", "Stay");
+      if (yes) invoke("remote_close_all").catch(() => {});
+    });
+  }
+
+  function connectHere(id) {
     const d = data.devices.find((x) => x.id === id);
     if (!d || KagazRemoteView.isOpen()) return;
     viewId = id;
@@ -129,11 +193,16 @@ const KagazRemote = (() => {
     chev.innerHTML = KagazIcons.svg("forward");
     main.append(ic, text, chev);
     const acts = el("span", "tile-actions");
-    const go = button("tile-act", withIcon("computer", "Connect"), () => connect(d.id), `Connect to ${d.name}`);
+    const shown = windowsOf(d.id).length > 0;
+    const go = shown
+      ? button("tile-act", withIcon("computer", "Show window"), () => connect(d.id, true), `Show the window with ${d.name}'s screen`)
+      : button("tile-act", withIcon("computer", "Connect"), () => connect(d.id), `Connect to ${d.name}`);
     const st = states.get(d.id);
-    go.disabled = !canConnect(d) || !!(st && !st.within);
-    if (!canConnect(d)) go.title = NOT_YET;
-    else if (go.disabled) go.title = `${d.name} is out of reach`;
+    if (!shown) {
+      go.disabled = !canConnect(d) || !!(st && !st.within);
+      if (!canConnect(d)) go.title = NOT_YET;
+      else if (go.disabled) go.title = `${d.name} is out of reach`;
+    }
     acts.append(go);
     t.append(main, acts);
     return t;
@@ -279,10 +348,11 @@ const KagazRemote = (() => {
 
   const viewIs = (v) => !$(`remote-${v}-view`).classList.contains("hidden");
   function showView(v) {
-    for (const x of ["list", "add", "device", "viewer"]) $(`remote-${x}-view`).classList.toggle("hidden", x !== v);
+    for (const x of ["list", "add", "device", "viewer", "settings"]) $(`remote-${x}-view`).classList.toggle("hidden", x !== v);
     const pane = $("remote");
     const d = (v === "device" || v === "viewer") && data.devices.find((x) => x.id === (v === "viewer" ? viewId : openId));
     if (v === "add") pane.dataset.title = "Add a computer or phone";
+    else if (v === "settings") pane.dataset.title = "Settings for computers & phones";
     else if (d) pane.dataset.title = d.name;
     else delete pane.dataset.title;
     $("main").scrollTop = 0;
@@ -323,14 +393,21 @@ const KagazRemote = (() => {
     showView("device");
     KagazNav.push("remote-device", () => {
       openId = null;
-      showView("list");
+      leaveDevice();
     });
+  }
+  // Back from a device's page: to where it was opened from.
+  function leaveDevice() {
+    if (KagazNav.has("remote-settings")) {
+      renderSettings();
+      showView("settings");
+    } else showView("list");
   }
   function closeDevice() {
     if (viewIs("device")) {
       openId = null;
-      showView("list");
       KagazNav.pop("remote-device");
+      leaveDevice();
     }
   }
 
@@ -620,6 +697,98 @@ const KagazRemote = (() => {
     return w.port === usual ? name : `${name} on port ${w.port}`;
   };
 
+  // ---------- this kind's own settings ----------
+  // Behind the gear: what holds for every computer and phone, then a way
+  // to each device's own (its page). Settings lists it too.
+  function setRow(label, note, control) {
+    const r = el("div", "set-row");
+    const l = el("label", "set-label");
+    l.append(el("span", "", label));
+    if (note) l.append(el("span", "muted small", note));
+    const c = el("span", "set-control");
+    c.append(control);
+    const field = c.querySelector("input, select");
+    if (field) {
+      field.id = field.id || `remote-set-${label.length}-${label.charCodeAt(0)}`;
+      l.htmlFor = field.id;
+    }
+    r.append(l, c);
+    return r;
+  }
+  function renderSettings() {
+    const box = $("remote-settings-view");
+    const w = { keep_open: false, ring: true, ...(data.windows || {}) };
+    const note = el("p", "muted small");
+    note.setAttribute("role", "status");
+    const keep = async (change) => {
+      const next = { ...w, ...change };
+      try {
+        data = await invoke("remote_windows_settings", { windows: next });
+        note.textContent = "";
+      } catch (e) {
+        note.textContent = "Not saved: " + e;
+      }
+      renderSettings();
+    };
+    const win = el("section", "set-section");
+    win.append(el("h3", "", "Session windows"), el("p", "muted small", "Each session has a window of its own; Kagaz's main window stays free for everything else."));
+    const closing = el("select");
+    for (const [v, words] of [["", "End every session, after asking"], ["keep", "Keep the session windows open"]]) {
+      const o = el("option", "", words);
+      o.value = v;
+      o.selected = (w.keep_open ? "keep" : "") === v;
+      closing.append(o);
+    }
+    closing.addEventListener("change", () => keep({ keep_open: closing.value === "keep" }));
+    const ringLabel = el("label", "switch");
+    const ring = el("input");
+    ring.type = "checkbox";
+    ring.checked = w.ring !== false;
+    ring.setAttribute("aria-label", "Show a call at the door in a session's window");
+    ringLabel.append(ring);
+    ring.addEventListener("change", () => keep({ ring: ring.checked }));
+    win.append(
+      setRow("When Kagaz's main window closes", w.keep_open ? "Kagaz stays behind them; the Kagaz button in a session's bar brings its main window back." : "", closing),
+      setRow("Show a call at the door in a session's window", "With Answer and Decline, also in full screen", ringLabel),
+      note,
+    );
+    const each = el("section", "set-section");
+    each.append(el("h3", "", "Each device"), el("p", "muted small", "Its keyboard, screen, sound and sign-in are on its own page."));
+    for (const d of data.devices.slice().sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }))) {
+      const r = el("div", "set-row set-door");
+      r.tabIndex = 0;
+      r.setAttribute("role", "button");
+      const ic = el("span", "set-door-icon ic");
+      ic.innerHTML = KagazIcons.svg(shapeIcon(d));
+      const l = el("span", "set-label");
+      l.append(el("span", "", d.name));
+      const go = el("span", "set-door-go ic");
+      go.innerHTML = KagazIcons.svg("forward");
+      r.append(ic, l, go);
+      const open = () => openDevice(d.id);
+      r.addEventListener("click", open);
+      r.addEventListener("keydown", (ev) => {
+        if (ev.key === "Enter" || ev.key === " ") {
+          ev.preventDefault();
+          open();
+        }
+      });
+      each.append(r);
+    }
+    if (!data.devices.length) each.append(el("p", "muted", "No computers or phones yet."));
+    box.replaceChildren(win, each);
+  }
+  async function openSettings() {
+    try {
+      data = (await invoke("remote_saved")) || data;
+    } catch (e) {}
+    renderSettings();
+    if (viewIs("settings")) return;
+    showView("settings");
+    KagazNav.push("remote-settings", () => showView("list"));
+  }
+  $("remote-gear").addEventListener("click", openSettings);
+
   // ---------- the page ----------
   async function show() {
     invoke("remote_abilities").then((can) => {
@@ -679,5 +848,5 @@ const KagazRemote = (() => {
     addHost(host, $("remote-add-name").value.trim() || null, $("remote-add-speaks").value || null).finally(() => (go.disabled = false));
   });
 
-  return { show, rescan, open, openAdd, connectTo, homeWords, saved: () => data.devices, shapeIcon, within: (id) => !!(states.get(id) && states.get(id).within) };
+  return { show, rescan, open, openAdd, openSettings, connectTo, homeWords, saved: () => data.devices, shapeIcon, within: (id) => !!(states.get(id) && states.get(id).within) };
 })();

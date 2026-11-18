@@ -1306,3 +1306,21 @@ html[data-viewer] #bar .rc-chip.open svg { color: inherit; }
 .rc-head .accent { min-height: 40px; padding: 0 22px; font-weight: 600; }
 .rc-wrong { color: var(--bad); }
 
+/* ---------- a session's own window (session.html) ---------- */
+/* A call at the door lies over the device's screen, not beside it: the
+   device does not redraw its screen for a ring. */
+[data-session] .rc-viewer { position: relative; }
+[data-session] .urgent { position: absolute; z-index: 7; top: 10px; left: 50%; transform: translateX(-50%); width: min(620px, calc(100% - 24px)); margin: 0; box-shadow: 0 10px 32px rgba(0, 0, 0, 0.45); }
+[data-session] #bar-title { flex: 1 1 auto; }
+[data-session] #main { flex: 1 1 auto; min-height: 0; }
+[data-session] body { grid-template-rows: minmax(0, 1fr); }
+
+/* A row of settings that leads somewhere (a kind's settings: each device). */
+.set-door { flex-wrap: nowrap; cursor: default; }
+.set-door:hover { background: var(--hover, rgba(127, 127, 127, 0.07)); }
+.set-door-icon svg { width: 20px; height: 20px; color: var(--accent); }
+.set-door-go svg { width: 16px; height: 16px; color: var(--muted); }
+.set-door .set-label { flex: 1 1 auto; }
+#remote-settings-view { max-width: 760px; }
+#remote-settings-view .set-label { flex-direction: column; align-items: flex-start; }
+#remote-settings-view .set-control select { max-width: 320px; }

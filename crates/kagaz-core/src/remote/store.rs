@@ -224,10 +224,43 @@ impl Device {
     }
 }
 
+/// What holds for every session's window, whichever device it shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Windows {
+    /// Closing Kagaz's main window leaves the sessions' windows open (and
+    /// Kagaz running behind them) instead of ending every session after
+    /// a question.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub keep_open: bool,
+    /// A call at the door shows in a session's window too, with Answer
+    /// and Decline.
+    #[serde(default = "yes", skip_serializing_if = "Clone::clone")]
+    pub ring: bool,
+}
+
+fn yes() -> bool {
+    true
+}
+
+impl Default for Windows {
+    fn default() -> Self {
+        Windows { keep_open: false, ring: true }
+    }
+}
+
+impl Windows {
+    fn is_default(&self) -> bool {
+        *self == Windows::default()
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Devices {
     #[serde(default)]
     pub devices: Vec<Device>,
+    /// The sessions' windows, for all devices.
+    #[serde(default, skip_serializing_if = "Windows::is_default")]
+    pub windows: Windows,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -610,6 +643,18 @@ mod tests {
         assert_eq!(Devices::load(&path).unwrap(), saved);
         let from_page: Settings = serde_json::from_str(r#"{"system_keys":"full-screen"}"#).unwrap();
         assert_eq!(from_page, Settings::default());
+        // What holds for every session's window: said only when changed.
+        assert!(!text.contains("[windows]"), "{text}");
+        assert!(saved.windows.ring && !saved.windows.keep_open);
+        let (_, saved) = Devices::update(&path, |d| {
+            d.windows = Windows { keep_open: true, ring: false };
+            Ok(())
+        })
+        .unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("[windows]") && text.contains("keep_open = true") && text.contains("ring = false"), "{text}");
+        assert_eq!(Devices::load(&path).unwrap(), saved);
+        assert_eq!(serde_json::from_str::<Windows>("{}").unwrap(), Windows::default());
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
