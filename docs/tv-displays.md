@@ -492,6 +492,56 @@ the phone, no mockups):
 - **Smart View, Android's Cast and DeX** are opened, not driven: Kagaz
   opens the screen where the person picks the TV.
 
+*The phone's screen, first run (2026-11-18, Galaxy S10, Android 12):*
+the release build's shrinker had dropped the Kotlin methods only Rust
+calls (`KagazTv.start` and the rest), so the session died at its first
+picture with "Java exception was thrown"; a keep rule fixed it, and a Java
+error now names itself. To the stand-in TV on the laptop: 1920x1080 on
+the Exynos encoder, every picture decoded, none lost, about 10 a second
+on a still screen (the encoder repeats one every 100 ms) and up to 53
+while things moved. The encoder refused one of the low-delay wishes and
+ran without them; which one is still to find. Not yet onto the LG: its
+network mirroring port stayed closed after the first, unfinished try,
+through a full power cycle (Cast and AirPlay still answered). Samsung's
+Smart View screen cannot be opened by another app on this phone; Kagaz
+opens Android's Cast screen instead, which lists the TV both as a
+wireless display (Miracast over Wi-Fi Direct, Smart View's way) and as a
+Google Cast receiver. DeX's own start screen (its quick-panel tile's) can
+be opened by Kagaz; DeX found no eligible wireless display for the LG,
+and needs Link to Windows turned off.
+
+*A stand-in TV* (`kagaz tvs stand-in`, `miracast/stand_in.rs`, kept as a
+feature at the owner's wish): this computer announces itself as a
+screen-mirroring TV, takes a sender's session over the network as the LG
+does, and reports what arrives in numbers only (no picture shown or
+kept). Checked first with the laptop's own sender and the test pattern:
+479 of 481 pictures decoded at 1080p60, none lost.
+
+## Next, agreed 2026-11-18
+
+- **This computer as a screen** (the owner approved the plan): on the TVs
+  page, off until switched on ("Let phones and computers show their
+  screen here"); while on, Kagaz announces this computer as a display;
+  each sender is asked about first (Allow / Decline); the picture opens in
+  its own window (full screen, Stop, a fading strip with who, size,
+  pictures a second, lost packets); "Check a sender" keeps today's
+  numbers-only mode and a report to copy; a gear for the name and the
+  networks it announces on. Receiving: Miracast over the network first,
+  then over Wi-Fi Direct (so a phone's own Cast screen lists it), then
+  **Google Cast and AirPlay receiving when feasible** (the owner). The
+  phone as a screen later.
+- **Kagaz's own Google Cast sender** (after the phone reaches the LG):
+  Cast's mirroring as Chrome does it (the Open Screen library's Cast
+  Streaming, BSD); the dependable route to TVs with Cast built in, from
+  the phone and computers alike. First check whether the LG accepts a
+  sender Google has not certified. Needs the TV on a network.
+- **LG Link** (file transfer between LG Link or gram Link apps, PIN
+  pairing): LG's own protocol; learn it from what LG's phone app sends to
+  the TV, with step 3 (send media).
+- **The phone's sound on the TV over Bluetooth** (the TV's "Play
+  smartphone music"): a button that opens Bluetooth settings naming the
+  TV.
+
 ## Rules
 
 - **Nothing reaches a real TV without the owner's go-ahead at that
