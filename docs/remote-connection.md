@@ -61,8 +61,15 @@ the other kinds: saved devices, Found nearby, Add.
   computer makes one screen for the viewer. The picture comes by RDP's
   graphics pipeline, H.264 decoded by OpenH264 built in from source
   (chosen 2026-11-17), with the older picture as a per-computer switch.
-  Its sound plays here through the system's own sound (2026-11-18). A per-computer switch keeps left click
-  left where the remote computer has its mouse buttons swapped.
+  Its sound plays here through the system's own sound (2026-11-18),
+  by Kagaz's own player, which keeps only as much ready as the way the
+  sound arrives needs. This computer's own keys (Print Screen, the
+  Windows key, Alt + Tab) go to the device in full screen only, whenever
+  the pointer is on Kagaz, or never: the owner's choice per device
+  (2026-11-18), with Ctrl + Esc to leave full screen and a question
+  before Kagaz closes with a session open. A per-computer switch keeps
+  left click left where the remote computer has its mouse buttons
+  swapped.
 - **Trust.** A computer's RDP certificate is remembered at the first
   connection and a change is warned about. VNC outside Tailscale shows
   "Not encrypted on this network". Passwords go in the system's password

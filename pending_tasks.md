@@ -431,13 +431,49 @@ Plan: `docs/remote-connection.md` (agreed 2026-11-16).
       yet** on the real PC, and the part on this system's clipboard was
       not run at all: a test of it would overwrite what the owner has
       copied.
-- [ ] **System keys (Print Screen, the Windows key, Alt+Tab, Alt+F4)**:
-      a proposal is with the owner (to this computer in a window, to the
-      device in full screen, as Windows' own viewer has it).
-- [ ] **To hear from the owner on the real Windows PC**: which lag the
-      sound has, and the log's line on it; a picture copied each way;
-      sending files; the certificate card; Remember typed in the
-      window.
+- [x] **The sound stuttered: Kagaz's own player** (2026-11-18; the
+      owner: "stuttering"). The night's log showed little work on the
+      picture (under 70 ms a second) and the sound coming in long blocks
+      (fewer than 50 in 25 s, so a third of a second or more each). The
+      library's player steers how full its store is on the whole to 0.1
+      s; with long blocks that average is high while the store runs
+      empty before each block, so it kept playing faster until it ran
+      dry: in a replay, a gap a second with quarter-second blocks, and a
+      third of the sound thrown away with half-second ones. `rdp/play.rs`
+      replaces it (cpal and ringbuf directly, libopus for Opus; the
+      library's player is no longer used): it watches the lowest the
+      store falls over three seconds and steers that to a reserve of 60
+      ms, one part in a hundred faster or slower; the reserve doubles
+      after a gap (to 480 ms at most) and comes down after a calm
+      minute; what piles up in a stall is let go; a sound that ends is
+      not a gap; gaps come in and go out softly. Tests replay blocks of
+      20 ms to 1 s, a jumpy link, a stall. Through the real window
+      against the test server, on a silent test output (nothing on the
+      speakers): no gaps with 20 ms and 250 ms blocks, and the system's
+      own queue down from about 100 ms to 30 ms (short turns asked of
+      it). On a slower link the computer is now asked to suit the sound
+      to the link (Remote Desktop's "dynamic" quality). The log says the
+      longest block, gaps, the reserve and how far ahead of the speakers
+      the sound is. **Not yet** heard on the real PC.
+- [x] **This computer's own keys** (2026-11-18, the owner's choices):
+      Print Screen, the Windows key, Alt + Tab and the like go to one
+      side only. A choice per device (its page, Keyboard; the viewer's
+      key menu): to the device in full screen only (default), whenever
+      the pointer is on Kagaz while it is in front, or never. The window
+      takes the keyboard (a GTK seat grab of the keyboard alone, which
+      on Wayland asks the system to leave its shortcuts to the window;
+      the system asks the person the first time). On Wayland nothing
+      changes while the window is out of focus, so that the system's own
+      question does not withdraw itself. Ctrl + Esc leaves full screen
+      and does not reach the device. Closing the window with a session
+      open asks first. Checked in the headless page (which keys go
+      where, the choice saved, the question). **Not yet** tried in the
+      real window: the grab itself, GNOME's question, whether the
+      laptop's volume and brightness keys still act here in full screen.
+- [ ] **To hear from the owner on the real Windows PC**: the sound now
+      (gaps, how late), and the log's line on it; this computer's keys
+      in full screen and in a window; a picture copied each way; sending
+      files; the certificate card; Remember typed in the window.
 - [x] **Step 1, Remote Desktop, clipboard text** both ways, in any
       script (2026-11-17): each side says it has text and hands it over
       when asked; Kagaz asks at once, so what is copied on the computer

@@ -1902,6 +1902,19 @@ pub fn run() {
     #[cfg(target_os = "linux")]
     own_app_scope();
     tauri::Builder::default()
+        // Closing the window ends an open session with a computer or
+        // phone, and whatever was being done there: the person is asked.
+        .on_window_event(|window, event| {
+            #[cfg(desktop)]
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if remote_view::any_open(window.app_handle()) {
+                    api.prevent_close();
+                    let _ = window.emit("remote-close-asked", ());
+                }
+            }
+            #[cfg(not(desktop))]
+            let _ = (window, event);
+        })
         .manage(CameraState {
             engine: std::sync::Mutex::new(None),
             downloading: std::sync::Mutex::new(std::collections::HashSet::new()),
@@ -2041,6 +2054,8 @@ pub fn run() {
             remote_view::remote_clipboard_push,
             remote_view::remote_send_files,
             remote_view::remote_fullscreen,
+            remote_view::remote_keys,
+            remote_view::remote_close_window,
             remote_view::remote_startup_files,
             remote_view::remote_disconnect,
             fans::room_add,

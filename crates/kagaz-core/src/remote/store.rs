@@ -119,6 +119,29 @@ impl Identity {
     }
 }
 
+/// Where the keys go that this computer normally keeps for itself (Print
+/// Screen, the Windows key, Alt + Tab, Ctrl + Alt + Del) while the
+/// device's screen is being used. Each press goes to one side only, never
+/// both: a screenshot of one screen, a menu on one computer.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SystemKeys {
+    /// To the device in full screen (nothing of this computer shows
+    /// then); to this computer in a window.
+    #[default]
+    FullScreen,
+    /// To the device whenever Kagaz is in front with the pointer on it.
+    Window,
+    /// To this computer always; the viewer's key menu sends them.
+    Never,
+}
+
+impl SystemKeys {
+    fn is_default(&self) -> bool {
+        *self == SystemKeys::default()
+    }
+}
+
 /// How a device's screen is shown and driven; the defaults are what the
 /// person gets without touching anything.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -145,6 +168,9 @@ pub struct Settings {
     /// acknowledged): for a computer whose picture comes out wrong.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub older_picture: bool,
+    /// Where this computer's own keys go during a session.
+    #[serde(default, skip_serializing_if = "SystemKeys::is_default")]
+    pub system_keys: SystemKeys,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -573,6 +599,17 @@ mod tests {
         // Defaults are not written out.
         assert!(!text.contains("settings"), "{text}");
         assert!(!text.contains("remember"), "{text}");
+        // A choice that is not the default is, in words the page shares.
+        let (_, saved) = Devices::update(&path, |d| {
+            d.devices[0].settings.system_keys = SystemKeys::Window;
+            Ok(())
+        })
+        .unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("system_keys = \"window\""), "{text}");
+        assert_eq!(Devices::load(&path).unwrap(), saved);
+        let from_page: Settings = serde_json::from_str(r#"{"system_keys":"full-screen"}"#).unwrap();
+        assert_eq!(from_page, Settings::default());
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

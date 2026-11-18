@@ -248,6 +248,7 @@ const KagazRemoteView = (() => {
     setTools(connected.info);
     setChip(connected.millis);
     stage.focus();
+    wantKeys();
     pushClipboard(true);
     // Files the window was started to send (`kagaz remote send`).
     invoke("remote_startup_files").then((paths) => {
@@ -271,6 +272,7 @@ const KagazRemoteView = (() => {
     closePop();
     hideCard();
     fullScreen(false);
+    wantKeys();
     delete document.documentElement.dataset.viewer;
     $("bar-remote").classList.add("hidden");
     canvas.classList.add("hidden");
@@ -292,6 +294,7 @@ const KagazRemoteView = (() => {
       // Its sound again, unless the person had turned it off.
       if (cur.info && cur.info.sound && !cur.soundOff) did({ t: "sound", on: true }, true);
       log("back on screen");
+      wantKeys();
     } else {
       releaseKeys(cur);
       closePop();
@@ -301,6 +304,7 @@ const KagazRemoteView = (() => {
       delete document.documentElement.dataset.viewer;
       $("bar-remote").classList.add("hidden");
       log("another page on screen; the session goes on");
+      wantKeys();
     }
   }
 
@@ -586,6 +590,14 @@ const KagazRemoteView = (() => {
     if (!cur || cur.session == null || ev.isComposing) return;
     ev.preventDefault();
     ev.stopPropagation();
+    // Ctrl + Esc leaves full screen: the one press Kagaz keeps for
+    // itself there, where every other key is the device's. (In a window
+    // it is the device's too.)
+    if (ev.code === "Escape" && (cur.keptEsc || (down && full && ev.ctrlKey && !ev.altKey && !ev.shiftKey && !ev.metaKey))) {
+      cur.keptEsc = down;
+      if (down && !ev.repeat) fullScreen(false);
+      return;
+    }
     if (down && !ev.repeat) locks(ev);
     const id = ev.code || ev.key;
     if (down) cur.held.set(id, { key: ev.key, code: ev.code });
@@ -605,9 +617,70 @@ const KagazRemoteView = (() => {
     }
     state.held.clear();
   }
-  stage.addEventListener("blur", () => releaseKeys(cur));
-  stage.addEventListener("focus", () => pushClipboard(true));
-  window.addEventListener("focus", () => cur && cur.session != null && pushClipboard(true));
+  stage.addEventListener("blur", () => {
+    releaseKeys(cur);
+    wantKeys();
+  });
+  stage.addEventListener("focus", () => {
+    pushClipboard(true);
+    wantKeys();
+  });
+  window.addEventListener("focus", () => {
+    if (cur && cur.session != null) pushClipboard(true);
+    wantKeys();
+  });
+  window.addEventListener("blur", () => {
+    // Keys held when the window lost the focus are let go there by
+    // whatever took it; the device is told the same.
+    releaseKeys(cur);
+    wantKeys();
+  });
+
+  // ---------- this computer's own keys ----------
+  // Print Screen, the Windows key, Alt + Tab and the system's other
+  // shortcuts never reach a page: this computer acts on them itself. The
+  // window can ask for them (remote_keys), and then they go to the
+  // device, and only there: a press is never acted on by both. When it
+  // asks is the person's choice for the device (settings.system_keys):
+  // in full screen only (nothing of this computer shows then), whenever
+  // Kagaz is in front with the pointer on it, or never. Never while a
+  // card or question of Kagaz's own has the keys.
+  const KEY_MODES = [
+    ["full-screen", "In full screen only"],
+    ["window", "Whenever the pointer is on Kagaz"],
+    ["never", "Never: they stay with this computer"],
+  ];
+  const keyMode = () => (cur && cur.settings && cur.settings.system_keys) || "full-screen";
+  let pointerIn = document.documentElement.matches(":hover");
+  let keysSaid = "", keysTurn = Promise.resolve(), keysLater = null, keysLogged = 0;
+  function wantKeys() {
+    const mode = keyMode();
+    const here = !!cur && cur.session != null && !cur.away && document.activeElement === stage && card.classList.contains("hidden");
+    const on = here && (mode === "window" ? pointerIn : mode === "full-screen" && full);
+    const focused = document.hasFocus();
+    const say = `${on}:${focused}`;
+    clearTimeout(keysLater);
+    if (say === keysSaid) return;
+    const tell = () => {
+      keysSaid = say;
+      keysTurn = keysTurn.then(() => invoke("remote_keys", { on, focused })).then((held) => {
+        if (keysLogged++ < 8) log(`this computer's own keys: ${held ? "to the device" : "here"}`);
+      }).catch(() => {});
+    };
+    // Taken at once; given back a moment later, when it is known what
+    // else changed with it (the pointer leaves and the focus goes in the
+    // same instant when the system puts a question of its own on top).
+    if (on) tell();
+    else keysLater = setTimeout(tell, 150);
+  }
+  document.documentElement.addEventListener("mouseenter", () => {
+    pointerIn = true;
+    wantKeys();
+  });
+  document.documentElement.addEventListener("mouseleave", () => {
+    pointerIn = false;
+    wantKeys();
+  });
 
   // A row of keys pressed in order and let go in reverse.
   function press(keys) {
@@ -711,7 +784,23 @@ const KagazRemoteView = (() => {
       b.setAttribute("role", "menuitem");
       return b;
     });
-    if (openPop("rv-keys", "keys", [el("strong", "", "Send keys"), ...list])) pop.setAttribute("role", "menu");
+    // And where this computer's own keys go, for this device.
+    const where = el("label", "rc-keys-where");
+    const choose = el("select");
+    for (const [v, words] of KEY_MODES) {
+      const o = el("option", "", words);
+      o.value = v;
+      o.selected = keyMode() === v;
+      choose.append(o);
+    }
+    choose.addEventListener("change", () => {
+      cur.settings = { ...cur.settings, system_keys: choose.value };
+      if (choose.value === "full-screen") delete cur.settings.system_keys;
+      if (hooks.settings) hooks.settings(cur.device.id, cur.settings);
+      wantKeys();
+    });
+    where.append(el("span", "", `Print Screen, the Windows key, Alt + Tab and this computer's other keys go to ${cur.device.name}`), choose);
+    if (openPop("rv-keys", "keys", [el("strong", "", "Send keys"), ...list, where])) pop.setAttribute("role", "menu");
   });
 
   $("rv-clip").addEventListener("click", () => {
@@ -841,7 +930,7 @@ const KagazRemoteView = (() => {
   let full = false;
   function fullIcon() {
     setIcon($("rv-full").querySelector(".ic"), full ? "unfull" : "full");
-    $("rv-full").title = full ? "Leave full screen" : "Full screen";
+    $("rv-full").title = full ? "Leave full screen (Ctrl + Esc)" : "Full screen";
     $("rv-full").setAttribute("aria-label", $("rv-full").title);
   }
   async function fullScreen(on) {
@@ -859,6 +948,10 @@ const KagazRemoteView = (() => {
       }
     }
     fullIcon();
+    wantKeys();
+    if (on && full && cur && cur.session != null) {
+      toast(`Ctrl + Esc leaves full screen.${keyMode() === "never" ? "" : ` Print Screen, the Windows key and Alt + Tab go to ${cur.device.name} meanwhile.`}`, 5000);
+    }
   }
   // The system may take the window out of full screen by itself.
   async function fullScreenNow() {
@@ -868,6 +961,7 @@ const KagazRemoteView = (() => {
       full = !!document.fullscreenElement;
     }
     fullIcon();
+    wantKeys();
   }
   $("rv-full").addEventListener("click", () => {
     closePop();
@@ -875,6 +969,23 @@ const KagazRemoteView = (() => {
     stage.focus();
   });
   document.addEventListener("fullscreenchange", fullScreenNow);
+
+  // The window is being closed with a session open (main.rs holds it
+  // back): that ends the session, so the person is asked.
+  const events = window.__TAURI__ && window.__TAURI__.event;
+  if (events && events.listen) {
+    events.listen("remote-close-asked", async () => {
+      if (cur && cur.session != null) {
+        const yes = await KagazAsk.confirm(`Close Kagaz and end the session with ${cur.device.name}?`, "Close Kagaz",
+          "Everything open on it stays open there.", "Stay");
+        if (!yes) {
+          if (!cur.away) stage.focus();
+          return;
+        }
+      }
+      invoke("remote_close_window").catch(() => {});
+    });
+  }
 
   // A narrow window's tools under the picture do what the bar's do.
   document.querySelectorAll("#rv-touchbar button").forEach((b) => b.addEventListener("click", () => $(b.dataset.tool).click()));

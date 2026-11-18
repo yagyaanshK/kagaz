@@ -3341,22 +3341,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ironrdp-rdpsnd-native"
-version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "03efdf6b486987efb6c1c0f9038742f0fb5a5d7e527955f8dbde11cfe46c0e89"
-dependencies = [
- "cpal",
- "ironrdp-core",
- "ironrdp-error",
- "ironrdp-rdpsnd",
- "opus2",
- "ringbuf",
- "tracing",
- "windows",
-]
-
-[[package]]
 name = "ironrdp-session"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3640,6 +3624,7 @@ dependencies = [
  "btleplug",
  "cbc 0.1.2",
  "chacha20 0.9.1",
+ "cpal",
  "des 0.8.1",
  "flate2",
  "hayro",
@@ -3658,7 +3643,6 @@ dependencies = [
  "ironrdp-pdu",
  "ironrdp-rdpdr",
  "ironrdp-rdpsnd",
- "ironrdp-rdpsnd-native",
  "ironrdp-session",
  "libc",
  "lzma-rs",
@@ -3666,7 +3650,9 @@ dependencies = [
  "mdns-sd",
  "num-bigint",
  "nusb",
+ "opus2",
  "png 0.18.1",
+ "ringbuf",
  "roxmltree",
  "rustls",
  "rustls-pki-types",

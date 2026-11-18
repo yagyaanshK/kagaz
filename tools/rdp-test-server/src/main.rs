@@ -16,7 +16,8 @@
 //! by itself, n ticks a second (0 stops it). With `--sound` it has sound
 //! for a viewer that takes it: it says `heard SoundReady`, and `tone
 //! <ms>` on its input sends so long a made tone (plain 16-bit stereo at
-//! 44100 a second), then says `heard Tone(<bytes sent>)`.
+//! 44100 a second), then says `heard Tone(<bytes sent>)`; `tone <ms>
+//! <each>` sends it in blocks of `each` milliseconds.
 //!
 //! It says `listening <address>` and `fingerprint <sha-256 of its
 //! certificate>`, then `heard <what a viewer did>` for every key and
@@ -199,18 +200,23 @@ impl Speaker {
         }
     }
 
-    /// So many milliseconds of a quiet 440 Hz tone, a fiftieth of a
-    /// second at a time, as a computer sends its sound.
-    fn tone(&self, millis: u64) {
+    /// So many milliseconds of a quiet 440 Hz tone, `each` milliseconds
+    /// at a time (a fiftieth of a second unless said), as a computer
+    /// sends its sound: some send it in far longer blocks.
+    fn tone(&self, millis: u64, each: u64) {
         if !self.ready.load(Ordering::Acquire) {
             return say("heard NoSound");
         }
         let began = std::time::Instant::now();
         let mut sent = 0usize;
         let mut frame = 0u64;
-        for block in 0..millis / 20 {
-            let mut data = Vec::with_capacity(882 * 4);
-            for _ in 0..882 {
+        // One block's length is told in 16 bits: at most a third of a
+        // second of this plain stereo sound.
+        let each = each.clamp(10, 350);
+        let frames = (44100 * each / 1000) as usize;
+        for block in 0..millis / each {
+            let mut data = Vec::with_capacity(frames * 4);
+            for _ in 0..frames {
                 let level = ((frame as f64 * 440.0 * std::f64::consts::TAU / 44100.0).sin() * 3000.0) as i16;
                 data.extend_from_slice(&level.to_le_bytes());
                 data.extend_from_slice(&level.to_le_bytes());
@@ -220,7 +226,7 @@ impl Speaker {
             if let Some(sender) = self.to_viewer.lock().unwrap().as_ref() {
                 let _ = sender.send(ServerEvent::Rdpsnd(RdpsndServerMessage::Wave(data, began.elapsed().as_millis() as u32)));
             }
-            std::thread::sleep((began + Duration::from_millis((block + 1) * 20)).saturating_duration_since(std::time::Instant::now()));
+            std::thread::sleep((began + Duration::from_millis((block + 1) * each)).saturating_duration_since(std::time::Instant::now()));
         }
         say(&format!("heard Tone({sent})"));
     }
@@ -868,7 +874,11 @@ fn main() -> anyhow::Result<()> {
                     ["rate", hz] => rate.store(hz.parse().unwrap_or(0), Ordering::Release),
                     ["tone", ms] => {
                         let (speaker, ms) = (speaker.clone(), ms.parse().unwrap_or(0));
-                        std::thread::spawn(move || speaker.tone(ms));
+                        std::thread::spawn(move || speaker.tone(ms, 20));
+                    }
+                    ["tone", ms, each] => {
+                        let (speaker, ms, each) = (speaker.clone(), ms.parse().unwrap_or(0), each.parse().unwrap_or(20));
+                        std::thread::spawn(move || speaker.tone(ms, each));
                     }
                     ["paste"] => clipboard.paste(Duration::ZERO),
                     ["paste", ms] => clipboard.paste(Duration::from_millis(ms.parse().unwrap_or(0))),

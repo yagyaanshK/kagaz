@@ -503,6 +503,30 @@ const KagazRemote = (() => {
     swapRow.append(swapLabel);
     mouse.append(swapRow);
 
+    // Where this computer's own keys go while its screen is used (the
+    // viewer's key menu has the same choice). Each press goes to one
+    // side only.
+    const keys = el("section", "set-section");
+    keys.append(el("h3", "", "Keyboard"));
+    const keysRow = el("div", "set-row");
+    const keysLabel = el("label", "", "This computer's own keys go to it");
+    keysLabel.htmlFor = "remote-system-keys";
+    const keysChoice = el("select");
+    keysChoice.id = "remote-system-keys";
+    for (const [v, w] of [["full-screen", "In full screen only"], ["window", "Whenever the pointer is on Kagaz"], ["never", "Never: they stay with this computer"]]) {
+      const o = el("option", "", w);
+      o.value = v;
+      o.selected = (settings.system_keys || "full-screen") === v;
+      keysChoice.append(o);
+    }
+    keysChoice.addEventListener("change", () => {
+      if (keysChoice.value === "full-screen") delete settings.system_keys;
+      else settings.system_keys = keysChoice.value;
+      keepSettings();
+    });
+    keysRow.append(keysLabel, keysChoice);
+    keys.append(keysRow, el("p", "muted small", "Print Screen, the Windows key, Alt + Tab, Ctrl + Alt + Del and the like, which this computer otherwise acts on itself. A press goes to one of the two, never both. Ctrl + Esc leaves full screen; the first time, this computer asks whether Kagaz may have its keys."));
+
     const paths = el("section", "set-section");
     paths.append(el("h3", "", "Ways to reach it"), el("p", "muted", "All are tried at once; the first to answer is used."));
     for (const p of d.paths) paths.append(pathRow(d, p));
@@ -583,7 +607,7 @@ const KagazRemote = (() => {
     note.setAttribute("role", "status");
     // Keep what is being typed when a check finishes under the person.
     const typing = document.activeElement && document.activeElement.id === "remote-user" ? document.activeElement.value : null;
-    box.replaceChildren(head, soon, note, paths, screen, mouse, signIn, about, forget);
+    box.replaceChildren(head, soon, note, paths, screen, mouse, keys, signIn, about, forget);
     if (typing !== null) {
       const again = $("remote-user");
       again.value = typing;

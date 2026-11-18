@@ -8,6 +8,7 @@
 //! that [`InputSender`] pokes, so a key or a click leaves at once.
 
 mod clip;
+mod play;
 mod sound;
 
 use super::keys;
@@ -49,6 +50,7 @@ use std::io::{self, Read, Write};
 use std::net::{Shutdown, SocketAddr, TcpStream};
 use ironrdp_rdpdr::{NoopRdpdrBackend, Rdpdr};
 use ironrdp_rdpsnd::client::{Rdpsnd, RdpsndDvcState};
+use ironrdp_rdpsnd::pdu::QualityMode;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant};
@@ -1067,6 +1069,10 @@ pub fn open(
     // A link that answered within a fiftieth of a second carries the
     // sound as it is; a slower one is left to the computer's own choice.
     let fast = answered <= Duration::from_millis(20);
+    // And says so: on a fast link the computer is asked for its best
+    // sound; on a slower one, to suit the sound to the link as it goes
+    // (thinner while the link is poor, fuller when it recovers).
+    let quality = if fast { QualityMode::High } else { QualityMode::Dynamic };
     // How long each block of sound was held here before it was said to
     // be played: the computer keeps sound and picture together by it.
     let clock = || -> ironrdp_rdpsnd::client::Clock {
@@ -1076,7 +1082,8 @@ pub fn open(
     if with_sound {
         let newer =
             RdpsndDvcState::new(Box::new(sound::Sound::new("newer channel", fast, quiet.clone(), numbers.clone())))
-                .with_clock(clock());
+                .with_clock(clock())
+                .with_quality_mode(quality);
         dynamic = dynamic.with_dynamic_channel(newer.channel()).with_dynamic_channel(newer.lossy_channel());
     }
     let mut connector =
@@ -1091,7 +1098,8 @@ pub fn open(
         connector = connector
             .with_static_channel(
                 Rdpsnd::new(Box::new(sound::Sound::new("older channel", fast, quiet.clone(), numbers.clone())))
-                    .with_clock(clock()),
+                    .with_clock(clock())
+                    .with_quality_mode(quality),
             )
             .with_static_channel(Rdpdr::new(Box::new(NoopRdpdrBackend), "Kagaz".into()));
     }

@@ -564,7 +564,7 @@ fn a_picture_copied_on_the_computer_arrives_here() {
     let Some(mut server) = serve(64, 64) else { return };
     let session = connect(&server, Some("asha"), Some("sesame"), &Trust::default()).unwrap();
     let mut told = Told::of(&session);
-    let mut picture = |told: &mut Told| -> Option<Vec<u8>> {
+    let picture = |told: &mut Told| -> Option<Vec<u8>> {
         let mut found = None;
         until(|| {
             told.events.extend(told.session.screen.take().events);
@@ -697,7 +697,7 @@ fn the_computers_sound_arrives_whole() {
     // Which channel it came by and in what form is told, for the log.
     assert_eq!(
         session.numbers.sound_via(),
-        "older channel, PCM at 44100 a second, 2 channels, 1 blocks, up to 0 ms ahead of the speakers"
+        "older channel, PCM at 44100 a second, 2 channels, 1 blocks"
     );
     // Turned off here for now, it still arrives (the computer goes on
     // sending), and the session goes on.

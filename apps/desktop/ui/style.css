@@ -1297,6 +1297,8 @@ html[data-viewer] #bar .rc-chip.open svg { color: inherit; }
 .rc-pop { position: absolute; top: 8px; right: 12px; z-index: 5; display: flex; flex-direction: column; gap: 6px; min-width: 240px; max-width: calc(100% - 24px); max-height: calc(100% - 16px); overflow: auto; padding: 12px; border-radius: var(--r-card, 12px); background: var(--panel); color: var(--text); box-shadow: 0 10px 32px rgba(0, 0, 0, 0.45); }
 .rc-pop.keys button { justify-content: flex-start; text-align: left; border: none; background: none; min-height: 34px; }
 .rc-pop.keys button:hover { background: var(--hover, rgba(127, 127, 127, 0.12)); }
+.rc-pop .rc-keys-where { display: flex; flex-direction: column; gap: 6px; max-width: 300px; margin-top: 4px; padding-top: 10px; border-top: 1px solid var(--line, rgba(127, 127, 127, 0.25)); font-size: 12px; color: var(--muted); }
+.rc-pop .rc-keys-where select { width: 100%; font-size: 13px; }
 .rc-pop p { margin: 2px 0 0; font-size: 12px; }
 .rc-pop .switch { white-space: normal; }
 [data-layout="bar"] .rc-pop { top: auto; bottom: 8px; left: 12px; right: 12px; }

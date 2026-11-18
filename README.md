@@ -415,10 +415,24 @@ computer on its page): the speaker button turns it off for the moment,
 and it waits by itself while another page of Kagaz shows, so that a call
 at the door is not talked over. On a fast link Kagaz takes only the
 full sound (plain, stereo), where the computer would else send its
-thinnest. Esc, the mouse's back and forward buttons and the lock keys
-belong to the device while its screen has the focus: full screen is the
-window's own (a page's would end with Esc), and Caps Lock and Num Lock
-there follow this keyboard.
+thinnest; on a slower one the computer is asked to suit its sound to the
+link as it goes. Kagaz keeps only as much sound ready as the way it
+arrives needs (some computers send half a second at a time), so that it
+plays without gaps and little later than the link makes it. Esc, the
+mouse's back and forward buttons and the lock keys belong to the device
+while its screen has the focus: full screen is the window's own (a
+page's would end with Esc), and Caps Lock and Num Lock there follow
+this keyboard.
+
+**This computer's own keys** (Print Screen, the Windows key, Alt + Tab,
+Ctrl + Alt + Del and the like) go to one side only, never both, and
+which is your choice for each device, on its page under Keyboard or in
+the viewer's key menu: to the device **in full screen only** (the
+default: nothing of this computer shows then), **whenever the pointer is
+on Kagaz** while it is in front, or **never**. The first time, this
+computer asks whether Kagaz may have its keys (on GNOME, Super + Esc
+takes them back at any moment). **Ctrl + Esc** leaves full screen.
+Closing Kagaz while a session is open asks first.
 
 Each page keeps its place: leave a printer's page with a scan under way
 for the cameras, and coming back finds the scan where it was. Camera

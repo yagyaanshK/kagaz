@@ -599,6 +599,72 @@ pub fn remote_fullscreen(window: tauri::WebviewWindow, on: Option<bool>) -> Resu
     }
 }
 
+/// The keys this computer keeps for itself (Print Screen, the Windows
+/// key, Alt + Tab, the system's shortcuts) go to the window instead while
+/// `on`, and so to the device; the page says when (see `wantKeys` there).
+/// Says whether the window has them now.
+///
+/// On Wayland the system asks the person, the first time, whether Kagaz
+/// may, and keeps a key of its own to take them back (GNOME: Super +
+/// Esc). Its question takes the focus from the window, and withdrawing
+/// the request would take the question away again: so there, nothing
+/// changes while the window is not `focused` (the system gives the keys
+/// to whatever has the focus meanwhile anyway). Under X11 the keys would
+/// stay with a window that lost the focus, so they are let go with it.
+#[tauri::command]
+pub async fn remote_keys(app: AppHandle, window: tauri::WebviewWindow, on: bool, focused: bool) -> Result<bool, String> {
+    #[cfg(target_os = "linux")]
+    {
+        use gtk::prelude::*;
+        static HELD: AtomicBool = AtomicBool::new(false);
+        let (tx, rx) = mpsc::channel();
+        app.run_on_main_thread(move || {
+            let held = (|| {
+                let window = window.gtk_window().ok()?;
+                let display = window.display();
+                let wayland = display.type_().name().contains("Wayland");
+                let was = HELD.load(Ordering::Acquire);
+                let want = if wayland && !focused { was } else { on && focused };
+                if want == was {
+                    return Some(was);
+                }
+                let seat = display.default_seat()?;
+                if !want {
+                    seat.ungrab();
+                    return Some(false);
+                }
+                // The keyboard alone: a grab of it by itself is what tells
+                // a Wayland system to leave its shortcuts to the window.
+                let status = seat.grab(&window.window()?, gtk::gdk::SeatCapabilities::KEYBOARD, true, None, None, None);
+                Some(status == gtk::gdk::GrabStatus::Success)
+            })()
+            .unwrap_or(false);
+            HELD.store(held, Ordering::Release);
+            let _ = tx.send(held);
+        })
+        .map_err(|e| e.to_string())?;
+        Ok(rx.recv_timeout(Duration::from_secs(4)).unwrap_or(false))
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = (app, window, on, focused);
+        Err("this system's keys stay with it".into())
+    }
+}
+
+/// A session is open: closing the window would end it, so the person is
+/// asked first (main.rs holds the window back; the page asks).
+#[cfg(desktop)]
+pub fn any_open(app: &AppHandle) -> bool {
+    app.try_state::<Viewers>().is_some_and(|viewers| viewers.list.lock().is_ok_and(|list| !list.is_empty()))
+}
+
+/// The person said yes: the window closes, and its sessions with it.
+#[tauri::command]
+pub fn remote_close_window(window: tauri::WebviewWindow) {
+    let _ = window.destroy();
+}
+
 /// Files the window was started to send (`kagaz remote send` starts it
 /// with `KAGAZ_SEND`, a list of paths): handed out once, to the first
 /// session that opens.
