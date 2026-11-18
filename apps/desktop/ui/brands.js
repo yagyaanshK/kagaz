@@ -25,14 +25,14 @@ const KagazBrands = (() => {
   };
 
   const KINDS = [
-    { id: "doorbell", name: "Doorbell & intercom", note: "Video door stations and indoor monitors", page: "doorbell", supported: true },
+    { id: "doorbell", name: "Doorbell", note: "Video door stations and indoor monitors", page: "doorbell", supported: true },
     { id: "security", name: "Security cameras", note: "Home and shop cameras", page: "cameras", supported: true },
     { id: "print", name: "Printers & scanners", note: "On the network and USB", page: "print", supported: true },
-    { id: "fan", name: "Ceiling fans", note: "Over Bluetooth, and Wi-Fi", page: "fans", supported: true },
+    { id: "fan", name: "Fans", note: "Over Bluetooth, and Wi-Fi", page: "fans", supported: true },
     { id: "purifier", name: "Air purifiers", note: "Philips, on the Wi-Fi network", page: "purifiers", supported: true },
     { id: "computer", name: "Computers & phones", note: "See and use your own from here", page: "remote", supported: true },
     { id: "society", name: "Society gate", note: "Visitors and vehicles at your gate", page: "society", supported: true },
-    { id: "camera", name: "Cameras", note: "DSLR and mirrorless", supported: false },
+    { id: "camera", name: "Photo cameras", note: "DSLR and mirrorless", supported: false },
     { id: "vacuum", name: "Robot vacuums", supported: false },
     { id: "tv", name: "TVs", supported: false },
     { id: "fridge", name: "Fridges", supported: false },

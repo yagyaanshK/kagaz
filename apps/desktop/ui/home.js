@@ -219,7 +219,7 @@ const KagazHome = (() => {
     const on = fans.filter((f) => f.last_state && f.last_state.power).length;
     const devs = fans.map((f) => ({ key: favKey("fans", f.name), name: f.name, sub: KagazFans.homeWords(f), icon: "fan", tone: f.last_state && f.last_state.power ? "on" : "", open }));
     const chips = on ? [{ icon: "fan", text: `${on} fan${on === 1 ? "" : "s"} on`, open }] : [];
-    return { id: "fans", icon: "fan", title: "Ceiling fans", status: `Atomberg · ${on} of ${fans.length} on`, devices: devs, open, chips, count: devs.length };
+    return { id: "fans", icon: "fan", title: "Fans", status: `Atomberg · ${on} of ${fans.length} on`, devices: devs, open, chips, count: devs.length };
   }
 
   // The purifiers the person added, as last seen (the page looks for
@@ -427,5 +427,5 @@ const KagazHome = (() => {
   $("home-add").addEventListener("click", openAdd);
   $("add-back").addEventListener("click", () => (addKind ? showKinds() : selectCategory("home")));
 
-  return { show, devicesChanged, openAdd, kinds };
+  return { show, devicesChanged, openAdd, kinds, list: kindsNow };
 })();

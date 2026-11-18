@@ -29,7 +29,7 @@ const KagazShell = (() => {
   const TITLES = {
     home: "Home", add: "Add a device", settings: "Settings", tools: "Tools",
     doorbell: "Doorbell", cameras: "Security cameras", print: "Printers & scanners",
-    fans: "Ceiling fans", purifiers: "Air purifiers", society: "Society gate",
+    fans: "Fans", purifiers: "Air purifiers", society: "Society gate",
     remote: "Computers & phones",
   };
   // Places the navigation itself reaches: there, Back has nowhere to go

@@ -1322,5 +1322,6 @@ html[data-viewer] #bar .rc-chip.open svg { color: inherit; }
 .set-door-go svg { width: 16px; height: 16px; color: var(--muted); }
 .set-door .set-label { flex: 1 1 auto; }
 #remote-settings-view { max-width: 760px; }
+.set-door .set-label { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
 #remote-settings-view .set-label { flex-direction: column; align-items: flex-start; }
 #remote-settings-view .set-control select { max-width: 320px; }

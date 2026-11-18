@@ -471,21 +471,50 @@ const KagazSettings = (() => {
     body.appendChild(box);
   }
 
-  function drawDevices(body) {
-    const box = section("Device settings", "Each kind of device keeps its settings on its own page, behind its ⚙ button.");
-    const go = (label, cat, word) => {
-      const b = el("button", "", word);
-      b.type = "button";
-      b.addEventListener("click", () => {
-        selectCategory(cat);
-        if (cat === "doorbell") doorSettings(true);
-        if (cat === "remote" && typeof KagazRemote !== "undefined") KagazRemote.openSettings();
+  // One door to every kind's settings: a row for each kind of device
+  // the person has, by name (Home says which, as for the sidebar). A row
+  // opens what that kind's gear opens; a kind without settings of its
+  // own yet opens its page, where each device's are.
+  const KIND_DOORS = {
+    cameras: ["Playback, tiles in a row, accounts", () => setTimeout(() => $("cam-gear").click(), 0)],
+    doorbell: ["Ringtones, ringing here, stations on this network", () => doorSettings(true)],
+    fans: ["Each fan's name and room, on its card", null],
+    print: ["Your printers; a Brother's own Scan button", null],
+    purifiers: ["Each purifier's name", null],
+    remote: ["Session windows; each device's keyboard, screen, sound and sign-in", () => KagazRemote.openSettings()],
+    society: ["Entries and exits, vehicles", null],
+  };
+  async function drawDevices(body) {
+    const kinds = typeof KagazHome !== "undefined" ? await KagazHome.list().catch(() => []) : [];
+    if (!kinds.length) return;
+    const box = section("Your devices", "What each kind keeps for all of its devices, and each device's own.");
+    for (const k of kinds) {
+      const [note, then] = KIND_DOORS[k.id] || ["", null];
+      const r = el("div", "set-row set-door");
+      r.tabIndex = 0;
+      r.setAttribute("role", "button");
+      const ic = el("span", "set-door-icon ic");
+      ic.innerHTML = KagazIcons.svg(k.icon);
+      const l = el("span", "set-label");
+      l.append(el("span", "", k.title));
+      const words = [note, k.count ? `${k.count} device${k.count === 1 ? "" : "s"}` : ""].filter(Boolean).join(" · ");
+      if (words) l.append(el("span", "muted small", words));
+      const go = el("span", "set-door-go ic");
+      go.innerHTML = KagazIcons.svg("forward");
+      r.append(ic, l, go);
+      const open = () => {
+        k.open();
+        if (then) then();
+      };
+      r.addEventListener("click", open);
+      r.addEventListener("keydown", (ev) => {
+        if (ev.key === "Enter" || ev.key === " ") {
+          ev.preventDefault();
+          open();
+        }
       });
-      return row(label, "", b);
-    };
-    // By name, as everywhere.
-    box.append(go("Computers & phones: session windows, each device", "remote", "Open their settings"));
-    box.append(go("Doorbell: ringtones, ringing here, stations on this network", "doorbell", "Open doorbell settings"));
+      box.append(r);
+    }
     body.appendChild(box);
   }
 
@@ -573,7 +602,7 @@ const KagazSettings = (() => {
     await drawAccounts(body);
     await drawRinging(body);
     await drawSaving(body);
-    drawDevices(body);
+    await drawDevices(body);
     drawAbout(body);
   }
 

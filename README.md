@@ -367,7 +367,7 @@ stretched by Tidy or plain Crop, so a card or signature keeps its real size.
 The tools are written once (kagaz-core `tools`, the window's `bench.js`), so
 a new source, such as a camera, only adds a button.
 
-On **Ceiling fans**, the fans you added show at once, by room, each with
+On **Fans**, the fans you added show at once, by room, each with
 how it was last seen; a look around runs alongside and the ones within
 reach get their controls: Turn on and off, the speed, the light (on fans
 that have one), Sleep and a timer. A timer shows as a countdown on the
@@ -452,7 +452,10 @@ Each page keeps its place: leave a printer's page with a scan under way
 for the cameras, and coming back finds the scan where it was. Camera
 pictures play only while their page is chosen (on a phone, also only
 while Kagaz is on screen), sparing the connection; downloads carry on.
-Wide windows have a sidebar; phones a bottom bar. The sidebar lists
+A kind of device has one name everywhere (Security cameras, Fans, Air
+purifiers…). Settings lists each kind you have, by name, and a row opens
+that kind's own settings. Wide windows have a sidebar; phones a bottom
+bar. The sidebar lists
 Home, then only the kinds of device you have added, by name, with **Add
 a device** at their end (every kind Kagaz knows is behind it), and Tools
 and Settings at its foot; a long list of kinds scrolls between the two.

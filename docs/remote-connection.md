@@ -82,21 +82,14 @@ the other kinds: saved devices, Found nearby, Add.
   running a VNC server (Tailscale, home Wi-Fi, the phone's hotspot), a
   GNOME computer through GNOME's own RDP, and any typed address.
 
-### 2. The viewer on Android and Windows
+### 2. Kagaz on both ends; the Windows host
 
-Touch where you tap (tap clicks there, long-press is right-click, two
-fingers scroll, pinch zooms), with a switch to trackpad mode remembered
-per device. The phone's fingerprint or PIN before each session. A frugal
-start on mobile data, with the amount used shown. A saved device shared to
-another Kagaz by QR code (its paths, never its passwords): a phone cannot
-read Tailscale's list.
-
-### 3. More existing protocols
-
-Wake-on-LAN, an adb link to an Android phone over USB or Wi-Fi, and SFTP
-file browsing.
-
-### 4. Kagaz on both ends; the Linux host
+Moved ahead of the phone's viewer on 2026-11-18 (the owner): a computer
+that someone is sitting at, seen and used from afar *while they go on
+using it*, for showing a team how something is done. Windows' own Remote
+Desktop cannot: it gives the screen to one person at a time. The usual
+answer sends the screen through its maker's servers; Kagaz's goes from
+one device to the other, over the local network or Tailscale.
 
 - **Pairing.** A QR code or a short code, or a device found nearby; both
   show the same few words and each confirms. Each device has its own key.
@@ -106,10 +99,6 @@ file browsing.
   device that connects; a phone asks for its fingerprint or PIN before a
   session; any other paired device can remove the lost one. Kagaz does not
   keep a computer's sign-in password unless told to.
-- **GNOME on Wayland.** Kagaz's host runs in the signed-in session. The
-  login screen (after a reboot) goes through GNOME's own remote login, set
-  up once with the administrator password after showing what changes.
-  Nothing of Kagaz runs as root.
 - **On the host.** A visible sign for the whole session naming the device
   connected, with a way to end it; the computer locks when a session ends
   if nobody was at it; an option to blank the real screen; a record of
@@ -117,12 +106,33 @@ file browsing.
 - **Terminal.** A shell and running one command inside Kagaz's own
   session, as its own permission, off until granted.
 
-### 5. The Windows host
-
-Runs while signed in, without administrator rights and without a service.
+**On Windows.** Runs while signed in, without administrator rights and without a service.
 The login screen and administrator prompts go through Windows' own Remote
 Desktop, which Kagaz already speaks. The mouse-button setting is read and
 corrected without a switch.
+
+### 3. The viewer on Android and Windows
+
+Touch where you tap (tap clicks there, long-press is right-click, two
+fingers scroll, pinch zooms), with a switch to trackpad mode remembered
+per device. The phone's fingerprint or PIN before each session. A frugal
+start on mobile data, with the amount used shown. A saved device shared to
+another Kagaz by QR code (its paths, never its passwords): a phone cannot
+read Tailscale's list.
+
+### 4. More existing protocols
+
+Wake-on-LAN, an adb link to an Android phone over USB or Wi-Fi, and SFTP
+file browsing.
+
+### 5. The Linux host
+
+What step 2 built for Windows, on Linux.
+
+- **GNOME on Wayland.** Kagaz's host runs in the signed-in session. The
+  login screen (after a reboot) goes through GNOME's own remote login, set
+  up once with the administrator password after showing what changes.
+  Nothing of Kagaz runs as root.
 
 ### 6. The Android host
 

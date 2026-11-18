@@ -185,11 +185,23 @@ with the commit that closes them.
       entries' icons are green on Ubuntu and Windows as on macOS (the
       owner). Checked in the headless page on every system's look; not
       yet seen in the real window by a person.
-- [ ] **One name for a kind everywhere?** The sidebar says Cameras,
-      Fans, Purifiers, Computers, Print & scan; Home and the pages say
-      Security cameras, Ceiling fans, Air purifiers, Computers & phones,
-      Printers & scanners. Each list is in order by the names it shows,
-      so the two orders differ a little. Asked of the owner.
+- [x] **One name for a kind everywhere** (the owner, 2026-11-18): Air
+      purifiers, Computers & phones, Doorbell, Fans, Printers &
+      scanners, Security cameras (kept apart from the Photo cameras to
+      come), Society gate: in the sidebar, on Home, in Settings, as page
+      titles and in Add a device. Under an icon (Android's rail) a short
+      word stands for the longer names.
+- [x] **Settings, first step: one door** (2026-11-18): the Settings page
+      lists each kind the person has, by name, and a row opens what that
+      kind's gear opens (or its page, where it has no settings of its
+      own yet). **Still to move, kind by kind**, as in
+      `design/mockups/settings/`: accounts gathered under Settings ›
+      Accounts with sign in and out there (Xiaomi is not listed yet); a
+      kind's setting for all its devices with each device's own
+      ("Same as all") for computers' keys, sound and size; the cameras'
+      playback method and tiles in a row remembered and on a page of
+      their own; "Ring me here" in one place; a Brother's Scan button
+      under Printers & scanners; the field that finds a setting.
 
 - [x] Illustrations next to each option in the Scan pane and a badge per
       verdict in About (inline SVG, 2026-10-06). Worth a look in the window.
@@ -500,6 +512,16 @@ Plan: `docs/remote-connection.md` (agreed 2026-11-16).
       webview's again. Checked: the page's part in the headless page;
       in the real window (test card) the webview's pinch is found and
       turned off. **Not yet** tried with fingers.
+- [ ] **Kagaz on the computer being used: the Windows side, next**
+      (the owner, 2026-11-18: an office laptop he teaches his team on
+      from afar, while they go on using it; Windows' Remote Desktop
+      gives the screen to one person, and he does not trust a service
+      that sends the screen through its maker's servers). Moved ahead
+      of the phone's viewer in `docs/remote-connection.md` (now step
+      2). Questions on how it should behave are with the owner. Until
+      it exists: a VNC server on that laptop, reached over Tailscale,
+      with today's Kagaz (not yet tried against a real Windows VNC
+      server).
 - [x] **Num Lock came out the other way round on the computer** (the
       owner on the real PC, 2026-11-18): WebKitGTK tells a page about
       Caps Lock only and says "off" for Num Lock and Scroll Lock

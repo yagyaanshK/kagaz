@@ -465,3 +465,9 @@ body {
    (the owner, 2026-11-18); Add a device stays quiet. */
 [data-os="gnome"] #categories .cat-icon, [data-os="windows"] #categories .cat-icon { color: var(--accent); }
 [data-os] #categories li.cat-add:not(.active) .cat-icon { color: var(--muted); }
+
+/* One name for a kind everywhere; under an icon (Android's rail) there
+   is room for a short word only, which those entries carry beside it. */
+.cat-short { display: none; }
+[data-os="android"][data-layout="rail"] #categories li.has-short .cat-name { display: none; }
+[data-os="android"][data-layout="rail"] #categories li.has-short .cat-short { display: block; max-width: 88px; text-align: center; font-size: 12px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
