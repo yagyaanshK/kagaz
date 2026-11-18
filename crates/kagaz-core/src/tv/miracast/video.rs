@@ -154,9 +154,9 @@ impl Video {
             .rate_control_mode(RateControlMode::Bitrate)
             .profile(Profile::Baseline)
             .level(level)
-            // Over budget, a picture is skipped rather than the stream
-            // falling behind.
-            .skip_frames(true)
+            // Never skip a picture: during an animation every picture
+            // counts; over budget the quality dips a little instead.
+            .skip_frames(false)
             .adaptive_quantization(false)
             .background_detection(false)
             // A whole picture every 10 seconds, and whenever the TV asks

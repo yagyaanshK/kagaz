@@ -35,6 +35,11 @@ pub enum Route {
 pub trait Pictures {
     /// The picture due at `due` since the start, as RGBA at this size.
     fn picture(&mut self, due: Duration, width: usize, height: usize) -> &[u8];
+
+    /// How many pictures the desktop has delivered so far (0 for the pattern).
+    fn delivered(&self) -> u64 {
+        0
+    }
 }
 
 impl Pictures for video::Pattern {
@@ -50,6 +55,10 @@ impl Pictures for video::Pattern {
 impl Pictures for super::capture::Screen {
     fn picture(&mut self, _due: Duration, width: usize, height: usize) -> &[u8] {
         super::capture::Screen::picture(self, width, height)
+    }
+
+    fn delivered(&self) -> u64 {
+        self.arrived.load(std::sync::atomic::Ordering::Relaxed)
     }
 }
 
@@ -87,6 +96,8 @@ pub enum Event {
         worst_ms: f32,
         budget_ms: f32,
         dropped: u64,
+        /// Pictures the desktop delivered in the last second.
+        delivered_per_second: u64,
     },
     /// The TV asked for a fresh key frame.
     KeyFrameAsked,
@@ -283,6 +294,8 @@ pub fn mirror<R>(
     let mut link = Link { tcp, buf: Vec::new(), cseq: 0 };
     let session = format!("{:08}", u32::from_be_bytes(random_bytes()) % 100_000_000);
     let udp = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0)).map_err(|e| format!("no UDP port: {e}"))?;
+    // Room to queue a whole changed picture without blocking.
+    let _ = socket2::SockRef::from(&udp).set_send_buffer_size(4 << 20);
     let udp_port = udp.local_addr().map(|a| a.port()).unwrap_or(0);
     let mut asked = Asked::default();
     let mut report = Report::default();
@@ -361,11 +374,14 @@ pub fn mirror<R>(
 
         let target = SocketAddr::new(tv_ip, asked.rtp_port.unwrap_or(1028));
         event(Event::Playing(mode));
+        // Room for whole-screen changes (an animation, a scrolled page):
+        // Miracast links commonly carry 10 to 20 Mbit/s, and a still desktop
+        // uses well under 1.
         let bitrate = match (mode.height > 720, mode.fps > 30) {
-            (true, true) => 16_000_000,
-            (true, false) => 10_000_000,
-            (false, true) => 8_000_000,
-            (false, false) => 6_000_000,
+            (true, true) => 24_000_000,
+            (true, false) => 16_000_000,
+            (false, true) => 14_000_000,
+            (false, false) => 10_000_000,
         };
         let (w, h) = (mode.width as usize, mode.height as usize);
         let mut encoder = video::Video::new(w, h, mode.fps, bitrate)?;
@@ -378,6 +394,12 @@ pub fn mirror<R>(
         let mut last_progress = start;
         let mut bytes_at_progress = 0u64;
         let (mut busy, mut worst, mut made) = (Duration::ZERO, Duration::ZERO, 0u32);
+        let mut delivered_at_progress = pictures.delivered();
+        // A picture's packets go out spread over most of its time slot, not
+        // in one burst: a burst overflows the Wi-Fi link and the TV loses
+        // packets (and freezes until a whole picture comes).
+        let mut queue: std::collections::VecDeque<Vec<u8>> = Default::default();
+        let mut per_ms = 1usize;
         loop {
             if stop.load(Ordering::Relaxed) {
                 report.ended_by = "you".into();
@@ -387,8 +409,19 @@ pub fn mirror<R>(
                 report.ended_by = "time".into();
                 break;
             }
-            // Requests from the TV between pictures.
-            let wait = next_frame.saturating_duration_since(Instant::now());
+            if !queue.is_empty() {
+                let n = if Instant::now() >= next_frame { queue.len() } else { per_ms.min(queue.len()) };
+                for p in queue.drain(..n) {
+                    report.bytes += p.len() as u64;
+                    let _ = udp.send_to(&p, target);
+                }
+            }
+            // Requests from the TV between pictures (and between slices of
+            // a picture's packets).
+            let mut wait = next_frame.saturating_duration_since(Instant::now());
+            if !queue.is_empty() {
+                wait = wait.min(Duration::from_millis(1));
+            }
             if let Some(m) = link.next(wait)? {
                 if !m.is_reply() {
                     answer(&mut link, &m, &session, udp_port, &mut asked)?;
@@ -427,11 +460,15 @@ pub fn mirror<R>(
             let pcr27 = start.elapsed().as_micros() as u64 * 27;
             let packets = muxer.frame(&picture.data, picture.key, pcr27, pts90);
             if asked.playing {
-                for p in rtp.packets(&packets, pts90) {
+                // Anything left of the last picture goes first, then this
+                // one's packets over about 70% of the slot.
+                for p in queue.drain(..) {
                     report.bytes += p.len() as u64;
-                    // A full Wi-Fi queue drops a packet; the next key frame mends it.
                     let _ = udp.send_to(&p, target);
                 }
+                queue.extend(rtp.packets(&packets, pts90));
+                let slot_ms = (frame_time.as_secs_f64() * 1000.0 * 0.7).max(1.0);
+                per_ms = (queue.len() as f64 / slot_ms).ceil().max(1.0) as usize;
             }
             report.frames += 1;
             let took = began.elapsed();
@@ -453,7 +490,9 @@ pub fn mirror<R>(
                     worst_ms: worst.as_secs_f32() * 1000.0,
                     budget_ms: frame_time.as_secs_f32() * 1000.0,
                     dropped: report.dropped,
+                    delivered_per_second: ((pictures.delivered() - delivered_at_progress) as f64 / secs) as u64,
                 });
+                delivered_at_progress = pictures.delivered();
                 (busy, worst, made) = (Duration::ZERO, Duration::ZERO, 0);
                 bytes_at_progress = report.bytes;
                 last_progress = Instant::now();
