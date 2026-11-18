@@ -2,7 +2,7 @@
 
 use anyhow::{anyhow, bail, Result};
 use clap::{Subcommand, ValueEnum};
-use kagaz_core::tv::miracast::{self, Event, Options, Route, Source};
+use kagaz_core::tv::miracast::{self, Event, Options, Pictures, Route};
 use kagaz_core::tv::{self, Tv, Way};
 use std::net::IpAddr;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -26,12 +26,16 @@ pub enum Via {
 
 #[derive(Subcommand)]
 pub enum TvAction {
-    /// Show a picture from this computer on the TV (Miracast). Ctrl+C ends it.
+    /// Show this computer's screen on the TV (Miracast). The desktop asks
+    /// which screen or window to share. Ctrl+C ends it.
     Mirror {
         /// Send the test pattern (colour bars, a moving square and a clock)
         /// instead of this computer's screen
-        #[arg(long)]
+        #[arg(long, conflicts_with = "window")]
         pattern: bool,
+        /// Share one window instead of a whole screen
+        #[arg(long)]
+        window: bool,
         /// How to reach the TV; by default the network when the TV is on it,
         /// Wi-Fi Direct otherwise
         #[arg(long, value_enum)]
@@ -98,16 +102,10 @@ pub fn list(seconds: f32, direct: bool, json: bool) -> Result<()> {
 /// `kagaz tv NAME ...`
 pub fn tv(name: &str, action: TvAction) -> Result<()> {
     match action {
-        TvAction::Mirror { pattern, via, size, seconds, name: shown } => {
-            if !pattern {
-                bail!(
-                    "showing this computer's screen is the next step and is not built yet; \
-                     `--pattern` sends the test pattern"
-                );
-            }
+        TvAction::Mirror { pattern, window, via, size, seconds, name: shown } => {
+            let mut pictures = pictures(pattern, window)?;
             let opts = Options {
                 name: shown,
-                source: Source::Pattern,
                 max_height: match size {
                     Size::P720 => 720,
                     Size::P1080 => 1080,
@@ -116,8 +114,31 @@ pub fn tv(name: &str, action: TvAction) -> Result<()> {
                 wait: Duration::from_secs(30),
             };
             stop_on_ctrl_c();
-            mirror(name, via, &opts)
+            mirror(name, via, &opts, pictures.as_mut())
         }
+    }
+}
+
+/// The pattern, or the screen the owner picks in the desktop's dialog.
+fn pictures(pattern: bool, window: bool) -> Result<Box<dyn Pictures>> {
+    if pattern {
+        return Ok(Box::new(kagaz_core::tv::miracast::video::Pattern::new(16, 16)));
+    }
+    #[cfg(target_os = "linux")]
+    {
+        use kagaz_core::tv::capture::{Choice, Screen};
+        println!("Choose what to show in the desktop's sharing dialog...");
+        let screen = Screen::ask(if window { Choice::Window } else { Choice::Screen }).map_err(|e| anyhow!(e))?;
+        match screen.first_picture(Duration::from_secs(5)) {
+            Some((w, h)) => println!("Sharing {w}x{h}."),
+            None => bail!("the desktop sent no picture of the screen"),
+        }
+        Ok(Box::new(screen))
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = window;
+        bail!("showing the screen works on Linux so far; `--pattern` sends the test pattern")
     }
 }
 
@@ -159,10 +180,10 @@ fn on_event(e: Event) {
     }
 }
 
-fn mirror(name: &str, via: Option<Via>, opts: &Options) -> Result<()> {
+fn mirror(name: &str, via: Option<Via>, opts: &Options, pictures: &mut dyn Pictures) -> Result<()> {
     // A typed address goes straight to the network route.
     if let (Ok(ip), None | Some(Via::Network)) = (name.parse::<IpAddr>(), via) {
-        return run(Route::Network(ip), opts, || Ok(()));
+        return run(Route::Network(ip), opts, pictures, || Ok(()));
     }
     if !matches!(via, Some(Via::Direct)) {
         let tvs = tv::nearby(Duration::from_secs(4), false).map_err(|e| anyhow!(e))?;
@@ -170,7 +191,7 @@ fn mirror(name: &str, via: Option<Via>, opts: &Options) -> Result<()> {
         match found {
             Ok(t) if t.has(Way::MiracastNetwork) => {
                 println!("Mirroring to {} over the network.", t.name);
-                return run(Route::Network(t.address.expect("found on the network")), opts, || Ok(()));
+                return run(Route::Network(t.address.expect("found on the network")), opts, pictures, || Ok(()));
             }
             Ok(t) if matches!(via, Some(Via::Network)) => {
                 bail!(
@@ -183,11 +204,11 @@ fn mirror(name: &str, via: Option<Via>, opts: &Options) -> Result<()> {
             _ => {}
         }
     }
-    direct(name, opts)
+    direct(name, opts, pictures)
 }
 
 #[cfg(target_os = "linux")]
-fn direct(name: &str, opts: &Options) -> Result<()> {
+fn direct(name: &str, opts: &Options, pictures: &mut dyn Pictures) -> Result<()> {
     use kagaz_core::tv::p2p;
     println!("Looking for {name} over Wi-Fi Direct (its screen sharing must be on)...");
     let q = name.to_lowercase();
@@ -200,7 +221,7 @@ fn direct(name: &str, opts: &Options) -> Result<()> {
         .find(|p| p.display && p.name.to_lowercase().contains(&q))
         .ok_or_else(|| anyhow!("no TV called \"{name}\" showed over Wi-Fi Direct. Is its screen sharing on?"))?;
     println!("Mirroring to {} over Wi-Fi Direct.", peer.name);
-    run(Route::Direct, opts, || {
+    run(Route::Direct, opts, pictures, || {
         println!("Making the Wi-Fi Direct link (up to a minute)...");
         // A TV just out of another session can miss the first try (seen on
         // an LG); a second one usually takes seconds.
@@ -212,12 +233,17 @@ fn direct(name: &str, opts: &Options) -> Result<()> {
 }
 
 #[cfg(not(target_os = "linux"))]
-fn direct(name: &str, _opts: &Options) -> Result<()> {
+fn direct(name: &str, _opts: &Options, _pictures: &mut dyn Pictures) -> Result<()> {
     bail!("{name} was not found on the network, and Wi-Fi Direct from Kagaz works on Linux only so far")
 }
 
-fn run<R>(route: Route, opts: &Options, ready: impl FnOnce() -> Result<R, String>) -> Result<()> {
-    let report = miracast::mirror(route, opts, &STOP, ready, on_event).map_err(|e| anyhow!(e))?;
+fn run<R>(
+    route: Route,
+    opts: &Options,
+    pictures: &mut dyn Pictures,
+    ready: impl FnOnce() -> Result<R, String>,
+) -> Result<()> {
+    let report = miracast::mirror(route, opts, pictures, &STOP, ready, on_event).map_err(|e| anyhow!(e))?;
     let by = match report.ended_by.as_str() {
         "you" => "you ended it",
         "time" => "the time ran out",

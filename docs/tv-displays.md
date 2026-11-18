@@ -251,6 +251,18 @@ now stamped at exactly even times rather than when each was drawn, to
 give the TV no wobble of Kagaz's own to follow. With that, the owner saw
 the square move smoothly (over the network, the TV's port 7250 open
 again once it had restarted fully).
+
+*This computer's screen on Linux* (2026-11-18): `tv/capture.rs` asks the
+desktop's screen-sharing portal (its own dialog: a screen, or a window
+with `--window`), takes the pictures from PipeWire (`pipewire` crate,
+MIT; build headers as in the installations notes), and scales the newest
+one to the TV's size with black bars where the shapes differ. The
+command line mirrors the screen by default now; `--pattern` sends the
+test pattern. Tested in a sealed headless GNOME Shell with its own
+PipeWire (`crates/kagaz-core/tests/headless-screen.sh`): the test
+desktop's screen arrives at its size, and a whole session to the
+stand-in TV decodes every picture sent. Not yet tried with a real
+desktop's dialog or on the TV; KDE and Hyprland not yet tried.
 All tests on a real TV use the LG for now (the owner, 2026-11-18). Saved TVs (names,
 rooms) come with the window; until then `kagaz tvs` lists the TVs found
 nearby.

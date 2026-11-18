@@ -8,6 +8,8 @@
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub mod miracast;
 #[cfg(target_os = "linux")]
+pub mod capture;
+#[cfg(target_os = "linux")]
 pub mod p2p;
 
 use mdns_sd::{ServiceDaemon, ServiceEvent};

@@ -500,7 +500,24 @@ Plan: `docs/remote-connection.md` (agreed 2026-11-16).
       webview's again. Checked: the page's part in the headless page;
       in the real window (test card) the webview's pinch is found and
       turned off. **Not yet** tried with fingers.
-- [ ] **Several sessions at once, each in a window of its own** (the
+- [x] **Session windows, built** (2026-11-18, the owner: "proceed as
+      recommended"): `remote_windows.rs` (a registry of the windows,
+      opening one per Connect, the two closing questions, keeping them
+      open with the main window out of sight), `session.html` and
+      `session.js` (the viewer alone, the house button to the main
+      window, the ring strip over the screen), the device list ("In its
+      own window", Show window, the question before another), the gear
+      of Computers & phones (Session windows: what closing the main
+      window does, the ring in a session's window; Each device), stored
+      in remote.toml under `[windows]`. This computer's keys and the
+      pinch are each window's own. A second connection is never
+      refused by Kagaz: the device decides (Windows Server allows
+      several, the home editions one). Checked: both pages in the
+      headless browser, and the real app opens a test card in a window
+      of its own. **Not yet** done by a person: the closing questions,
+      a real ring's strip, keeping windows open, two real devices at
+      once.
+- [x] **Several sessions at once, each in a window of its own** (the
       owner, 2026-11-18): today one session takes over Kagaz's window.
       Asked for: every connection in its own window, closing it ends
       that session (after a question), the main window free meanwhile
@@ -642,10 +659,12 @@ first, then sending files, the remote, and extending. Nothing built yet.
 - [ ] **Step 6: the phone** (agreed 2026-11-18, after the computer's
       screen): mirror over Miracast, Android's own Cast, and extend through
       adb.
-- [ ] **Step 2: this computer's screen** (xdg-desktop-portal ScreenCast and
-      PipeWire on Linux; Windows.Graphics.Capture; ScreenCaptureKit), sound
-      (the LG takes LPCM and AAC), the delay measured, and Windows' own
-      Wi-Fi Direct.
+- [ ] **Step 2: this computer's screen on the TV, Linux**: built and tested
+      in the sealed test desktop (2026-11-18); still to see through a real
+      desktop's dialog onto the LG, and on KDE and Hyprland.
+- [ ] **Step 2, still to do**: sound (the LG takes LPCM and AAC), the delay
+      measured, the screen on Windows (Windows.Graphics.Capture) and macOS
+      (ScreenCaptureKit), Windows' own Wi-Fi Direct.
 - [ ] **AirPlay mirroring from Linux, Windows and Android** needs FairPlay's
       sender side, which is not published; find out whether it can be done
       before promising it.

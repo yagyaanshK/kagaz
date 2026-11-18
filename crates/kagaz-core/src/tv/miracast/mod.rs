@@ -30,18 +30,33 @@ pub enum Route {
     Direct,
 }
 
-/// What to send.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Source {
-    /// The generated test pattern.
-    Pattern,
+/// Where the pictures come from: the test pattern, or this computer's
+/// screen.
+pub trait Pictures {
+    /// The picture due at `due` since the start, as RGBA at this size.
+    fn picture(&mut self, due: Duration, width: usize, height: usize) -> &[u8];
+}
+
+impl Pictures for video::Pattern {
+    fn picture(&mut self, due: Duration, width: usize, height: usize) -> &[u8] {
+        if self.width != width || self.height != height {
+            *self = video::Pattern::new(width, height);
+        }
+        self.draw(due.as_millis() as u64)
+    }
+}
+
+#[cfg(target_os = "linux")]
+impl Pictures for super::capture::Screen {
+    fn picture(&mut self, _due: Duration, width: usize, height: usize) -> &[u8] {
+        super::capture::Screen::picture(self, width, height)
+    }
 }
 
 #[derive(Debug, Clone)]
 pub struct Options {
     /// The name the TV shows for this computer.
     pub name: String,
-    pub source: Source,
     /// The tallest picture to send: 1080 or 720.
     pub max_height: u32,
     /// Stop after this long; `None` runs until `stop` is set.
@@ -194,6 +209,7 @@ fn random_bytes<const N: usize>() -> [u8; N] {
 pub fn mirror<R>(
     route: Route,
     opts: &Options,
+    pictures: &mut dyn Pictures,
     stop: &AtomicBool,
     ready: impl FnOnce() -> Result<R, String>,
     mut event: impl FnMut(Event),
@@ -340,7 +356,6 @@ pub fn mirror<R>(
             (false, false) => 6_000_000,
         };
         let (w, h) = (mode.width as usize, mode.height as usize);
-        let mut pattern = video::Pattern::new(w, h);
         let mut encoder = video::Video::new(w, h, mode.fps, bitrate)?;
         let mut muxer = ts::Muxer::new();
         let mut rtp = ts::Rtp::new(u32::from_be_bytes(random_bytes()));
@@ -386,9 +401,7 @@ pub fn mirror<R>(
                 // Fell behind (a slow machine): drop the backlog.
                 next_frame = Instant::now() + frame_time;
             }
-            let rgba = match opts.source {
-                Source::Pattern => pattern.draw(due.as_millis() as u64),
-            };
+            let rgba = pictures.picture(due, w, h);
             let picture = encoder.encode(rgba)?;
             if picture.data.is_empty() {
                 continue;
@@ -551,12 +564,17 @@ pub(crate) mod tests {
     /// A session of `length` with the stand-in TV: the report, and the H.264
     /// that arrived.
     pub fn session_with_stand_in(length: Duration) -> (Report, Vec<u8>) {
+        let mut pattern = video::Pattern::new(16, 16);
+        session_with_stand_in_from(&mut pattern, length)
+    }
+
+    /// The same with pictures from anywhere.
+    pub fn session_with_stand_in_from(pictures: &mut dyn Pictures, length: Duration) -> (Report, Vec<u8>) {
         let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
         let received = Arc::new(Mutex::new(Vec::new()));
         let tv = std::cell::Cell::new(None);
         let opts = Options {
             name: "Kagaz test".into(),
-            source: Source::Pattern,
             max_height: 720,
             length: Some(length),
             wait: Duration::from_secs(5),
@@ -565,6 +583,7 @@ pub(crate) mod tests {
         let report = mirror(
             Route::Direct,
             &opts,
+            pictures,
             &stop,
             || {
                 tv.set(Some(stand_in_tv(received.clone())));
@@ -585,16 +604,17 @@ pub(crate) mod tests {
         let tv = std::cell::Cell::new(None);
         let opts = Options {
             name: "Kagaz test".into(),
-            source: Source::Pattern,
             max_height: 720,
             length: Some(Duration::from_millis(1500)),
             wait: Duration::from_secs(5),
         };
         let stop = AtomicBool::new(false);
         let mut events = Vec::new();
+        let mut pattern = video::Pattern::new(16, 16);
         let report = mirror(
             Route::Direct,
             &opts,
+            &mut pattern,
             &stop,
             || {
                 tv.set(Some(stand_in_tv(received.clone())));

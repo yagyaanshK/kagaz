@@ -105,3 +105,5 @@ opus2 = { version = "0.4", features = ["bundled"] }
 [target.'cfg(target_os = "linux")'.dependencies]
 # NetworkManager's Wi-Fi Direct for TVs on no network (already built for btleplug).
 dbus = "0.9"
+# The screen, as the screen-sharing portal hands it over, for mirroring to a TV (MIT).
+pipewire = "0.10"
