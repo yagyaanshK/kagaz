@@ -614,3 +614,151 @@ body.here-idle { cursor: none; }
 /* The TVs page: this computer as a screen, a row as "This computer's
    screens" has. */
 .here-section { margin-top: 24px; }
+
+/* ============== A page's actions in the bar (shell.js lift) ==============
+   The gear, Add and the like move from the page into the bar: icon
+   buttons there, as each system's bar has them; a word only where a
+   button has no icon (Rearrange, Done). */
+.bar-page { display: contents; }
+.bar-page > button, .bar-page > .cam-menu > button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-width: var(--tap); min-height: var(--tap); padding: 0; border: none; background: none; color: inherit; border-radius: var(--r-icon-btn, 50%); font-weight: 500; }
+.bar-page > button:has(.ic) > span:not(.ic) { display: none; }
+.bar-page > button:not(:has(.ic)) { padding: 0 12px; border-radius: var(--r-btn, 8px); color: var(--accent); }
+.bar-page > button.hidden { display: none; }
+.bar-page .ic svg { width: 20px; height: 20px; }
+[data-os="android"] .bar-page .ic svg { width: 24px; height: 24px; }
+.bar-page > button:hover, .bar-page > .cam-menu > button:hover { background: var(--hover); }
+.bar-page > .cam-menu { position: relative; }
+.bar-page > select { min-height: 36px; margin: 0 4px; }
+[data-os="android"] .bar-page > select { min-height: 40px; border-radius: 8px; border: 1px solid var(--line); background-color: transparent; font-size: 14px; font-weight: 500; }
+
+/* ================= Android: the pages' own controls in Material 3 =================
+   Under :where() so a part's own rule (a tile's button, a sheet's row)
+   still wins; this only replaces the old boxes. Buttons: the filled one
+   for the main action, outlined for the others, all 40 high and round;
+   fields outlined, 56 high; a setting's on/off is a switch; settings are
+   lists under a heading in the accent, not boxes. */
+:where([data-os="android"] #main) button:not([class]),
+:where([data-os="android"] #main) button.accent, :where([data-os="android"] #main) button.ok,
+:where([data-os="android"] #main) button.big, :where([data-os="android"] #main) button.danger,
+:where([data-os="android"] #main) button.secondary {
+  min-height: 40px; padding: 0 24px; border-radius: 20px; font-size: 14px; font-weight: 500; letter-spacing: 0.1px;
+  border: 1px solid var(--control); background: transparent; color: var(--accent);
+}
+:where([data-os="android"] #main) button.accent, :where([data-os="android"] #main) button.ok { border-color: transparent; background: var(--accent); color: var(--accent-text); }
+:where([data-os="android"] #main) button.danger { border-color: transparent; background: var(--bad); color: #fff; }
+:where([data-os="android"] #main) button.big { min-height: 56px; padding: 0 28px; border-radius: 28px; font-size: 16px; }
+:where([data-os="android"] #main) button:not([class]):hover { background: var(--hover); }
+:where([data-os="android"] #main) button.icon { min-width: 48px; min-height: 48px; padding: 0; border: none; border-radius: 50%; background: transparent; color: var(--muted); }
+:where([data-os="android"] #main) button.icon .ic svg { width: 24px; height: 24px; }
+:where([data-os="android"] #main) :is(input[type="text"], input[type="number"], input[type="password"], input[type="email"], input[type="tel"], input[type="search"], input[type="url"], input:not([type]), select, textarea) {
+  min-height: 56px; padding: 0 16px; border: 1px solid var(--control); border-radius: 4px; background-color: transparent; font-size: 16px;
+}
+:where([data-os="android"] #main) select { padding-right: 40px; background-position: calc(100% - 22px) 55%, calc(100% - 17px) 55%; }
+:where([data-os="android"] #main) label { font-size: 14px; }
+/* A setting's on/off: Material's switch (as the TVs' sheet has it). */
+:where([data-os="android"] #main) :is(.set-row, .switch, .ot-remember, .set-control) input[type="checkbox"] {
+  appearance: none; -webkit-appearance: none; position: relative; flex: none; width: 52px; height: 32px; min-height: 0; margin: 0; padding: 0;
+  border: 2px solid var(--control); border-radius: 16px; background: rgba(127, 127, 127, 0.14); transition: background 150ms, border-color 150ms;
+}
+:where([data-os="android"] #main) :is(.set-row, .switch, .ot-remember, .set-control) input[type="checkbox"]::before {
+  content: ""; position: absolute; top: 50%; left: 6px; width: 16px; height: 16px; border-radius: 50%; background: var(--control); transform: translateY(-50%); transition: left 150ms, width 150ms, height 150ms;
+}
+:where([data-os="android"] #main) :is(.set-row, .switch, .ot-remember, .set-control) input[type="checkbox"]:checked { border-color: var(--accent); background: var(--accent); }
+:where([data-os="android"] #main) :is(.set-row, .switch, .ot-remember, .set-control) input[type="checkbox"]:checked::before { left: 22px; width: 24px; height: 24px; background: var(--accent-text); }
+/* The switch after its words, the row as wide as the page. */
+[data-os="android"] #main .switch, [data-os="android"] #main .ot-remember { display: flex; flex-direction: row-reverse; justify-content: space-between; align-items: center; gap: 16px; min-height: 56px; white-space: normal; font-size: 16px; color: var(--text); }
+/* Settings as lists: a heading in the accent, rows without boxes. */
+[data-os="android"] #main .set-section { margin: 8px calc(-1 * var(--edge)) 0; padding: 8px var(--edge); border: none; border-radius: 0; background: none; }
+[data-os="android"] #main .set-section h3, [data-os="android"] .door-settings-title { margin: 8px 0 4px; font-size: 14px; font-weight: 500; color: var(--accent); }
+[data-os="android"] #main .set-row { min-height: 56px; padding: 8px 0; border-top: none; }
+[data-os="android"] #main .set-label { font-size: 16px; }
+[data-os="android"] #main .set-label .small { font-size: 14px; }
+[data-os="android"] #main .set-door { margin: 0 calc(-1 * var(--edge)); padding: 8px var(--edge); gap: 16px; min-height: 64px; }
+[data-os="android"] #main .set-door-icon svg { width: 24px; height: 24px; color: var(--muted); }
+/* Cards that were boxes: a tonal surface, no outline. */
+[data-os="android"] #main :is(.signin-card, .ot-panel) { border: none; border-radius: 16px; background: var(--tile-bg); padding: 16px; }
+[data-os="android"] #main .list-head { margin: 24px 0 8px; font-size: 14px; font-weight: 500; color: var(--accent); }
+[data-os="android"] #main .pill { border-radius: 8px; padding: 4px 10px; font-size: 12px; font-weight: 500; vertical-align: middle; }
+/* Tabs: Material's primary tabs, the line under the active one. */
+[data-os="android"] #main .tabs { gap: 0; margin: 0 calc(-1 * var(--edge)) 16px; padding: 0 var(--edge); }
+[data-os="android"] #main .tab { flex: 1 1 0; min-height: 48px; font-size: 14px; font-weight: 500; }
+
+/* ======================= Settings (settings.js) =======================
+   The field that finds a setting, as drawn in design/mockups/settings;
+   on Android Material's search bar (a 56 high pill on the container). */
+.set-search { display: flex; align-items: center; gap: 8px; margin: 4px 0 8px; padding: 0 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.set-search svg { width: 18px; height: 18px; color: var(--muted); }
+#main .set-search input { flex: 1 1 auto; min-height: 40px; padding: 0; border: none; background: none; color: var(--text); font: inherit; outline: none; box-shadow: none; }
+[data-os="android"] .set-search { min-height: 56px; padding: 0 16px; gap: 16px; border: none; border-radius: 28px; background: #E4EAE3; }
+@media (prefers-color-scheme: dark) { [data-os="android"] .set-search { background: #262B27; } }
+[data-os="android"] .set-search svg { width: 24px; height: 24px; }
+#main [data-os="android"] .set-search input, [data-os="android"] #main .set-search input { min-height: 56px; font-size: 16px; }
+#settings-body { max-width: 760px; }
+.set-index .set-section:first-child { margin-top: 0; }
+/* The old in-page Back links: the bar's Back does their work everywhere. */
+#main .pane .back { display: none !important; }
+/* The doorbell's settings: the bar names them; their own title goes. */
+.door-settings-title { display: none; }
+/* A switch row among the doors: its icon, its words, the switch at the end. */
+.set-switch { cursor: default; }
+.set-switch .set-control { flex: none; }
+/* A page's Look again is the bar's refresh icon; the page's own button
+   stays only as what the icon presses. */
+#main [data-bar="refresh"] { display: none !important; }
+
+/* ======================= Android: switches everywhere =======================
+   Every on/off in Kagaz is a role="switch" checkbox (input.toggle) or sits
+   in a setting's row: on Android each is Material's switch. */
+:where([data-os="android"] #main) input[type="checkbox"]:is(.toggle, [role="switch"]) {
+  appearance: none; -webkit-appearance: none; position: relative; flex: none; width: 52px; height: 32px; min-height: 0; margin: 0; padding: 0;
+  border: 2px solid var(--control); border-radius: 16px; background: rgba(127, 127, 127, 0.14); transition: background 150ms, border-color 150ms;
+}
+:where([data-os="android"] #main) input[type="checkbox"]:is(.toggle, [role="switch"])::before {
+  content: ""; position: absolute; top: 50%; left: 6px; width: 16px; height: 16px; border-radius: 50%; background: var(--control); transform: translateY(-50%); transition: left 150ms, width 150ms, height 150ms;
+}
+:where([data-os="android"] #main) input[type="checkbox"]:is(.toggle, [role="switch"]):checked { border-color: var(--accent); background: var(--accent); }
+:where([data-os="android"] #main) input[type="checkbox"]:is(.toggle, [role="switch"]):checked::before { left: 22px; width: 24px; height: 24px; background: var(--accent-text); }
+
+/* ============================ Android: Fans ============================
+   A fan's card as Material's filled card: no outline (a tonal container
+   when on), the power as a round filled or tonal button, the speeds as
+   one connected row (Material's segmented buttons), Light and Sleep as
+   rows with a switch, the overflow as the vertical ⋮. */
+[data-os="android"] .fan-cards { padding: 0 8px 8px; gap: 8px; }
+[data-os="android"] .fan-card { border: none; border-radius: 16px; background: var(--bg); padding: 12px 16px 16px; }
+[data-os="android"] .fan-card.on { background: var(--icon-bg); color: var(--icon-fg); }
+[data-os="android"] .fan-card.on .fan-name { color: var(--text); }
+[data-os="android"] .fan-more-btn { transform: rotate(90deg); font-size: 20px; }
+[data-os="android"] .fan-more, [data-os="android"] .fan-arrange { border-top: none; padding-top: 4px; }
+[data-os="android"] .fan-controls { gap: 12px; }
+[data-os="android"] #main .fan-power { align-self: stretch; min-height: 48px; border-radius: 24px; border: none; background: var(--accent-soft); color: var(--nav-active-fg); font-size: 16px; }
+[data-os="android"] #main .fan-power.on { background: var(--accent); color: var(--accent-text); }
+[data-os="android"] .fan-speeds { display: grid; grid-template-columns: repeat(5, 1fr) 1.6fr; gap: 0; flex-wrap: nowrap; }
+[data-os="android"] #main .fan-speeds .chip { min-width: 0; min-height: 40px; padding: 0; border: 1px solid var(--control); border-radius: 0; margin-left: -1px; background: transparent; color: var(--text); font-size: 14px; font-weight: 500; }
+[data-os="android"] #main .fan-speeds .chip:first-child { border-radius: 20px 0 0 20px; margin-left: 0; }
+[data-os="android"] #main .fan-speeds .chip:last-child { border-radius: 0 20px 20px 0; }
+[data-os="android"] #main .fan-speeds .chip.active { background: var(--accent-soft); color: var(--nav-active-fg); }
+[data-os="android"] .fan-extras { flex-direction: column; align-items: stretch; gap: 0; }
+[data-os="android"] .fan-extras > label { display: flex; flex-direction: row; justify-content: space-between; align-items: center; gap: 16px; min-height: 48px; font-size: 16px; color: var(--text); }
+[data-os="android"] .fan-extras > label input[type="range"] { flex: 1 1 auto; accent-color: var(--accent); }
+[data-os="android"] .fan-extras > label select { min-height: 40px; }
+
+/* A part hidden by its page stays hidden whatever its layout says (a
+   fan's ⋮ menu showed open on every system: .fan-more is a flex box). */
+.fan-more[hidden] { display: none; }
+
+/* ============================ Android: Doorbell ============================ */
+[data-os="android"] .calls-head { display: flex; flex-direction: column-reverse; align-items: stretch; gap: 0; }
+[data-os="android"] .calls-head .switch { width: 100%; }
+[data-os="android"] .calls-panel { border-top: none; border-bottom: none; }
+[data-os="android"] #doorbell :is(.ot-local-heading, #door-list > h3) { margin: 24px 0 4px; font-size: 14px; font-weight: 500; color: var(--accent); }
+[data-os="android"] #doorbell .ot-local-heading + p:empty + #door-list > h3 { display: none; }
+/* Add by address: Material's outlined button with its icon, not a dashed box. */
+[data-os="android"] #door-stations li.add { display: inline-flex; align-items: center; min-height: 40px; padding: 0 24px; border: 1px solid var(--control); border-radius: 20px; background: none; }
+[data-os="android"] #door-stations li.add .name { font-size: 14px; font-weight: 500; color: var(--accent); }
+[data-os="android"] #door-stations li.add :is(.where, .caps) { display: none; }
+[data-os="android"] .calls-head > p { flex: none; margin: 0 0 8px; }
+/* Android's overflow is the vertical ⋮. */
+[data-os="android"] .ic[data-icon="more"] svg { transform: rotate(90deg); }
+/* A doorbell's card: Material's filled card, no outline. */
+[data-os="android"] #ot-devices .dev-card { border: none; border-radius: 16px; background: var(--bg); }

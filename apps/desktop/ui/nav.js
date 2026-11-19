@@ -108,10 +108,12 @@ const KagazNav = (() => {
 
   // A top-level place: Home (null), or a page one level above Home.
   // Going elsewhere keeps the page's own levels (a printer's page with a
-  // scan under way, the doorbell's settings, rearranging) for coming back
-  // to it; only what floats over it (a menu, a question, a picture, full
-  // screen, a live view) closes. Choosing the page you are on goes to its top.
-  const FLOATING = new Set(["cam-menu", "ot-menu", "ask", "viewer", "full", "ot-card"]);
+  // scan under way, rearranging) for coming back to it; what floats over
+  // it (a menu, a question, a picture, full screen, a live view) closes,
+  // and so does a kind's settings: coming back to the doorbell from its
+  // tile opens the doorbell, not the settings last seen there (reported
+  // 2026-11-19). Choosing the page you are on goes to its top.
+  const FLOATING = new Set(["cam-menu", "ot-menu", "ask", "viewer", "full", "ot-card", "door-settings", "remote-settings", "settings-sub"]);
   const kept = new Map(); // page -> its levels, as left
   function root(id, close) {
     if (closing) return;

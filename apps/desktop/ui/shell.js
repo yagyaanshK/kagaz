@@ -156,10 +156,59 @@ const KagazShell = (() => {
     const step = pane && pane.dataset.title;
     $("bar-title").textContent = view === "add" ? $("add-title").textContent || TITLES.add : step || TITLES[view] || "Kagaz";
     $("bar-add").classList.toggle("hidden", view !== "home");
-    $("bar-refresh").classList.toggle("hidden", !(pane && "refresh" in pane.dataset));
     $("bar-menu").classList.toggle("hidden", layout !== "minimal");
     root.dataset.view = view;
+    lift();
   }
+
+  // A page's own actions (its gear, Add, Look again) sit in the bar, as
+  // every system's apps have them, not in a row of boxes under it. The
+  // page marks them data-bar; they move into the bar while their part of
+  // the page shows and back when it goes, keeping their handlers. A page's
+  // Look again (data-bar="refresh") is the bar's refresh icon.
+  const lifted = []; // [node, the mark where it came from]
+  let refreshFor = null;
+  const shownPane = () => document.querySelector("#main > section.pane:not(.hidden)");
+  function lift() {
+    for (const [node, mark] of lifted.splice(0)) mark.replaceWith(node);
+    const pane = shownPane();
+    const slot = $("bar-page");
+    refreshFor = null;
+    if (pane) {
+      // Only what belongs to the part of the page on screen.
+      const showing = (n) => { for (let p = n.parentElement; p && p !== pane; p = p.parentElement) if (p.classList.contains("hidden")) return false; return true; };
+      for (const n of pane.querySelectorAll("[data-bar]")) {
+        if (!showing(n)) continue;
+        if (n.dataset.bar === "refresh") { refreshFor = refreshFor || n; continue; }
+        const mark = document.createComment("bar");
+        n.replaceWith(mark);
+        slot.append(n);
+        lifted.push([n, mark]);
+      }
+    }
+    const own = pane && "refresh" in pane.dataset;
+    $("bar-refresh").classList.toggle("hidden", !(own || (refreshFor && !refreshFor.classList.contains("hidden"))));
+    if (refreshFor) {
+      $("bar-refresh").title = refreshFor.title || "Look again";
+      $("bar-refresh").setAttribute("aria-label", $("bar-refresh").title);
+    }
+  }
+  // Watched on the page: a page or a part of one showing or going (app.js
+  // shows the page after telling the shell), and the page's Look again,
+  // which turns the bar's icon while it looks (it is disabled meanwhile)
+  // and shows or hides it with itself.
+  const PARTS = "section.pane, #remote-list-view, #door-settings-view";
+  new MutationObserver((list) => {
+    if (list.some((m) => m.attributeName === "class" && m.target.matches && m.target.matches(PARTS))) {
+      lift();
+      return;
+    }
+    if (!refreshFor) return;
+    const b = $("bar-refresh");
+    b.classList.toggle("working", refreshFor.disabled);
+    b.disabled = refreshFor.disabled;
+    b.classList.toggle("hidden", refreshFor.classList.contains("hidden"));
+  }).observe($("main"), { attributes: true, attributeFilter: ["disabled", "class"], subtree: true });
   const SHORT = { cameras: "Cameras", print: "Print & scan", fans: "Fans", purifiers: "Purifiers", tvs: "TVs", remote: "Computers" };
   const shortTitle = (v) => SHORT[v] || TITLES[v];
 
@@ -169,7 +218,11 @@ const KagazShell = (() => {
   });
   $("bar-add").addEventListener("click", () => KagazHome.openAdd());
   // The page looks again itself (it hears "refresh" on its section).
-  $("bar-refresh").addEventListener("click", () => { const p = $(view); if (p) p.dispatchEvent(new Event("refresh")); });
+  $("bar-refresh").addEventListener("click", () => {
+    if (refreshFor) { if (!refreshFor.disabled) refreshFor.click(); return; }
+    const p = shownPane();
+    if (p) p.dispatchEvent(new Event("refresh"));
+  });
   KagazNav.watch(() => updateBar());
   // Add a device names its step (a kind's name once one is chosen).
   new MutationObserver(() => view === "add" && updateBar()).observe($("add-title"), { childList: true, characterData: true, subtree: true });

@@ -450,24 +450,15 @@ const KagazSettings = (() => {
   const { el, section, row } = KagazSet;
 
   async function drawAccounts(body) {
-    const box = section("Accounts", "Kagaz signs in to each service the way its own app does. Passwords stay in this device's password store.");
-    const go = (label, cat) => {
-      const b = el("button", "", label);
-      b.type = "button";
-      b.addEventListener("click", () => selectCategory(cat));
-      return b;
-    };
-    const loading = el("p", "muted", "Loading…");
-    body.appendChild(loading);
-    try {
-      const ot = await invoke("onetouch_peek");
-      box.appendChild(row("OneTouch (doorbell)", ot.logged_in ? `Signed in as ${ot.username}` : ot.remembered ? `Saved sign-in: ${ot.remembered.username}` : "Not signed in", go("Open Doorbell", "doorbell")));
-    } catch (_) {}
-    try {
-      const cam = await invoke("cameras_status");
-      box.appendChild(row("Tapo (security cameras)", cam.logged_in ? "Signed in" : "Not signed in", go("Open Security cameras", "cameras")));
-    } catch (_) {}
-    loading.remove();
+    const box = section("Signed in here", "Passwords stay in this device's password store.");
+    const [ot, cam, xm] = await Promise.all([
+      invoke("onetouch_peek").catch(() => null),
+      invoke("cameras_status").catch(() => null),
+      invoke("xiaomi_signed_in").catch(() => null),
+    ]);
+    if (ot) box.appendChild(door("doorbell", "OneTouch", ot.logged_in ? `Signed in as ${ot.username} · Doorbell` : ot.remembered ? `Saved sign-in: ${ot.remembered.username} · Doorbell` : "Not signed in · Doorbell", () => selectCategory("doorbell")));
+    if (cam) box.appendChild(door("cameras", "Tapo", (cam.logged_in ? "Signed in" : "Not signed in") + " · Security cameras", () => selectCategory("cameras")));
+    if (xm !== null) box.appendChild(door("cameras", "Xiaomi", (xm ? "Signed in" : "Not signed in") + " · Security cameras", () => selectCategory("cameras")));
     body.appendChild(box);
   }
 
@@ -476,18 +467,18 @@ const KagazSettings = (() => {
   // opens what that kind's gear opens; a kind without settings of its
   // own yet opens its page, where each device's are.
   const KIND_DOORS = {
-    cameras: ["Playback, tiles in a row, accounts", () => setTimeout(() => $("cam-gear").click(), 0)],
-    doorbell: ["Ringtones, ringing here, stations on this network", () => doorSettings(true)],
-    fans: ["Each fan's name and room, on its card", null],
-    print: ["Your printers; a Brother's own Scan button", null],
-    purifiers: ["Each purifier's name", null],
-    remote: ["Session windows; each device's keyboard, screen, sound and sign-in", () => KagazRemote.openSettings()],
+    cameras: ["Playback, tiles in a row", () => setTimeout(() => $("cam-gear").click(), 0)],
+    doorbell: ["Ringtones, ringing here, door stations", () => doorSettings(true)],
+    fans: ["Names and rooms", null],
+    print: ["Your printers, the Scan button", null],
+    purifiers: ["Names", null],
+    remote: ["Session windows, keyboard, sound", () => KagazRemote.openSettings()],
     society: ["Entries and exits, vehicles", null],
   };
   async function drawDevices(body) {
     const kinds = typeof KagazHome !== "undefined" ? await KagazHome.list().catch(() => []) : [];
     if (!kinds.length) return;
-    const box = section("Your devices", "What each kind keeps for all of its devices, and each device's own.");
+    const box = section("Your devices");
     for (const k of kinds) {
       const [note, then] = KIND_DOORS[k.id] || ["", null];
       const r = el("div", "set-row set-door");
@@ -631,15 +622,157 @@ const KagazSettings = (() => {
     body.appendChild(box);
   }
 
-  async function show() {
+  // ---------- the page: one door to every setting ----------
+  // As drawn in design/mockups/settings: a field that finds a setting,
+  // Kagaz's own (each a row that opens its page, or a switch where one
+  // switch is all there is), then each kind the person has. A row's page
+  // opens over Settings (the bar names it; Back comes back here).
+  function door(icon, label, note, open) {
+    const r = el("div", "set-row set-door");
+    r.tabIndex = 0;
+    r.setAttribute("role", "button");
+    const ic = el("span", "set-door-icon ic");
+    ic.innerHTML = KagazIcons.svg(icon);
+    const l = el("span", "set-label");
+    l.append(el("span", "", label));
+    if (note) l.append(el("span", "muted small", note));
+    const go = el("span", "set-door-go ic");
+    go.innerHTML = KagazIcons.svg("forward");
+    r.append(ic, l, go);
+    r.addEventListener("click", open);
+    r.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter" || ev.key === " ") {
+        ev.preventDefault();
+        open();
+      }
+    });
+    return r;
+  }
+
+  // Kagaz's own pages, each drawn by its function above.
+  const PAGES = {
+    accounts: ["Accounts", drawAccounts],
+    saving: ["Where things are saved", drawSaving],
+    power: ["Power", drawPower],
+    about: ["About Kagaz", drawAbout],
+  };
+  function openPage(id) {
+    const [title, draw] = PAGES[id];
+    const pane = $("settings");
+    pane.dataset.title = title;
     const body = $("settings-body");
-    body.innerHTML = "";
-    await drawAccounts(body);
-    await drawRinging(body);
-    await drawSaving(body);
-    await drawPower(body);
-    await drawDevices(body);
-    drawAbout(body);
+    body.replaceChildren();
+    draw(body).then?.(() => {}, () => {});
+    KagazNav.push("settings-sub", () => {
+      delete pane.dataset.title;
+      drawIndex();
+    });
+    $("main").scrollTop = 0;
+  }
+
+  // Every setting by name, for the field: where it lives and how to get
+  // there. Kept by hand beside the pages; each kind's own are named by
+  // the words on its row.
+  function findable(kinds) {
+    const list = [
+      ["OneTouch account", "Accounts", () => openPage("accounts"), "family"],
+      ["Tapo account", "Accounts", () => openPage("accounts"), "family"],
+      ["Sign in, sign out", "Accounts", () => openPage("accounts"), "family"],
+      ["Save pictures and videos in", "Where things are saved", () => openPage("saving"), "file"],
+      ["Screenshots, recordings, scans", "Where things are saved", () => openPage("saving"), "file"],
+      ["Optimise for performance or battery", "Power", () => openPage("power"), "bolt"],
+      ["Screen to a TV, encoded by", "Power", () => openPage("power"), "bolt"],
+      ["Licence", "About Kagaz", () => openPage("about"), "info"],
+    ];
+    if (phoneRinging) list.push(["Ring during Do Not Disturb", "Kagaz", () => { typed = ""; drawIndex(); }, "bell"]);
+    for (const k of kinds) {
+      const [note, then] = KIND_DOORS[k.id] || ["", null];
+      const go = () => { k.open(); if (then) then(); };
+      for (const word of (note || "").split(/[,;]\s*/).filter(Boolean)) list.push([word.replace(/^./, (c) => c.toUpperCase()), k.title, go, k.icon]);
+      list.push([k.title, "Your devices", go, k.icon]);
+    }
+    return list;
+  }
+
+  let phoneRinging = false;
+  let typed = "";
+  async function drawIndex() {
+    const body = $("settings-body");
+    const box = el("div", "set-search");
+    const ic = el("span", "ic");
+    ic.innerHTML = KagazIcons.svg("search");
+    const field = el("input");
+    field.type = "search";
+    field.placeholder = "Find a setting";
+    field.setAttribute("aria-label", "Find a setting");
+    field.value = typed;
+    box.append(ic, field);
+    const list = el("div", "set-index");
+    body.replaceChildren(box, list);
+    const kinds = typeof KagazHome !== "undefined" ? await KagazHome.list().catch(() => []) : [];
+    const [ot, cam, folder, dnd, power] = await Promise.all([
+      invoke("onetouch_peek").catch(() => null),
+      invoke("cameras_status").catch(() => null),
+      invoke("save_folder").catch(() => null),
+      invoke("ring_in_dnd").catch(() => null),
+      invoke("pref_get", { key: "power" }).catch(() => null),
+    ]);
+    phoneRinging = dnd !== null && dnd !== undefined;
+    const signed = [ot && ot.logged_in ? "OneTouch" : "", cam && cam.logged_in ? "Tapo" : ""].filter(Boolean);
+    const all = findable(kinds);
+
+    function drawList() {
+      const q = typed.trim().toLowerCase();
+      list.replaceChildren();
+      if (q) {
+        const hits = all.filter(([label, where]) => (label + " " + where).toLowerCase().includes(q));
+        const found = section(hits.length ? `${hits.length} found` : "Nothing found");
+        for (const [label, where, go, icon] of hits) found.append(door(icon || "settings", label, where, go));
+        list.append(found);
+        return;
+      }
+      const app = section("Kagaz");
+      app.append(door("family", "Accounts", signed.length ? `${signed.join(", ")}: signed in` : "Sign in to OneTouch, Tapo", () => openPage("accounts")));
+      if (phoneRinging) {
+        // A single switch: right here, not a page of its own. Android
+        // holds it; the switch opens Android's page for it.
+        const r = el("div", "set-row set-door set-switch");
+        const ic = el("span", "set-door-icon ic");
+        ic.innerHTML = KagazIcons.svg("bell");
+        const l = el("label", "set-label");
+        l.append(el("span", "", "Ring during Do Not Disturb"), el("span", "muted small", "Opens Android's setting for Kagaz's calls"));
+        const t = el("input", "toggle");
+        t.type = "checkbox";
+        t.id = "set-dnd";
+        l.htmlFor = t.id;
+        t.checked = dnd === true;
+        t.addEventListener("change", () => {
+          t.checked = !t.checked; // only Android's page changes it
+          KagazSet.attempt(r, () => invoke("ring_dnd_settings"));
+        });
+        dndToggle = t;
+        const c = el("span", "set-control");
+        c.append(t);
+        r.append(ic, l, c);
+        app.append(r);
+      }
+      app.append(door("file", "Where things are saved", folder ? folder.label : "Screenshots, recordings, scans", () => openPage("saving")));
+      if (power) app.append(door("bolt", "Power", power === "battery" ? "Battery" : "Performance", () => openPage("power")));
+      app.append(door("info", "About Kagaz", "Licence", () => openPage("about")));
+      list.append(app);
+      if (kinds.length) drawDevices(list);
+    }
+    field.addEventListener("input", () => {
+      typed = field.value;
+      drawList();
+    });
+    drawList();
+  }
+
+  async function show() {
+    if (KagazNav.has("settings-sub")) return;
+    delete $("settings").dataset.title;
+    await drawIndex();
   }
 
   return { show };

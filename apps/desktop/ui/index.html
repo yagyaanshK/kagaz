@@ -53,6 +53,7 @@
       <div class="bar-actions">
         <!-- A page that can look again (data-refresh on its section) gets this. -->
         <button id="bar-refresh" type="button" class="bar-btn hidden" aria-label="Look again" title="Look again"><span class="ic" data-icon="reload"></span></button>
+        <span id="bar-page" class="bar-page"></span>
         <button id="bar-add" type="button" class="bar-btn" aria-label="Add a device" title="Add a device"><span class="ic" data-icon="plus"></span></button>
         <!-- The viewer's tools, while a device's screen is shown (remote-view.js). -->
         <span id="bar-remote" class="bar-remote hidden">
@@ -129,7 +130,7 @@
       <button type="button" class="back to-home">&#x2190; Home</button>
       <div class="pane-head">
         <h2>Printers &amp; scanners</h2>
-        <button id="rescan" type="button" title="Look again on the network and USB">Look again</button>
+        <button id="rescan" type="button" data-bar="refresh" title="Look again on the network and USB">Look again</button>
       </div>
       <div id="print-brands" class="chips" role="group" aria-label="Brand"></div>
       <h3 class="list-head">My printers</h3>
@@ -147,8 +148,8 @@
       <div class="pane-head">
         <h2>Fans</h2>
         <div class="fan-tools">
-          <button id="fans-arrange" type="button" class="hidden" title="Make rooms, name fans and move them between rooms" aria-pressed="false">Rearrange</button>
-          <button id="fans-rescan" type="button" title="Look again for fans over Bluetooth and on the Wi-Fi network">Look again</button>
+          <button id="fans-arrange" type="button" class="hidden" data-bar title="Make rooms, name fans and move them between rooms" aria-pressed="false">Rearrange</button>
+          <button id="fans-rescan" type="button" data-bar="refresh" title="Look again for fans over Bluetooth and on the Wi-Fi network">Look again</button>
         </div>
       </div>
       <p id="fans-note" class="muted" role="status"></p>
@@ -165,7 +166,7 @@
       <button type="button" class="back to-home">&#x2190; Home</button>
       <div class="pane-head">
         <h2>Air purifiers</h2>
-        <button id="purifiers-rescan" type="button" title="Look again for purifiers on the Wi-Fi network">Look again</button>
+        <button id="purifiers-rescan" type="button" data-bar="refresh" title="Look again for purifiers on the Wi-Fi network">Look again</button>
       </div>
       <p class="muted small">Kagaz finds Philips purifiers on your Wi-Fi and keeps them here. Switching them and reading their air come next, once how they talk is checked on a real purifier.</p>
       <p id="purifiers-note" class="muted" role="status"></p>
@@ -199,9 +200,9 @@
       <div id="remote-list-view">
         <div class="pane-head rc-tools">
           <div class="fan-tools">
-            <button id="remote-rescan" type="button" title="Check your devices again and look for others on this network and in Tailscale"><span class="ic" data-icon="reload"></span><span>Look again</span></button>
-            <button id="remote-add" type="button" class="accent" title="Add a computer or phone"><span class="ic" data-icon="plus"></span><span>Add</span></button>
-            <button id="remote-gear" type="button" class="icon" title="Settings for computers and phones" aria-label="Settings for computers and phones"><span class="ic" data-icon="settings"></span></button>
+            <button id="remote-rescan" type="button" data-bar="refresh" title="Check your devices again and look for others on this network and in Tailscale"><span class="ic" data-icon="reload"></span><span>Look again</span></button>
+            <button id="remote-add" type="button" class="accent" data-bar aria-label="Add a computer or phone" title="Add a computer or phone"><span class="ic" data-icon="plus"></span><span>Add</span></button>
+            <button id="remote-gear" type="button" class="icon" data-bar title="Settings for computers and phones" aria-label="Settings for computers and phones"><span class="ic" data-icon="settings"></span></button>
           </div>
         </div>
         <p id="remote-note" class="muted" role="status"></p>
@@ -376,8 +377,7 @@
       <div class="cam-head pane-head">
         <h2>Doorbell</h2>
         <div class="actions">
-          <span id="door-listen" class="pill muted">…</span>
-          <button id="door-gear" type="button" class="icon" title="Doorbell settings" aria-label="Doorbell settings"><span class="ic" data-icon="settings"></span></button>
+          <button id="door-gear" type="button" class="icon" data-bar title="Doorbell settings" aria-label="Doorbell settings"><span class="ic" data-icon="settings"></span></button>
         </div>
       </div>
       <!-- Doorbell settings (settings.js): what applies to every doorbell,
@@ -389,7 +389,7 @@
         <div id="door-settings-all"></div>
         <div id="door-settings-onetouch"></div>
         <section class="set-section" id="door-settings-local">
-          <h3>Door stations on this network</h3>
+          <h3>Door stations on this network <span id="door-listen" class="pill muted">…</span></h3>
           <p class="muted small">A station that rings this device directly (Direct IP), without your OneTouch account. On the station's web page, add <code id="door-local">this computer</code> as a Direct IP target.</p>
           <div id="door-settings-local-tone"></div>
           <div class="set-row">
@@ -579,7 +579,7 @@
       <div class="cam-head pane-head">
         <h2>Security cameras</h2>
         <div class="actions">
-          <select id="cam-when" aria-label="Show" title="Live view, or recorded footage from the cameras' SD cards">
+          <select id="cam-when" data-bar aria-label="Show" title="Live view, or recorded footage from the cameras' SD cards">
             <option value="live" selected>Live</option>
             <option value="playback">Playback</option>
           </select>
@@ -590,7 +590,7 @@
             <button id="cam-sound-all" type="button" title="Hear every camera shown at once, or mute them all"><span class="ic" data-icon="speaker"></span><span>Sound on all</span></button>
             <button id="cam-rearrange" type="button" title="Make groups and drag cameras between them">Rearrange</button>
           </span>
-          <div class="cam-menu">
+          <div class="cam-menu" data-bar>
             <button id="cam-gear" type="button" class="icon" title="Settings" aria-label="Camera settings"><span class="ic" data-icon="settings"></span></button>
             <div id="cam-settings" class="cam-settings hidden">
               <div id="cam-tools-menu" class="cam-settings-tools"></div>

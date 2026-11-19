@@ -3504,6 +3504,10 @@ $("door-add-rescan").addEventListener("click", lookForStations);
 function doorSettings(on) {
   $("doorbell").classList.toggle("show-settings", on);
   $("door-settings-view").classList.toggle("hidden", !on);
+  // The bar names them (and the gear hides: they are open).
+  if (on) $("doorbell").dataset.title = "Doorbell settings";
+  else delete $("doorbell").dataset.title;
+  $("door-gear").classList.toggle("hidden", on);
   if (on) {
     if (typeof stopOneTouch === "function") stopOneTouch();
     KagazDoorbellSettings.show();
