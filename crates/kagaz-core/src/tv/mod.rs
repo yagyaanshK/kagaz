@@ -17,6 +17,12 @@ pub mod picture;
 pub mod switches;
 #[cfg(target_os = "linux")]
 pub mod sound;
+#[cfg(windows)]
+#[path = "sound_win.rs"]
+pub mod sound;
+#[cfg(target_os = "macos")]
+#[path = "sound_mac.rs"]
+pub mod sound;
 #[cfg(target_os = "linux")]
 pub mod keys;
 #[cfg(target_os = "linux")]

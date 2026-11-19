@@ -119,6 +119,34 @@ pub fn take_sound() -> Option<Vec<u8>> {
     SOUND.lock().unwrap().pop_front()
 }
 
+/// The computer's sound is AAC (Windows, whose Opus is not built in),
+/// not Opus.
+static AAC: AtomicBool = AtomicBool::new(false);
+
+/// Says which codec the computer's sound packets are in.
+pub fn sound_is_aac(yes: bool) {
+    AAC.store(yes, Ordering::SeqCst);
+}
+
+/// The codec's name, as Cast's offer gives it.
+pub fn sound_codec() -> &'static str {
+    if AAC.load(Ordering::SeqCst) {
+        "aac"
+    } else {
+        "opus"
+    }
+}
+
+/// How long a sound packet plays, in samples at 48 kHz: an AAC frame is
+/// 1024; an Opus packet says in its first byte.
+pub fn sound_samples(packet: &[u8]) -> u32 {
+    if AAC.load(Ordering::SeqCst) {
+        1024
+    } else {
+        opus_samples(packet)
+    }
+}
+
 /// How long an Opus packet plays, in samples at 48 kHz (from its first
 /// byte: the mode and frame size, and how many frames it holds).
 pub fn opus_samples(packet: &[u8]) -> u32 {

@@ -78,7 +78,7 @@ fn offer(mode: Mode, bits_per_second: u32, agreed: &Agreed, sound: Option<&Agree
         streams.push(json!({
             "index": 1,
             "type": "audio_source",
-            "codecName": "opus",
+            "codecName": external::sound_codec(),
             "rtpProfile": "cast",
             "rtpPayloadType": s.payload_type,
             "ssrc": s.ssrc,
@@ -286,7 +286,7 @@ pub(crate) fn run(
     let (mut sound_sent, mut sound_skipped, mut sound_noted) = (0u64, 0u64, Instant::now());
     let sound_delay = sound.as_ref().map(|(s, ..)| s.delay()).unwrap_or(DELAY);
     if sound.is_some() {
-        event(Event::Encoder("the sound goes too (Opus)".into()));
+        event(Event::Encoder(format!("the sound goes too ({})", if external::sound_codec() == "aac" { "AAC" } else { "Opus" })));
     }
     // A phone's encoder runs by itself and hands pictures over as it makes
     // them; a computer's is handed a picture each slot.
@@ -342,7 +342,7 @@ pub(crate) fn run(
         // of more than 150 ms starts the count of moments again.
         if let Some((s, samples, first)) = &mut sound {
             while let Some(packet) = external::take_sound() {
-                let n = external::opus_samples(&packet) as u64;
+                let n = external::sound_samples(&packet) as u64;
                 if n == 0 {
                     continue;
                 }

@@ -1,7 +1,9 @@
 //! This computer's screen on macOS, for mirroring to a TV: the main
 //! display through ScreenCaptureKit (macOS 12.3 or newer), pointer
 //! included. macOS asks the owner once for Screen Recording permission.
-//! Kagaz keeps the newest picture and scales it to the TV's size.
+//! Kagaz keeps the newest picture and scales it to the TV's size. From
+//! macOS 13 the same stream also carries what the computer plays (not
+//! Kagaz's own sound), taken only while the sound is to go to the TV.
 //!
 //! Not yet run on a Mac: written to Apple's documentation and type-checked
 //! for macOS from Linux.
@@ -34,6 +36,123 @@ extern "C" {
 #[link(name = "CoreMedia", kind = "framework")]
 extern "C" {
     fn CMSampleBufferGetImageBuffer(sample: *const c_void) -> *const c_void;
+    fn CMSampleBufferGetFormatDescription(sample: *const c_void) -> *const c_void;
+    fn CMAudioFormatDescriptionGetStreamBasicDescription(desc: *const c_void) -> *const StreamDescription;
+    fn CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer(
+        sample: *const c_void,
+        size_needed: *mut usize,
+        list: *mut c_void,
+        list_size: usize,
+        allocator: *const c_void,
+        memory_allocator: *const c_void,
+        flags: u32,
+        block: *mut *const c_void,
+    ) -> i32;
+}
+#[link(name = "CoreFoundation", kind = "framework")]
+extern "C" {
+    fn CFRelease(cf: *const c_void);
+}
+
+/// AudioStreamBasicDescription (CoreAudioTypes.h).
+#[repr(C)]
+struct StreamDescription {
+    sample_rate: f64,
+    format_id: u32,
+    format_flags: u32,
+    bytes_per_packet: u32,
+    frames_per_packet: u32,
+    bytes_per_frame: u32,
+    channels_per_frame: u32,
+    bits_per_channel: u32,
+    reserved: u32,
+}
+
+/// AudioBuffer (CoreAudioTypes.h).
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct AudioBuffer {
+    channels: u32,
+    size: u32,
+    data: *const c_void,
+}
+
+const FLOAT: u32 = 1;
+const NON_INTERLEAVED: u32 = 1 << 5;
+
+/// The computer's sound as it played, 16-bit 48 kHz stereo, taken while
+/// the sound is to go to the TV (sound_mac.rs takes it from here).
+pub static SOUND_IN: Mutex<std::collections::VecDeque<i16>> = Mutex::new(std::collections::VecDeque::new());
+
+/// The capture carries sound (macOS 13 and later).
+pub static HAS_SOUND: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// One sample buffer of sound into [`SOUND_IN`].
+///
+/// # Safety
+/// `sample` is a live CMSampleBuffer of sound.
+unsafe fn take_sound(sample: *const c_void) {
+    unsafe {
+        let desc = CMSampleBufferGetFormatDescription(sample);
+        if desc.is_null() {
+            return;
+        }
+        let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(desc);
+        if asbd.is_null() {
+            return;
+        }
+        let d = &*asbd;
+        if d.format_flags & FLOAT == 0 || d.bits_per_channel != 32 {
+            return;
+        }
+        // Room for a list of up to eight buffers.
+        let mut list = [0u64; 1 + 8 * 2];
+        let mut block: *const c_void = std::ptr::null();
+        let r = CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer(
+            sample,
+            std::ptr::null_mut(),
+            list.as_mut_ptr() as *mut c_void,
+            std::mem::size_of_val(&list),
+            std::ptr::null(),
+            std::ptr::null(),
+            1,
+            &mut block,
+        );
+        if r != 0 {
+            return;
+        }
+        let count = (list.as_ptr() as *const u32).read() as usize;
+        let buffers = std::slice::from_raw_parts((list.as_ptr() as *const u8).add(8) as *const AudioBuffer, count.min(8));
+        let planar = d.format_flags & NON_INTERLEAVED != 0;
+        let channels = d.channels_per_frame.max(1) as usize;
+        let at = |c: usize, i: usize| -> f32 {
+            let c = c.min(channels - 1);
+            if planar {
+                let b = buffers[c.min(buffers.len() - 1)];
+                *(b.data as *const f32).add(i)
+            } else {
+                *(buffers[0].data as *const f32).add(i * channels + c)
+            }
+        };
+        let frames = if planar {
+            buffers.first().map(|b| b.size as usize / 4).unwrap_or(0)
+        } else {
+            buffers.first().map(|b| b.size as usize / 4 / channels).unwrap_or(0)
+        };
+        let mut q = SOUND_IN.lock().unwrap();
+        for i in 0..frames {
+            for c in 0..2 {
+                q.push_back((at(c, i).clamp(-1.0, 1.0) * 32767.0) as i16);
+            }
+        }
+        // Half a second waiting at most.
+        while q.len() > 48_000 {
+            q.pop_front();
+        }
+        if !block.is_null() {
+            CFRelease(block);
+        }
+    }
 }
 #[link(name = "CoreGraphics", kind = "framework")]
 extern "C" {
@@ -70,6 +189,13 @@ define_class!(
     unsafe impl SCStreamOutput for Output {
         #[unsafe(method(stream:didOutputSampleBuffer:ofType:))]
         fn did_output(&self, _stream: &SCStream, sample: &CMSampleBuffer, kind: SCStreamOutputType) {
+            if kind == SCStreamOutputType::Audio {
+                if super::switches::sound_to_tv() {
+                    // SAFETY: a sound sample buffer, live through this call.
+                    unsafe { take_sound(sample as *const CMSampleBuffer as *const c_void) };
+                }
+                return;
+            }
             if kind != SCStreamOutputType::Screen {
                 return;
             }
@@ -180,6 +306,14 @@ impl Screen {
             config.setMinimumFrameInterval(CMTime { value: 1, timescale: 60, flags: CMTimeFlags::Valid, epoch: 0 });
             config.setShowsCursor(true);
             config.setQueueDepth(5);
+            // The sound too, from macOS 13 (asked first: older ones lack it).
+            let can_sound: bool = msg_send![&*config, respondsToSelector: objc2::sel!(setCapturesAudio:)];
+            if can_sound {
+                let _: () = msg_send![&*config, setCapturesAudio: true];
+                let _: () = msg_send![&*config, setSampleRate: 48_000isize];
+                let _: () = msg_send![&*config, setChannelCount: 2isize];
+                let _: () = msg_send![&*config, setExcludesCurrentProcessAudio: true];
+            }
 
             let shared = Arc::new(Shared { latest: Mutex::new(Latest::default()), arrived: AtomicU64::new(0) });
             let output = Output::new(shared.clone());
@@ -187,6 +321,13 @@ impl Screen {
             stream
                 .addStreamOutput_type_sampleHandlerQueue_error(ProtocolObject::from_ref(&*output), SCStreamOutputType::Screen, None)
                 .map_err(|e| format!("the capture: {}", e.localizedDescription()))?;
+            HAS_SOUND.store(
+                can_sound
+                    && stream
+                        .addStreamOutput_type_sampleHandlerQueue_error(ProtocolObject::from_ref(&*output), SCStreamOutputType::Audio, None)
+                        .is_ok(),
+                std::sync::atomic::Ordering::SeqCst,
+            );
             let started: Answer<()> = Arc::new(Mutex::new(None));
             let s = started.clone();
             let block = RcBlock::new(move |error: *mut NSError| {

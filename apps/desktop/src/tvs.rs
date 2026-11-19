@@ -180,10 +180,7 @@ fn session(app: &AppHandle, name: &str, what: &str, say: &dyn Fn(String, &'stati
     // more. A phone keeps its own (KagazTv.kt).
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     let (_sound, mut pictures) = {
-        #[cfg(target_os = "linux")]
         let sound = kagaz_core::tv::sound::available().then(|| kagaz_core::tv::sound::Sound::start(name));
-        #[cfg(not(target_os = "linux"))]
-        let sound: Option<()> = None;
         kagaz_core::tv::switches::begin(sound.is_some());
         live::begin(app, name);
         (sound, Ended(pictures, app.clone()))

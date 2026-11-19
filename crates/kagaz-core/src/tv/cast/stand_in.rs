@@ -179,6 +179,8 @@ struct Taken {
     index: u64,
     receiver: Receiver,
     sound: bool,
+    /// The sound is AAC: 1024 samples a packet.
+    aac: bool,
 }
 
 fn session(mut tcp: TcpStream, config: Arc<rustls::ServerConfig>, lose: Option<u64>, stop: &AtomicBool, say: &mut dyn FnMut(String)) -> Result<(), String> {
@@ -296,7 +298,7 @@ fn session(mut tcp: TcpStream, config: Arc<rustls::ServerConfig>, lose: Option<u
                             completed = true;
                             if t.sound {
                                 sound_packets += 1;
-                                sound_samples += super::super::miracast::external::opus_samples(&p) as u64;
+                                sound_samples += if t.aac { 1024 } else { super::super::miracast::external::opus_samples(&p) as u64 };
                             } else {
                                 pictures += 1;
                                 bytes += p.len() as u64;
@@ -357,7 +359,7 @@ fn take_offer(j: &Value) -> Vec<Taken> {
     for s in j["offer"]["supportedStreams"].as_array().into_iter().flatten() {
         let sound = s["type"] == "audio_source";
         let codec = s["codecName"].as_str().unwrap_or("");
-        if (sound && codec != "opus") || (!sound && codec != "h264") || out.iter().any(|t| t.sound == sound) {
+        if (sound && codec != "opus" && codec != "aac") || (!sound && codec != "h264") || out.iter().any(|t| t.sound == sound) {
             continue;
         }
         let (Some(key), Some(mask), Some(ssrc), Some(pt)) = (
@@ -377,7 +379,7 @@ fn take_offer(j: &Value) -> Vec<Taken> {
             clock: if sound { 48_000 } else { CLOCK },
             delay: Duration::from_millis(s["targetDelay"].as_u64().unwrap_or(400)),
         };
-        out.push(Taken { index: s["index"].as_u64().unwrap_or(0), receiver: Receiver::new(agreed), sound });
+        out.push(Taken { index: s["index"].as_u64().unwrap_or(0), receiver: Receiver::new(agreed), sound, aac: codec == "aac" });
     }
     out
 }

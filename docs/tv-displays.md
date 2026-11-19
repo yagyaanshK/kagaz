@@ -676,10 +676,21 @@ a tray icon while mirroring.
   through the phone's queue; silence fills gaps so the TV never waits.
   Not yet: one window's own app only (the portal does not say which
   app a window belongs to).
-- **Sound on Windows and macOS**: not yet. libopus does not cross-build
-  to Windows (its SSE4.1/AVX2 files need flags the cross toolchain does
-  not pass, and the toolchain cannot be overridden), so Windows will
-  send AAC through Media Foundation, which Cast also takes.
+- **Sound on Windows** (`tv/sound_win.rs`; built, checked by building
+  for Windows, not yet run): Windows' loopback recording of the default
+  output while Sound on TV is on, the output muted meanwhile and its
+  mute put back after; AAC (192 kbit/s, raw frames of 1024 samples)
+  through Windows' own encoder in Media Foundation, since libopus does
+  not cross-build to Windows (its SSE4.1/AVX2 files need flags the cross
+  toolchain does not pass, and the toolchain cannot be overridden); the
+  offer names "aac" then. To be seen: whether a muted output's loopback
+  still carries the sound, and whether the LG takes AAC.
+- **Sound on macOS 13 and later** (`tv/capture_mac.rs`,
+  `tv/sound_mac.rs`; type-checked, not yet run): ScreenCaptureKit's
+  stream carries the computer's sound beside the screen (not Kagaz's
+  own); while Sound on TV is on it goes as Opus and the default output
+  is muted (Core Audio), its mute put back after. To be seen: whether
+  the capture's sound still comes with the output muted.
 - **The strip on top** (`tv-strip.html`): state, Show/Hide everything,
   a TV and a speaker that never change picture (struck through while
   kept from the TV), Stop in red. Windows leaves it out of the TV's
@@ -758,9 +769,8 @@ resent, a second of sound each second.
   **Google Cast and AirPlay receiving when feasible** (the owner). The
   phone as a screen later.
 - **Google Cast, further** (the sender itself is built, see above):
-  sound on Windows (AAC through Media Foundation) and macOS
-  (ScreenCaptureKit's sound); one window's own app's sound on Linux;
-  NVENC's rate fitted.
+  Windows' and macOS's sound seen on real computers; one window's own
+  app's sound on Linux; NVENC's rate fitted.
 - **LG Link** (file transfer between LG Link or gram Link apps, PIN
   pairing): LG's own protocol; learn it from what LG's phone app sends to
   the TV, with step 3 (send media).
