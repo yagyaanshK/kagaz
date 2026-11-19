@@ -117,6 +117,7 @@ pub struct Video {
     yuv: YUVBuffer,
     width: usize,
     height: usize,
+    fps: u32,
 }
 
 /// On a phone the phone's own encoder works (the pictures come encoded,
@@ -190,7 +191,7 @@ impl Video {
             .num_threads(threads);
         let encoder = Encoder::with_api_config(OpenH264API::from_source(), config)
             .map_err(|e| format!("the H.264 encoder did not start: {e}"))?;
-        Ok(Video { encoder, yuv: YUVBuffer::new(width, height), width, height })
+        Ok(Video { encoder, yuv: YUVBuffer::new(width, height), width, height, fps })
     }
 
     /// The next picture starts a new sequence (the TV asked for one, or
@@ -403,6 +404,37 @@ impl AnyVideo {
             AnyVideo::Mf(v) => v.key_next(),
             #[cfg(target_os = "macos")]
             AnyVideo::Vt(v) => v.key_next(),
+        }
+    }
+
+    /// A new rate, as the link to the TV allows. The graphics chips' and
+    /// the phone's encoders change in place; OpenH264 starts again at the
+    /// new rate (its next picture whole). False where the rate stays.
+    pub fn set_bit_rate(&mut self, bits_per_second: u32) -> bool {
+        match self {
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            AnyVideo::Software(v) => match Video::new(v.width, v.height, v.fps, bits_per_second) {
+                Ok(n) => {
+                    *v = n;
+                    true
+                }
+                Err(_) => false,
+            },
+            #[cfg(any(target_os = "android", target_os = "ios"))]
+            AnyVideo::Software(_) => false,
+            AnyVideo::External(_) => super::external::set_bit_rate(bits_per_second),
+            #[cfg(target_os = "linux")]
+            AnyVideo::Vaapi(v) => {
+                v.set_bit_rate(bits_per_second);
+                true
+            }
+            // Not yet: NVENC's reconfiguration is untried.
+            #[cfg(target_os = "linux")]
+            AnyVideo::Nvenc(_) => false,
+            #[cfg(windows)]
+            AnyVideo::Mf(v) => v.set_bit_rate(bits_per_second),
+            #[cfg(target_os = "macos")]
+            AnyVideo::Vt(v) => v.set_bit_rate(bits_per_second),
         }
     }
 

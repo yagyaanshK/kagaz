@@ -234,6 +234,15 @@ const KagazTvs = (() => {
           });
         }
       }
+      if (!PHONE) {
+        // The session's shortcuts (tvs.rs: the desktop's shortcuts portal
+        // on Linux, which asks once; Windows and macOS directly).
+        section("While mirroring");
+        const mac = OS === "macos";
+        const keys = (k) => (mac ? "⌃⌥" + k : "Ctrl+Alt+" + k);
+        row("div", "tv-way-info", { icon: "keyboard", name: keys("H"), what: "Hide or show everything" });
+        row("div", "tv-way-info", { icon: "keyboard", name: keys("S"), what: "Sound on the TV or on this computer" });
+      }
       list.appendChild(el("div", "tv-way-rule"));
       opens({ icon: "bin", name: "Remove this TV", danger: true, go: () => remove(t) });
       dlg.appendChild(list);
@@ -299,11 +308,12 @@ const KagazTvs = (() => {
   // sound, checked while that goes to the TV.
   function switches() {
     const row = el("div", "tv-switches");
-    const hiddenSome = sw.screenHidden || !sw.soundOnTv;
+    // Sound counts only where it can go to the TV at all.
+    const hiddenSome = sw.screenHidden || (sw.sound && !sw.soundOnTv);
     row.append(
       hiddenSome
         ? button("tv-all show", withIcon("eye", "Show everything"), () => turn("all", true), "Show the screen and play the sound on the TV")
-        : button("tv-all", withIcon("lock", "Hide everything"), () => turn("all", false), "Hide the screen and keep the sound on this phone")
+        : button("tv-all", withIcon("lock", "Hide everything"), () => turn("all", false), `Hide the screen and keep the sound on this ${DEVICE}`)
     );
     const chip = (word, on, what, label) => {
       const c = button("tv-chip" + (on ? " on" : ""), on ? withIcon("check", word) : word, () => turn(what, !on), label);

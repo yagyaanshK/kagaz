@@ -87,17 +87,17 @@ impl Drop for Screen {
     }
 }
 
-const PORTAL: &str = "org.freedesktop.portal.Desktop";
-const PORTAL_PATH: &str = "/org/freedesktop/portal/desktop";
+pub(crate) const PORTAL: &str = "org.freedesktop.portal.Desktop";
+pub(crate) const PORTAL_PATH: &str = "/org/freedesktop/portal/desktop";
 const SCREENCAST: &str = "org.freedesktop.portal.ScreenCast";
 
-fn v<T: RefArg + 'static>(x: T) -> Variant<Box<dyn RefArg>> {
+pub(crate) fn v<T: RefArg + 'static>(x: T) -> Variant<Box<dyn RefArg>> {
     Variant(Box::new(x))
 }
 
 /// Calls a portal method that answers through a Request object, and waits
 /// for the answer (the owner may take a while in the dialog).
-fn portal_request(
+pub(crate) fn portal_request(
     c: &Connection,
     method: &str,
     token: &str,
@@ -138,7 +138,7 @@ fn portal_request(
     }
 }
 
-fn token() -> String {
+pub(crate) fn token() -> String {
     format!("kagaz{}", uuid::Uuid::new_v4().simple())
 }
 

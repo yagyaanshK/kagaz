@@ -10,6 +10,7 @@
 
 pub mod channel;
 pub mod stream;
+mod fit;
 
 use super::miracast::rtsp::Mode;
 use super::miracast::{external, video, Event, Options, Pictures, Report};
@@ -201,6 +202,7 @@ pub fn mirror(
             (Some(s), Some(tv_ssrc)) => Some(Agreed { tv_ssrc, ..s }),
             _ => None,
         };
+        super::switches::sound_agreed(sound.is_some());
         if most.is_some_and(|m| m < 50.0) {
             mode.fps = 30;
         }
@@ -217,6 +219,8 @@ pub fn mirror(
                 _ => false,
             }))
         };
+        // A phone held upright sends its own shape; the TV fits it.
+        let _shape = external::MayReshape::hold();
         run(&udp, SocketAddr::new(tv, port), agreed, sound, mode, opts, pictures, stop, &mut event, &mut || ended(&mut ch))
     })();
     // Closing the app puts the TV back where it was.
@@ -256,6 +260,12 @@ pub(crate) fn run(
     event(Event::Encoder(which));
     event(Event::Playing(mode));
     let mut sender = Sender::new(agreed);
+    // The rate, fitted to the link as the TV's reports tell of it; and
+    // pictures held back because the TV was behind (the link's trouble,
+    // not the computer's).
+    let mut fit = fit::Fit::new(bits, Instant::now());
+    let mut fitting = true;
+    let mut held_back = 0u64;
     // The sound's stream; how much has been queued, in samples; and the
     // moment the first sample stands for.
     let mut sound = sound.map(|a| (Sender::new(a).same_clock_as(&sender), 0u64, None::<Instant>));
@@ -388,6 +398,23 @@ pub(crate) fn run(
             bytes_at_progress = sent(&sender, &sound);
             last_progress = Instant::now();
         }
+        if fitting {
+            let counts = fit::Counts {
+                packets: sender.tally.packets,
+                again: sender.tally.again,
+                whole_asked: sender.tally.lost_pictures,
+                held_back,
+            };
+            if let Some(rate) = fit.check(now, counts) {
+                if encoder.set_bit_rate(rate) {
+                    event(Event::Note(format!("The rate is now {:.1} Mbit/s, fitted to the link.", rate as f64 / 1e6)));
+                } else {
+                    // An encoder that keeps its rate: no more fitting.
+                    fitting = false;
+                    event(Event::Note("This encoder keeps the rate it started with.".into()));
+                }
+            }
+        }
         if self_running {
             // Each picture the phone made goes as it is, stamped with now.
             loop {
@@ -396,6 +423,9 @@ pub(crate) fn run(
                     // The TV is behind. After 300 ms of that, what waits is
                     // dropped and the stream starts again from a whole
                     // picture, rather than show old pictures late.
+                    if stalled.is_none() {
+                        held_back += 1;
+                    }
                     if now.duration_since(*stalled.get_or_insert(now)) > Duration::from_millis(300) {
                         encoder.start_over();
                         report.dropped += 1;
@@ -435,6 +465,7 @@ pub(crate) fn run(
         // that every picture made is one the next can build on.
         if !sender.room(rtp) {
             report.dropped += 1;
+            held_back += 1;
             continue;
         }
         if sender.take_key_request(now) {

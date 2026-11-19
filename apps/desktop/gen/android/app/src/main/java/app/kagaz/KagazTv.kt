@@ -66,6 +66,16 @@ object KagazTv {
     private var opusLooked = false
 
     private var picture: KagazTvPicture? = null
+    /** The TV's frame and the session's numbers, for a new start when the
+     *  phone turns; whether the stream may change shape (Cast may,
+     *  Miracast fixes it at the start); whether the phone stands upright. */
+    private var tvWidth = 0
+    private var tvHeight = 0
+    private var tvFps = 30
+    private var tvBits = 8_000_000
+    private var reshape = false
+    private var upright = false
+    private var turns: DisplayManager.DisplayListener? = null
 
     /** The TV gets a blur in place of the screen. */
     @Volatile var screenHidden = true
@@ -174,38 +184,29 @@ object KagazTv {
 
     /** From Rust, when the TV has chosen: "" once encoding, else why not. */
     @JvmStatic
-    fun start(width: Int, height: Int, fps: Int, bitrate: Int): String {
+    fun start(width: Int, height: Int, fps: Int, bitrate: Int, mayReshape: Boolean): String {
         Log.i("KagazTv", "start ${width}x$height at $fps, $bitrate bit/s; grant held: ${projection != null}")
         val mp = projection ?: return "screen sharing was not allowed on the phone yet"
         val context = app ?: return "Kagaz is not ready yet"
         release(false)
         return try {
-            val c = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC)
-            try {
-                c.configure(format(width, height, fps, bitrate, true), null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
-            } catch (e: Exception) {
-                Log.i("KagazTv", "the encoder refused the low-delay settings: $e")
-                // Some encoders refuse the profile or the low-delay wishes.
-                c.reset()
-                c.configure(format(width, height, fps, bitrate, false), null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
-            }
-            val s = c.createInputSurface()
-            c.start()
-            codec = c
-            surface = s
+            tvWidth = width
+            tvHeight = height
+            tvFps = fps
+            tvBits = bitrate
+            reshape = mayReshape
+            upright = reshape && standsUpright(context)
+            val (w, h) = shape(context, upright)
             // Hidden until shown: the first picture the TV gets is a blur.
             screenHidden = true
             soundOnTv = false
-            val pic = KagazTvPicture(s, width, height, true)
-            picture = pic
-            val onto = pic.start()
             running = true
+            val onto = encodeAt(w, h)
             display = mp.createVirtualDisplay(
-                "Kagaz", width, height, context.resources.displayMetrics.densityDpi,
+                "Kagaz", w, h, context.resources.displayMetrics.densityDpi,
                 DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR, onto, null, null
             )
-            drainer = Thread({ drain(c) }, "kagaz-tv-encoder").also { it.start() }
-            Log.i("KagazTv", "encoding on ${c.name}")
+            if (reshape) followTurns(context)
             if (canSound()) sounder = Thread({ soundLoop(mp, context) }, "kagaz-tv-sound").also { it.start() }
             announce()
             ""
@@ -214,6 +215,105 @@ object KagazTv {
             release(false)
             e.message ?: e.toString()
         }
+    }
+
+    /** A new encoder and picture stage at `w` x `h`, its drainer running;
+     *  the surface the virtual display draws into. */
+    private fun encodeAt(w: Int, h: Int): Surface {
+        val c = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC)
+        try {
+            c.configure(format(w, h, tvFps, tvBits, true), null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+        } catch (e: Exception) {
+            Log.i("KagazTv", "the encoder refused the low-delay settings: $e")
+            // Some encoders refuse the profile or the low-delay wishes.
+            c.reset()
+            c.configure(format(w, h, tvFps, tvBits, false), null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+        }
+        val s = c.createInputSurface()
+        c.start()
+        codec = c
+        surface = s
+        val pic = KagazTvPicture(s, w, h, screenHidden)
+        picture = pic
+        val onto = pic.start()
+        drainer = Thread({ drain(c) }, "kagaz-tv-encoder").also { it.start() }
+        Log.i("KagazTv", "encoding ${w}x$h on ${c.name}")
+        return onto
+    }
+
+    private fun standsUpright(context: Context): Boolean {
+        val m = context.resources.displayMetrics
+        return m.heightPixels > m.widthPixels
+    }
+
+    /** The frame for the phone as it stands: the TV's own when it lies on
+     *  its side (or the stream keeps one shape); upright, the phone's own
+     *  shape, 1920 tall (within H.264 level 4.2), 1280 where the encoder
+     *  takes no more. Sides even, in steps of 16. */
+    private fun shape(context: Context, upright: Boolean): Pair<Int, Int> {
+        if (!upright) return tvWidth to tvHeight
+        val m = context.resources.displayMetrics
+        val (pw, ph) = if (Build.VERSION.SDK_INT >= 30) {
+            val b = (context.getSystemService(Context.WINDOW_SERVICE) as android.view.WindowManager).maximumWindowMetrics.bounds
+            minOf(b.width(), b.height()) to maxOf(b.width(), b.height())
+        } else minOf(m.widthPixels, m.heightPixels) to maxOf(m.widthPixels, m.heightPixels)
+        val caps = try {
+            MediaCodecList(MediaCodecList.REGULAR_CODECS).codecInfos
+                .firstOrNull { it.isEncoder && it.supportedTypes.any { t -> t.equals(MediaFormat.MIMETYPE_VIDEO_AVC, true) } }
+                ?.getCapabilitiesForType(MediaFormat.MIMETYPE_VIDEO_AVC)?.videoCapabilities
+        } catch (e: Throwable) {
+            null
+        }
+        for (h in intArrayOf(1920, 1280)) {
+            val w = ((h.toLong() * pw / ph).toInt() + 8) / 16 * 16
+            if (caps == null || caps.isSizeSupported(w, h)) return w to h
+        }
+        return tvWidth to tvHeight
+    }
+
+    /** When the phone turns, the stream takes its new shape: a new
+     *  encoder at that size (its first picture whole, its headers new),
+     *  the virtual display moved onto it. */
+    private fun followTurns(context: Context) {
+        val dm = context.getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
+        val l = object : DisplayManager.DisplayListener {
+            override fun onDisplayAdded(id: Int) {}
+            override fun onDisplayRemoved(id: Int) {}
+            override fun onDisplayChanged(id: Int) {
+                if (id != android.view.Display.DEFAULT_DISPLAY || !running) return
+                val now = standsUpright(context)
+                if (now == upright) return
+                upright = now
+                turnTo(context, shape(context, now))
+            }
+        }
+        turns = l
+        dm.registerDisplayListener(l, android.os.Handler(android.os.Looper.getMainLooper()))
+    }
+
+    private fun turnTo(context: Context, size: Pair<Int, Int>) {
+        val (w, h) = size
+        Log.i("KagazTv", "the phone turned: now ${w}x$h")
+        val oldCodec = codec
+        val oldDrainer = drainer
+        val oldPicture = picture
+        val oldSurface = surface
+        try {
+            val onto = encodeAt(w, h)
+            display?.resize(w, h, context.resources.displayMetrics.densityDpi)
+            display?.surface = onto
+        } catch (e: Throwable) {
+            Log.w("KagazTv", "the new shape did not start", e)
+            return
+        }
+        // The old encoder's drainer sees it is no longer the one, and ends.
+        Thread({
+            try { oldDrainer?.join(500) } catch (e: Throwable) {}
+            try { oldPicture?.stop() } catch (e: Throwable) {}
+            try { oldCodec?.stop() } catch (e: Throwable) {}
+            try { oldCodec?.release() } catch (e: Throwable) {}
+            try { oldSurface?.release() } catch (e: Throwable) {}
+        }, "kagaz-tv-turn").start()
     }
 
     private fun format(width: Int, height: Int, fps: Int, bitrate: Int, wishes: Boolean): MediaFormat {
@@ -248,7 +348,7 @@ object KagazTv {
     private fun drain(c: MediaCodec) {
         val info = MediaCodec.BufferInfo()
         var headers: ByteArray? = null
-        while (running) {
+        while (running && codec === c) {
             val i = try {
                 c.dequeueOutputBuffer(info, 20_000)
             } catch (e: Throwable) {
@@ -468,6 +568,21 @@ object KagazTv {
         }
     }
 
+    /** From Rust, when the link to the TV can carry more or less: the
+     *  running encoder's new rate. False when it took none. */
+    @JvmStatic
+    fun setBitRate(bits: Int): Boolean {
+        val c = codec ?: return false
+        tvBits = bits
+        return try {
+            c.setParameters(Bundle().apply { putInt(MediaCodec.PARAMETER_KEY_VIDEO_BITRATE, bits) })
+            Log.i("KagazTv", "rate now ${bits / 1000} kbit/s")
+            true
+        } catch (e: Throwable) {
+            false
+        }
+    }
+
     /** From Rust, when the session ends: everything goes, Android's grant
      *  too (a new session asks again, as Android wants). */
     @JvmStatic
@@ -478,6 +593,13 @@ object KagazTv {
     @Synchronized
     private fun release(all: Boolean) {
         running = false
+        turns?.let { l ->
+            try {
+                (app?.getSystemService(Context.DISPLAY_SERVICE) as? DisplayManager)?.unregisterDisplayListener(l)
+            } catch (e: Throwable) {
+            }
+        }
+        turns = null
         try { drainer?.join(500) } catch (e: Throwable) {}
         drainer = null
         try { sounder?.join(500) } catch (e: Throwable) {}

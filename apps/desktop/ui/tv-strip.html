@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Kagaz: TV</title>
+  <script src="platform.js"></script>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="skins.css">
+</head>
+<body class="tv-strip-body">
+  <!-- On top while this computer is on a TV (tvs.rs opens it): what the
+       TV gets, the switches, and Stop. Windows and macOS keep it out of
+       the TV's picture. -->
+  <div class="tv-strip" role="toolbar" aria-label="Mirroring to a TV">
+    <span class="tv-strip-state" id="strip-state" title="">Hidden</span>
+    <button type="button" id="strip-all" class="tv-strip-all">Show everything</button>
+    <button type="button" id="strip-screen" class="tv-strip-icon" aria-pressed="false"><span class="ic" data-icon="tv"></span></button>
+    <button type="button" id="strip-sound" class="tv-strip-icon" aria-pressed="false"><span class="ic" data-icon="speaker"></span></button>
+    <button type="button" id="strip-stop" class="tv-strip-stop">Stop</button>
+  </div>
+  <script src="icons.js"></script>
+  <script src="tv-strip.js"></script>
+</body>
+</html>

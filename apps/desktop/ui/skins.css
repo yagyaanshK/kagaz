@@ -511,6 +511,9 @@ body {
 .tv-ways .tv-way { display: flex; flex-direction: row; align-items: center; gap: 16px; width: 100%; min-height: 64px; margin: 0; padding: 8px 24px 8px 16px; text-align: left; border: none; border-radius: 0; background: none; color: var(--text); font: inherit; cursor: pointer; white-space: normal; }
 .tv-way:hover, .tv-way:active { background: var(--hover, rgba(127, 127, 127, 0.08)); }
 .tv-way:disabled { opacity: 0.45; cursor: default; }
+.tv-ways .tv-way.tv-way-info { cursor: default; }
+.tv-ways .tv-way.tv-way-info:hover { background: none; }
+.tv-way-info .tv-way-name { font-variant-numeric: tabular-nums; }
 .tv-way > .ic { display: inline-flex; flex: none; color: var(--muted); }
 .tv-way > .ic svg { width: 24px; height: 24px; }
 .tv-way-words { display: flex; flex-direction: column; gap: 2px; flex: 1 1 auto; min-width: 0; }
@@ -561,3 +564,20 @@ input.tv-switch:checked::before { left: 22px; width: 24px; height: 24px; backgro
 [data-os="gnome"] #tvs .home-tile.live .tile-act, [data-os="macos"] #tvs .home-tile.live .tile-act { background: var(--accent-soft); color: var(--accent); }
 [data-os="android"] dialog.ask.sheet .actions button { border: none; background: none; color: var(--accent); font-weight: 600; border-radius: 999px; padding: 0 16px; }
 [data-os="ios"] #tvs .rc-row > button { min-height: 44px; border: none; background: none; color: var(--accent); font-weight: 600; }
+/* The strip on top while a computer is on a TV (tv-strip.html): a slim
+   bar like Windows' own cast bar. The icons never change; a line through
+   one says that part is not on the TV. Stop is red, apart from the rest. */
+body.tv-strip-body { display: block; min-height: 0; margin: 0; overflow: hidden; background: var(--panel); color: var(--text); -webkit-user-select: none; user-select: none; }
+.tv-strip { display: flex; align-items: center; gap: 6px; height: 100vh; padding: 0 8px 0 14px; border: 1px solid var(--line); box-sizing: border-box; font-size: 13px; white-space: nowrap; }
+.tv-strip-state { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
+.tv-strip button { min-height: 32px; margin: 0; font: inherit; }
+.tv-strip-all { padding: 0 14px; border: none; border-radius: var(--r-btn, 999px); background: var(--accent-soft); color: var(--nav-active-fg, var(--accent)); font-weight: 600; }
+.tv-strip-all.show { background: var(--accent); color: var(--accent-text); }
+.tv-strip-icon { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 36px; padding: 0; border: none; border-radius: var(--r-btn, 999px); background: none; color: var(--text); }
+.tv-strip-icon:hover { background: var(--hover, rgba(127, 127, 127, 0.1)); }
+.tv-strip-icon svg { width: 20px; height: 20px; }
+.tv-strip-icon.off { color: var(--muted); }
+.tv-strip-icon.off::after { content: ""; position: absolute; left: 50%; top: 50%; width: 24px; height: 2px; border-radius: 1px; background: currentColor; box-shadow: 0 0 0 1.5px var(--panel); transform: translate(-50%, -50%) rotate(-45deg); }
+.tv-strip-stop { padding: 0 14px; border: none; border-radius: var(--r-btn, 999px); background: #C62828; color: #fff; font-weight: 600; }
+[data-os="windows"] .tv-strip button { border-radius: 4px; }
+[data-os="windows"] .tv-strip { border-radius: 0; }

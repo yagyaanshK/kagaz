@@ -13,6 +13,12 @@ pub mod cast;
 pub mod send;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub mod picture;
+#[cfg(not(target_os = "ios"))]
+pub mod switches;
+#[cfg(target_os = "linux")]
+pub mod sound;
+#[cfg(target_os = "linux")]
+pub mod keys;
 #[cfg(target_os = "linux")]
 pub mod capture;
 #[cfg(windows)]
@@ -23,6 +29,32 @@ pub mod capture_mac;
 pub mod p2p;
 #[cfg(target_os = "linux")]
 mod pw;
+
+/// Keeps a window of Kagaz's own (the strip on top during a session) out
+/// of every screen capture, the TV's included: Windows leaves it out of
+/// Windows.Graphics.Capture (Windows 10 2004 and later), macOS out of
+/// screen sharing. `window` is the HWND or the NSWindow.
+#[cfg(windows)]
+pub fn keep_off_the_tv(window: *mut std::ffi::c_void) {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::WindowsAndMessaging::{SetWindowDisplayAffinity, WDA_EXCLUDEFROMCAPTURE};
+    // SAFETY: the handle is a live window of this process.
+    let _ = unsafe { SetWindowDisplayAffinity(HWND(window), WDA_EXCLUDEFROMCAPTURE) };
+}
+
+#[cfg(target_os = "macos")]
+pub fn keep_off_the_tv(window: *mut std::ffi::c_void) {
+    use objc2::runtime::AnyObject;
+    if window.is_null() {
+        return;
+    }
+    // SAFETY: the pointer is a live NSWindow of this process; NSWindow's
+    // sharingType takes NSWindowSharingNone (0).
+    unsafe {
+        let w = &*(window as *const AnyObject);
+        let _: () = objc2::msg_send![w, setSharingType: 0usize];
+    }
+}
 
 use mdns_sd::{ServiceDaemon, ServiceEvent};
 use serde::Serialize;

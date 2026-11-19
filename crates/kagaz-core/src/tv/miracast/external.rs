@@ -17,6 +17,28 @@ pub struct Wanted {
     pub height: u32,
     pub fps: u32,
     pub bits_per_second: u32,
+    /// The stream may change shape as the phone turns (Google Cast may;
+    /// Miracast fixes it at the start).
+    pub reshape: bool,
+}
+
+/// Set for the length of a session whose stream may change shape.
+static RESHAPE: AtomicBool = AtomicBool::new(false);
+
+/// While it lives, the phone may send its pictures at its own shape.
+pub struct MayReshape;
+
+impl MayReshape {
+    pub fn hold() -> MayReshape {
+        RESHAPE.store(true, Ordering::SeqCst);
+        MayReshape
+    }
+}
+
+impl Drop for MayReshape {
+    fn drop(&mut self) {
+        RESHAPE.store(false, Ordering::SeqCst);
+    }
 }
 
 struct Hooks {
@@ -24,6 +46,8 @@ struct Hooks {
     key: Box<dyn Fn() + Send + Sync>,
     stop: Box<dyn Fn() + Send + Sync>,
     sound: Box<dyn Fn() -> bool + Send + Sync>,
+    /// A new rate for the running encoder (where the phone's side took it).
+    bits: Box<dyn Fn(u32) -> bool + Send + Sync>,
 }
 
 /// The phone's sound, encoded: Opus packets (48 kHz, stereo) in order.
@@ -59,16 +83,29 @@ pub fn connect(
     key: impl Fn() + Send + Sync + 'static,
     stop: impl Fn() + Send + Sync + 'static,
     sound: impl Fn() -> bool + Send + Sync + 'static,
+    bits: impl Fn(u32) -> bool + Send + Sync + 'static,
 ) {
-    let _ = HOOKS.set(Hooks { start: Box::new(start), key: Box::new(key), stop: Box::new(stop), sound: Box::new(sound) });
+    let _ = HOOKS.set(Hooks {
+        start: Box::new(start),
+        key: Box::new(key),
+        stop: Box::new(stop),
+        sound: Box::new(sound),
+        bits: Box::new(bits),
+    });
 }
 
-/// Whether the outside encoder sends sound with its pictures.
+/// A new rate for the phone's running encoder.
+pub fn set_bit_rate(bits_per_second: u32) -> bool {
+    HOOKS.get().is_some_and(|h| (h.bits)(bits_per_second))
+}
+
+/// Whether sound comes with the pictures: the phone's encoder sends it, or
+/// this computer's session can (its sound comes through the same queue).
 pub fn has_sound() -> bool {
-    HOOKS.get().is_some_and(|h| (h.sound)())
+    HOOKS.get().is_some_and(|h| (h.sound)()) || super::super::switches::can_sound()
 }
 
-/// One Opus packet of the phone's sound.
+/// One Opus packet of the phone's (or the computer's) sound.
 pub fn push_sound(packet: Vec<u8>) {
     let mut q = SOUND.lock().unwrap();
     if q.len() >= MOST_SOUND_WAITING {
@@ -137,7 +174,7 @@ impl External {
         QUEUE.lock().unwrap().clear();
         SOUND.lock().unwrap().clear();
         WHOLE_NEXT.store(false, Ordering::Relaxed);
-        (h.start)(Wanted { width: width as u32, height: height as u32, fps, bits_per_second })?;
+        (h.start)(Wanted { width: width as u32, height: height as u32, fps, bits_per_second, reshape: RESHAPE.load(Ordering::SeqCst) })?;
         Ok(External { _private: () })
     }
 

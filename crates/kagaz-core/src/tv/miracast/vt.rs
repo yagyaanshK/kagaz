@@ -302,6 +302,18 @@ impl VtEncoder {
         self.key_next = true;
     }
 
+    /// A new rate; VideoToolbox takes it while running.
+    pub fn set_bit_rate(&mut self, bits_per_second: u32) -> bool {
+        // SAFETY: the session is live; the number is released after.
+        unsafe {
+            let v = bits_per_second as i32;
+            let n = CFNumberCreate(null(), CF_NUMBER_SINT32, &v as *const i32 as *const c_void);
+            let ok = VTSessionSetProperty(self.session, kVTCompressionPropertyKey_AverageBitRate, n) == 0;
+            CFRelease(n);
+            ok
+        }
+    }
+
     /// Encodes one RGBA picture; Annex B bytes, and whether it is a whole
     /// (key) picture.
     pub fn encode(&mut self, rgba: &[u8]) -> Result<(Vec<u8>, bool), String> {

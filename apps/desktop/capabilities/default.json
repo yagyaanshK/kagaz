@@ -2,6 +2,6 @@
   "$schema": "https://schema.tauri.app/config/2/capability",
   "identifier": "default",
   "description": "The main window, and each session's own, talk to the core through Kagaz's own commands.",
-  "windows": ["main", "session-*", "share-ask", "share-sign"],
+  "windows": ["main", "session-*", "share-ask", "share-sign", "tv-strip"],
   "permissions": ["core:default"]
 }

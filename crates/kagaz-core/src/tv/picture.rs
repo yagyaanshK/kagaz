@@ -137,6 +137,107 @@ pub fn rgba_to_nv12(rgba: &[u8], w: usize, h: usize, y: &mut [u8], y_pitch: usiz
     });
 }
 
+/// Frosted glass in place of a screen, made so that nothing of it can be
+/// read back: the screen is cut to blocks of 64 x 64 pixels, each block
+/// kept only as its average colour rounded to 64 steps a channel (about
+/// 500 colours for a whole 1080p screen, all its writing and faces gone
+/// for good), then spread smoothly back to full size, a quarter of its
+/// colour taken out and dimmed by 38 %, as the phone's glass is.
+#[derive(Default)]
+pub struct Frost {
+    cells: Vec<[u8; 3]>,
+    size: (usize, usize),
+    out: Vec<u8>,
+}
+
+/// The block's side, in pixels.
+const FROST_CELL: usize = 64;
+
+impl Frost {
+    /// The glass for `rgba` (`w` x `h`, four bytes a pixel), redone only
+    /// when its blocks changed.
+    pub fn apply(&mut self, rgba: &[u8], w: usize, h: usize) -> &[u8] {
+        let (gw, gh) = (w.div_ceil(FROST_CELL).max(1), h.div_ceil(FROST_CELL).max(1));
+        let mut cells = Vec::with_capacity(gw * gh);
+        for cy in 0..gh {
+            for cx in 0..gw {
+                // Every fourth pixel each way: 256 of a block's 4096.
+                let (mut sum, mut n) = ([0u32; 3], 0u32);
+                let (y0, y1) = (cy * FROST_CELL, ((cy + 1) * FROST_CELL).min(h));
+                let (x0, x1) = (cx * FROST_CELL, ((cx + 1) * FROST_CELL).min(w));
+                for y in (y0..y1).step_by(4) {
+                    for x in (x0..x1).step_by(4) {
+                        let at = (y * w + x) * 4;
+                        if let Some(px) = rgba.get(at..at + 3) {
+                            sum[0] += px[0] as u32;
+                            sum[1] += px[1] as u32;
+                            sum[2] += px[2] as u32;
+                            n += 1;
+                        }
+                    }
+                }
+                let n = n.max(1);
+                let avg = [sum[0] / n, sum[1] / n, sum[2] / n];
+                let grey = (avg[0] * 54 + avg[1] * 183 + avg[2] * 19) >> 8;
+                // Rounded to 64 steps, a quarter of the colour out, dimmed.
+                let glass = |c: u32| -> u8 {
+                    let c = c & !3;
+                    let c = (c * 3 + grey) / 4;
+                    ((c * 62 + 24 * 38) / 100) as u8
+                };
+                cells.push([glass(avg[0]), glass(avg[1]), glass(avg[2])]);
+            }
+        }
+        if cells == self.cells && self.size == (w, h) && self.out.len() == w * h * 4 {
+            return &self.out;
+        }
+        self.out.resize(w * h * 4, 255);
+        // Spread: each pixel between the four block centres around it,
+        // weighted by a smooth curve, so no seams show.
+        let place = |n: usize, cells: usize| -> Vec<(usize, usize, u32)> {
+            (0..n)
+                .map(|i| {
+                    let c = ((i as f64 + 0.5) / FROST_CELL as f64 - 0.5).clamp(0.0, (cells - 1) as f64);
+                    let i0 = c.floor() as usize;
+                    let t = c - c.floor();
+                    let t = t * t * (3.0 - 2.0 * t);
+                    (i0, (i0 + 1).min(cells - 1), (t * 256.0) as u32)
+                })
+                .collect()
+        };
+        let cols = place(w, gw);
+        let rows = place(h, gh);
+        let mut line_a = vec![[0u32; 3]; w];
+        let mut line_b = vec![[0u32; 3]; w];
+        let spread = |row: usize, line: &mut [[u32; 3]]| {
+            for (x, &(c0, c1, t)) in cols.iter().enumerate() {
+                let (a, b) = (cells[row * gw + c0], cells[row * gw + c1]);
+                for k in 0..3 {
+                    line[x][k] = (a[k] as u32 * (256 - t) + b[k] as u32 * t) >> 8;
+                }
+            }
+        };
+        let mut have = (usize::MAX, usize::MAX);
+        for (y, &(r0, r1, t)) in rows.iter().enumerate() {
+            if have != (r0, r1) {
+                spread(r0, &mut line_a);
+                spread(r1, &mut line_b);
+                have = (r0, r1);
+            }
+            let out = &mut self.out[y * w * 4..(y + 1) * w * 4];
+            for (x, px) in out.chunks_exact_mut(4).enumerate() {
+                for k in 0..3 {
+                    px[k] = ((line_a[x][k] * (256 - t) + line_b[x][k] * t) >> 8) as u8;
+                }
+                px[3] = 255;
+            }
+        }
+        self.cells = cells;
+        self.size = (w, h);
+        &self.out
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -173,5 +274,34 @@ mod tests {
         assert_eq!(px(0, 1), &[255, 0, 0, 255]);
         assert_eq!(px(3, 2), &[0, 0, 255, 255]);
         assert_eq!(px(3, 3), &[0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn frost_keeps_nothing_of_the_screen() {
+        // Fine writing: one-pixel black lines on white. Behind the glass
+        // every block is one smooth colour; the lines are gone.
+        let (w, h) = (256, 128);
+        let mut screen = vec![255u8; w * h * 4];
+        for y in (0..h).step_by(3) {
+            for x in 0..w {
+                screen[(y * w + x) * 4..(y * w + x) * 4 + 3].copy_from_slice(&[0, 0, 0]);
+            }
+        }
+        let mut f = super::Frost::default();
+        let out = f.apply(&screen, w, h).to_vec();
+        assert_eq!(out.len(), w * h * 4);
+        // Neighbouring rows differ by a step at most: no line survives.
+        for y in 1..h {
+            for x in 0..w {
+                let (a, b) = (out[(y * w + x) * 4] as i32, out[((y - 1) * w + x) * 4] as i32);
+                assert!((a - b).abs() <= 2, "row {y} col {x}: {a} vs {b}");
+            }
+        }
+        // Dimmed: white comes out well below white.
+        assert!(out[0] < 200);
+        // Two screens that differ only within blocks give the same glass.
+        let mut other = screen.clone();
+        other[(5 * w + 7) * 4 + 1] = 17;
+        assert_eq!(f.apply(&other, w, h), &out[..]);
     }
 }

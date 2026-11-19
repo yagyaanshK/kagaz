@@ -157,6 +157,8 @@ pub struct Vaapi {
     idr_id: u16,
     since_key: u32,
     key_next: bool,
+    /// The rate changed: its rate control goes with the next picture.
+    rate_changed: bool,
     recon: usize,
     image: Option<VAImage>,
     derived: bool,
@@ -316,6 +318,7 @@ impl Vaapi {
                 idr_id: 0,
                 since_key: 0,
                 key_next: true,
+                rate_changed: false,
                 recon: 0,
                 image: None,
                 derived: true,
@@ -329,6 +332,13 @@ impl Vaapi {
 
     pub fn key_next(&mut self) {
         self.key_next = true;
+    }
+
+    /// A new rate from the next picture on (its rate control and buffer
+    /// go with that picture; no whole picture is needed).
+    pub fn set_bit_rate(&mut self, bits_per_second: u32) {
+        self.bits_per_second = bits_per_second;
+        self.rate_changed = true;
     }
 
     /// Whether this computer's chip can encode and also take pictures
@@ -387,6 +397,32 @@ impl Vaapi {
         };
         self.lib.check("parameters", s)?;
         Ok(id)
+    }
+
+    /// The rate control, frame rate and buffer, as they stand.
+    fn rate_buffers(&self) -> Result<Vec<VABufferID>, String> {
+        // SAFETY: plain C structures, zeroed then filled.
+        unsafe {
+            let mut rc: VAEncMiscParameterRateControl = std::mem::zeroed();
+            rc.bits_per_second = self.bits_per_second;
+            // With variable bitrate: up to the full rate in big changes.
+            rc.target_percentage = 70;
+            rc.window_size = 500;
+            rc.initial_qp = 26;
+            rc.min_qp = 10;
+            rc.max_qp = 40;
+            let mut fr: VAEncMiscParameterFrameRate = std::mem::zeroed();
+            fr.framerate = self.fps;
+            let mut hrd: VAEncMiscParameterHRD = std::mem::zeroed();
+            // Half a second of buffer: low delay.
+            hrd.buffer_size = self.bits_per_second / 2;
+            hrd.initial_buffer_fullness = self.bits_per_second / 4;
+            Ok(vec![
+                self.misc(VAEncMiscParameterType_VAEncMiscParameterTypeRateControl, &rc)?,
+                self.misc(VAEncMiscParameterType_VAEncMiscParameterTypeFrameRate, &fr)?,
+                self.misc(VAEncMiscParameterType_VAEncMiscParameterTypeHRD, &hrd)?,
+            ])
+        }
     }
 
     /// A misc parameter buffer: the type, then the structure.
@@ -725,23 +761,7 @@ impl Vaapi {
                 seq.time_scale = self.fps * 2;
                 buffers.push(self.buffer(VABufferType_VAEncSequenceParameterBufferType, &seq)?);
 
-                let mut rc: VAEncMiscParameterRateControl = std::mem::zeroed();
-                rc.bits_per_second = self.bits_per_second;
-                // With variable bitrate: up to the full rate in big changes.
-                rc.target_percentage = 70;
-                rc.window_size = 500;
-                rc.initial_qp = 26;
-                rc.min_qp = 10;
-                rc.max_qp = 40;
-                buffers.push(self.misc(VAEncMiscParameterType_VAEncMiscParameterTypeRateControl, &rc)?);
-                let mut fr: VAEncMiscParameterFrameRate = std::mem::zeroed();
-                fr.framerate = self.fps;
-                buffers.push(self.misc(VAEncMiscParameterType_VAEncMiscParameterTypeFrameRate, &fr)?);
-                let mut hrd: VAEncMiscParameterHRD = std::mem::zeroed();
-                // Half a second of buffer: low delay.
-                hrd.buffer_size = self.bits_per_second / 2;
-                hrd.initial_buffer_fullness = self.bits_per_second / 4;
-                buffers.push(self.misc(VAEncMiscParameterType_VAEncMiscParameterTypeHRD, &hrd)?);
+                buffers.extend(self.rate_buffers()?);
                 if self.packed {
                     let s = self.stream();
                     let sps = super::h264::sps(&s);
@@ -750,6 +770,12 @@ impl Vaapi {
                     buffers.extend(self.packed_header(VAEncPackedHeaderType_VAEncPackedHeaderPicture, &pps, pps.len() * 8)?);
                 }
             }
+
+            // A new rate between whole pictures goes with this one.
+            if !idr && self.rate_changed {
+                buffers.extend(self.rate_buffers()?);
+            }
+            self.rate_changed = false;
 
             let mut pic: VAEncPictureParameterBufferH264 = std::mem::zeroed();
             pic.CurrPic = VAPictureH264 {

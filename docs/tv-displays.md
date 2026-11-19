@@ -641,9 +641,82 @@ Choosing the route (`tv/send.rs`): Miracast over the network when the
 TV takes it there, else Google Cast when the TV has it, else Wi-Fi
 Direct (Linux). `kagaz tv NAME mirror --via cast` asks for Cast; the
 app's Mirror button follows the same order, and a TV with Cast counts
-as ready to mirror. A computer's sound is not sent yet (nor any sound
-over Miracast); the bit rate is fixed (16 Mbit/s at most at 1080p60),
-not yet fitted to the link as Chrome does.
+as ready to mirror. No sound goes over Miracast yet.
+
+### A computer's sound, Hide and switches (2026-11-19, built; not yet seen on the TV)
+
+The owner's choices: the sound follows the picture (the whole screen:
+everything the computer plays; one window: that app's); the computer
+goes quiet while its sound is on the TV; a session starts hidden; the
+switches sit on the TV's card, a strip on top, keyboard shortcuts and
+a tray icon while mirroring.
+
+- **One state** (`tv/switches.rs`): live, screen hidden, sound on the
+  TV, sound possible; every control turns it and hears each change
+  (the app sends it to the page as "tv-controls"). A session starts
+  hidden with the sound on the computer.
+- **Hide on a computer** (`tv/picture.rs`, `Frost`; `switches::Guarded`
+  wraps every computer's pictures, both routes): blocks of 64 x 64
+  pixels averaged, each colour rounded to 64 steps a channel (about
+  500 colours for a 1080p screen), a quarter of the colour taken out,
+  dimmed 38 %, spread back smoothly; redone only when a block changes.
+  While hidden, pictures in graphics memory go through the processor,
+  where the glass is made.
+- **Sound on Linux** (`tv/sound.rs`, `pw.rs`): measured first: a sink's
+  monitor still carries full sound when the sink is muted or at volume
+  0, so muting would not have quietened anything for the TV's sake;
+  instead, while Sound on TV is on, Kagaz is a sound output of its own
+  ("<TV> (Kagaz)", a PipeWire stream with the class Audio/Sink) and the
+  default output (`pw-metadata` sets WirePlumber's configured default;
+  measured: a player already playing moved over, and back when the
+  default went back). The volume keys then set the TV's level as any
+  output's. Off again, the output goes and the earlier default comes
+  back; if Kagaz ends unexpectedly its output goes with it and the
+  system falls back to the speakers. Opus, 160 kbit/s, 20 ms packets,
+  through the phone's queue; silence fills gaps so the TV never waits.
+  Not yet: one window's own app only (the portal does not say which
+  app a window belongs to).
+- **Sound on Windows and macOS**: not yet. libopus does not cross-build
+  to Windows (its SSE4.1/AVX2 files need flags the cross toolchain does
+  not pass, and the toolchain cannot be overridden), so Windows will
+  send AAC through Media Foundation, which Cast also takes.
+- **The strip on top** (`tv-strip.html`): state, Show/Hide everything,
+  a TV and a speaker that never change picture (struck through while
+  kept from the TV), Stop in red. Windows leaves it out of the TV's
+  picture (`SetWindowDisplayAffinity`, WDA_EXCLUDEFROMCAPTURE), macOS
+  too (`sharingType` none; untested). GNOME on Wayland lets no window
+  keep itself on top (GTK 3 has no way there), so on GNOME the strip
+  is not shown and the tray and shortcuts stand in.
+- **Shortcuts**: Ctrl+Alt+H hides or shows everything, Ctrl+Alt+S moves
+  the sound (macOS ⌃⌥). Linux: the desktop's GlobalShortcuts portal
+  (`tv/keys.rs`; GNOME asks once and lets the keys be changed in its
+  settings); Windows and macOS: Tauri's global-shortcut plugin. Bound
+  only while a session runs; listed in the TV's sheet.
+- **Tray** (Ubuntu shows it through its AppIndicator extension): only
+  while mirroring; Show/Hide everything, Screen on TV, Sound on TV,
+  Stop mirroring, Open Kagaz.
+
+### The rate fitted to the link; a phone upright at its own shape (2026-11-19, built; not yet seen on the TV)
+
+- **Rate** (`cast/fit.rs`): once a second, from what the TV reports:
+  packets asked for again (more than 2 in 100), a whole picture asked
+  for, or pictures held back with the TV behind take the rate down
+  30 %; three clean seconds take it up 15 %; between an eighth of the
+  starting rate and the starting rate. Pictures skipped because the
+  computer was slow do not count. VA-API takes the new rate with the
+  next picture (its rate control sent between whole pictures), Media
+  Foundation and VideoToolbox in place, the phone's MediaCodec through
+  `PARAMETER_KEY_VIDEO_BITRATE`; OpenH264 starts again at the new rate
+  (a whole picture); NVENC keeps its rate (reconfiguring it is
+  untried).
+- **Upright** (`KagazTv.kt`): over Cast (which allows a new size
+  mid-stream; Miracast fixes it), a phone standing upright encodes its
+  own shape, 1920 tall (about 912 x 1920 on a 19:9 phone; within H.264
+  level 4.2), 1280 where its encoder takes no more; when it turns, a new
+  encoder at the new shape, the virtual display moved onto it. On a 4K
+  TV an upright phone shows twice as sharp as inside a 1920 x 1080
+  frame. Whether the LG's Cast receiver takes the change of size is to
+  be seen.
 
 ## Next, agreed 2026-11-18
 
@@ -659,9 +732,9 @@ not yet fitted to the link as Chrome does.
   **Google Cast and AirPlay receiving when feasible** (the owner). The
   phone as a screen later.
 - **Google Cast, further** (the sender itself is built, see above):
-  sound, Hide and the switches on computers (the phone has them); the
-  bit rate fitted to the link; a phone held upright sent at its own
-  shape; and a stand-in Cast receiver beside the Miracast one
+  sound on Windows (AAC through Media Foundation) and macOS
+  (ScreenCaptureKit's sound); one window's own app's sound on Linux;
+  NVENC's rate fitted; a stand-in Cast receiver beside the Miracast one
   (`kagaz tvs stand-in`).
 - **LG Link** (file transfer between LG Link or gram Link apps, PIN
   pairing): LG's own protocol; learn it from what LG's phone app sends to

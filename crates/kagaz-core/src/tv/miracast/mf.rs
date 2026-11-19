@@ -166,6 +166,16 @@ impl MfEncoder {
         self.key_next = true;
     }
 
+    /// A new rate, where the encoder takes one while running.
+    pub fn set_bit_rate(&mut self, bits_per_second: u32) -> bool {
+        let Some(c) = &self.codec else { return false };
+        // SAFETY: the encoder's own codec interface, on its thread.
+        unsafe {
+            c.SetValue(&CODECAPI_AVEncCommonMeanBitRate, &VARIANT::from(bits_per_second)).is_ok()
+                && c.SetValue(&CODECAPI_AVEncCommonMaxBitRate, &VARIANT::from(bits_per_second / 2 * 3)).is_ok()
+        }
+    }
+
     /// Encodes one RGBA picture; Annex B bytes (empty when the encoder
     /// holds it back a moment), and whether a whole (key) picture came out.
     pub fn encode(&mut self, rgba: &[u8]) -> Result<(Vec<u8>, bool), String> {

@@ -38,6 +38,11 @@ struct Lib {
 
 static LIB: OnceLock<Result<Lib, String>> = OnceLock::new();
 
+/// Whether PipeWire's library is here to open.
+pub(super) fn loads() -> bool {
+    lib().is_ok()
+}
+
 /// PipeWire's library, opened the first time it is wanted and kept open.
 fn lib() -> Result<&'static Lib, String> {
     LIB.get_or_init(load).as_ref().map_err(Clone::clone)
@@ -170,6 +175,7 @@ const TYPE_INT: u32 = 4;
 const TYPE_LONG: u32 = 5;
 const TYPE_RECTANGLE: u32 = 10;
 const TYPE_FRACTION: u32 = 11;
+const TYPE_ARRAY: u32 = 13;
 const TYPE_OBJECT: u32 = 15;
 const TYPE_CHOICE: u32 = 19;
 const OBJECT_FORMAT: u32 = 0x40003;
@@ -190,7 +196,18 @@ const FORMAT_VIDEO_FORMAT: u32 = 0x20001;
 const FORMAT_VIDEO_MODIFIER: u32 = 0x20002;
 const FORMAT_VIDEO_SIZE: u32 = 0x20003;
 const FORMAT_VIDEO_FRAMERATE: u32 = 0x20004;
+const MEDIA_TYPE_AUDIO: u32 = 1;
 const MEDIA_TYPE_VIDEO: u32 = 2;
+// Audio format keys (spa/param/format.h) and values (spa/param/audio/raw.h).
+const FORMAT_AUDIO_FORMAT: u32 = 0x10001;
+const FORMAT_AUDIO_RATE: u32 = 0x10003;
+const FORMAT_AUDIO_CHANNELS: u32 = 0x10004;
+const FORMAT_AUDIO_POSITION: u32 = 0x10005;
+const AUDIO_S16_LE: u32 = 0x103;
+const CHANNEL_FL: u32 = 3;
+const CHANNEL_FR: u32 = 4;
+/// Any node: a stream that others connect to names none.
+const ID_ANY: u32 = 0xffff_ffff;
 const MEDIA_SUBTYPE_RAW: u32 = 1;
 // Choices and property flags (spa/pod/pod.h).
 const CHOICE_RANGE: u32 = 1;
@@ -263,6 +280,37 @@ fn offer(formats: Vec<u32>, modifiers: Option<Vec<u32>>, size: Option<(u32, u32)
     );
     prop(FORMAT_VIDEO_FRAMERATE, 0, choice(CHOICE_RANGE, TYPE_FRACTION, 2, &[60, 1, 0, 1, 1000, 1]));
     pod(TYPE_OBJECT, &body)
+}
+
+/// Sound as Kagaz takes it: 16-bit, 48 kHz, stereo, interleaved
+/// (PipeWire converts whatever the apps play).
+pub fn sound_offer() -> Vec<u32> {
+    let mut body = vec![OBJECT_FORMAT, PARAM_ENUM_FORMAT];
+    let mut prop = |key: u32, value: Vec<u32>| {
+        body.extend_from_slice(&[key, 0]);
+        body.extend(value);
+    };
+    prop(FORMAT_MEDIA_TYPE, pod(TYPE_ID, &[MEDIA_TYPE_AUDIO]));
+    prop(FORMAT_MEDIA_SUBTYPE, pod(TYPE_ID, &[MEDIA_SUBTYPE_RAW]));
+    prop(FORMAT_AUDIO_FORMAT, pod(TYPE_ID, &[AUDIO_S16_LE]));
+    prop(FORMAT_AUDIO_RATE, pod(TYPE_INT, &[48_000]));
+    prop(FORMAT_AUDIO_CHANNELS, pod(TYPE_INT, &[2]));
+    prop(FORMAT_AUDIO_POSITION, pod(TYPE_ARRAY, &[4, TYPE_ID, CHANNEL_FL, CHANNEL_FR]));
+    pod(TYPE_OBJECT, &body)
+}
+
+/// A value for PipeWire's property strings, quoted, so that a TV's name
+/// with brackets, spaces or quotes stays one value.
+fn quoted(v: &str) -> String {
+    let mut q = String::from("\"");
+    for c in v.chars().filter(|c| !c.is_control()) {
+        if c == '"' || c == '\\' {
+            q.push('\\');
+        }
+        q.push(c);
+    }
+    q.push('"');
+    q
 }
 
 /// The format both sides settled on.
@@ -409,8 +457,16 @@ unsafe extern "C" fn on_process(data: Ptr) {
     }
 }
 
-/// A video stream being taken in on PipeWire's own thread. Dropping it
-/// stops the thread and closes the stream and connection.
+/// What a stream is: a screen's pictures taken in, or a sound output of
+/// Kagaz's own that apps play into.
+enum Kind {
+    Video { fd: Option<OwnedFd>, node: u32, size: Option<(u32, u32)>, gpu: bool },
+    SoundSink { name: String, description: String },
+}
+
+/// A stream being taken in on PipeWire's own thread. Dropping it stops
+/// the thread and closes the stream and connection (a sound output goes
+/// from the system's list of outputs then, or when Kagaz ends).
 pub struct VideoStream {
     lib: &'static Lib,
     thread_loop: Ptr,
@@ -469,15 +525,61 @@ impl VideoStream {
                 return Err(err("could not start its thread"));
             }
             (lib.thread_loop_lock)(thread_loop);
-            let r = s.connect(fd, node, size, gpu);
+            let r = s.connect(Kind::Video { fd, node, size, gpu });
+            (lib.thread_loop_unlock)(thread_loop);
+            r.map(|()| s)
+        }
+    }
+
+    /// A sound output of Kagaz's own, listed by the system beside the
+    /// speakers as `description`: whatever apps play into it comes to
+    /// `sound` (16-bit, 48 kHz, stereo, interleaved), on PipeWire's thread.
+    pub fn sound_sink(name: &str, description: &str, mut sound: impl FnMut(&[i16]) + Send + 'static) -> Result<VideoStream, String> {
+        let lib = lib()?;
+        let err = |what: &str| format!("PipeWire {what}: {}", std::io::Error::last_os_error());
+        let frame = move |f: Frame<'_>| {
+            if let Frame::Memory { bytes, offset, size, .. } = f {
+                let Some(b) = bytes.get(offset..offset + size) else { return };
+                let samples: Vec<i16> = b.chunks_exact(2).map(|c| i16::from_le_bytes([c[0], c[1]])).collect();
+                sound(&samples);
+            }
+        };
+        // SAFETY: as in `open`.
+        unsafe {
+            let thread_loop = (lib.thread_loop_new)(c"kagaz-sound".as_ptr(), std::ptr::null());
+            if thread_loop.is_null() {
+                return Err(err("could not start"));
+            }
+            let mut s = VideoStream {
+                lib,
+                thread_loop,
+                context: null_mut(),
+                core: null_mut(),
+                stream: null_mut(),
+                hook: Box::new(Hook([null_mut(); 6])),
+                callbacks: Box::new(Callbacks { lib, stream: null_mut(), format: Box::new(|_| {}), frame: Box::new(frame) }),
+            };
+            s.context = (lib.context_new)((lib.thread_loop_get_loop)(thread_loop), null_mut(), 0);
+            if s.context.is_null() {
+                return Err(err("could not start"));
+            }
+            if (lib.thread_loop_start)(thread_loop) < 0 {
+                return Err(err("could not start its thread"));
+            }
+            (lib.thread_loop_lock)(thread_loop);
+            let r = s.connect(Kind::SoundSink { name: name.into(), description: description.into() });
             (lib.thread_loop_unlock)(thread_loop);
             r.map(|()| s)
         }
     }
 
     /// Called with the loop locked.
-    unsafe fn connect(&mut self, fd: Option<OwnedFd>, node: u32, size: Option<(u32, u32)>, gpu: bool) -> Result<(), String> {
+    unsafe fn connect(&mut self, mut kind: Kind) -> Result<(), String> {
         let lib = self.lib;
+        let fd = match &mut kind {
+            Kind::Video { fd, .. } => fd.take(),
+            Kind::SoundSink { .. } => None,
+        };
         // SAFETY: see `open`; the hook and callbacks are boxed, so they stay
         // put for as long as the stream.
         unsafe {
@@ -489,23 +591,45 @@ impl VideoStream {
             if self.core.is_null() {
                 return Err(format!("PipeWire could not be reached: {}", std::io::Error::last_os_error()));
             }
-            let props = (lib.properties_new_string)(c"media.type=Video media.category=Capture media.role=Screen".as_ptr());
-            self.stream = (lib.stream_new)(self.core, c"kagaz-screen".as_ptr(), props);
+            let (props, stream_name) = match &kind {
+                Kind::Video { .. } => ("media.type=Video media.category=Capture media.role=Screen".to_string(), c"kagaz-screen"),
+                // 20 ms at a time, Opus's packet length.
+                Kind::SoundSink { name, description } => (
+                    format!(
+                        "media.type=Audio media.category=Capture media.class=Audio/Sink node.name={} node.description={} node.latency=960/48000 audio.position=[ FL FR ]",
+                        quoted(name),
+                        quoted(description)
+                    ),
+                    c"kagaz-sound",
+                ),
+            };
+            let props = std::ffi::CString::new(props).map_err(|_| "a name with a nul in it".to_string())?;
+            let props = (lib.properties_new_string)(props.as_ptr());
+            self.stream = (lib.stream_new)(self.core, stream_name.as_ptr(), props);
             if self.stream.is_null() {
                 return Err(format!("PipeWire made no stream: {}", std::io::Error::last_os_error()));
             }
             self.callbacks.stream = self.stream;
             let data = &mut *self.callbacks as *mut Callbacks as Ptr;
             (lib.stream_add_listener)(self.stream, &mut *self.hook, &EVENTS, data);
-            // Graphics memory first when wanted, in the layouts GNOME
-            // draws; then ordinary memory.
             let mut offers: Vec<Vec<u64>> = Vec::new();
-            if gpu {
-                for f in [BGRX, BGRA, RGBX, RGBA] {
-                    offers.push(aligned(&gpu_offer(f, size)));
+            let node = match &kind {
+                Kind::Video { node, size, gpu, .. } => {
+                    // Graphics memory first when wanted, in the layouts
+                    // GNOME draws; then ordinary memory.
+                    if *gpu {
+                        for f in [BGRX, BGRA, RGBX, RGBA] {
+                            offers.push(aligned(&gpu_offer(f, *size)));
+                        }
+                    }
+                    offers.push(aligned(&video_offer(*size)));
+                    *node
                 }
-            }
-            offers.push(aligned(&video_offer(size)));
+                Kind::SoundSink { .. } => {
+                    offers.push(aligned(&sound_offer()));
+                    ID_ANY
+                }
+            };
             let mut params: Vec<*const c_void> = offers.iter().map(|o| o.as_ptr() as *const c_void).collect();
             let r = (lib.stream_connect)(
                 self.stream,

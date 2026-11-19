@@ -145,6 +145,8 @@ pub fn tv_show(app: AppHandle, name: String, what: String) -> Result<(), String>
         *showing = Some(name.clone());
     }
     STOP.store(false, Ordering::SeqCst);
+    #[cfg(not(target_os = "android"))]
+    computer_watch(&app);
     std::thread::Builder::new()
         .name("kagaz-tv".into())
         .spawn(move || {
@@ -154,7 +156,7 @@ pub fn tv_show(app: AppHandle, name: String, what: String) -> Result<(), String>
                 let _ = app.emit("tv-session", News { tv: name.clone(), line, phase });
             };
             say("Starting...".into(), "starting");
-            let result = session(&name, &what, &say);
+            let result = session(&app, &name, &what, &say);
             match result {
                 Ok(line) => say(line, "ended"),
                 Err(e) => say(e, "failed"),
@@ -167,11 +169,31 @@ pub fn tv_show(app: AppHandle, name: String, what: String) -> Result<(), String>
     Ok(())
 }
 
-fn session(name: &str, what: &str, say: &dyn Fn(String, &'static str)) -> Result<String, String> {
+fn session(app: &AppHandle, name: &str, what: &str, say: &dyn Fn(String, &'static str)) -> Result<String, String> {
     use kagaz_core::tv::miracast::{video, Options};
     use kagaz_core::tv::send::{self, Said};
     let engine = video::Engine::from_settings();
+    #[cfg_attr(not(any(target_os = "android", target_os = "ios")), allow(unused_mut))]
     let mut pictures = pictures(what, engine)?;
+    // A computer's session starts hidden, its sound on the computer; the
+    // switches (the TV's card, the strip, the shortcuts, the tray) show
+    // more. A phone keeps its own (KagazTv.kt).
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    let (_sound, mut pictures) = {
+        #[cfg(target_os = "linux")]
+        let sound = kagaz_core::tv::sound::available().then(|| kagaz_core::tv::sound::Sound::start(name));
+        #[cfg(not(target_os = "linux"))]
+        let sound: Option<()> = None;
+        kagaz_core::tv::switches::begin(sound.is_some());
+        live::begin(app, name);
+        (sound, Ended(pictures, app.clone()))
+    };
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    let mut guarded = kagaz_core::tv::switches::Guarded::new(pictures.0.as_mut());
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    let pictures: &mut dyn kagaz_core::tv::miracast::Pictures = &mut guarded;
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    let pictures: &mut dyn kagaz_core::tv::miracast::Pictures = pictures.as_mut();
     let opts = Options {
         name: "Kagaz".into(),
         max_height: 1080,
@@ -180,7 +202,7 @@ fn session(name: &str, what: &str, say: &dyn Fn(String, &'static str)) -> Result
         length: None,
         wait: Duration::from_secs(30),
     };
-    let report = send::mirror_named(name, None, &opts, pictures.as_mut(), &STOP, |s| match s {
+    let report = send::mirror_named(name, None, &opts, pictures, &STOP, |s| match s {
         Said::Line(l) => say(l, "starting"),
         // A note is for the record (the phone's log), not the page.
         Said::Event(kagaz_core::tv::miracast::Event::Note(line)) => eprintln!("tv: [note] {line}"),
@@ -192,6 +214,19 @@ fn session(name: &str, what: &str, say: &dyn Fn(String, &'static str)) -> Result
         }
     })?;
     Ok(send::ended(&report))
+}
+
+/// A computer's pictures, whose end ends the session's switches (however
+/// the session ends: the switches go back, the sound returns).
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+struct Ended(Box<dyn kagaz_core::tv::miracast::Pictures>, AppHandle);
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+impl Drop for Ended {
+    fn drop(&mut self) {
+        kagaz_core::tv::switches::end();
+        live::end(&self.1);
+    }
 }
 
 /// Where the pictures come from on this system.
@@ -326,8 +361,8 @@ pub async fn tv_controls(app: AppHandle) -> Result<Option<Switches>, String> {
     }
     #[cfg(not(target_os = "android"))]
     {
-        let _ = app;
-        Ok(None)
+        computer_watch(&app);
+        Ok(computer_switches())
     }
 }
 
@@ -352,9 +387,67 @@ pub async fn tv_control(app: AppHandle, what: String, on: bool) -> Result<Option
     }
     #[cfg(not(target_os = "android"))]
     {
-        let _ = (app, what, on);
-        Ok(None)
+        computer_watch(&app);
+        if cfg!(target_os = "ios") {
+            return Ok(None);
+        }
+        #[cfg(not(target_os = "ios"))]
+        kagaz_core::tv::switches::turn(&what, on)?;
+        let _ = (what, on);
+        Ok(computer_switches())
     }
+}
+
+/// A computer's switches as the page knows them; `None` with no session.
+#[cfg(not(target_os = "android"))]
+fn computer_switches() -> Option<Switches> {
+    #[cfg(not(target_os = "ios"))]
+    {
+        let s = kagaz_core::tv::switches::state();
+        s.live.then_some(Switches {
+            live: s.live,
+            screen_hidden: s.screen_hidden,
+            sound_on_tv: s.sound_on_tv,
+            sound: s.sound,
+            sound_kept: false,
+            tiles: None,
+            floating: None,
+        })
+    }
+    #[cfg(target_os = "ios")]
+    None
+}
+
+/// Every change of a computer's switches goes to the page as
+/// "tv-controls", whoever turned it (the card, the strip, a shortcut, the
+/// tray).
+#[cfg(not(target_os = "android"))]
+pub fn computer_watch(app: &AppHandle) {
+    #[cfg(not(target_os = "ios"))]
+    {
+        static ONCE: std::sync::Once = std::sync::Once::new();
+        let app = app.clone();
+        ONCE.call_once(move || {
+            kagaz_core::tv::switches::watch(move |s| {
+                #[cfg(not(any(target_os = "android", target_os = "ios")))]
+                live::changed(&app, s);
+                let _ = app.emit(
+                    "tv-controls",
+                    Switches {
+                        live: s.live,
+                        screen_hidden: s.screen_hidden,
+                        sound_on_tv: s.sound_on_tv,
+                        sound: s.sound,
+                        sound_kept: false,
+                        tiles: None,
+                        floating: None,
+                    },
+                );
+            });
+        });
+    }
+    #[cfg(target_os = "ios")]
+    let _ = app;
 }
 
 #[cfg(target_os = "android")]
@@ -374,6 +467,24 @@ struct Said {
 pub fn init() -> tauri::plugin::TauriPlugin<tauri::Wry> {
     tauri::plugin::Builder::new("kagaz-tv")
         .setup(|_app, _api| {
+            // A session's shortcuts (registered only while one runs).
+            #[cfg(any(windows, target_os = "macos"))]
+            {
+                use tauri_plugin_global_shortcut::{Shortcut, ShortcutState};
+                let plugin = tauri_plugin_global_shortcut::Builder::new()
+                    .with_handler(|_app, shortcut: &Shortcut, ev| {
+                        if ev.state() != ShortcutState::Pressed {
+                            return;
+                        }
+                        for (id, keys) in live::KEYS {
+                            if keys.parse::<Shortcut>().is_ok_and(|k| k == *shortcut) {
+                                live::press(id);
+                            }
+                        }
+                    })
+                    .build();
+                _app.plugin(plugin)?;
+            }
             #[cfg(target_os = "android")]
             {
                 use tauri::Manager;
@@ -490,12 +601,13 @@ mod phone {
                     let v = env.call_static_method(
                         class,
                         "start",
-                        "(IIII)Ljava/lang/String;",
+                        "(IIIIZ)Ljava/lang/String;",
                         &[
                             JValue::Int(w.width as i32),
                             JValue::Int(w.height as i32),
                             JValue::Int(w.fps as i32),
                             JValue::Int(w.bits_per_second as i32),
+                            JValue::Bool(w.reshape.into()),
                         ],
                     )?;
                     let o = v.l()?;
@@ -517,6 +629,191 @@ mod phone {
                 let _ = call(|env, class| env.call_static_method(class, "stop", "()V", &[]).map(|_| ()));
             },
             || call(|env, class| env.call_static_method(class, "canSound", "()Z", &[])?.z()).unwrap_or(false),
+            |bits| {
+                call(|env, class| env.call_static_method(class, "setBitRate", "(I)Z", &[JValue::Int(bits as i32)])?.z())
+                    .unwrap_or(false)
+            },
         );
+    }
+}
+
+/// While a computer's session runs: the strip on top, the tray icon and
+/// the shortcuts, each turning the same switches as the TV's card. The
+/// strip is kept out of what the TV shows (Windows, macOS). GNOME on
+/// Wayland lets no window keep itself on top, so there the tray and the
+/// shortcuts stand in for it.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+mod live {
+    use kagaz_core::tv::switches::{self, State};
+    use std::sync::Mutex;
+    use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem};
+    use tauri::{AppHandle, Manager, Wry};
+
+    const STRIP: &str = "tv-strip";
+    const TRAY: &str = "tv";
+    /// The shortcuts on Windows and macOS (Linux: keys.rs, the same keys).
+    #[cfg(any(windows, target_os = "macos"))]
+    pub const KEYS: [(&str, &str); 2] = [("all", "ctrl+alt+KeyH"), ("sound", "ctrl+alt+KeyS")];
+
+    struct Tray {
+        all: MenuItem<Wry>,
+        screen: CheckMenuItem<Wry>,
+        sound: CheckMenuItem<Wry>,
+    }
+    static TRAY_ITEMS: Mutex<Option<Tray>> = Mutex::new(None);
+    #[cfg(target_os = "linux")]
+    static KEYS_HELD: Mutex<Option<kagaz_core::tv::keys::Keys>> = Mutex::new(None);
+
+    /// A shortcut or a tray item's id, done.
+    pub fn press(id: &str) {
+        let s = switches::state();
+        let _ = match id {
+            "all" => switches::toggle_all(),
+            "screen" => switches::turn("screen", s.screen_hidden),
+            "sound" if s.sound => switches::turn("sound", !s.sound_on_tv),
+            _ => return,
+        };
+    }
+
+    pub fn begin(app: &AppHandle, tv: &str) {
+        strip(app);
+        let a = app.clone();
+        let tv = tv.to_string();
+        let _ = app.run_on_main_thread(move || tray(&a, &tv));
+        keys(app);
+    }
+
+    pub fn end(app: &AppHandle) {
+        if let Some(w) = app.get_webview_window(STRIP) {
+            let _ = w.destroy();
+        }
+        let a = app.clone();
+        let _ = app.run_on_main_thread(move || {
+            *TRAY_ITEMS.lock().unwrap() = None;
+            let _ = a.remove_tray_by_id(TRAY);
+        });
+        #[cfg(target_os = "linux")]
+        {
+            let k = KEYS_HELD.lock().unwrap().take();
+            drop(k);
+        }
+        #[cfg(any(windows, target_os = "macos"))]
+        {
+            use tauri_plugin_global_shortcut::GlobalShortcutExt;
+            for (_, keys) in KEYS {
+                let _ = app.global_shortcut().unregister(keys);
+            }
+        }
+    }
+
+    /// The tray menu follows the switches.
+    pub fn changed(app: &AppHandle, s: State) {
+        let _ = app.run_on_main_thread(move || {
+            if let Some(t) = TRAY_ITEMS.lock().unwrap().as_ref() {
+                let anything = !s.screen_hidden || (s.sound && s.sound_on_tv);
+                let _ = t.all.set_text(if anything { "Hide everything" } else { "Show everything" });
+                let _ = t.screen.set_checked(!s.screen_hidden);
+                let _ = t.sound.set_checked(s.sound && s.sound_on_tv);
+                let _ = t.sound.set_enabled(s.sound);
+            }
+        });
+    }
+
+    /// GNOME (and other desktops) on Wayland: no window keeps itself on top.
+    fn wayland() -> bool {
+        cfg!(target_os = "linux") && std::env::var_os("WAYLAND_DISPLAY").is_some() && std::env::var("GDK_BACKEND").map_or(true, |b| !b.starts_with("x11"))
+    }
+
+    fn strip(app: &AppHandle) {
+        if wayland() || app.get_webview_window(STRIP).is_some() {
+            return;
+        }
+        let size = (420.0, 48.0);
+        let built = tauri::WebviewWindowBuilder::new(app, STRIP, tauri::WebviewUrl::App("tv-strip.html".into()))
+            .title("Kagaz: TV")
+            .inner_size(size.0, size.1)
+            .resizable(false)
+            .decorations(false)
+            .always_on_top(true)
+            .skip_taskbar(true)
+            .focused(false)
+            .build();
+        let Ok(w) = built else { return };
+        // Kept out of the picture the TV gets.
+        #[cfg(windows)]
+        if let Ok(h) = w.hwnd() {
+            kagaz_core::tv::keep_off_the_tv(h.0 as *mut std::ffi::c_void);
+        }
+        #[cfg(target_os = "macos")]
+        if let Ok(n) = w.ns_window() {
+            kagaz_core::tv::keep_off_the_tv(n);
+        }
+        // At the top middle of the main screen, as Windows' own cast bar.
+        if let Ok(Some(m)) = w.primary_monitor() {
+            let (ms, mp, scale) = (m.size(), m.position(), m.scale_factor());
+            let w_px = (size.0 * scale) as i32;
+            let _ = w.set_position(tauri::PhysicalPosition::new(mp.x + (ms.width as i32 - w_px) / 2, mp.y + (8.0 * scale) as i32));
+        }
+    }
+
+    fn tray(app: &AppHandle, tv: &str) {
+        use tauri::tray::TrayIconBuilder;
+        if app.tray_by_id(TRAY).is_some() {
+            return;
+        }
+        let made = (|| -> tauri::Result<Tray> {
+            let s = switches::state();
+            let all = MenuItem::with_id(app, "tv-all", "Show everything", true, None::<&str>)?;
+            let screen = CheckMenuItem::with_id(app, "tv-screen", "Screen on TV", true, !s.screen_hidden, None::<&str>)?;
+            let sound = CheckMenuItem::with_id(app, "tv-sound", "Sound on TV", s.sound, s.sound && s.sound_on_tv, None::<&str>)?;
+            let stop = MenuItem::with_id(app, "tv-stop", "Stop mirroring", true, None::<&str>)?;
+            let open = MenuItem::with_id(app, "tv-open", "Open Kagaz", true, None::<&str>)?;
+            let menu = Menu::with_items(app, &[&all, &screen, &sound, &PredefinedMenuItem::separator(app)?, &stop, &open])?;
+            let mut b = TrayIconBuilder::with_id(TRAY).menu(&menu).tooltip(format!("Kagaz: mirroring to {tv}"));
+            if let Some(icon) = app.default_window_icon() {
+                b = b.icon(icon.clone());
+            }
+            b.on_menu_event(|app, ev| match ev.id().as_ref() {
+                "tv-all" => press("all"),
+                "tv-screen" => press("screen"),
+                "tv-sound" => press("sound"),
+                "tv-stop" => super::tv_stop(),
+                "tv-open" => {
+                    if let Some(w) = app.get_webview_window("main") {
+                        let _ = w.show();
+                        let _ = w.unminimize();
+                        let _ = w.set_focus();
+                    }
+                }
+                _ => {}
+            })
+            .build(app)?;
+            Ok(Tray { all, screen, sound })
+        })();
+        match made {
+            Ok(t) => {
+                *TRAY_ITEMS.lock().unwrap() = Some(t);
+                changed(app, switches::state());
+            }
+            Err(e) => eprintln!("tv: no tray icon: {e}"),
+        }
+    }
+
+    fn keys(app: &AppHandle) {
+        #[cfg(target_os = "linux")]
+        {
+            let _ = app;
+            let held = kagaz_core::tv::keys::Keys::start(press, |why| eprintln!("tv: no shortcuts: {why}"));
+            *KEYS_HELD.lock().unwrap() = Some(held);
+        }
+        #[cfg(any(windows, target_os = "macos"))]
+        {
+            use tauri_plugin_global_shortcut::GlobalShortcutExt;
+            for (_, keys) in KEYS {
+                if let Err(e) = app.global_shortcut().register(keys) {
+                    eprintln!("tv: the shortcut {keys} could not be had: {e}");
+                }
+            }
+        }
     }
 }
