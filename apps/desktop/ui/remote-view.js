@@ -211,7 +211,7 @@ const KagazRemoteView = (() => {
   // ---------- opening and closing ----------
   function open(device, h) {
     hooks = h || {};
-    cur = { device, session: null, owed: 0, width: 0, height: 0, held: new Map(), buttons: 0, frames: 0, paintMs: 0, bytes: 0, told: null, ownSize: false };
+    cur = { device, session: null, owed: 0, width: 0, height: 0, held: new Map(), buttons: 0, frames: 0, paintMs: 0, bytes: 0, told: null, ownSize: false, asked: null, responses: [], lastResponse: null };
     document.documentElement.dataset.viewer = "on";
     $("bar-remote").classList.remove("hidden");
     canvas.classList.add("hidden");
@@ -402,8 +402,9 @@ const KagazRemoteView = (() => {
     // The path's name gives way first where the bar is short.
     $("rv-chip-path").textContent = millis != null ? `${cur.path} ·` : cur.path;
     $("rv-chip-text").textContent = millis != null ? `${millis} ms` : "";
-    chip.title = cur.protected ? "How this session travels. Nobody in between can read it."
-      : "How this session travels. It is not encrypted on this network.";
+    chip.title = (cur.protected ? "How this session travels. Nobody in between can read it."
+      : "How this session travels. It is not encrypted on this network.")
+      + (cur.lastResponse != null ? ` The last click or key showed on the screen after ${Math.round(cur.lastResponse)} ms.` : "");
   }
 
   function setTools(info) {
@@ -642,6 +643,16 @@ const KagazRemoteView = (() => {
         hideCard();
       }
       cur.paintMs += performance.now() - began;
+      // The first change shown after a click or key: its response. One
+      // longer than three seconds was not an answer to it.
+      if (cur.asked != null) {
+        const took = performance.now() - cur.asked;
+        cur.asked = null;
+        if (took < 3000) {
+          cur.responses.push(took);
+          cur.lastResponse = took;
+        }
+      }
       if (cur.session != null) invoke("remote_painted", { session: cur.session }).catch(() => {});
       else cur.owed++;
     } else if (u8[0] === 2) {
@@ -756,6 +767,13 @@ const KagazRemoteView = (() => {
   // second at most, each the latest; presses and keys go at once.
   function did(d, now) {
     if (!cur || cur.session == null) return;
+    // A click, a key or the wheel: the time until the screen next changes
+    // is the session's response, all of it (the way there and back, the
+    // device itself, its picture made, sent and shown). Moves are not
+    // counted: one follows another.
+    const acting = (d.t === "key" && d.down) || d.t === "wheel" || (d.t === "pointer" && d.buttons & ~cur.buttonsSaid);
+    if (d.t === "pointer") cur.buttonsSaid = d.buttons;
+    if (acting && cur.asked == null) cur.asked = performance.now();
     outbox.push(d);
     if (now) {
       clearTimeout(flushing);
@@ -1213,12 +1231,24 @@ const KagazRemoteView = (() => {
 
   const megabytes = (bytes) => (bytes >= 1e9 ? `${(bytes / 1e9).toFixed(2)} GB` : `${(bytes / 1e6).toFixed(bytes >= 1e7 ? 0 : 1)} MB`);
   let lastReading = null;
+  // The responses measured lately: the middle one and the slowest (and
+  // with `take`, they are let go, for the next five seconds' line).
+  function response(take) {
+    if (!cur || !cur.responses.length) return null;
+    const sorted = [...cur.responses].sort((a, b) => a - b);
+    const out = { middle: Math.round(sorted[Math.floor(sorted.length / 2)]), worst: Math.round(sorted[sorted.length - 1]), count: sorted.length };
+    if (take) cur.responses = [];
+    else if (cur.responses.length > 40) cur.responses = cur.responses.slice(-40);
+    return out;
+  }
   function numbersLine(r) {
     const parts = [r.delay != null ? `${r.delay} ms delay` : "delay not measured yet"];
     if (lastReading && r.seconds > lastReading.seconds) {
       const rate = ((r.received - lastReading.received) * 8) / (r.seconds - lastReading.seconds) / 1e6;
       parts.push(`${rate.toFixed(rate >= 10 ? 0 : 1)} Mbit/s now`);
     }
+    const answer = response(false);
+    if (answer) parts.push(`${answer.middle} ms from a click to the screen`);
     parts.push(`${megabytes(r.received + r.sent)} this session`);
     return parts.join(" · ");
   }
@@ -1273,6 +1303,47 @@ const KagazRemoteView = (() => {
       : "Over Remote Desktop the computer suits its picture to the connection and draws its screen at this window's size.");
     // What cannot be chosen here is not offered.
     const parts = chooses ? [slider, autoLabel, sizeLabel] : [];
+    // A Windows computer reached over Remote Desktop can draw and encode
+    // its screen with its graphics chip (H.264): Windows' own settings,
+    // which Kagaz can turn on there (Windows asks for an administrator).
+    const windows = cur.info && cur.info.speaks === "rdp" && !cur.device.paired && (!cur.device.system || cur.device.system === "windows");
+    if (windows) {
+      const chip = el("div", "rv-chip-gpu");
+      const drawChip = () => {
+        const via = (lastReading && lastReading.via) || "";
+        const h264 = /H\.264 \d/.test(via);
+        const on = !!(cur.settings && cur.settings.graphics_chip);
+        chip.replaceChildren(
+          el("strong", "", "Its graphics chip"),
+          el("p", "muted small", h264 ? "Its pictures come as H.264, encoded by Windows there."
+            : on ? "Turned on there; it takes effect once Windows there is signed out and in again."
+              : "Its pictures come without H.264: its processor draws and encodes them, which lags more."),
+        );
+        const b = el("button", "", on ? "Put back as it was" : "Use it there…");
+        b.type = "button";
+        b.addEventListener("click", async () => {
+          b.disabled = true;
+          toast(`On ${cur.device.name}, Windows asks for an administrator: answer it there. Press nothing there until it shows.`, 120000);
+          try {
+            const said = await invoke("remote_graphics", { session: cur.session, on: !on });
+            cur.settings = { ...cur.settings, graphics_chip: !on };
+            if (on) delete cur.settings.graphics_chip;
+            if (hooks.settings) hooks.settings(cur.device.id, cur.settings);
+            toast(said, 15000);
+            log(`its graphics chip ${on ? "put back" : "turned on"} there`);
+          } catch (e) {
+            toast(sentence(e), 10000);
+          }
+          b.disabled = false;
+          drawChip();
+        });
+        const row = el("div", "rc-buttons start");
+        row.append(b);
+        chip.append(row);
+      };
+      drawChip();
+      parts.push(chip);
+    }
     if (openPop("rv-picture", "picture", [el("strong", "", "Picture"), ...parts, line, note])) {
       pop.removeAttribute("role");
       pop._show = show;
@@ -1307,8 +1378,10 @@ const KagazRemoteView = (() => {
     // what the device sent (decoding its picture), and how that came.
     const r = lastReading;
     const work = r && was.work != null && r.work >= was.work ? `, ${Math.round((r.work - was.work) / seconds)} ms of work a second` : "";
+    const answer = response(true);
+    const answered = answer ? `, a click or key answered in ${answer.middle} ms (slowest ${answer.worst}, of ${answer.count})` : "";
     log(`${(frames / seconds).toFixed(1)} updates/s, ${((now.paintMs - was.paintMs) / frames).toFixed(2)} ms to paint one, `
-      + `${((now.bytes - was.bytes) / seconds / 1e6).toFixed(1)} MB/s to the page, delay ${r && r.delay != null ? r.delay + " ms" : "unknown"}${work}`
+      + `${((now.bytes - was.bytes) / seconds / 1e6).toFixed(1)} MB/s to the page, delay ${r && r.delay != null ? r.delay + " ms" : "unknown"}${work}${answered}`
       + (r && was.sound != null && r.sound > was.sound ? `, sound ${Math.round((r.sound - was.sound) / seconds / 1000)} kB/s` : "")
       + (r && r.via ? `; ${r.via}` : "")
       + (r && r.sound_via ? `; sound by the ${r.sound_via}` : ""));

@@ -156,6 +156,14 @@ mod pipe {
             self.0.write_all(&head).is_ok() && self.0.write_all(data).is_ok()
         }
     }
+
+    /// Done with it: the connection ends for both handles, so the page
+    /// sees it close and the thread reading its goodbye stops too.
+    impl Drop for Socket {
+        fn drop(&mut self) {
+            let _ = self.0.shutdown(std::net::Shutdown::Both);
+        }
+    }
 }
 
 /// The page may be this many pictures behind before Kagaz waits for it:
@@ -869,8 +877,17 @@ fn through_drive(
     let helper = sent.join(".kagaz");
     std::fs::create_dir_all(&helper).map_err(|e| e.to_string())?;
     std::fs::write(helper.join("save.ps1"), kagaz_core::remote::rdp::SAVE_SCRIPT).map_err(|e| e.to_string())?;
+    run_there(input, &kagaz_core::remote::rdp::run_line(&batch, ask));
+    Ok(())
+}
+
+/// The Kagaz drive shown there, then Windows' Run box opened and `line`
+/// typed into it and run. What is typed goes as letters, whatever the
+/// keyboard layout there.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn run_there(input: &kagaz_core::remote::InputSender, line: &str) {
     input.send(Input::ShowSent);
-    // The drive takes a moment to appear there; the helper waits too.
+    // The drive takes a moment to appear there; the helpers wait too.
     std::thread::sleep(Duration::from_millis(1200));
     let key = |key: &str, code: &str, down: bool| Input::Key { key: key.into(), code: code.into(), down };
     // Windows + R: the Run box.
@@ -879,14 +896,73 @@ fn through_drive(
     input.send(key("r", "KeyR", false));
     input.send(key("Meta", "MetaLeft", false));
     std::thread::sleep(Duration::from_millis(900));
-    for c in kagaz_core::remote::rdp::run_line(&batch, ask).chars() {
+    for c in line.chars() {
         let letter = c.to_string();
         input.send(key(&letter, "", true));
         input.send(key(&letter, "", false));
     }
     input.send(key("Enter", "Enter", true));
     input.send(key("Enter", "Enter", false));
-    Ok(())
+}
+
+/// The computer's own graphics chip for drawing and encoding its Remote
+/// Desktop screen: Windows' settings for it turned on there (`on`), or
+/// what was there before put back. Windows asks there for an
+/// administrator; this waits up to two minutes for the answer. Says
+/// what to do next.
+#[tauri::command]
+pub async fn remote_graphics(app: AppHandle, session: u64, on: bool) -> Result<String, String> {
+    blocking(move || {
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        {
+            let (device_id, sent, input) = app.state::<Viewers>().with(session, |o| (o.device.clone(), o.sent.clone(), o.input.clone()))?;
+            let sent = sent.ok_or("this session has no drive to start it from (Remote Desktop to Windows only)")?;
+            let helper = sent.join(".kagaz");
+            std::fs::create_dir_all(&helper).map_err(|e| e.to_string())?;
+            std::fs::write(helper.join("graphics.ps1"), kagaz_core::remote::rdp::GRAPHICS_SCRIPT).map_err(|e| e.to_string())?;
+            let result = helper.join("graphics-result.txt");
+            let _ = std::fs::remove_file(&result);
+            run_there(&input, &kagaz_core::remote::rdp::helper_line("graphics.ps1", if on { "on" } else { "off" }));
+            let until = std::time::Instant::now() + Duration::from_secs(120);
+            let code = loop {
+                if let Ok(text) = std::fs::read_to_string(&result) {
+                    // Written by PowerShell, perhaps as UTF-16: the digits.
+                    let digits: String = text.chars().filter(|c| c.is_ascii_digit()).collect();
+                    if !digits.is_empty() {
+                        break digits.parse::<u32>().unwrap_or(1);
+                    }
+                }
+                if std::time::Instant::now() > until {
+                    return Err("No answer from the computer within two minutes: Windows' question there may still be open.".into());
+                }
+                std::thread::sleep(Duration::from_millis(300));
+            };
+            match code {
+                0 => {
+                    let list = Devices::default_path();
+                    let _ = Devices::update(&list, |d| {
+                        if let Some(dev) = d.devices.iter_mut().find(|x| x.id == device_id) {
+                            dev.settings.graphics_chip = on;
+                        }
+                        Ok(())
+                    });
+                    Ok(if on {
+                        "Turned on there. Sign out of Windows there (or restart it) and connect again: then its graphics chip draws and encodes the screen.".into()
+                    } else {
+                        "Put back as it was. It takes effect at Windows' next sign-in there.".into()
+                    })
+                }
+                1223 => Err("Windows' administrator question there was not answered yes: nothing changed.".into()),
+                _ => Err("Windows' settings could not be changed there.".into()),
+            }
+        }
+        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+        {
+            let _ = (app, session, on);
+            Err("this comes to this system later".into())
+        }
+    })
+    .await
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "macos")))]

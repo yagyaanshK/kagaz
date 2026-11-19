@@ -71,7 +71,19 @@ the other kinds: saved devices, Found nearby, Add.
   shared with a device as a drive, both ways, from the next connection.
   A computer running Kagaz takes the files at once into its person's
   Downloads, beside what is there, with "N files in Downloads" on its
-  sign to show them. Choosing a monitor was dropped on 2026-11-17: over RDP the
+  sign to show them.
+  Lag, measured: the time from a click, key or wheel to the next change
+  shown is logged every five seconds (middle and slowest) and shown in
+  the Picture panel. The owner's PC sent no H.264 at all (its processor
+  drew and encoded the screen with Windows' text and progressive
+  codecs), so the Picture panel offers "Use it there…": Kagaz starts a
+  helper from its drive that turns on Windows' own settings for the
+  graphics chip (hardware graphics adapters for Remote Desktop, H.264
+  hardware encoding, H.264 4:4:4 preferred, 60 pictures a second instead
+  of 30) after Windows' administrator question there, keeping what was
+  there before to put back (2026-11-19). On Linux the pictures reach the
+  window through a WebSocket on this computer (about 15 ms for a whole
+  picture against 25 to 30 through the window's channel). Choosing a monitor was dropped on 2026-11-17: over RDP the
   computer makes one screen for the viewer. The picture comes by RDP's
   graphics pipeline, H.264 decoded by OpenH264 built in from source
   (chosen 2026-11-17), with the older picture as a per-computer switch.

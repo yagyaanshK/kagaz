@@ -723,6 +723,23 @@ Plan: `docs/remote-connection.md` (agreed 2026-11-16).
       when asked; Kagaz asks at once, so what is copied on the computer
       is on this device's clipboard without a further step. Tested
       against the test server, not yet against real Windows.
+- [ ] **Smoother sessions: the PC's graphics chip and a measured response**
+      (the owner, 2026-11-19: jitter, late clicks; "build the button and
+      the measurement both", and take over the other session's lag work).
+      The log showed no H.264 from the PC (text 34k, progressive 29k
+      updates). Built, **not yet tried on the PC**: Picture panel ›
+      "Its graphics chip" › "Use it there…" (Kagaz types a helper into the
+      Run box from its drive; Windows asks for an administrator there;
+      it sets bEnumerateHWBeforeSW, AVCHardwareEncodePreferred,
+      AVC444ModePreferred, DWMFRAMEINTERVAL=15, keeping the old values
+      under HKLM\SOFTWARE\Kagaz\Graphics; "Put back as it was" restores
+      them); then sign out of Windows there and connect again: the log's
+      "newer picture" part should list H.264. The response from a click,
+      key or wheel to the next change shown: in the Picture panel and
+      the log every five seconds ("answered in N ms"). The WebSocket
+      pipe for pictures on Linux (taken over, committed 380a138; its tests
+      pass) is used from the first session after Kagaz is reopened.
+      **To try:** note the response before and after turning the chip on.
 - [ ] **Sending files, four ways** (the owner, 2026-11-19: three .exe
       files offered by the clipboard never arrived on the real PC; Ctrl +
       V in a folder there did nothing; Kagaz's log shows "files offered

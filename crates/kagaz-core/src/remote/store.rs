@@ -184,6 +184,11 @@ pub struct Settings {
     /// A folder of this computer shown to it as a drive in every session.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shared_folder: Option<String>,
+    /// Kagaz turned on the computer's own settings for drawing and
+    /// encoding its Remote Desktop screen with its graphics chip (and
+    /// can put back what was there before).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub graphics_chip: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]

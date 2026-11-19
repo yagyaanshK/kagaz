@@ -315,11 +315,71 @@ if (-not $to) { exit }
 Start-Process explorer.exe -ArgumentList "/select,`"$(Join-Path $to $items[0].Name)`""
 "#;
 
+/// The helper that lets a Windows computer draw and encode its Remote
+/// Desktop screen with its graphics chip (`on`), or puts back what was
+/// there before (`off`): Windows' own settings for it (the policies "Use
+/// hardware graphics adapters for all Remote Desktop Services sessions",
+/// "Configure H.264/AVC hardware encoding" and "Prioritize H.264/AVC 444
+/// graphics mode", and up to 60 pictures a second instead of 30). Changing
+/// them takes an administrator: the helper asks Windows for that, which
+/// shows its own question there. What was there before is kept under
+/// `HKLM\SOFTWARE\Kagaz\Graphics` until it is put back. The result goes
+/// back to the drive: 0 done, 1223 the question answered no.
+pub const GRAPHICS_SCRIPT: &str = r#"param([string]$Turn = 'on')
+$result = '\\tsclient\Kagaz\.kagaz\graphics-result.txt'
+$me = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
+if (-not $me.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+  # Raised from a copy of its own: a raised program may not reach the drive.
+  $copy = Join-Path $env:TEMP 'kagaz-graphics.ps1'
+  Copy-Item -LiteralPath $PSCommandPath -Destination $copy -Force
+  try {
+    $p = Start-Process powershell -Verb RunAs -WindowStyle Hidden -Wait -PassThru -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$copy`"", $Turn)
+    $code = $p.ExitCode
+  } catch { $code = 1223 }
+  Remove-Item -LiteralPath $copy -Force -ErrorAction SilentlyContinue
+  Set-Content -LiteralPath $result -Value $code
+  exit
+}
+$ts = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services'
+$ws = 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations'
+$kept = 'HKLM:\SOFTWARE\Kagaz\Graphics'
+$values = @(@($ts, 'bEnumerateHWBeforeSW', 1), @($ts, 'AVCHardwareEncodePreferred', 1), @($ts, 'AVC444ModePreferred', 1), @($ws, 'DWMFRAMEINTERVAL', 15))
+try {
+  if ($Turn -eq 'on') {
+    if (-not (Test-Path $kept)) {
+      New-Item -Path $kept -Force | Out-Null
+      foreach ($v in $values) {
+        $was = (Get-ItemProperty -Path $v[0] -Name $v[1] -ErrorAction SilentlyContinue).($v[1])
+        Set-ItemProperty -Path $kept -Name $v[1] -Value $(if ($null -eq $was) { 'none' } else { "$was" })
+      }
+    }
+    New-Item -Path $ts -Force | Out-Null
+    foreach ($v in $values) { Set-ItemProperty -Path $v[0] -Name $v[1] -Value $v[2] -Type DWord }
+  } else {
+    if (Test-Path $kept) {
+      foreach ($v in $values) {
+        $was = (Get-ItemProperty -Path $kept -Name $v[1] -ErrorAction SilentlyContinue).($v[1])
+        if ($was -eq 'none' -or $null -eq $was) { Remove-ItemProperty -Path $v[0] -Name $v[1] -ErrorAction SilentlyContinue }
+        else { Set-ItemProperty -Path $v[0] -Name $v[1] -Value ([int]$was) -Type DWord }
+      }
+      Remove-Item -Path $kept -Force
+      if (-not (Get-ChildItem 'HKLM:\SOFTWARE\Kagaz' -ErrorAction SilentlyContinue)) { Remove-Item 'HKLM:\SOFTWARE\Kagaz' -Force -ErrorAction SilentlyContinue }
+    }
+  }
+  exit 0
+} catch { exit 1 }
+"#;
+
+/// The line typed into Windows' Run box for a helper on the Kagaz drive.
+pub fn helper_line(script: &str, argument: &str) -> String {
+    format!(r#"powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \\tsclient\Kagaz\.kagaz\{script} "{argument}""#)
+}
+
 /// The line typed into Windows' Run box for a batch: the save helper, or
 /// the batch's folder opened.
 pub fn run_line(batch: &str, ask: bool) -> String {
     if ask {
-        format!(r#"powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \\tsclient\Kagaz\.kagaz\save.ps1 "{batch}""#)
+        helper_line("save.ps1", batch)
     } else {
         format!(r#"explorer "\\tsclient\Kagaz\{batch}""#)
     }

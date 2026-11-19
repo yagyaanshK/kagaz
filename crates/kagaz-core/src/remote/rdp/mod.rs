@@ -11,7 +11,7 @@ mod clip;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 mod drives;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
-pub use drives::{run_line, stage, SAVE_SCRIPT};
+pub use drives::{helper_line, run_line, stage, GRAPHICS_SCRIPT, SAVE_SCRIPT};
 pub(crate) mod play;
 mod sound;
 
