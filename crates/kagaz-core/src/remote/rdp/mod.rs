@@ -13,7 +13,7 @@ mod sound;
 
 use super::keys;
 use super::reach;
-use super::screen::{Event, Pointer, Rect, Screen, Sending};
+use super::screen::{Event, Pointer, Rect, Screen, Sending, Video};
 use super::session::{
     buttons_for, Info, Input, InputSender, Numbers, OpenError, Session, SignIn, Trust, View, BACK, FORWARD, LEFT,
     MIDDLE, RIGHT,
@@ -34,7 +34,10 @@ use ironrdp_displaycontrol::client::DisplayControlClient;
 use ironrdp_dvc::{DrdynvcClient, DvcClientProcessor, DvcMessage, DvcProcessor};
 use ironrdp_egfx::client::{BitmapUpdate, GraphicsPipelineClient, GraphicsPipelineHandler};
 use ironrdp_egfx::decode::{H264Decoder, OpenH264Decoder};
-use ironrdp_egfx::pdu::{CapabilitySet, Codec1Type};
+use ironrdp_egfx::decode::{DecodedFrame, DecoderResult, Yuv420Frame};
+use ironrdp_egfx::pdu::{
+    CacheToSurfacePdu, CapabilitySet, Codec1Type, SolidFillPdu, SurfaceToCachePdu, SurfaceToSurfacePdu,
+};
 use ironrdp_graphics::image_processing::PixelFormat;
 use ironrdp_pdu::gcc::{ConnectionType, KeyboardType};
 use ironrdp_pdu::geometry::InclusiveRectangle;
@@ -52,7 +55,7 @@ use ironrdp_rdpdr::{NoopRdpdrBackend, Rdpdr};
 use ironrdp_rdpsnd::client::{Rdpsnd, RdpsndDvcState};
 use ironrdp_rdpsnd::pdu::QualityMode;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{mpsc, Arc};
+use std::sync::{mpsc, Arc, Mutex};
 use std::time::{Duration, Instant};
 
 /// The screen asked for when the viewer's size is not known, or when
@@ -205,13 +208,88 @@ fn config(
 
 /// Watches the newer picture's channel (the graphics pipeline) to tell
 /// how the picture travels: which version the two agreed on, and how
-/// many areas came by each way of packing them.
+/// many areas came by each way of packing them; and notes, for a viewer
+/// that decodes H.264 itself, each H.264 picture and what else changed
+/// the screen in the same frame ([`Videos`]).
 struct Watching {
     numbers: Arc<Numbers>,
     agreed: String,
     /// Areas by codec, in the order first seen.
     areas: Vec<(&'static str, u64)>,
     frames: u64,
+    videos: Arc<Mutex<Videos>>,
+}
+
+/// The device's H.264 as it came, for a viewer that decodes it itself
+/// (lag comes first: a picture of the whole screen goes to the window in
+/// a few kilobytes instead of eight megabytes of pixels, and the window's
+/// graphics chip decodes it). Kagaz still decodes every picture too, so
+/// what it keeps of the screen stays whole for moves, new sizes and a
+/// window that cannot decode after all.
+#[derive(Default)]
+struct Videos {
+    /// The picture handed to the decoder last, not yet placed.
+    stream: Option<Arc<Vec<u8>>>,
+    /// The stream started over since the last picture.
+    restart: bool,
+    /// Where each surface sits on the screen.
+    origins: HashMap<u16, (u16, u16)>,
+    /// The size of what each cache slot holds.
+    slots: HashMap<u16, (u16, u16)>,
+    /// This frame so far: its H.264 pictures and the areas anything else
+    /// changed.
+    frame: Vec<Video>,
+    others: Vec<Rect>,
+    /// Frames complete, for [`Running::graphics`].
+    done: Vec<(Vec<Video>, Vec<Rect>)>,
+}
+
+impl Videos {
+    fn on_screen(&self, surface: u16, left: u16, top: u16, right: u16, bottom: u16) -> Rect {
+        let (x, y) = self.origins.get(&surface).copied().unwrap_or((0, 0));
+        Rect::new(x.saturating_add(left), y.saturating_add(top), right.saturating_sub(left), bottom.saturating_sub(top))
+    }
+}
+
+/// OpenH264, with each picture noted before it is decoded ([`Videos`]).
+struct Tapped {
+    inner: Box<dyn H264Decoder>,
+    videos: Arc<Mutex<Videos>>,
+}
+
+impl Tapped {
+    fn note(&self, data: &[u8]) {
+        self.videos.lock().unwrap_or_else(|e| e.into_inner()).stream = Some(Arc::new(data.to_vec()));
+    }
+}
+
+impl H264Decoder for Tapped {
+    fn decode(&mut self, data: &[u8]) -> DecoderResult<DecodedFrame> {
+        self.note(data);
+        self.inner.decode(data)
+    }
+
+    fn decode_yuv420(&mut self, data: &[u8]) -> DecoderResult<Yuv420Frame> {
+        self.note(data);
+        self.inner.decode_yuv420(data)
+    }
+
+    fn supports_yuv420(&self) -> bool {
+        self.inner.supports_yuv420()
+    }
+
+    fn wait_until_ready(&mut self) -> bool {
+        self.inner.wait_until_ready()
+    }
+
+    fn reset(&mut self) {
+        {
+            let mut v = self.videos.lock().unwrap_or_else(|e| e.into_inner());
+            v.stream = None;
+            v.restart = true;
+        }
+        self.inner.reset();
+    }
 }
 
 impl Watching {
@@ -235,6 +313,30 @@ impl GraphicsPipelineHandler for Watching {
     }
 
     fn on_bitmap_updated(&mut self, update: &BitmapUpdate) {
+        {
+            let r = &update.destination_rectangle;
+            let mut v = self.videos.lock().unwrap_or_else(|e| e.into_inner());
+            let area = v.on_screen(update.surface_id, r.left, r.top, r.right, r.bottom);
+            if update.codec_id == Codec1Type::Avc420 {
+                // The first area of a picture brings it; the rest of its
+                // areas follow.
+                if let Some(stream) = v.stream.take() {
+                    let (origin_x, origin_y) = v.origins.get(&update.surface_id).copied().unwrap_or((0, 0));
+                    let restart = std::mem::take(&mut v.restart);
+                    v.frame.push(Video { origin_x, origin_y, regions: Vec::new(), stream, paint: true, restart });
+                }
+                if let Some(last) = v.frame.last_mut() {
+                    last.regions.push(area);
+                } else {
+                    v.others.push(area);
+                }
+            } else {
+                // Full colour H.264 is two pictures made one here: it goes
+                // as pixels.
+                v.stream = None;
+                v.others.push(area);
+            }
+        }
         let codec = match update.codec_id {
             Codec1Type::Avc420 => "H.264",
             Codec1Type::Avc444 | Codec1Type::Avc444v2 => "H.264 full colour",
@@ -254,6 +356,54 @@ impl GraphicsPipelineHandler for Watching {
     fn on_frame_complete(&mut self, _frame_id: u32) {
         self.frames += 1;
         self.tell();
+        let mut v = self.videos.lock().unwrap_or_else(|e| e.into_inner());
+        let frame = (std::mem::take(&mut v.frame), std::mem::take(&mut v.others));
+        v.done.push(frame);
+    }
+
+    fn on_surface_mapped(&mut self, surface_id: u16, origin_x: u32, origin_y: u32) {
+        let at = (origin_x.min(u16::MAX as u32) as u16, origin_y.min(u16::MAX as u32) as u16);
+        self.videos.lock().unwrap_or_else(|e| e.into_inner()).origins.insert(surface_id, at);
+    }
+
+    fn on_surface_deleted(&mut self, surface_id: u16) {
+        self.videos.lock().unwrap_or_else(|e| e.into_inner()).origins.remove(&surface_id);
+    }
+
+    // What else changes the screen within a frame: its areas are sent as
+    // pixels, whatever H.264 painted there.
+    fn on_solid_fill(&mut self, pdu: &SolidFillPdu) {
+        let mut v = self.videos.lock().unwrap_or_else(|e| e.into_inner());
+        for r in &pdu.rectangles {
+            let area = v.on_screen(pdu.surface_id, r.left, r.top, r.right, r.bottom);
+            v.others.push(area);
+        }
+    }
+
+    fn on_surface_to_surface(&mut self, pdu: &SurfaceToSurfacePdu) {
+        let mut v = self.videos.lock().unwrap_or_else(|e| e.into_inner());
+        let r = &pdu.source_rectangle;
+        let (w, h) = (r.right.saturating_sub(r.left), r.bottom.saturating_sub(r.top));
+        for p in &pdu.destination_points {
+            let area = v.on_screen(pdu.destination_surface_id, p.x, p.y, p.x.saturating_add(w), p.y.saturating_add(h));
+            v.others.push(area);
+        }
+    }
+
+    fn on_surface_to_cache(&mut self, pdu: &SurfaceToCachePdu) {
+        let r = &pdu.source_rectangle;
+        let size = (r.right.saturating_sub(r.left), r.bottom.saturating_sub(r.top));
+        self.videos.lock().unwrap_or_else(|e| e.into_inner()).slots.insert(pdu.cache_slot, size);
+    }
+
+    fn on_cache_to_surface(&mut self, pdu: &CacheToSurfacePdu) {
+        let mut v = self.videos.lock().unwrap_or_else(|e| e.into_inner());
+        // A slot of unknown size: the whole screen goes as pixels.
+        let (w, h) = v.slots.get(&pdu.cache_slot).copied().unwrap_or((u16::MAX, u16::MAX));
+        for p in &pdu.destination_points {
+            let area = v.on_screen(pdu.surface_id, p.x, p.y, p.x.saturating_add(w), p.y.saturating_add(h));
+            v.others.push(area);
+        }
     }
 }
 
@@ -435,6 +585,8 @@ struct Running {
     quiet: Arc<AtomicBool>,
     /// Keys that are down, to let go when the session closes.
     held: HashMap<String, FastPathInputEvent>,
+    /// The device's H.264 pictures as they came (see [`Videos`]).
+    videos: Arc<Mutex<Videos>>,
 }
 
 /// The longest a picture's acknowledgement waits for the window: a window
@@ -574,12 +726,35 @@ impl Running {
         if done.reset || (done.region.is_some() && self.screen.size() != size) {
             self.screen.resize(size.0, size.1);
         }
+        // The frames now on the screen: their H.264 pictures go to a
+        // viewer that decodes them, in order, before the areas sent as
+        // pixels; an area only H.264 changed is not sent again.
+        let frames = std::mem::take(&mut self.videos.lock().unwrap_or_else(|e| e.into_inner()).done);
+        let wanted = self.screen.video_wanted();
+        let mut painted: Vec<Rect> = Vec::new();
+        let mut others: Vec<Rect> = Vec::new();
+        for (pictures, changed) in frames {
+            if !wanted {
+                continue;
+            }
+            for v in pictures {
+                painted.extend_from_slice(&v.regions);
+                self.screen.video(v);
+            }
+            others.extend(changed);
+        }
         for region in &done.regions {
             let rect = area_of(&self.image, region);
-            if !rect.is_empty() {
-                self.screen.put_from(rect, self.image.data(), self.image.stride());
-                self.drew = true;
+            if rect.is_empty() {
+                continue;
             }
+            let video_only = painted.iter().any(|p| p.contains(&rect)) && !others.iter().any(|o| o.intersects(&rect));
+            if video_only {
+                self.screen.put_from_video(rect, self.image.data(), self.image.stride());
+            } else {
+                self.screen.put_from(rect, self.image.data(), self.image.stride());
+            }
+            self.drew = true;
         }
         Ok(())
     }
@@ -1191,14 +1366,21 @@ pub fn open(
     // picture codecs beside it, each frame acknowledged so that the
     // computer sends as fast as this side keeps up.
     let newer_picture = !settings.older_picture;
+    let videos: Arc<Mutex<Videos>> = Arc::default();
     let mut dynamic = DrdynvcClient::new().with_dynamic_channel(DisplayControlClient::new(|_| Ok(Vec::new())));
     if newer_picture {
-        let decoder = OpenH264Decoder::new().ok().map(|d| Box::new(d) as Box<dyn H264Decoder>);
+        let decoder = OpenH264Decoder::new().ok().map(|d| {
+            Box::new(Tapped {
+                inner: Box::new(d),
+                videos: videos.clone(),
+            }) as Box<dyn H264Decoder>
+        });
         let watching = Watching {
             numbers: numbers.clone(),
             agreed: String::new(),
             areas: Vec::new(),
             frames: 0,
+            videos: videos.clone(),
         };
         dynamic = dynamic.with_dynamic_channel(Paced::new(GraphicsPipelineClient::new(Box::new(watching), decoder)));
     } else {
@@ -1304,6 +1486,9 @@ pub fn open(
 
     let size = result.desktop_size;
     let screen = Arc::new(Screen::new());
+    if view.is_some_and(|v| v.video) {
+        screen.video_on();
+    }
     screen.resize(size.width, size.height);
     let activation = result.activation_factory;
     let stage = ActiveStageBuilder {
@@ -1344,6 +1529,7 @@ pub fn open(
         told: None,
         quiet,
         held: HashMap::new(),
+        videos,
     };
     {
         let screen = screen.clone();

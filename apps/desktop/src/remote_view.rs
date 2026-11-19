@@ -10,7 +10,13 @@
 //!   1  a picture update: sequence number (u32), count (u32), then pieces
 //!      of 16 bytes each (kind, 3 unused, x, y, width, height, from x,
 //!      from y, all u16) followed, for a picture, by its RGBA pixels.
-//!      Piece kinds: 1 the screen's size, 2 a picture, 3 a move.
+//!      Piece kinds: 1 the screen's size, 2 a picture, 3 a move, 4 a
+//!      picture of the device's H.264 stream, as it came (for a page that
+//!      decodes it, see `video` in `Asking`): its second byte has 1 to
+//!      paint it and 2 for a stream that starts over, x and y are where
+//!      the picture's top left goes, width is the number of areas it
+//!      paints; then the stream's length (u32), each area (x, y, width,
+//!      height, u16), and the stream (Annex B).
 //!   2  news as JSON: {"type": "clipboard" | "bell" | "pointer-default" |
 //!      "ended", ...}
 //!   3  the pointer's shape: 3 unused, width, height, hot x, hot y (u16),
@@ -116,6 +122,7 @@ fn update_packet(seq: u32, pieces: &[Piece]) -> Vec<u8> {
         .iter()
         .map(|p| match p {
             Piece::Picture { rgba, .. } => rgba.len(),
+            Piece::Video(v) => 4 + v.regions.len() * 8 + v.stream.len(),
             _ => 0,
         })
         .sum();
@@ -131,6 +138,18 @@ fn update_packet(seq: u32, pieces: &[Piece]) -> Vec<u8> {
                 out.extend_from_slice(rgba);
             }
             Piece::Move { from_x, from_y, rect } => piece_head(&mut out, 3, *rect, (*from_x, *from_y)),
+            Piece::Video(v) => {
+                let at = out.len();
+                piece_head(&mut out, 4, Rect::new(v.origin_x, v.origin_y, v.regions.len() as u16, 0), (0, 0));
+                out[at + 1] = u8::from(v.paint) | (u8::from(v.restart) << 1);
+                out.extend_from_slice(&(v.stream.len() as u32).to_le_bytes());
+                for r in &v.regions {
+                    for n in [r.x, r.y, r.width, r.height] {
+                        out.extend_from_slice(&n.to_le_bytes());
+                    }
+                }
+                out.extend_from_slice(&v.stream);
+            }
         }
     }
     out
@@ -327,6 +346,11 @@ pub struct Asking {
     /// The viewer: its size in pixels and its scale in percent.
     #[serde(default)]
     pub view: Option<(u16, u16, u32)>,
+    /// The page decodes H.264 itself (its graphics chip does): a device
+    /// that sends it has its pictures handed over as they came, not as
+    /// pixels (lag comes first).
+    #[serde(default)]
+    pub video: bool,
 }
 
 /// Reach a saved device and open a session with it; its picture then
@@ -366,6 +390,7 @@ pub async fn remote_connect(
             remember,
             accept_certificate,
             view,
+            video,
         } = asking;
         // A computer running Kagaz takes a PIN, and an empty one too (the
         // person there is asked); its user is its id there, from pairing.
@@ -387,7 +412,7 @@ pub async fn remote_connect(
             known: device.identity.certificate.clone(),
             accept_new: accept_certificate,
         };
-        let view = view.map(|(width, height, scale)| View { width, height, scale });
+        let view = view.map(|(width, height, scale)| View { width, height, scale, video });
         let session = session::open(
             answer.addr,
             answer.way,
@@ -517,6 +542,13 @@ pub fn remote_painted(viewers: tauri::State<'_, Viewers>, session: u64) -> Resul
         open.screen.shown();
         open.input.send(Input::Shown);
     })
+}
+
+/// The page could not decode the device's H.264 after all: pixels from
+/// now on, starting with all of the screen.
+#[tauri::command]
+pub fn remote_video_off(viewers: tauri::State<'_, Viewers>, session: u64) -> Result<(), String> {
+    viewers.with(session, |open| open.screen.video_off())
 }
 
 /// The session in numbers: the delay, what travelled, the picture setting.

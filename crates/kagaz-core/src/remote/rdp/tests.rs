@@ -8,6 +8,7 @@
 
 use super::*;
 use crate::remote::pattern;
+use crate::remote::Piece;
 use std::io::{BufRead, BufReader};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::Mutex;
@@ -424,6 +425,7 @@ fn the_screen_is_drawn_to_fit_the_viewer_and_follows_it() {
         width: 641,
         height: 400,
         scale: 200,
+        video: false,
     };
     let fit = Settings::default();
     let session = open(server.addr, &sign_in, &fit, &Trust::default(), Some(view), Duration::from_secs(10)).unwrap();
@@ -546,6 +548,85 @@ fn a_picture_is_acknowledged_once_the_window_has_shown_it() {
     assert!(until(|| acks(&server) > shown), "held for good by a silent window");
 }
 
+/// A viewer that decodes H.264 itself gets the pictures as they came,
+/// in order, starting with what a decoder needs first (the stream's
+/// settings and a whole picture), with the areas each paints; the areas
+/// only H.264 changed are not sent again as pixels. Kagaz's own copy of
+/// the screen stays whole.
+#[test]
+fn h264_goes_to_a_viewer_that_decodes_it_as_it_came() {
+    let Some(mut server) = serve_with(320, 240, &["--h264"]) else { return };
+    let sign_in = SignIn {
+        user: Some("asha".into()),
+        password: Some("sesame".into()),
+    };
+    let view = View {
+        width: 320,
+        height: 240,
+        scale: 100,
+        video: true,
+    };
+    let session =
+        open(server.addr, &sign_in, &Settings::default(), &Trust::default(), Some(view), Duration::from_secs(10)).unwrap();
+    assert!(until(|| card_apart(&session, 320, 240, 0) < CLOSE));
+    let mut pieces = Vec::new();
+    let mut take = |pieces: &mut Vec<Piece>| {
+        let end = Instant::now() + Duration::from_millis(500);
+        while Instant::now() < end {
+            pieces.extend(session.screen.take().pieces);
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    };
+    take(&mut pieces);
+    let videos: Vec<&Video> = pieces.iter().filter_map(|p| if let Piece::Video(v) = p { Some(v) } else { None }).collect();
+    assert!(!videos.is_empty(), "no video among {} pieces", pieces.len());
+    // NAL unit types after each start code: the first picture carries
+    // its settings (7, 8) and is whole (5).
+    let types = |stream: &[u8]| -> Vec<u8> {
+        stream.windows(4).filter(|w| w[..3] == [0, 0, 1]).map(|w| w[3] & 31).collect()
+    };
+    let first = types(&videos[0].stream);
+    assert!(first.contains(&7) && first.contains(&8) && first.contains(&5), "first picture's units {first:?}");
+    assert!(videos.iter().all(|v| !v.regions.is_empty()));
+    // Moves on: the next picture comes as video, and its area not again
+    // as pixels.
+    server.tick(40);
+    let mut more = Vec::new();
+    take(&mut more);
+    let later: Vec<&Video> = more.iter().filter_map(|p| if let Piece::Video(v) = p { Some(v) } else { None }).collect();
+    assert!(!later.is_empty(), "the next picture came as {more:?}");
+    let painted: Vec<Rect> = later.iter().flat_map(|v| v.regions.clone()).collect();
+    for p in &more {
+        if let Piece::Picture { rect, .. } = p {
+            assert!(!painted.iter().any(|v| v.contains(rect)), "{rect:?} sent as pixels too");
+        }
+    }
+    assert!(card_apart(&session, 320, 240, 40) < CLOSE, "Kagaz's own copy fell behind");
+    // For the page's own test (scratch, by hand): the pictures as the page
+    // gets them, and Kagaz's copy of the screen to compare with.
+    if let Some(dir) = std::env::var_os("KAGAZ_DUMP_VIDEO") {
+        let dir = std::path::PathBuf::from(dir);
+        let mut out = Vec::new();
+        for p in pieces.iter().chain(more.iter()) {
+            if let Piece::Video(v) = p {
+                out.extend_from_slice(&[u8::from(v.paint), u8::from(v.restart)]);
+                for n in [v.origin_x, v.origin_y, v.regions.len() as u16] {
+                    out.extend_from_slice(&n.to_le_bytes());
+                }
+                for r in &v.regions {
+                    for n in [r.x, r.y, r.width, r.height] {
+                        out.extend_from_slice(&n.to_le_bytes());
+                    }
+                }
+                out.extend_from_slice(&(v.stream.len() as u32).to_le_bytes());
+                out.extend_from_slice(&v.stream);
+            }
+        }
+        std::fs::write(dir.join("video.bin"), out).unwrap();
+        std::fs::write(dir.join("screen.rgba"), session.screen.snapshot().2).unwrap();
+    }
+}
+
 #[test]
 fn the_newer_picture_follows_the_viewers_size() {
     let Some(server) = serve_with(320, 240, &["--h264", "--fit"]) else { return };
@@ -558,6 +639,7 @@ fn the_newer_picture_follows_the_viewers_size() {
         width: 400,
         height: 301,
         scale: 100,
+        video: false,
     };
     let session =
         open(server.addr, &sign_in, &Settings::default(), &Trust::default(), Some(view), Duration::from_secs(10)).unwrap();
@@ -779,6 +861,7 @@ fn its_own_size_is_kept_when_the_person_asks_for_that() {
         width: 640,
         height: 400,
         scale: 100,
+        video: false,
     };
     let session = open(server.addr, &sign_in, &own, &Trust::default(), Some(view), Duration::from_secs(10)).unwrap();
     assert!(!session.info.resizes);

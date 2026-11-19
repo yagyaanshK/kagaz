@@ -94,6 +94,10 @@ pub struct View {
     pub width: u16,
     pub height: u16,
     pub scale: u32,
+    /// The viewer decodes H.264 itself: a device that sends its screen
+    /// as H.264 has its pictures handed over as they came (see
+    /// [`super::Screen::video_on`]).
+    pub video: bool,
 }
 
 /// What is known of the device's certificate before a session opens.

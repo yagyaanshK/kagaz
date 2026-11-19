@@ -245,6 +245,8 @@ const KagazRemoteView = (() => {
       state.session = null;
     }
     state.owed = 0;
+    if (state.video) videoClose(state.video);
+    state.video = null;
     connectingCard(state.device, state.device.paired && asking.password === "");
     const channel = new window.__TAURI__.core.Channel();
     channel.onmessage = (m) => {
@@ -261,6 +263,9 @@ const KagazRemoteView = (() => {
           remember: asking.remember == null ? null : asking.remember,
           accept_certificate: !!asking.accept_certificate,
           view: view(),
+          // The device's H.264 decoded here, by the graphics chip, rather
+          // than sent as pixels: lag comes first.
+          video: videoHere(),
         },
         channel,
       });
@@ -289,6 +294,10 @@ const KagazRemoteView = (() => {
     state.last = null; // nothing typed is kept once it has been used
     state.asked = view();
     for (; state.owed > 0; state.owed--) invoke("remote_painted", { session: state.session }).catch(() => {});
+    if (state.videoOffOwed) {
+      state.videoOffOwed = false;
+      invoke("remote_video_off", { session: state.session }).catch(() => {});
+    }
     // A computer running Kagaz that is asking its person lets the session
     // open before the answer: "Asking…" stays until its first picture.
     if (state.device.paired && asking.password === "" && !state.frames) state.waitingAnswer = true;
@@ -430,10 +439,134 @@ const KagazRemoteView = (() => {
   }
   const sentence = (e) => String(e).replace(/^./, (c) => c.toUpperCase()).replace(/\.?$/, ".");
 
+  // ---------- the device's H.264, decoded here ----------
+  // Each picture is decoded in order (each builds on the ones before) and
+  // painted over its areas, the picture's top left at its origin. A
+  // decoder that fails, or holds a picture back, hands the session back
+  // to pixels: the device's whole screen comes once more, as it is.
+  const H = typeof KagazPlayer !== "undefined" ? KagazPlayer.h264 : null;
+  // Only where the decoder hands each picture over as soon as it is
+  // decoded: Chromium's (Windows, Android). WebKitGTK's keeps one back
+  // until the next arrives (measured 2026-11-19), so the last change on
+  // screen would wait for another: there, and on WebKit elsewhere, the
+  // pixels stay. A decoder found keeping pictures back is remembered.
+  const HELD = "kagaz.remote.videoHeld";
+  function videoHere() {
+    let held = false;
+    try {
+      held = localStorage.getItem(HELD) === "1";
+    } catch (e) {}
+    return !!H && !held && typeof VideoDecoder === "function" && typeof EncodedVideoChunk === "function" && /Chrome\//.test(navigator.userAgent);
+  }
+  function videoOf(state) {
+    if (!state.video) state.video = { dec: null, sps: null, pps: null, waiting: [], broken: false, t: 0, first: true };
+    return state.video;
+  }
+  function videoClose(v) {
+    if (v.dec && v.dec.state !== "closed") {
+      try {
+        v.dec.close();
+      } catch (e) {}
+    }
+    v.dec = null;
+    for (const w of v.waiting.splice(0)) w(null);
+  }
+  function videoFail(state, why) {
+    const v = videoOf(state);
+    if (v.broken) return;
+    v.broken = true;
+    videoClose(v);
+    log(`H.264 is not decoded here (${why}); pixels from now on`);
+    if (state.session != null) invoke("remote_video_off", { session: state.session }).catch(() => {});
+    else state.videoOffOwed = true;
+  }
+  // The picture decoded, or null when there is none to paint.
+  function videoPicture(state, stream, restart) {
+    const v = videoOf(state);
+    if (v.broken) return Promise.resolve(null);
+    if (restart) videoClose(v);
+    const units = H.nals(stream);
+    let key = false, fresh = false;
+    const slices = [];
+    for (const u of units) {
+      const t = u[0] & 31;
+      if (t === 7) {
+        fresh = fresh || !v.sps || v.sps.length !== u.length || v.sps.some((b, i) => b !== u[i]);
+        v.sps = u.slice();
+      } else if (t === 8) {
+        fresh = fresh || !v.pps || v.pps.length !== u.length || v.pps.some((b, i) => b !== u[i]);
+        v.pps = u.slice();
+      } else if (t >= 1 && t <= 5) {
+        slices.push(u);
+        if (t === 5) key = true;
+      }
+    }
+    if (!slices.length) return Promise.resolve(null);
+    if (key && (fresh || !v.dec)) {
+      if (!v.sps || !v.pps) {
+        videoFail(state, "a whole picture came without its stream settings");
+        return Promise.resolve(null);
+      }
+      videoClose(v);
+      try {
+        v.dec = new VideoDecoder({
+          output: (frame) => {
+            const done = v.waiting.shift();
+            if (done) done(frame);
+            else frame.close();
+          },
+          error: (e) => videoFail(state, `the decoder failed: ${(e && e.message) || e}`),
+        });
+        // Remote Desktop's H.264 is BT.709 at full range (MS-RDPEGFX), not
+        // the TV range a decoder takes by default: its whites would glare
+        // and its darks sink.
+        v.dec.configure({
+          codec: H.codec(v.sps),
+          description: H.avcC(v.sps, v.pps),
+          optimizeForLatency: true,
+          colorSpace: { primaries: "bt709", transfer: "bt709", matrix: "bt709", fullRange: true },
+        });
+      } catch (e) {
+        videoFail(state, `the decoder refused it: ${e.message || e}`);
+        return Promise.resolve(null);
+      }
+    }
+    // Nothing to build on yet: wait for a whole picture (pixels cover it).
+    if (!v.dec) return Promise.resolve(null);
+    return new Promise((resolve) => {
+      // A decoder that keeps a picture back until the next arrives would
+      // put a picture's worth of lag on every one: not here.
+      const most = v.first ? 2000 : 300;
+      const timer = setTimeout(() => {
+        try {
+          localStorage.setItem(HELD, "1");
+        } catch (e) {}
+        videoFail(state, `a picture took over ${most} ms`);
+      }, most);
+      v.waiting.push((frame) => {
+        clearTimeout(timer);
+        v.first = false;
+        resolve(frame);
+      });
+      try {
+        v.dec.decode(new EncodedVideoChunk({ type: key ? "key" : "delta", timestamp: v.t++ * 1000, data: H.avcc(slices) }));
+      } catch (e) {
+        videoFail(state, `decoding failed: ${e.message || e}`);
+      }
+    });
+  }
+
   // ---------- the picture ----------
+  // Updates are applied one after another, each whole, even while a
+  // picture of the device's H.264 is being decoded.
+  let applying = Promise.resolve();
   function feed(m) {
+    applying = applying.then(() => apply(m)).catch((e) => log(`an update could not be shown (${e && e.message ? e.message : e})`));
+  }
+  async function apply(m) {
     const u8 = m instanceof Uint8Array ? m : new Uint8Array(m);
     if (!u8.length || !cur) return;
+    const state = cur;
     const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
     if (u8[0] === 1) {
       const began = performance.now();
@@ -452,6 +585,31 @@ const KagazRemoteView = (() => {
           ctx.putImageData(new ImageData(new Uint8ClampedArray(u8.buffer, u8.byteOffset + at, len), w, h), x, y);
           at += len;
         } else if (kind === 3) ctx.drawImage(canvas, fx, fy, w, h, x, y, w, h);
+        else if (kind === 4) {
+          const flags = u8[at - 15];
+          const len = dv.getUint32(at, true);
+          at += 4;
+          const areas = [];
+          for (let r = 0; r < w; r++, at += 8) areas.push([dv.getUint16(at, true), dv.getUint16(at + 2, true), dv.getUint16(at + 4, true), dv.getUint16(at + 6, true)]);
+          const stream = u8.subarray(at, at + len);
+          at += len;
+          const frame = await videoPicture(state, stream, (flags & 2) !== 0);
+          if (cur !== state) {
+            if (frame) frame.close();
+            return;
+          }
+          if (frame) {
+            if (flags & 1) {
+              ctx.save();
+              ctx.beginPath();
+              for (const [ax, ay, aw, ah] of areas) ctx.rect(ax, ay, aw, ah);
+              ctx.clip();
+              ctx.drawImage(frame, x, y);
+              ctx.restore();
+            }
+            frame.close();
+          }
+        }
       }
       cur.frames++;
       if (cur.waitingAnswer) {

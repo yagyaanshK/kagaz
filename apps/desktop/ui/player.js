@@ -738,5 +738,8 @@ const KagazPlayer = (() => {
     };
   }
 
-  return { Player, Stage, watch, audioContext, fullscreen, shapeOf, zoomable, ICON };
+  // H.264 in the shape decoders take, for other viewers (remote-view.js).
+  const h264 = { nals, avcc, avcC, codec: (sps) => `avc1.${hex2(sps[1])}${hex2(sps[2])}${hex2(sps[3])}` };
+
+  return { Player, Stage, watch, audioContext, fullscreen, shapeOf, zoomable, ICON, h264 };
 })();

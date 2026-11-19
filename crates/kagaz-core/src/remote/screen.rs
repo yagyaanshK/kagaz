@@ -9,7 +9,7 @@
 //!
 //! Pixels are RGBA, four bytes each, row by row, always opaque.
 
-use std::sync::{Condvar, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
 /// An area of the screen, in the device's own pixels.
@@ -137,6 +137,27 @@ pub enum Piece {
     Picture { rect: Rect, rgba: Vec<u8> },
     /// What is shown at `from` goes to `rect` (scrolling, a dragged window).
     Move { from_x: u16, from_y: u16, rect: Rect },
+    /// A picture of the device's H.264 stream, for a viewer that decodes
+    /// it itself (see [`Screen::video_on`]).
+    Video(Video),
+}
+
+/// One picture of the device's H.264 stream, as it came: the viewer
+/// decodes every one, in order (each builds on the ones before), and
+/// paints `regions` from it, the picture's top left at the origin.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Video {
+    pub origin_x: u16,
+    pub origin_y: u16,
+    /// Where it changed the screen, in the screen's pixels.
+    pub regions: Vec<Rect>,
+    /// The picture's NAL units, Annex B.
+    pub stream: Arc<Vec<u8>>,
+    /// Paint it; when not, only decode it (what it changed is painted
+    /// from pixels instead, or comes with a whole new picture).
+    pub paint: bool,
+    /// The stream starts over here: a new decoder for it.
+    pub restart: bool,
 }
 
 #[derive(Debug, Default)]
@@ -151,10 +172,11 @@ impl Taken {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 enum Op {
     Dirty(Rect),
     Move { from_x: u16, from_y: u16, rect: Rect },
+    Video(Video),
 }
 
 /// More changed areas than this are merged, the least wasteful pair first.
@@ -178,6 +200,8 @@ struct Inner {
     paced: bool,
     /// Takes not yet shown.
     out: u32,
+    /// The viewer decodes the device's H.264 itself.
+    video: bool,
 }
 
 impl Inner {
@@ -185,12 +209,13 @@ impl Inner {
         if r.is_empty() || self.resized {
             return;
         }
-        // Only the areas after the last move may be merged: an area before
-        // it is painted before the move, and the move may paint over it.
+        // Only the areas after the last move or video picture may be
+        // merged: an area before it is painted before it, and it may paint
+        // over the area.
         let start = self
             .ops
             .iter()
-            .rposition(|op| matches!(op, Op::Move { .. }))
+            .rposition(|op| matches!(op, Op::Move { .. } | Op::Video(_)))
             .map_or(0, |i| i + 1);
         let covered = self.ops[start..]
             .iter()
@@ -200,8 +225,8 @@ impl Inner {
         }
         let mut i = start;
         while i < self.ops.len() {
-            match self.ops[i] {
-                Op::Dirty(d) if r.contains(&d) => {
+            match &self.ops[i] {
+                Op::Dirty(d) if r.contains(d) => {
                     self.ops.remove(i);
                 }
                 _ => i += 1,
@@ -214,7 +239,10 @@ impl Inner {
                     *op = Op::Dirty(rect);
                 }
             }
-            merge(&mut self.ops, 0);
+            // Video pictures stay, in their place (each one is needed to
+            // decode the next), so merging starts after the last.
+            let start = self.ops.iter().rposition(|op| matches!(op, Op::Video(_))).map_or(0, |i| i + 1);
+            merge(&mut self.ops, start);
         } else {
             merge(&mut self.ops, start);
         }
@@ -238,16 +266,16 @@ fn merge(ops: &mut Vec<Op>, start: usize) {
         let mut best: Option<(usize, usize, i64)> = None;
         for i in start..ops.len() {
             for j in i + 1..ops.len() {
-                let (Op::Dirty(a), Op::Dirty(b)) = (ops[i], ops[j]) else { continue };
-                let waste = a.union(&b).area() as i64 - a.area() as i64 - b.area() as i64;
+                let (Op::Dirty(a), Op::Dirty(b)) = (&ops[i], &ops[j]) else { continue };
+                let waste = a.union(b).area() as i64 - a.area() as i64 - b.area() as i64;
                 if best.is_none_or(|(_, _, w)| waste < w) {
                     best = Some((i, j, waste));
                 }
             }
         }
         let Some((i, j, _)) = best else { return };
-        let (Op::Dirty(a), Op::Dirty(b)) = (ops[i], ops[j]) else { return };
-        ops[i] = Op::Dirty(a.union(&b));
+        let (Op::Dirty(a), Op::Dirty(b)) = (&ops[i], &ops[j]) else { return };
+        ops[i] = Op::Dirty(a.union(b));
         ops.remove(j);
     }
 }
@@ -281,7 +309,7 @@ impl Screen {
         s.width = width;
         s.height = height;
         s.rgba = [0, 0, 0, 255].repeat(width as usize * height as usize);
-        s.ops.clear();
+        s.ops.retain(|op| matches!(op, Op::Video(_)));
         s.resized = true;
     }
 
@@ -308,6 +336,16 @@ impl Screen {
     /// the same place there (`stride` bytes a row), made opaque. What
     /// falls outside either picture is left out.
     pub fn put_from(&self, rect: Rect, whole: &[u8], stride: usize) {
+        self.take_over(rect, whole, stride, true);
+    }
+
+    /// As [`Screen::put_from`], for an area a video picture already paints
+    /// on the viewer's side ([`Screen::video`]): kept here, not sent again.
+    pub fn put_from_video(&self, rect: Rect, whole: &[u8], stride: usize) {
+        self.take_over(rect, whole, stride, false);
+    }
+
+    fn take_over(&self, rect: Rect, whole: &[u8], stride: usize, send: bool) {
         let mut s = self.lock();
         let c = rect.within(s.width, s.height);
         let bytes = c.width as usize * 4;
@@ -324,7 +362,48 @@ impl Screen {
                 p[3] = 255;
             }
         }
-        s.dirty(c);
+        if send {
+            s.dirty(c);
+        }
+    }
+
+    // ---- the device's H.264, for a viewer that decodes it ----
+
+    /// The viewer decodes the device's H.264 itself: video pictures are
+    /// handed over as they came ([`Screen::video`]).
+    pub fn video_on(&self) {
+        self.lock().video = true;
+    }
+
+    /// The viewer could not decode them after all: pixels from now on, and
+    /// all of the screen once more, as it is.
+    pub fn video_off(&self) {
+        let mut s = self.lock();
+        s.video = false;
+        s.ops.retain(|op| !matches!(op, Op::Video(_)));
+        if s.width > 0 && s.height > 0 {
+            s.resized = true;
+            s.ready = true;
+            self.changed.notify_all();
+        }
+    }
+
+    pub fn video_wanted(&self) -> bool {
+        self.lock().video
+    }
+
+    /// A picture of the device's H.264 stream, in its place among the
+    /// changes.
+    pub fn video(&self, mut v: Video) {
+        let mut s = self.lock();
+        if !s.video {
+            return;
+        }
+        // A whole new picture comes next: this one is only decoded.
+        if s.resized {
+            v.paint = false;
+        }
+        s.ops.push(Op::Video(v));
     }
 
     /// One colour over an area.
@@ -440,7 +519,14 @@ impl Screen {
         let mut pieces = Vec::new();
         if s.resized {
             s.resized = false;
-            s.ops.clear();
+            // Video pictures are still decoded, before the whole picture
+            // that paints over what they would.
+            for op in std::mem::take(&mut s.ops) {
+                if let Op::Video(mut v) = op {
+                    v.paint = false;
+                    pieces.push(Piece::Video(v));
+                }
+            }
             pieces.push(Piece::Size {
                 width: s.width,
                 height: s.height,
@@ -460,6 +546,7 @@ impl Screen {
                         rgba: s.pixels(rect),
                     },
                     Op::Move { from_x, from_y, rect } => Piece::Move { from_x, from_y, rect },
+                    Op::Video(v) => Piece::Video(v),
                 });
             }
         }
@@ -517,6 +604,8 @@ impl Shown {
                     }
                     self.paint(*rect, &pixels);
                 }
+                // Nothing here decodes H.264; these tests give it none.
+                Piece::Video(_) => {}
             }
         }
     }
@@ -702,6 +791,60 @@ mod tests {
         // Nothing taken: nothing to show.
         assert!(screen.take().pieces.is_empty());
         assert!(screen.settled());
+    }
+
+    fn a_video_picture(regions: Vec<Rect>) -> Video {
+        Video { origin_x: 0, origin_y: 0, regions, stream: Arc::new(vec![0, 0, 0, 1, 0x65]), paint: true, restart: false }
+    }
+
+    /// Video pictures go to a viewer that takes them, every one and in
+    /// their place: an area changed after one is painted after it, and
+    /// one changed before it is not merged across it.
+    #[test]
+    fn video_pictures_keep_their_place_and_none_is_lost() {
+        let screen = Screen::new();
+        screen.resize(8, 8);
+        screen.take();
+        screen.video(a_video_picture(vec![Rect::new(0, 0, 4, 4)]));
+        assert!(screen.take().pieces.is_empty(), "nobody asked for video");
+        screen.video_on();
+        screen.put(Rect::new(0, 0, 2, 2), &[1; 16]);
+        screen.video(a_video_picture(vec![Rect::new(0, 0, 4, 4)]));
+        screen.put(Rect::new(0, 0, 4, 4), &[2; 64]);
+        screen.video(a_video_picture(vec![Rect::new(4, 4, 4, 4)]));
+        let taken = screen.take();
+        let kinds: Vec<&str> = taken
+            .pieces
+            .iter()
+            .map(|p| match p {
+                Piece::Picture { .. } => "picture",
+                Piece::Video(_) => "video",
+                _ => "other",
+            })
+            .collect();
+        assert_eq!(kinds, ["picture", "video", "picture", "video"]);
+        // A new size: the pictures are still decoded, not painted, before
+        // the whole screen.
+        screen.video(a_video_picture(vec![Rect::new(0, 0, 4, 4)]));
+        screen.resize(8, 8);
+        screen.video(a_video_picture(vec![Rect::new(0, 0, 4, 4)]));
+        let taken = screen.take();
+        assert!(matches!(&taken.pieces[0], Piece::Video(v) if !v.paint));
+        assert!(matches!(&taken.pieces[1], Piece::Video(v) if !v.paint));
+        assert!(matches!(taken.pieces[2], Piece::Size { .. }));
+        assert!(matches!(taken.pieces[3], Piece::Picture { .. }));
+        // An area taken over for a video picture is kept, not sent.
+        screen.put_from_video(Rect::new(0, 0, 2, 2), &[7; 8 * 8 * 4], 8 * 4);
+        assert!(screen.take().pieces.is_empty());
+        assert_eq!(screen.snapshot().2[0], 7);
+        // A viewer that cannot decode them: the whole screen again, in
+        // pixels, and no more video.
+        screen.video(a_video_picture(vec![Rect::new(0, 0, 4, 4)]));
+        screen.video_off();
+        let taken = screen.take();
+        assert!(matches!(taken.pieces[..], [Piece::Size { .. }, Piece::Picture { .. }]));
+        screen.video(a_video_picture(vec![Rect::new(0, 0, 4, 4)]));
+        assert!(screen.take().pieces.is_empty());
     }
 
     #[test]

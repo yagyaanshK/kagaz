@@ -760,7 +760,8 @@ fn try_session(which: &str, seconds: u64, picture: Option<u8>, sound: bool) -> R
                 match piece {
                     Piece::Picture { rect, .. } => pixels += rect.area(),
                     Piece::Move { .. } => moves += 1,
-                    Piece::Size { .. } => {}
+                    // The command line never asks for video.
+                    Piece::Size { .. } | Piece::Video(_) => {}
                 }
             }
             for event in taken.events {

@@ -2085,6 +2085,7 @@ pub fn run() {
             remote_view::remote_connect,
             remote_view::remote_input,
             remote_view::remote_painted,
+            remote_view::remote_video_off,
             remote_view::remote_numbers,
             remote_view::remote_clipboard_push,
             remote_view::remote_send_files,
