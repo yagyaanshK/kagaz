@@ -31,6 +31,9 @@ sha1 = "0.11.0"
 md-5 = "0.11.0"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
 rustls-pki-types = "1"
+# The stand-in Cast TV's own certificate, made when it starts, as a TV
+# makes its own (rcgen, MIT or Apache-2.0).
+rcgen = { version = "0.14", default-features = false, features = ["crypto", "ring"] }
 webpki-roots = "1"
 base64 = "0.22"
 lzma-rs = "0.3"

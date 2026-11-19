@@ -171,8 +171,14 @@ fn tls_setup() -> Option<std::sync::Arc<rustls::ClientConfig>> {
 impl Channel {
     /// Connects and greets the TV.
     pub fn open(tv: IpAddr, wait: Duration) -> Result<Channel, String> {
-        let mut tcp = TcpStream::connect_timeout(&SocketAddr::new(tv, PORT), wait)
-            .map_err(|e| format!("the TV does not answer Google Cast (port {PORT}): {e}"))?;
+        Channel::open_at(SocketAddr::new(tv, PORT), wait)
+    }
+
+    /// The same at another port (a stand-in TV in a test).
+    pub fn open_at(at: SocketAddr, wait: Duration) -> Result<Channel, String> {
+        let tv = at.ip();
+        let mut tcp = TcpStream::connect_timeout(&at, wait)
+            .map_err(|e| format!("the TV does not answer Google Cast (port {}): {e}", at.port()))?;
         tcp.set_nodelay(true).ok();
         tcp.set_read_timeout(Some(wait)).ok();
         tcp.set_write_timeout(Some(wait)).ok();

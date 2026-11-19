@@ -696,11 +696,37 @@ a tray icon while mirroring.
   while mirroring; Show/Hide everything, Screen on TV, Sound on TV,
   Stop mirroring, Open Kagaz.
 
+### A stand-in Cast TV (2026-11-19)
+
+`kagaz tvs stand-in --cast [--lose N]` (`cast/stand_in.rs`): this
+computer announces itself as a Google Cast TV (`_googlecast._tcp`,
+port 8009, a certificate made at start), starts "screen mirroring" when
+asked, answers the offer (H.264 and Opus), puts the stream together,
+confirms each picture as soon as it is whole (as a receiver does) and
+reports numbers only: pictures a second, the rate, each change of the
+picture's size (read from the sequence header), whole pictures, sound
+packets and seconds. `--lose N` loses every Nth stream packet. Tests
+run the whole sender against it on 127.0.0.1 (the session, and sound
+over a link losing one packet in 12).
+
+What it showed at once, fixed: the "nudge" (the newest picture's last
+packet again when the TV has not said it has it) went every 10 ms and
+was counted as a resend, so every picture looked lost twice over; the
+rate fitting then took the rate down each second, and OpenH264 started
+again each time (a whole picture a second). Nudges are counted apart
+now, every 20 ms at most; a resend waits at least 10 ms; and losses
+lower the rate only while the stream uses half of it or the round trip
+grows 40 ms past its best (queues filling), since random losses on a
+stream far under its rate are the air's. Measured after: the test
+pattern at 1080p60 through VA-API, 60 pictures a second, none dropped,
+none sent again; over a link losing 1 in 12, the rate held, losses
+resent, a second of sound each second.
+
 ### The rate fitted to the link; a phone upright at its own shape (2026-11-19, built; not yet seen on the TV)
 
-- **Rate** (`cast/fit.rs`): once a second, from what the TV reports:
-  packets asked for again (more than 2 in 100), a whole picture asked
-  for, or pictures held back with the TV behind take the rate down
+- **Rate** (`cast/fit.rs`): once a second, from what the TV reports: a
+  full link (the round trip 40 ms past its best, or losses or pictures
+  held back while the stream uses half the rate) takes the rate down
   30 %; three clean seconds take it up 15 %; between an eighth of the
   starting rate and the starting rate. Pictures skipped because the
   computer was slow do not count. VA-API takes the new rate with the
@@ -734,8 +760,7 @@ a tray icon while mirroring.
 - **Google Cast, further** (the sender itself is built, see above):
   sound on Windows (AAC through Media Foundation) and macOS
   (ScreenCaptureKit's sound); one window's own app's sound on Linux;
-  NVENC's rate fitted; a stand-in Cast receiver beside the Miracast one
-  (`kagaz tvs stand-in`).
+  NVENC's rate fitted.
 - **LG Link** (file transfer between LG Link or gram Link apps, PIN
   pairing): LG's own protocol; learn it from what LG's phone app sends to
   the TV, with step 3 (send media).

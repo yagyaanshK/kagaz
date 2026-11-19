@@ -91,6 +91,9 @@ pub struct Tally {
     pub bytes: u64,
     /// Packets sent again because the TV missed them.
     pub again: u64,
+    /// The newest picture's last packet sent once more, the TV not having
+    /// said it has it yet (no sign of trouble: the TV's word was not due).
+    pub nudges: u64,
     /// Times the TV asked for a whole picture.
     pub lost_pictures: u64,
 }
@@ -269,6 +272,7 @@ impl Sender {
     /// last packet once more.
     pub fn packet(&mut self, now: Instant) -> Option<Vec<u8>> {
         let mut chosen = None;
+        let mut nudge = false;
         for (i, w) in self.waiting.iter().enumerate() {
             if let Some(p) = w.go.iter().position(|g| *g) {
                 chosen = Some((i, p));
@@ -281,11 +285,12 @@ impl Sender {
                 return None;
             }
             let p = w.packets() - 1;
-            let every = (self.agreed.delay / 20).max(self.round_trip * 2);
+            let every = (self.agreed.delay / 10).max(self.round_trip * 2);
             if w.went[p].is_some_and(|t| now.duration_since(t) < every) {
                 return None;
             }
             chosen = Some((self.waiting.len() - 1, p));
+            nudge = true;
         }
         let (i, p) = chosen?;
         let sequence = self.sequence;
@@ -313,7 +318,9 @@ impl Sender {
         out.extend(((w.packets() - 1) as u16).to_be_bytes());
         out.push(builds_on as u8);
         out.extend(chunk);
-        if w.went[p].is_some() {
+        if nudge {
+            self.tally.nudges += 1;
+        } else if w.went[p].is_some() {
             self.tally.again += 1;
         }
         w.go[p] = false;
@@ -420,8 +427,9 @@ impl Sender {
             n
         };
         // A packet that left less than a round trip ago may be the one the
-        // note is about, still on its way: it does not go again.
-        let round_trip = self.round_trip;
+        // note is about, still on its way: it does not go again. On a fast
+        // link the round trip is next to nothing, so at least 10 ms.
+        let round_trip = self.round_trip.max(Duration::from_millis(10));
         let old_enough = |went: Option<Instant>| match went {
             Some(t) => now.duration_since(t) >= round_trip,
             None => false,
@@ -536,6 +544,11 @@ impl Receiver {
         }
     }
 
+    /// The receiver's own number, for its answer to the offer.
+    pub fn tv_ssrc(&self) -> u32 {
+        self.agreed.tv_ssrc
+    }
+
     /// The next whole picture (Annex B), in order.
     pub fn picture(&mut self) -> Option<Vec<u8>> {
         self.whole.pop_front()
@@ -566,15 +579,19 @@ impl Receiver {
             }
         }
         for (number, parts) in &self.parts {
+            // Only packets that are behind: before the last one come of
+            // this picture, or all of it once a later picture has begun.
+            let later = *number < newest;
+            let upto = if later { parts.len() } else { parts.iter().rposition(Option::is_some).unwrap_or(0) };
             let mut i = 0;
-            while i < parts.len() && notes.len() < 255 * 4 {
+            while i < upto && notes.len() < 255 * 4 {
                 if parts[i].is_some() {
                     i += 1;
                     continue;
                 }
                 let mut more = 0u8;
                 for bit in 0..8 {
-                    if parts.get(i + 1 + bit).is_some_and(Option::is_none) {
+                    if i + 1 + bit < upto && parts.get(i + 1 + bit).is_some_and(Option::is_none) {
                         more |= 1 << bit;
                     }
                 }

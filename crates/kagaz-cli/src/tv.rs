@@ -84,6 +84,13 @@ pub enum TvsAction {
         /// The name senders list it under
         #[arg(long, default_value = "Kagaz stand-in TV")]
         name: String,
+        /// Be a Google Cast TV instead (port 8009), for Kagaz's own Cast
+        /// sender
+        #[arg(long)]
+        cast: bool,
+        /// With --cast: lose every Nth packet of the stream (a weak link)
+        #[arg(long, requires = "cast")]
+        lose: Option<u64>,
     },
 }
 
@@ -194,8 +201,11 @@ fn ways(tv: &Tv) -> String {
 pub fn settings(action: TvsAction) -> Result<()> {
     let (power, encoder) = match action {
         TvsAction::Settings { power, encoder } => (power, encoder),
-        TvsAction::StandIn { name } => {
+        TvsAction::StandIn { name, cast, lose } => {
             stop_on_ctrl_c();
+            if cast {
+                return kagaz_core::tv::cast::stand_in::run(&name, 8009, lose, &STOP, |l| println!("{l}")).map_err(|e| anyhow!(e));
+            }
             return kagaz_core::tv::miracast::stand_in::run(&name, &STOP, |l| println!("{l}")).map_err(|e| anyhow!(e));
         }
     };

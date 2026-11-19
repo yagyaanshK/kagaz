@@ -11,6 +11,7 @@
 pub mod channel;
 pub mod stream;
 mod fit;
+pub mod stand_in;
 
 use super::miracast::rtsp::Mode;
 use super::miracast::{external, video, Event, Options, Pictures, Report};
@@ -135,9 +136,21 @@ pub fn mirror(
     opts: &Options,
     pictures: &mut dyn Pictures,
     stop: &AtomicBool,
+    event: impl FnMut(Event),
+) -> Result<Report, String> {
+    mirror_at(SocketAddr::new(tv, channel::PORT), opts, pictures, stop, event)
+}
+
+/// The same with the TV at another port (a stand-in TV in a test).
+pub fn mirror_at(
+    at: SocketAddr,
+    opts: &Options,
+    pictures: &mut dyn Pictures,
+    stop: &AtomicBool,
     mut event: impl FnMut(Event),
 ) -> Result<Report, String> {
-    let mut ch = Channel::open(tv, Duration::from_secs(8))?;
+    let tv = at.ip();
+    let mut ch = Channel::open_at(at, Duration::from_secs(8))?;
     event(Event::Waiting);
     ch.send(TV, RECEIVER, &json!({ "type": "LAUNCH", "appId": APP, "requestId": 1 }))?;
     // The TV's status names the app once it is up, with the address to
@@ -404,6 +417,8 @@ pub(crate) fn run(
                 again: sender.tally.again,
                 whole_asked: sender.tally.lost_pictures,
                 held_back,
+                bytes: sent(&sender, &sound),
+                round_trip: sender.round_trip(),
             };
             if let Some(rate) = fit.check(now, counts) {
                 if encoder.set_bit_rate(rate) {
@@ -522,6 +537,116 @@ mod tests {
     use super::*;
     use std::sync::Arc;
 
+    /// The whole of it, from the secure connection on, against the
+    /// stand-in TV on this computer: the app starts, the offer is
+    /// answered, pictures arrive whole and in order, and Stop ends it.
+    #[test]
+    fn a_whole_session_with_the_stand_in_cast_tv() {
+        use std::sync::atomic::AtomicBool;
+        use std::sync::mpsc;
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let tv_stop = Arc::new(AtomicBool::new(false));
+        let (said, heard) = mpsc::channel::<String>();
+        let s = tv_stop.clone();
+        let tv = std::thread::spawn(move || {
+            let _ = stand_in::serve(listener, &s, &mut |l| {
+                let _ = said.send(l);
+            }, None);
+        });
+        let opts = Options {
+            name: "test".into(),
+            max_height: 720,
+            engine: video::Engine::Software,
+            priority: video::Priority::Battery,
+            length: Some(Duration::from_secs(3)),
+            wait: Duration::from_secs(5),
+        };
+        let mut pattern = video::Pattern::new(1280, 720);
+        let stop = AtomicBool::new(false);
+        let report = mirror_at(SocketAddr::new(Ipv4Addr::LOCALHOST.into(), port), &opts, &mut pattern, &stop, |_| {}).unwrap();
+        std::thread::sleep(Duration::from_millis(300));
+        tv_stop.store(true, Ordering::SeqCst);
+        tv.join().unwrap();
+        let lines: Vec<String> = heard.try_iter().collect();
+        let all = lines.join("\n");
+        eprintln!("{all}\nsent again {}, whole asked {}, dropped {}", report.sent_again, report.whole_asked, report.dropped);
+        assert!(report.frames > 60, "only {} pictures went: {all}", report.frames);
+        assert!(all.contains("started screen mirroring"), "{all}");
+        assert!(all.contains("The pictures are 1280 x 720 now."), "{all}");
+        assert!(lines.iter().any(|l| l.contains("pictures a second") && !l.starts_with("0 ")), "{all}");
+        assert!(all.contains("stopped screen mirroring"), "{all}");
+    }
+
+    /// With sound, over a link losing one packet in 12: the sound arrives,
+    /// lost packets go again, and the rate comes down from the top.
+    /// The tests that send sound share the one sound queue: one at a time.
+    static SOUND_QUEUE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[test]
+    fn sound_and_a_weak_link_with_the_stand_in_cast_tv() {
+        let _one = SOUND_QUEUE.lock().unwrap_or_else(|e| e.into_inner());
+        use std::sync::atomic::AtomicBool;
+        use std::sync::mpsc;
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let tv_stop = Arc::new(AtomicBool::new(false));
+        let (said, heard) = mpsc::channel::<String>();
+        let s = tv_stop.clone();
+        let tv = std::thread::spawn(move || {
+            let _ = stand_in::serve_losing(listener, Some(12), &s, &mut |l| {
+                let _ = said.send(l);
+            }, None);
+        });
+        // The computer's sound: 20 ms Opus packets of silence, as sound.rs
+        // makes them, while the session runs.
+        super::super::switches::begin(true);
+        let pushing = Arc::new(AtomicBool::new(true));
+        let p = pushing.clone();
+        let pusher = std::thread::spawn(move || {
+            let mut e = opus2::Encoder::new(48_000, opus2::Channels::Stereo, opus2::Application::Audio).unwrap();
+            let mut out = [0u8; 4000];
+            while p.load(Ordering::SeqCst) {
+                let n = e.encode(&[0i16; 1920], &mut out).unwrap();
+                external::push_sound(out[..n].to_vec());
+                std::thread::sleep(Duration::from_millis(20));
+            }
+        });
+        let opts = Options {
+            name: "test".into(),
+            max_height: 720,
+            engine: video::Engine::Software,
+            priority: video::Priority::Battery,
+            length: Some(Duration::from_secs(5)),
+            wait: Duration::from_secs(5),
+        };
+        let mut pattern = video::Pattern::new(1280, 720);
+        let stop = AtomicBool::new(false);
+        let mut notes = Vec::new();
+        let report = mirror_at(SocketAddr::new(Ipv4Addr::LOCALHOST.into(), port), &opts, &mut pattern, &stop, |e| {
+            if let Event::Note(n) = e {
+                notes.push(n);
+            }
+        })
+        .unwrap();
+        pushing.store(false, Ordering::SeqCst);
+        pusher.join().unwrap();
+        super::super::switches::end();
+        std::thread::sleep(Duration::from_millis(300));
+        tv_stop.store(true, Ordering::SeqCst);
+        tv.join().unwrap();
+        let all = heard.try_iter().collect::<Vec<_>>().join("\n");
+        eprintln!("{all}\n{}\nsent again {}", notes.join("\n"), report.sent_again);
+        assert!(all.contains("took the pictures and the sound"), "{all}");
+        assert!(report.sent_again > 0, "nothing went again over a lossy link");
+        assert!(report.frames > 100, "{} pictures", report.frames);
+        // The stream uses far less than the rate: random losses leave it.
+        assert!(!notes.iter().any(|n| n.starts_with("The rate is now")), "the rate moved: {notes:?}");
+        // Sound arrived each second the stream ran.
+        let seconds_with_sound = all.lines().filter(|l| l.contains("sound:") && !l.contains("sound: 0 packets")).count();
+        assert!(seconds_with_sound >= 3, "{all}");
+    }
+
     #[test]
     fn the_offer_and_the_answer() {
         let agreed = Agreed { ssrc: 60_002, tv_ssrc: 60_003, key: [1; 16], iv_mask: [0xab; 16], payload_type: H264, clock: stream::CLOCK, delay: DELAY };
@@ -561,6 +686,7 @@ mod tests {
     /// order.
     #[test]
     fn pictures_and_sound_reach_a_stand_in_receiver() {
+        let _one = SOUND_QUEUE.lock().unwrap_or_else(|e| e.into_inner());
         let agreed = Agreed { ssrc: 60_002, tv_ssrc: 60_003, key: [7; 16], iv_mask: [9; 16], payload_type: H264, clock: stream::CLOCK, delay: DELAY };
         let tv = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
         let target = tv.local_addr().unwrap();
