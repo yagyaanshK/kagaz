@@ -52,6 +52,9 @@ webkit2gtk = "2.0.2"
 gtk = "0.18"
 # A silent ring's notification (the desktop's notification service).
 notify-rust = "4"
+# The handshake of the local WebSocket a remote screen's pictures take to
+# the page (remote_view.rs `pipe`).
+sha1 = "0.11.0"
 
 [target.'cfg(target_os = "android")'.dependencies]
 # Kotlin's side of the ring and saved sign-in, called without the window.

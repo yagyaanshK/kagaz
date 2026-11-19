@@ -39,6 +39,125 @@ use std::time::Duration;
 use tauri::ipc::{Channel, InvokeResponseBody};
 use tauri::{AppHandle, Manager};
 
+/// Linux: a remote screen's pictures go to the page through a WebSocket on
+/// this computer's own loopback, not through the window's channel. In
+/// WebKitGTK the channel hands each large message over by the page
+/// fetching it, about 25 to 30 ms for a whole 1920x1080 picture against
+/// about 15 ms pushed down a WebSocket (measured 2026-11-19, WebKitGTK
+/// 2.52); small ones take under a millisecond either way. Lag comes first.
+///
+/// Only the page that was given its address can open it: the address has
+/// a key nobody else has seen, it listens on loopback alone, and for one
+/// page, once.
+#[cfg(target_os = "linux")]
+mod pipe {
+    use base64::Engine as _;
+    use sha1::Digest as _;
+    use std::io::{BufRead, BufReader, Write};
+    use std::net::{TcpListener, TcpStream};
+    use std::time::{Duration, Instant};
+
+    pub struct Pipe {
+        listener: TcpListener,
+        key: String,
+    }
+
+    pub struct Socket(TcpStream);
+
+    pub fn open() -> Option<Pipe> {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).ok()?;
+        listener.set_nonblocking(true).ok()?;
+        let key = format!("{}{}", uuid::Uuid::new_v4().simple(), uuid::Uuid::new_v4().simple());
+        Some(Pipe { listener, key })
+    }
+
+    impl Pipe {
+        pub fn address(&self) -> Option<String> {
+            Some(format!("ws://127.0.0.1:{}/{}", self.listener.local_addr().ok()?.port(), self.key))
+        }
+
+        /// The page, once it has opened it; none if it does not within
+        /// `within` (the channel carries the pictures then).
+        pub fn accept(self, within: Duration) -> Option<Socket> {
+            let end = Instant::now() + within;
+            while Instant::now() < end {
+                match self.listener.accept() {
+                    Ok((stream, _)) => {
+                        if let Some(socket) = self.handshake(stream) {
+                            return Some(socket);
+                        }
+                    }
+                    Err(_) => std::thread::sleep(Duration::from_millis(5)),
+                }
+            }
+            None
+        }
+
+        fn handshake(&self, stream: TcpStream) -> Option<Socket> {
+            stream.set_nonblocking(false).ok()?;
+            stream.set_read_timeout(Some(Duration::from_secs(2))).ok()?;
+            let _ = stream.set_nodelay(true);
+            let mut reader = BufReader::new(stream.try_clone().ok()?);
+            let mut first = String::new();
+            reader.read_line(&mut first).ok()?;
+            if first.split(' ').nth(1) != Some(&format!("/{}", self.key)) {
+                return None;
+            }
+            let mut client_key = None;
+            loop {
+                let mut line = String::new();
+                if reader.read_line(&mut line).ok()? == 0 {
+                    return None;
+                }
+                let line = line.trim_end();
+                if line.is_empty() {
+                    break;
+                }
+                if let Some((name, value)) = line.split_once(':') {
+                    if name.trim().eq_ignore_ascii_case("sec-websocket-key") {
+                        client_key = Some(value.trim().to_string());
+                    }
+                }
+            }
+            let mut hash = sha1::Sha1::new();
+            hash.update(client_key?.as_bytes());
+            hash.update(b"258EAFA5-E914-47DA-95CA-C5AB0DC85B11");
+            let accept = base64::engine::general_purpose::STANDARD.encode(hash.finalize());
+            let mut stream = stream;
+            stream
+                .write_all(format!("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: {accept}\r\n\r\n").as_bytes())
+                .ok()?;
+            stream.set_read_timeout(None).ok()?;
+            // The page sends nothing but a goodbye; read it so the
+            // connection can close.
+            std::thread::spawn(move || {
+                let mut sink = [0u8; 256];
+                while matches!(std::io::Read::read(&mut reader.get_mut(), &mut sink), Ok(n) if n > 0) {}
+            });
+            Some(Socket(stream))
+        }
+    }
+
+    impl Socket {
+        /// One binary message; false once the page has gone.
+        pub fn send(&mut self, data: &[u8]) -> bool {
+            let mut head = vec![0x82];
+            match data.len() {
+                n if n < 126 => head.push(n as u8),
+                n if n < 65536 => {
+                    head.push(126);
+                    head.extend_from_slice(&(n as u16).to_be_bytes());
+                }
+                n => {
+                    head.push(127);
+                    head.extend_from_slice(&(n as u64).to_be_bytes());
+                }
+            }
+            self.0.write_all(&head).is_ok() && self.0.write_all(data).is_ok()
+        }
+    }
+}
+
 /// The page may be this many pictures behind before Kagaz waits for it:
 /// one, so that a picture never waits behind another (lag comes first;
 /// what changes meanwhile is merged into the next).
@@ -54,6 +173,14 @@ struct Open {
     stop: Arc<AtomicBool>,
     /// The window that shows it.
     window: String,
+    /// The device, where it was reached, and who signed in (for files
+    /// sent over SSH, with the same account).
+    device: String,
+    address: std::net::IpAddr,
+    user: Option<String>,
+    password: Option<String>,
+    /// The session's folder of files sent through a drive, where it has one.
+    sent: Option<std::path::PathBuf>,
 }
 
 /// The sessions open, in whichever window each is shown.
@@ -107,6 +234,9 @@ pub struct Connected {
     /// itself, or it travels through Tailscale.
     protected: bool,
     settings: Settings,
+    /// Where the page takes the pictures from, if not the channel (see
+    /// `pipe`).
+    pipe: Option<String>,
 }
 
 fn piece_head(out: &mut Vec<u8>, kind: u8, rect: Rect, from: (u16, u16)) {
@@ -173,14 +303,6 @@ fn pointer_packet(p: &remote::Pointer) -> Vec<u8> {
 // ---- this computer's clipboard ----
 
 /// What is on this computer's clipboard that a session carries: its
-    /// The device, where it was reached, and who signed in (for files
-    /// sent over SSH, with the same account).
-    device: String,
-    address: std::net::IpAddr,
-    user: Option<String>,
-    password: Option<String>,
-    /// The session's folder of files sent through a drive, where it has one.
-    sent: Option<std::path::PathBuf>,
 /// text, and its picture as PNG (a screenshot, an image out of a page).
 #[derive(Default)]
 struct Copied {
@@ -266,11 +388,29 @@ const CLIPBOARD_HERE: bool = cfg!(target_os = "linux");
 
 /// Take what changes on the session's screen to the page until either
 /// side ends it.
-fn forward(app: AppHandle, id: u64, session: remote::Session, channel: Channel<InvokeResponseBody>, open: &Open) {
+/// The pipe a session's pictures take to the page, where there is one.
+#[cfg(target_os = "linux")]
+type Pipe = pipe::Pipe;
+#[cfg(not(target_os = "linux"))]
+type Pipe = ();
+
+fn forward(app: AppHandle, id: u64, session: remote::Session, channel: Channel<InvokeResponseBody>, open: &Open, pipe: Option<Pipe>) {
     let (unpainted, stop) = (open.unpainted.clone(), open.stop.clone());
     std::thread::spawn(move || {
         let mut seq = 0u32;
-        let send = |packet: Vec<u8>| channel.send(InvokeResponseBody::Raw(packet)).is_ok();
+        // The page opens the pipe as soon as it hears of it; a page that
+        // does not leaves the pictures to the channel.
+        #[cfg(target_os = "linux")]
+        let mut socket = pipe.and_then(|p| p.accept(Duration::from_secs(2)));
+        #[cfg(not(target_os = "linux"))]
+        let _ = pipe;
+        let mut send = |packet: Vec<u8>| {
+            #[cfg(target_os = "linux")]
+            if let Some(s) = socket.as_mut() {
+                return s.send(&packet);
+            }
+            channel.send(InvokeResponseBody::Raw(packet)).is_ok()
+        };
         'session: while !stop.load(Ordering::Acquire) {
             // Not more than a couple of pictures ahead of the page. A page
             // that says nothing for a second (hidden, busy) is not waited
@@ -480,6 +620,11 @@ pub async fn remote_connect(
             unpainted: Arc::new((Mutex::new(0), Condvar::new())),
             stop: Arc::new(AtomicBool::new(false)),
             window: window.label().to_string(),
+            device: device.id.clone(),
+            address: answer.addr.ip(),
+            user: sign_in.user.clone(),
+            password: if device.paired { None } else { sign_in.password.clone() },
+            sent: session.info.sent.clone(),
         };
         let (width, height) = session.screen.size();
         let path = &device.paths[answer.path];
@@ -493,8 +638,15 @@ pub async fn remote_connect(
             millis: answer.millis,
             protected: session.info.encrypted || path.kind == PathKind::Tailscale,
             settings: device.settings.clone(),
+            pipe: None,
         };
-        forward(app.clone(), id, session, channel, &open);
+        #[cfg(target_os = "linux")]
+        let pipe = pipe::open();
+        #[cfg(not(target_os = "linux"))]
+        let pipe: Option<Pipe> = None;
+        #[cfg(target_os = "linux")]
+        let connected = Connected { pipe: pipe.as_ref().and_then(|p| p.address()), ..connected };
+        forward(app.clone(), id, session, channel, &open, pipe);
         viewers.list.lock().map_err(Failed::other)?.insert(id, open);
         Ok(connected)
     })
@@ -645,11 +797,21 @@ pub struct Sent {
 #[tauri::command]
 pub async fn remote_send_files(app: AppHandle, session: u64, paths: Option<Vec<String>>, how: Option<String>) -> Result<Sent, String> {
     blocking(move || {
-            device: device.id.clone(),
-            address: answer.addr.ip(),
-            user: sign_in.user.clone(),
-            password: if device.paired { None } else { sign_in.password.clone() },
-            sent: session.info.sent.clone(),
+        let (device_id, sent, window, input) = app
+            .state::<Viewers>()
+            .with(session, |o| (o.device.clone(), o.sent.clone(), o.window.clone(), o.input.clone()))?;
+        let device = Devices::load(&Devices::default_path()).ok().and_then(|d| d.find(&device_id).ok().cloned());
+        let paired = device.as_ref().is_some_and(|d| d.paired);
+        let chosen = how.or_else(|| device.as_ref().and_then(|d| d.settings.send_files.clone()));
+        let how = match chosen.as_deref() {
+            _ if paired => "clipboard",
+            Some("ask" | "open") if sent.is_some() => chosen.as_deref().unwrap_or("ask"),
+            Some("ssh") => "ssh",
+            Some("clipboard") => "clipboard",
+            _ if sent.is_some() => "ask",
+            _ => "clipboard",
+        }
+        .to_string();
         let paths: Vec<std::path::PathBuf> = match paths {
             Some(paths) => paths.into_iter().map(Into::into).collect(),
             None => {
@@ -682,168 +844,6 @@ pub async fn remote_send_files(app: AppHandle, session: u64, paths: Option<Vec<S
     .await
 }
 
-/// The whole of this screen for the window, or back to a window; without
-/// `on`, whether it has the whole screen now. The window's own full
-/// screen, not the page's: a page's full screen ends with Esc, which in a
-/// session belongs to the device.
-#[tauri::command]
-pub fn remote_fullscreen(window: tauri::WebviewWindow, on: Option<bool>) -> Result<bool, String> {
-    #[cfg(desktop)]
-    {
-        if let Some(on) = on {
-            window.set_fullscreen(on).map_err(|e| e.to_string())?;
-            return Ok(on);
-        }
-        window.is_fullscreen().map_err(|e| e.to_string())
-    }
-    #[cfg(not(desktop))]
-    {
-        let _ = (window, on);
-        Err("a phone's window has the whole screen already".into())
-    }
-}
-
-/// The keys this computer keeps for itself (Print Screen, the Windows
-/// key, Alt + Tab, the system's shortcuts) go to the window instead while
-/// `on`, and so to the device; the page says when (see `wantKeys` there).
-/// Says whether the window has them now.
-///
-/// On Wayland the system asks the person, the first time, whether Kagaz
-/// may, and keeps a key of its own to take them back (GNOME: Super +
-/// Esc). Its question takes the focus from the window, and withdrawing
-/// the request would take the question away again: so there, nothing
-/// changes while the window is not `focused` (the system gives the keys
-/// to whatever has the focus meanwhile anyway). Under X11 the keys would
-/// stay with a window that lost the focus, so they are let go with it.
-#[tauri::command]
-pub async fn remote_keys(app: AppHandle, window: tauri::WebviewWindow, on: bool, focused: bool) -> Result<bool, String> {
-    #[cfg(target_os = "linux")]
-    {
-        use gtk::prelude::*;
-        // Which window has them: one at a time, the one in front.
-        static HELD: Mutex<Option<String>> = Mutex::new(None);
-        let (tx, rx) = mpsc::channel();
-        let label = window.label().to_string();
-        app.run_on_main_thread(move || {
-            let Ok(mut holder) = HELD.lock() else { return };
-            let was = holder.as_deref() == Some(label.as_str());
-            let held = (|| {
-                let window = window.gtk_window().ok()?;
-                let display = window.display();
-                let wayland = display.type_().name().contains("Wayland");
-                let want = if wayland && !focused { was } else { on && focused };
-                if want == was {
-                    return Some(was);
-                }
-                let seat = display.default_seat()?;
-                if !want {
-                    seat.ungrab();
-                    return Some(false);
-                }
-                // Another of Kagaz's windows had them: they pass to this one.
-                if holder.is_some() {
-                    seat.ungrab();
-                }
-                // The keyboard alone: a grab of it by itself is what tells
-                // a Wayland system to leave its shortcuts to the window.
-                let status = seat.grab(&window.window()?, gtk::gdk::SeatCapabilities::KEYBOARD, true, None, None, None);
-                Some(status == gtk::gdk::GrabStatus::Success)
-            })()
-            .unwrap_or(false);
-            if held {
-                *holder = Some(label);
-            } else if was {
-                *holder = None;
-            }
-            let _ = tx.send(held);
-        })
-        .map_err(|e| e.to_string())?;
-        Ok(rx.recv_timeout(Duration::from_secs(4)).unwrap_or(false))
-    }
-    #[cfg(not(target_os = "linux"))]
-    {
-        let _ = (app, window, on, focused);
-        Err("this system's keys stay with it".into())
-    }
-}
-
-/// Caps Lock, Num Lock and Scroll Lock as they are on this keyboard now.
-#[derive(Debug, Clone, Copy, Serialize)]
-pub struct Locks {
-    caps: bool,
-    num: bool,
-    scroll: bool,
-}
-
-/// The lock keys' state, from the system itself. The page cannot be
-/// asked: WebKitGTK tells a page about Caps Lock only, and says "off" for
-/// the other two whatever they are, so a computer was told that Num Lock
-/// was off at the start of every session and its number pad came out the
-/// other way round from this keyboard's (the owner, 2026-11-18).
-#[tauri::command]
-pub async fn remote_locks(app: AppHandle, window: tauri::WebviewWindow) -> Result<Locks, String> {
-    #[cfg(target_os = "linux")]
-    {
-        use gtk::prelude::*;
-        let (tx, rx) = mpsc::channel();
-        app.run_on_main_thread(move || {
-            let locks = window.gtk_window().ok().and_then(|w| gtk::gdk::Keymap::for_display(&w.display())).map(|keys| Locks {
-                caps: keys.is_caps_locked(),
-                num: keys.is_num_locked(),
-                scroll: keys.is_scroll_locked(),
-            });
-            let _ = tx.send(locks);
-        })
-        .map_err(|e| e.to_string())?;
-        rx.recv_timeout(Duration::from_secs(4)).ok().flatten().ok_or_else(|| "the keyboard's state is not known".to_string())
-    }
-    #[cfg(not(target_os = "linux"))]
-    {
-        let _ = (app, window);
-        Err("the page knows the lock keys here".into())
-    }
-}
-
-/// A pinch on the touchpad (or the screen) while a device's screen is
-/// shown is the device's: the page is told how far the fingers have
-/// spread (`remote-pinch`) and passes it on as a zoom there. Left alone,
-/// the webview would enlarge Kagaz's own page instead, the screen's area
-/// in it would change with every move of the fingers, and a Remote
-/// Desktop computer would redraw its screen for each. While `on`, the
-/// webview's own pinch is off; with it off again, Kagaz's other pages
-        let (device_id, sent, window, input) = app
-            .state::<Viewers>()
-            .with(session, |o| (o.device.clone(), o.sent.clone(), o.window.clone(), o.input.clone()))?;
-        let device = Devices::load(&Devices::default_path()).ok().and_then(|d| d.find(&device_id).ok().cloned());
-        let paired = device.as_ref().is_some_and(|d| d.paired);
-        let chosen = how.or_else(|| device.as_ref().and_then(|d| d.settings.send_files.clone()));
-        let how = match chosen.as_deref() {
-            _ if paired => "clipboard",
-            Some("ask" | "open") if sent.is_some() => chosen.as_deref().unwrap_or("ask"),
-            Some("ssh") => "ssh",
-            Some("clipboard") => "clipboard",
-            _ if sent.is_some() => "ask",
-            _ => "clipboard",
-        }
-        .to_string();
-/// zoom as they always did. Says whether the webview's pinch was found
-/// (it is kept under a name of WebKitGTK's own choosing).
-#[tauri::command]
-pub async fn remote_pinch(window: tauri::WebviewWindow, on: bool) -> Result<bool, String> {
-    #[cfg(target_os = "linux")]
-    {
-        use gtk::glib::translate::from_glib_none;
-        use gtk::prelude::*;
-        use tauri::Emitter;
-        thread_local! {
-            /// For each window: Kagaz's own pinch on its webview, and
-            /// the phase the webview's had before it was first turned off.
-            static OURS: std::cell::RefCell<HashMap<String, (gtk::GestureZoom, gtk::PropagationPhase)>> = std::cell::RefCell::new(HashMap::new());
-        }
-        let page = window.clone();
-        let (tx, rx) = mpsc::channel();
-        window
-            .with_webview(move |webview| {
 /// Through the session's Kagaz drive: the files put in a batch folder of
 /// its own, the drive shown there, and Windows' Run box asked to start
 /// the save helper (or open the folder). What is typed goes as letters,
@@ -977,6 +977,153 @@ fn over_ssh(app: &AppHandle, session: u64, device: &kagaz_core::remote::Device, 
     Err(format!("Not sent over SSH: {why}."))
 }
 
+/// The whole of this screen for the window, or back to a window; without
+/// `on`, whether it has the whole screen now. The window's own full
+/// screen, not the page's: a page's full screen ends with Esc, which in a
+/// session belongs to the device.
+#[tauri::command]
+pub fn remote_fullscreen(window: tauri::WebviewWindow, on: Option<bool>) -> Result<bool, String> {
+    #[cfg(desktop)]
+    {
+        if let Some(on) = on {
+            window.set_fullscreen(on).map_err(|e| e.to_string())?;
+            return Ok(on);
+        }
+        window.is_fullscreen().map_err(|e| e.to_string())
+    }
+    #[cfg(not(desktop))]
+    {
+        let _ = (window, on);
+        Err("a phone's window has the whole screen already".into())
+    }
+}
+
+/// The keys this computer keeps for itself (Print Screen, the Windows
+/// key, Alt + Tab, the system's shortcuts) go to the window instead while
+/// `on`, and so to the device; the page says when (see `wantKeys` there).
+/// Says whether the window has them now.
+///
+/// On Wayland the system asks the person, the first time, whether Kagaz
+/// may, and keeps a key of its own to take them back (GNOME: Super +
+/// Esc). Its question takes the focus from the window, and withdrawing
+/// the request would take the question away again: so there, nothing
+/// changes while the window is not `focused` (the system gives the keys
+/// to whatever has the focus meanwhile anyway). Under X11 the keys would
+/// stay with a window that lost the focus, so they are let go with it.
+#[tauri::command]
+pub async fn remote_keys(app: AppHandle, window: tauri::WebviewWindow, on: bool, focused: bool) -> Result<bool, String> {
+    #[cfg(target_os = "linux")]
+    {
+        use gtk::prelude::*;
+        // Which window has them: one at a time, the one in front.
+        static HELD: Mutex<Option<String>> = Mutex::new(None);
+        let (tx, rx) = mpsc::channel();
+        let label = window.label().to_string();
+        app.run_on_main_thread(move || {
+            let Ok(mut holder) = HELD.lock() else { return };
+            let was = holder.as_deref() == Some(label.as_str());
+            let held = (|| {
+                let window = window.gtk_window().ok()?;
+                let display = window.display();
+                let wayland = display.type_().name().contains("Wayland");
+                let want = if wayland && !focused { was } else { on && focused };
+                if want == was {
+                    return Some(was);
+                }
+                let seat = display.default_seat()?;
+                if !want {
+                    seat.ungrab();
+                    return Some(false);
+                }
+                // Another of Kagaz's windows had them: they pass to this one.
+                if holder.is_some() {
+                    seat.ungrab();
+                }
+                // The keyboard alone: a grab of it by itself is what tells
+                // a Wayland system to leave its shortcuts to the window.
+                let status = seat.grab(&window.window()?, gtk::gdk::SeatCapabilities::KEYBOARD, true, None, None, None);
+                Some(status == gtk::gdk::GrabStatus::Success)
+            })()
+            .unwrap_or(false);
+            if held {
+                *holder = Some(label);
+            } else if was {
+                *holder = None;
+            }
+            let _ = tx.send(held);
+        })
+        .map_err(|e| e.to_string())?;
+        Ok(rx.recv_timeout(Duration::from_secs(4)).unwrap_or(false))
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = (app, window, on, focused);
+        Err("this system's keys stay with it".into())
+    }
+}
+
+/// Caps Lock, Num Lock and Scroll Lock as they are on this keyboard now.
+#[derive(Debug, Clone, Copy, Serialize)]
+pub struct Locks {
+    caps: bool,
+    num: bool,
+    scroll: bool,
+}
+
+/// The lock keys' state, from the system itself. The page cannot be
+/// asked: WebKitGTK tells a page about Caps Lock only, and says "off" for
+/// the other two whatever they are, so a computer was told that Num Lock
+/// was off at the start of every session and its number pad came out the
+/// other way round from this keyboard's (the owner, 2026-11-18).
+#[tauri::command]
+pub async fn remote_locks(app: AppHandle, window: tauri::WebviewWindow) -> Result<Locks, String> {
+    #[cfg(target_os = "linux")]
+    {
+        use gtk::prelude::*;
+        let (tx, rx) = mpsc::channel();
+        app.run_on_main_thread(move || {
+            let locks = window.gtk_window().ok().and_then(|w| gtk::gdk::Keymap::for_display(&w.display())).map(|keys| Locks {
+                caps: keys.is_caps_locked(),
+                num: keys.is_num_locked(),
+                scroll: keys.is_scroll_locked(),
+            });
+            let _ = tx.send(locks);
+        })
+        .map_err(|e| e.to_string())?;
+        rx.recv_timeout(Duration::from_secs(4)).ok().flatten().ok_or_else(|| "the keyboard's state is not known".to_string())
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = (app, window);
+        Err("the page knows the lock keys here".into())
+    }
+}
+
+/// A pinch on the touchpad (or the screen) while a device's screen is
+/// shown is the device's: the page is told how far the fingers have
+/// spread (`remote-pinch`) and passes it on as a zoom there. Left alone,
+/// the webview would enlarge Kagaz's own page instead, the screen's area
+/// in it would change with every move of the fingers, and a Remote
+/// Desktop computer would redraw its screen for each. While `on`, the
+/// webview's own pinch is off; with it off again, Kagaz's other pages
+/// zoom as they always did. Says whether the webview's pinch was found
+/// (it is kept under a name of WebKitGTK's own choosing).
+#[tauri::command]
+pub async fn remote_pinch(window: tauri::WebviewWindow, on: bool) -> Result<bool, String> {
+    #[cfg(target_os = "linux")]
+    {
+        use gtk::glib::translate::from_glib_none;
+        use gtk::prelude::*;
+        use tauri::Emitter;
+        thread_local! {
+            /// For each window: Kagaz's own pinch on its webview, and
+            /// the phase the webview's had before it was first turned off.
+            static OURS: std::cell::RefCell<HashMap<String, (gtk::GestureZoom, gtk::PropagationPhase)>> = std::cell::RefCell::new(HashMap::new());
+        }
+        let page = window.clone();
+        let (tx, rx) = mpsc::channel();
+        window
+            .with_webview(move |webview| {
                 let view = webview.inner();
                 // WebKitGTK keeps its pinch under this name on its widget.
                 let theirs: Option<gtk::EventController> = unsafe {
@@ -1086,6 +1233,57 @@ pub fn remote_disconnect(viewers: tauri::State<'_, Viewers>, session: u64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The pipe: the page with its address gets the WebSocket's answer
+    /// and each message whole and in order; anyone without the key gets
+    /// nothing, and the page still can after them.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn the_pipe_opens_for_its_key_alone_and_carries_whole_messages() {
+        use std::io::{Read, Write};
+        let pipe = super::pipe::open().unwrap();
+        let address = pipe.address().unwrap();
+        let rest = address.strip_prefix("ws://").unwrap();
+        let (host, path) = rest.split_once('/').unwrap();
+        let host = host.to_string();
+        let path = format!("/{path}");
+        let page = std::thread::spawn(move || {
+            // A stranger first, with a key of its own making.
+            let mut stranger = std::net::TcpStream::connect(&host).unwrap();
+            stranger.write_all(b"GET /0123 HTTP/1.1\r\nHost: x\r\nUpgrade: websocket\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n").unwrap();
+            let mut got = Vec::new();
+            let _ = stranger.read_to_end(&mut got);
+            assert!(got.is_empty(), "a stranger was answered");
+            let mut page = std::net::TcpStream::connect(&host).unwrap();
+            page.write_all(format!("GET {path} HTTP/1.1\r\nHost: x\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n").as_bytes()).unwrap();
+            let mut all = Vec::new();
+            page.read_to_end(&mut all).unwrap();
+            all
+        });
+        let mut socket = pipe.accept(Duration::from_secs(5)).expect("the page got in");
+        let big = vec![7u8; 70_000];
+        assert!(socket.send(b"hi"));
+        assert!(socket.send(&[1u8; 300]));
+        assert!(socket.send(&big));
+        drop(socket);
+        let all = page.join().unwrap();
+        let text = String::from_utf8_lossy(&all);
+        // RFC 6455's own example key and answer.
+        assert!(text.starts_with("HTTP/1.1 101") && text.contains("Sec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo="), "{text}");
+        let mut at = all.windows(4).position(|w| w == b"\r\n\r\n").unwrap() + 4;
+        let mut messages = Vec::new();
+        while at < all.len() {
+            assert_eq!(all[at], 0x82);
+            let (len, head) = match all[at + 1] {
+                126 => (u16::from_be_bytes([all[at + 2], all[at + 3]]) as usize, 4),
+                127 => (u64::from_be_bytes(all[at + 2..at + 10].try_into().unwrap()) as usize, 10),
+                n => (n as usize, 2),
+            };
+            messages.push(all[at + head..at + head + len].to_vec());
+            at += head + len;
+        }
+        assert_eq!(messages, vec![b"hi".to_vec(), vec![1u8; 300], big]);
+    }
 
     #[test]
     fn an_update_packet_holds_its_pieces_in_order() {

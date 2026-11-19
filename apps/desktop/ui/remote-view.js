@@ -245,6 +245,7 @@ const KagazRemoteView = (() => {
       state.session = null;
     }
     state.owed = 0;
+    closePipe(state);
     if (state.video) videoClose(state.video);
     state.video = null;
     connectingCard(state.device, state.device.paired && asking.password === "");
@@ -287,6 +288,21 @@ const KagazRemoteView = (() => {
     }
     state.session = connected.session;
     state.info = connected.info;
+    // Linux: the pictures come down a WebSocket on this computer (much
+    // quicker there than the channel for a large picture); Kagaz waits a
+    // moment for it, then uses the channel.
+    if (connected.pipe && typeof WebSocket === "function") {
+      try {
+        const ws = new WebSocket(connected.pipe);
+        ws.binaryType = "arraybuffer";
+        ws.onmessage = (m) => {
+          if (cur === state && attempt === mine) feed(m.data);
+        };
+        state.ws = ws;
+      } catch (e) {
+        log(`the pictures' pipe could not be opened (${e.message || e}); the channel carries them`);
+      }
+    }
     state.path = connected.path;
     state.protected = connected.protected;
     state.settings = connected.settings || {};
@@ -318,11 +334,20 @@ const KagazRemoteView = (() => {
   }
 
   // Leave the viewer: the session ends, the page it came from returns.
+  function closePipe(state) {
+    if (!state.ws) return;
+    try {
+      state.ws.close();
+    } catch (e) {}
+    state.ws = null;
+  }
+
   function close() {
     if (!cur) return;
     const state = cur;
     cur = null;
     attempt++;
+    closePipe(state);
     releaseKeys(state);
     if (state.session != null) {
       log(`close after ${Math.round((performance.now() - state.since) / 1000)} s, ${state.frames} updates painted`);
@@ -1052,6 +1077,7 @@ const KagazRemoteView = (() => {
   async function sendFiles(paths) {
     if (!cur || cur.session == null) return;
     closePop();
+    const there = cur.device.name;
     try {
       const sent = await invoke("remote_send_files", { session: cur.session, paths: paths || null });
       const what = sent.count === 1 ? "the file" : `${sent.count} files`;
@@ -1069,6 +1095,11 @@ const KagazRemoteView = (() => {
       toast(sentence(e), 8000);
     }
     stage.focus();
+  }
+  // Large files take a moment to be got ready for the drive.
+  function sendReady(p) {
+    if (!cur || !(p.total > 20e6)) return;
+    toast(p.done >= p.total ? "Ready; opening it there…" : `Getting the files ready: ${Math.floor((p.done / p.total) * 100)}%`, 4000);
   }
 
   const size = (bytes) => (bytes < 1000 ? `${bytes} bytes` : bytes < 1e6 ? `${Math.round(bytes / 1000)} KB` : megabytes(bytes));
@@ -1089,19 +1120,17 @@ const KagazRemoteView = (() => {
       if (cur.offer) cur.offer.waiting = false;
       toast(`${news.name} is on ${there}.`);
       log(`file taken, ${news.size} bytes`);
-    const there = cur.device.name;
+    } else if (news.state === "step") {
+      // The clipboard's own steps, for the log only.
+      log(`files: ${news.step}`);
     } else if (news.state === "withdrawn") {
+      log(`files withdrawn${cur.offer && cur.offer.waiting ? " before they were pasted" : ""}`);
       // Worth saying only while they were still waiting to be pasted.
       if (cur.offer && cur.offer.waiting) toast("The files are no longer on offer: something else was copied since.", 8000);
       cur.offer = null;
     } else if (news.state === "failed") {
       toast(sentence(news.why), 6000);
       log("files not sent");
-  // Large files take a moment to be got ready for the drive.
-  function sendReady(p) {
-    if (!cur || !(p.total > 20e6)) return;
-    toast(p.done >= p.total ? "Ready; opening it there…" : `Getting the files ready: ${Math.floor((p.done / p.total) * 100)}%`, 4000);
-  }
     }
   }
 
@@ -1120,11 +1149,7 @@ const KagazRemoteView = (() => {
     pop.className = "rc-pop " + cls;
     pop.replaceChildren(...children);
     popFor = tool;
-    } else if (news.state === "step") {
-      // The clipboard's own steps, for the log only.
-      log(`files: ${news.step}`);
     $(tool).setAttribute("aria-expanded", "true");
-      log(`files withdrawn${cur.offer && cur.offer.waiting ? " before they were pasted" : ""}`);
     return true;
   }
 
@@ -1345,6 +1370,7 @@ const KagazRemoteView = (() => {
   const hear = (name, fn) => (mine ? mine.listen(name, fn) : events.listen(name, fn));
   if (events && events.listen) {
     hear("remote-pinch", (ev) => pinch(ev.payload.scale, ev.payload.begin, ev.payload.end));
+    hear("remote-send-ready", (ev) => sendReady(ev.payload));
     hear("remote-close-asked", async () => {
       if (cur && cur.session != null) {
         const yes = await KagazAsk.confirm(
@@ -1370,7 +1396,6 @@ const KagazRemoteView = (() => {
   // on its page): where this computer's keys go follows at once; the
   // rest at the next connection.
   function settings(next) {
-    hear("remote-send-ready", (ev) => sendReady(ev.payload));
     if (!cur) return;
     cur.settings = { ...next };
     wantKeys();
