@@ -3,8 +3,9 @@
 //! What is copied here is offered to the viewer; what the viewer copies
 //! (text, a picture) is put on this computer's clipboard at once, as
 //! Windows' own Remote Desktop does. Files the viewer sends (its Send a
-//! file) are taken at once into a folder of their own and then put on
-//! the clipboard, so that Paste in any folder here copies them there.
+//! file) are taken at once into the person's Downloads (beside what is
+//! there, never over it) and also put on the clipboard, so that Paste in
+//! any folder here copies them there too.
 
 use ironrdp_cliprdr::backend::{ClipboardMessage, CliprdrBackend, CliprdrBackendFactory};
 use ironrdp_cliprdr::pdu::{
@@ -14,7 +15,7 @@ use ironrdp_cliprdr::pdu::{
 use ironrdp_server::{CliprdrServerFactory, ServerEvent, ServerEventSender};
 use std::collections::VecDeque;
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use tokio::sync::mpsc::UnboundedSender;
@@ -82,8 +83,9 @@ pub struct Clip {
     /// may (`--no-files`).
     allowed: crate::paired::Allowed,
     no_files: bool,
-    /// Where files from the viewer go, a folder for each sending.
-    pub received: PathBuf,
+    /// Where files from the viewer go, found at each sending: the
+    /// person's Downloads, where it is known.
+    pub received: Arc<dyn Fn() -> PathBuf + Send + Sync>,
 }
 
 impl std::fmt::Debug for Clip {
@@ -93,7 +95,12 @@ impl std::fmt::Debug for Clip {
 }
 
 impl Clip {
-    pub fn new(board: Arc<dyn Board>, received: PathBuf, allowed: crate::paired::Allowed, no_files: bool) -> Clip {
+    pub fn new(
+        board: Arc<dyn Board>,
+        received: Arc<dyn Fn() -> PathBuf + Send + Sync>,
+        allowed: crate::paired::Allowed,
+        no_files: bool,
+    ) -> Clip {
         let clip = Clip {
             board,
             to_viewer: Arc::default(),
@@ -140,6 +147,13 @@ impl Clip {
             let secs = taking.began.map_or(0.0, |b| b.elapsed().as_secs_f64());
             say(&format!("received {} files in {secs:.1} s; on the clipboard to paste", paths.len()));
             if !paths.is_empty() {
+                // Kagaz here says so, with a way to see them.
+                crate::event(serde_json::json!({
+                    "kind": "received",
+                    "count": paths.len(),
+                    "folder": taking.folder,
+                    "first": paths[0],
+                }));
                 self.board.put_files(paths);
             }
             return;
@@ -206,17 +220,12 @@ fn safe_name(name: &str, n: usize) -> String {
     }
 }
 
-/// A new folder for one sending, named by the time.
-fn folder_in(base: &Path) -> std::io::Result<PathBuf> {
-    let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs();
-    for n in 0.. {
-        let p = base.join(if n == 0 { format!("{secs}") } else { format!("{secs}-{n}") });
-        if !p.exists() {
-            std::fs::create_dir_all(&p)?;
-            return Ok(p);
-        }
+/// "report.pdf" for the second file of that name: "report (2).pdf".
+fn numbered(name: &str, n: usize) -> String {
+    match name.rfind('.').filter(|at| *at > 0) {
+        Some(at) => format!("{} ({n}){}", &name[..at], &name[at..]),
+        None => format!("{name} ({n})"),
     }
-    unreachable!()
 }
 
 impl ServerEventSender for Clip {
@@ -290,18 +299,22 @@ impl CliprdrBackend for Clip {
     // The list of what it sends: take the first file.
     fn on_remote_file_list(&mut self, files: &[FileDescriptor], clip_data_id: Option<u32>) {
         let mut taking = self.taking.lock().unwrap();
-        let folder = match folder_in(&self.received) {
-            Ok(f) => f,
-            Err(e) => return say(&format!("there is nowhere to put the files: {e}")),
-        };
+        let folder = (self.received)();
+        if let Err(e) = std::fs::create_dir_all(&folder) {
+            return say(&format!("there is nowhere to put the files: {e}"));
+        }
+        // Beside what is there already, never over it: "report (2).pdf".
         let mut names = std::collections::HashSet::new();
         let files: Vec<(String, u64)> = files
             .iter()
             .enumerate()
             .map(|(i, f)| {
-                let mut name = safe_name(&f.name, i);
-                while !names.insert(name.to_lowercase()) {
-                    name = format!("{} ({})", name, i + 1);
+                let base = safe_name(&f.name, i);
+                let mut name = base.clone();
+                let mut n = 2;
+                while folder.join(&name).exists() || !names.insert(name.to_lowercase()) {
+                    name = numbered(&base, n);
+                    n += 1;
                 }
                 (name, f.file_size.unwrap_or(0))
             })

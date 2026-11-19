@@ -391,7 +391,7 @@ const KagazRemoteView = (() => {
       $(id).disabled = !(on && has);
       $(id).title = on && !has ? without : title;
     };
-    set("rv-file", info && info.files, "Send files: they go to the device's clipboard, to be pasted there", not("Sending files"));
+    set("rv-file", info && info.files, "Send files to the device", not("Sending files"));
     // The device's sound plays here unless its page says not to; the
     // button turns it off and on for the moment.
     const noSound = info && info.speaks === "rdp" ? "Its sound is turned off for this computer on its page"
@@ -1044,16 +1044,29 @@ const KagazRemoteView = (() => {
   }
 
   // ---------- files ----------
-  // Files go by the device's clipboard: Kagaz says which files there
-  // are, and the device reads them when they are pasted there. Without
-  // `paths` the person is asked which files.
+  // Files go the way chosen for the device (remote_view.rs): through
+  // Kagaz's drive there, with Windows asking where to save them (or
+  // their folder opening); by its clipboard, to be pasted there; or over
+  // SSH. A computer running Kagaz takes them by itself. Without `paths`
+  // the person is asked which files.
   async function sendFiles(paths) {
     if (!cur || cur.session == null) return;
     closePop();
     try {
-      await invoke("remote_send_files", { session: cur.session, paths: paths || null });
+      const sent = await invoke("remote_send_files", { session: cur.session, paths: paths || null });
+      const what = sent.count === 1 ? "the file" : `${sent.count} files`;
+      if (sent.how === "ask") {
+        toast(`On ${there}, Windows asks where to save ${what}.`, 8000);
+        log(`files sent by the drive, ${sent.count}, asked where`);
+      } else if (sent.how === "open") {
+        toast(`${what[0].toUpperCase() + what.slice(1)} opened in a folder on ${there} (the Kagaz drive).`, 8000);
+        log(`files sent by the drive, ${sent.count}, folder opened`);
+      } else if (sent.how === "ssh") {
+        toast(`Sent ${what} to ${sent.folder} on ${there} over SSH.`, 8000);
+        log(`files sent over SSH, ${sent.count}`);
+      }
     } catch (e) {
-      toast(sentence(e));
+      toast(sentence(e), 8000);
     }
     stage.focus();
   }
@@ -1065,8 +1078,9 @@ const KagazRemoteView = (() => {
     if (news.state === "offered") {
       const one = news.names.length === 1;
       cur.offer = { waiting: true };
-      toast(`${one ? news.names[0] : `${news.names.length} files`} (${size(news.bytes)}) ${one ? "is" : "are"} on ${there}'s clipboard. `
-        + `Paste ${one ? "it" : "them"} there: open a folder and press Ctrl + V.`, 15000);
+      // Said until they go or are withdrawn: nothing happens until then.
+      toast(`Waiting for a paste on ${there}: ${one ? news.names[0] : `${news.names.length} files`} (${size(news.bytes)}). `
+        + `Open a folder there and press Ctrl + V.`, 10 * 60 * 1000);
       log(`files offered ${news.names.length}, ${news.bytes} bytes`);
     } else if (news.state === "going") {
       if (cur.offer) cur.offer.waiting = false;
@@ -1075,13 +1089,19 @@ const KagazRemoteView = (() => {
       if (cur.offer) cur.offer.waiting = false;
       toast(`${news.name} is on ${there}.`);
       log(`file taken, ${news.size} bytes`);
+    const there = cur.device.name;
     } else if (news.state === "withdrawn") {
       // Worth saying only while they were still waiting to be pasted.
-      if (cur.offer && cur.offer.waiting) toast("The files are no longer on offer: something else was copied since.");
+      if (cur.offer && cur.offer.waiting) toast("The files are no longer on offer: something else was copied since.", 8000);
       cur.offer = null;
     } else if (news.state === "failed") {
       toast(sentence(news.why), 6000);
       log("files not sent");
+  // Large files take a moment to be got ready for the drive.
+  function sendReady(p) {
+    if (!cur || !(p.total > 20e6)) return;
+    toast(p.done >= p.total ? "Ready; opening it there…" : `Getting the files ready: ${Math.floor((p.done / p.total) * 100)}%`, 4000);
+  }
     }
   }
 
@@ -1100,7 +1120,11 @@ const KagazRemoteView = (() => {
     pop.className = "rc-pop " + cls;
     pop.replaceChildren(...children);
     popFor = tool;
+    } else if (news.state === "step") {
+      // The clipboard's own steps, for the log only.
+      log(`files: ${news.step}`);
     $(tool).setAttribute("aria-expanded", "true");
+      log(`files withdrawn${cur.offer && cur.offer.waiting ? " before they were pasted" : ""}`);
     return true;
   }
 
@@ -1346,6 +1370,7 @@ const KagazRemoteView = (() => {
   // on its page): where this computer's keys go follows at once; the
   // rest at the next connection.
   function settings(next) {
+    hear("remote-send-ready", (ev) => sendReady(ev.payload));
     if (!cur) return;
     cur.settings = { ...next };
     wantKeys();

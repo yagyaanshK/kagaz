@@ -173,6 +173,14 @@ fn pointer_packet(p: &remote::Pointer) -> Vec<u8> {
 // ---- this computer's clipboard ----
 
 /// What is on this computer's clipboard that a session carries: its
+    /// The device, where it was reached, and who signed in (for files
+    /// sent over SSH, with the same account).
+    device: String,
+    address: std::net::IpAddr,
+    user: Option<String>,
+    password: Option<String>,
+    /// The session's folder of files sent through a drive, where it has one.
+    sent: Option<std::path::PathBuf>,
 /// text, and its picture as PNG (a screenshot, an image out of a page).
 #[derive(Default)]
 struct Copied {
@@ -605,13 +613,43 @@ pub async fn remote_clipboard_push(app: AppHandle, session: u64, asked: Option<b
     .await
 }
 
-/// Offer files to the device: they wait on its clipboard until they are
-/// pasted there. Without `paths` the person is asked which; says how many
-/// were offered, none when they chose nothing. How the files get on
-/// arrives with the session's news.
+/// A folder of this computer to share with a device, chosen by the
+/// person; none when they chose nothing.
 #[tauri::command]
-pub async fn remote_send_files(app: AppHandle, session: u64, paths: Option<Vec<String>>) -> Result<usize, String> {
+pub async fn remote_pick_folder(app: AppHandle) -> Result<Option<String>, String> {
     blocking(move || {
+        use tauri_plugin_dialog::DialogExt;
+        let picked = app.dialog().file().set_title("A folder to share with the device").blocking_pick_folder();
+        Ok(picked.and_then(|p| p.into_path().ok()).map(|p| p.to_string_lossy().to_string()))
+    })
+    .await
+}
+
+/// How files were sent, for the page to say.
+#[derive(Serialize, Default)]
+pub struct Sent {
+    count: usize,
+    /// "clipboard" (waiting to be pasted there), "ask" (the computer asks
+    /// where to save them), "open" (their folder opens there), "ssh"
+    /// (copied there into `folder`).
+    how: String,
+    folder: Option<String>,
+}
+
+/// Send files to the device, the way chosen for it (`how`, else its
+/// setting): on its clipboard to be pasted; through the session's Kagaz
+/// drive, with the computer asking where to save them or opening their
+/// folder; or over SSH into a folder there. Without `paths` the person is
+/// asked which (folders too, where they can go). A computer running Kagaz
+/// takes them by itself.
+#[tauri::command]
+pub async fn remote_send_files(app: AppHandle, session: u64, paths: Option<Vec<String>>, how: Option<String>) -> Result<Sent, String> {
+    blocking(move || {
+            device: device.id.clone(),
+            address: answer.addr.ip(),
+            user: sign_in.user.clone(),
+            password: if device.paired { None } else { sign_in.password.clone() },
+            sent: session.info.sent.clone(),
         let paths: Vec<std::path::PathBuf> = match paths {
             Some(paths) => paths.into_iter().map(Into::into).collect(),
             None => {
@@ -621,11 +659,25 @@ pub async fn remote_send_files(app: AppHandle, session: u64, paths: Option<Vec<S
             }
         };
         if paths.is_empty() {
-            return Ok(0);
+            return Ok(Sent::default());
         }
         let count = paths.len();
-        app.state::<Viewers>().with(session, |open| open.input.send(Input::Files(paths)))?;
-        Ok(count)
+        match how.as_str() {
+            "clipboard" => {
+                input.send(Input::Files(paths));
+                Ok(Sent { count, how, folder: None })
+            }
+            "ssh" => {
+                let folder = device
+                    .as_ref()
+                    .and_then(|d| d.settings.ssh_folder.clone())
+                    .filter(|f| !f.trim().is_empty())
+                    .unwrap_or_else(|| "Downloads".into());
+                over_ssh(&app, session, device.as_ref().ok_or("this device is no longer saved")?, &paths, &folder)?;
+                Ok(Sent { count, how, folder: Some(folder) })
+            }
+            _ => through_drive(&app, &window, &input, sent.as_deref(), &paths, how == "ask").map(|_| Sent { count, how, folder: None }),
+        }
     })
     .await
 }
@@ -759,6 +811,21 @@ pub async fn remote_locks(app: AppHandle, window: tauri::WebviewWindow) -> Resul
 /// in it would change with every move of the fingers, and a Remote
 /// Desktop computer would redraw its screen for each. While `on`, the
 /// webview's own pinch is off; with it off again, Kagaz's other pages
+        let (device_id, sent, window, input) = app
+            .state::<Viewers>()
+            .with(session, |o| (o.device.clone(), o.sent.clone(), o.window.clone(), o.input.clone()))?;
+        let device = Devices::load(&Devices::default_path()).ok().and_then(|d| d.find(&device_id).ok().cloned());
+        let paired = device.as_ref().is_some_and(|d| d.paired);
+        let chosen = how.or_else(|| device.as_ref().and_then(|d| d.settings.send_files.clone()));
+        let how = match chosen.as_deref() {
+            _ if paired => "clipboard",
+            Some("ask" | "open") if sent.is_some() => chosen.as_deref().unwrap_or("ask"),
+            Some("ssh") => "ssh",
+            Some("clipboard") => "clipboard",
+            _ if sent.is_some() => "ask",
+            _ => "clipboard",
+        }
+        .to_string();
 /// zoom as they always did. Says whether the webview's pinch was found
 /// (it is kept under a name of WebKitGTK's own choosing).
 #[tauri::command]
@@ -777,6 +844,139 @@ pub async fn remote_pinch(window: tauri::WebviewWindow, on: bool) -> Result<bool
         let (tx, rx) = mpsc::channel();
         window
             .with_webview(move |webview| {
+/// Through the session's Kagaz drive: the files put in a batch folder of
+/// its own, the drive shown there, and Windows' Run box asked to start
+/// the save helper (or open the folder). What is typed goes as letters,
+/// whatever the keyboard layout there.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn through_drive(
+    app: &AppHandle,
+    window: &str,
+    input: &kagaz_core::remote::InputSender,
+    sent: Option<&std::path::Path>,
+    paths: &[std::path::PathBuf],
+    ask: bool,
+) -> Result<(), String> {
+    use tauri::Emitter;
+    let sent = sent.ok_or("this session has no drive for files")?;
+    let mut told = std::time::Instant::now();
+    let batch = kagaz_core::remote::rdp::stage(sent, paths, |done, total| {
+        if told.elapsed() > Duration::from_millis(250) || done == total {
+            told = std::time::Instant::now();
+            let _ = app.emit_to(window, "remote-send-ready", serde_json::json!({ "done": done, "total": total }));
+        }
+    })?;
+    let helper = sent.join(".kagaz");
+    std::fs::create_dir_all(&helper).map_err(|e| e.to_string())?;
+    std::fs::write(helper.join("save.ps1"), kagaz_core::remote::rdp::SAVE_SCRIPT).map_err(|e| e.to_string())?;
+    input.send(Input::ShowSent);
+    // The drive takes a moment to appear there; the helper waits too.
+    std::thread::sleep(Duration::from_millis(1200));
+    let key = |key: &str, code: &str, down: bool| Input::Key { key: key.into(), code: code.into(), down };
+    // Windows + R: the Run box.
+    input.send(key("Meta", "MetaLeft", true));
+    input.send(key("r", "KeyR", true));
+    input.send(key("r", "KeyR", false));
+    input.send(key("Meta", "MetaLeft", false));
+    std::thread::sleep(Duration::from_millis(900));
+    for c in kagaz_core::remote::rdp::run_line(&batch, ask).chars() {
+        let letter = c.to_string();
+        input.send(key(&letter, "", true));
+        input.send(key(&letter, "", false));
+    }
+    input.send(key("Enter", "Enter", true));
+    input.send(key("Enter", "Enter", false));
+    Ok(())
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+fn through_drive(
+    _app: &AppHandle,
+    _window: &str,
+    _input: &kagaz_core::remote::InputSender,
+    _sent: Option<&std::path::Path>,
+    _paths: &[std::path::PathBuf],
+    _ask: bool,
+) -> Result<(), String> {
+    Err("sending through a drive comes to this system later".into())
+}
+
+/// Over SSH into `folder` there (relative to the account's home), with
+/// the system's scp, the account that signed in to the session and its
+/// password (handed to scp by a helper only it can read), checking the
+/// device's key as `kagaz remote ssh` does.
+fn over_ssh(app: &AppHandle, session: u64, device: &kagaz_core::remote::Device, paths: &[std::path::PathBuf], folder: &str) -> Result<(), String> {
+    use kagaz_core::remote::Speaks;
+    let way = device.way(Speaks::Ssh).ok_or("this device has no SSH way saved: add one on its page (port 22 on Windows' OpenSSH server)")?;
+    let (address, user, password) = app.state::<Viewers>().with(session, |o| (o.address, o.user.clone(), o.password.clone()))?;
+    let host = match address {
+        std::net::IpAddr::V6(v6) => format!("[{v6}]"),
+        v4 => v4.to_string(),
+    };
+    let target = match user.as_deref().or(device.user.as_deref()) {
+        Some(u) => format!("{u}@{host}:{folder}/"),
+        None => format!("{host}:{folder}/"),
+    };
+    let mut cmd = std::process::Command::new("scp");
+    cmd.arg("-r")
+        .arg("-P")
+        .arg(way.port.to_string())
+        .arg("-o")
+        .arg(format!("HostKeyAlias=kagaz-{}", device.id))
+        .arg("-o")
+        .arg("StrictHostKeyChecking=accept-new")
+        .args(paths)
+        .arg(&target)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped());
+    // The password, if the session had one, through a helper in a folder
+    // of its own that only this account can read, gone afterwards.
+    let helper = match &password {
+        Some(pw) => {
+            let dir = kagaz_core::paths::cache_dir().join(format!("askpass-{}", std::process::id()));
+            std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700));
+            }
+            let script = dir.join("askpass");
+            std::fs::write(&script, "#!/bin/sh\nprintf '%s\\n' \"$KAGAZ_SSH_PASSWORD\"\n").map_err(|e| e.to_string())?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let _ = std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700));
+            }
+            cmd.env("SSH_ASKPASS", &script).env("SSH_ASKPASS_REQUIRE", "force").env("KAGAZ_SSH_PASSWORD", pw);
+            Some(dir)
+        }
+        None => {
+            cmd.arg("-o").arg("BatchMode=yes");
+            None
+        }
+    };
+    let out = cmd.output();
+    if let Some(dir) = helper {
+        let _ = std::fs::remove_dir_all(dir);
+    }
+    let out = out.map_err(|_| "the system's scp could not be started (is OpenSSH's client installed?)".to_string())?;
+    if out.status.success() {
+        return Ok(());
+    }
+    let said = String::from_utf8_lossy(&out.stderr);
+    let why = if said.contains("Permission denied") {
+        "the computer did not take the account's password or key"
+    } else if said.contains("Connection refused") || said.contains("timed out") {
+        "the computer's SSH server did not answer (Windows: Settings › System › Optional features › OpenSSH Server)"
+    } else if said.contains("No such file") {
+        "that folder is not there"
+    } else {
+        "scp could not copy them"
+    };
+    Err(format!("Not sent over SSH: {why}."))
+}
+
                 let view = webview.inner();
                 // WebKitGTK keeps its pinch under this name on its widget.
                 let theirs: Option<gtk::EventController> = unsafe {

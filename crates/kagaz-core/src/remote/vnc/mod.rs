@@ -528,6 +528,7 @@ fn write_loop(rx: mpsc::Receiver<Input>, link: &Link, settings: &Settings) {
                 Input::Files(_) => link.screen.post(Event::Sending(Sending::Failed {
                     why: "VNC carries no files".into(),
                 })),
+                Input::ShowSent => {}
                 Input::Picture(p) => picture = *p,
                 Input::SwappedButtons(now) => swapped = *now,
                 // A VNC server's screen is the size it is, and it sends
@@ -639,6 +640,7 @@ pub fn open(addr: SocketAddr, sign_in: &SignIn, settings: &Settings, timeout: Du
     }
     Ok(Session {
         info: Info {
+            sent: None,
             speaks: Speaks::Vnc,
             name: hello.name,
             encrypted: false,

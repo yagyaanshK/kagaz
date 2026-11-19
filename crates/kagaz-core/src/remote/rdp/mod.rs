@@ -8,6 +8,10 @@
 //! that [`InputSender`] pokes, so a key or a click leaves at once.
 
 mod clip;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+mod drives;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub use drives::{run_line, stage, SAVE_SCRIPT};
 pub(crate) mod play;
 mod sound;
 
@@ -581,6 +585,13 @@ struct Running {
     kept: HashMap<u32, Arc<clip::Offer>>,
     /// When the viewer was last told how a file is getting on.
     told: Option<Instant>,
+    /// The clipboard's steps for files on offer already put in the log
+    /// (each kind once per file).
+    steps: std::collections::HashSet<String>,
+    /// The drive of files sent from here is to be shown on the computer;
+    /// and whether it is.
+    show_sent: bool,
+    sent_shown: bool,
     /// The person has turned the computer's sound off here for now.
     quiet: Arc<AtomicBool>,
     /// Keys that are down, to let go when the session closes.
@@ -1052,6 +1063,7 @@ impl Running {
                     // any, comes next.
                     self.their_text = None;
                     if matches!(self.here, Here::Files(_)) {
+                        self.step("something copied on the computer took their place");
                         self.withdraw();
                     }
                     continue;
@@ -1060,13 +1072,22 @@ impl Running {
                     if let (Here::Files(offer), true) = (&self.here, self.kept.len() < ironrdp_cliprdr::MAX_LOCKED_FILE_LISTS) {
                         self.kept.insert(number, offer.clone());
                     }
+                    self.step(&format!("the computer keeps the offer ({number})"));
                     continue;
                 }
                 clip::Asked::Unlock(number) => {
+                    self.step(&format!("the computer is done with the offer ({number})"));
                     self.kept.remove(&number);
                     continue;
                 }
+                clip::Asked::Listed(ok) => {
+                    self.step(if ok { "the computer took the list of files" } else { "the computer refused the list of files" });
+                    continue;
+                }
                 clip::Asked::Contents(request) => {
+                    let what = if request.flags.contains(ironrdp_cliprdr::pdu::FileContentsFlags::SIZE) { "size" } else { "pieces" };
+                    let said = format!("the computer asks for the {what} of file {}", request.index + 1);
+                    step_of(&self.here, &self.kept, &mut self.steps, &self.screen, &said);
                     // From the offer it asked to keep, else what is offered now.
                     let offer = request.data_id.and_then(|number| self.kept.get(&number)).or(match &self.here {
                         Here::Files(offer) => Some(offer),
@@ -1094,6 +1115,11 @@ impl Running {
         }
     }
 
+    /// A step of the clipboard's for the files on offer, once each.
+    fn step(&mut self, step: &str) {
+        step_of(&self.here, &self.kept, &mut self.steps, &self.screen, step);
+    }
+
     /// What was here for the computer is no longer on its clipboard.
     fn withdraw(&mut self) {
         if matches!(std::mem::replace(&mut self.here, Here::Nothing), Here::Files(_)) {
@@ -1110,6 +1136,7 @@ impl Running {
         if self.clip_last.as_deref() == Some(text) && (offered_now || !asked) {
             return;
         }
+        self.step("text copied here took their place");
         self.withdraw();
         self.clip_last = Some(text.to_string());
         self.here = Here::Text(text.to_string());
@@ -1123,6 +1150,7 @@ impl Running {
         if self.clip_last_picture == Some(seen) {
             return;
         }
+        self.step("a picture copied here took their place");
         self.withdraw();
         self.clip_last_picture = Some(seen);
         if let Some(text) = text {
@@ -1140,11 +1168,47 @@ impl Running {
         match clip::Offer::of(paths) {
             Ok(offer) => {
                 self.withdraw();
+                self.steps.clear();
                 self.here = Here::Files(Arc::new(offer));
                 self.clip.ask(clip::Asked::Mine);
             }
             Err(why) => self.screen.post(Event::Sending(Sending::Failed { why })),
         }
+    }
+
+    /// The drives' channel: the drive of files sent from here shown when
+    /// first wanted, and the answers the folders kept for later sent.
+    fn tend_drives(&mut self) -> Result<(), String> {
+        let Some(channel) = self.stage.get_svc_processor_mut::<Rdpdr>() else {
+            self.show_sent = false;
+            return Ok(());
+        };
+        let mut messages = Vec::new();
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        if self.show_sent && !self.sent_shown {
+            self.show_sent = false;
+            match channel.add_dynamic_drive(drives::SENT, drives::SENT_NAME.into()) {
+                Ok(m) => {
+                    messages.extend(m);
+                    self.sent_shown = true;
+                }
+                Err(e) => self.screen.post(Event::Sending(Sending::Failed { why: format!("the Kagaz drive could not be shown there ({e})") })),
+            }
+        }
+        if let Ok(m) = channel.poll_deferred_messages() {
+            messages.extend(m);
+        }
+        if messages.is_empty() {
+            return Ok(());
+        }
+        let frame = self
+            .stage
+            .process_svc_processor_messages(ironrdp_svc::SvcProcessorMessages::<Rdpdr>::new(messages))
+            .map_err(|e| format!("the drives could not be carried ({e})"))?;
+        if !frame.is_empty() {
+            self.write(&frame)?;
+        }
+        Ok(())
     }
 
     /// The clipboard channel's housekeeping: offers the computer asked to
@@ -1264,6 +1328,7 @@ impl Running {
             Input::ClipboardAsked(text) => self.copied_here(text, true),
             Input::ClipboardPicture { png, text } => self.copied_picture(png, text),
             Input::Files(paths) => self.offer(paths),
+            Input::ShowSent => self.show_sent = true,
             // The computer suits its picture to the link by itself.
             Input::Picture(_) => {}
             // The window showed a picture: held acknowledgements may go
@@ -1271,6 +1336,20 @@ impl Running {
             Input::Shown => {}
             Input::Close => {}
         }
+    }
+}
+
+/// A step of the clipboard's for the files on offer, put in the log once.
+fn step_of(
+    here: &Here,
+    kept: &HashMap<u32, Arc<clip::Offer>>,
+    steps: &mut std::collections::HashSet<String>,
+    screen: &Screen,
+    step: &str,
+) {
+    let offering = matches!(here, Here::Files(_)) || !kept.is_empty();
+    if offering && steps.insert(step.to_string()) {
+        screen.post(Event::Sending(Sending::Step { step: step.to_string() }));
     }
 }
 
@@ -1394,6 +1473,14 @@ fn run(mut s: Running, rx: mpsc::Receiver<Input>, mut waiter: waker::Waiter) -> 
                 s.numbers.set_delay(delay);
             }
             if let Err(why) = s.tidy_clipboard() {
+                return why;
+            }
+            if let Err(why) = s.tend_drives() {
+                return why;
+            }
+        }
+        if s.show_sent && !s.sent_shown {
+            if let Err(why) = s.tend_drives() {
                 return why;
             }
         }
@@ -1528,18 +1615,43 @@ pub fn open(
         ClientConnector::new(config(user.trim(), password, size, scale, newer_picture, with_sound)?, local)
             .with_static_channel(CliprdrClient::new(Box::new(clipboard)))
             .with_static_channel(dynamic);
-    if with_sound {
+    // Folders of this computer shown there as drives: the session's own
+    // for files sent from here (shown once something is sent), and the
+    // folder the person shares with this device, from the start.
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    let sent = drives::sent_folder().ok();
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    let sent: Option<std::path::PathBuf> = None;
+    let shared = settings.shared_folder.as_deref().map(std::path::PathBuf::from).filter(|p| p.is_dir());
+    if with_sound || sent.is_some() {
         // Windows starts its sound only for a viewer that also offers the
         // channel for redirected devices (drives, printers), and that
-        // channel in turn only with the sound's: here it carries no
-        // device at all.
+        // channel in turn only with the sound's. With the sound kept on
+        // the computer, the sound's channel is there and carries nothing.
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        let devices = match &sent {
+            Some(dir) => {
+                let mut r = Rdpdr::new(Box::new(drives::Drives::new(dir, shared.as_deref())), "Kagaz".into());
+                if let Some(folder) = &shared {
+                    r = r.with_drives(Some(vec![(drives::SHARED, drives::shared_name(folder))]));
+                }
+                r
+            }
+            None => Rdpdr::new(Box::new(NoopRdpdrBackend), "Kagaz".into()),
+        };
+        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+        let devices = {
+            let _ = &shared;
+            Rdpdr::new(Box::new(NoopRdpdrBackend), "Kagaz".into())
+        };
+        let older: Box<dyn ironrdp_rdpsnd::client::RdpsndClientHandler> = if with_sound {
+            Box::new(sound::Sound::new("older channel", fast, quiet.clone(), numbers.clone()))
+        } else {
+            Box::new(sound::Silent)
+        };
         connector = connector
-            .with_static_channel(
-                Rdpsnd::new(Box::new(sound::Sound::new("older channel", fast, quiet.clone(), numbers.clone())))
-                    .with_clock(clock())
-                    .with_quality_mode(quality),
-            )
-            .with_static_channel(Rdpdr::new(Box::new(NoopRdpdrBackend), "Kagaz".into()));
+            .with_static_channel(Rdpsnd::new(older).with_clock(clock()).with_quality_mode(quality))
+            .with_static_channel(devices);
     }
     let should_upgrade = ironrdp_blocking::connect_begin(&mut framed, &mut connector).map_err(refusal)?;
 
@@ -1634,6 +1746,9 @@ pub fn open(
         their_text: None,
         kept: HashMap::new(),
         told: None,
+        steps: std::collections::HashSet::new(),
+        show_sent: false,
+        sent_shown: false,
         quiet,
         held: HashMap::new(),
         outbox,
@@ -1641,10 +1756,15 @@ pub fn open(
     };
     {
         let screen = screen.clone();
+        let gone = sent.clone();
         std::thread::Builder::new()
             .name("rdp".into())
             .spawn(move || {
                 let why = run(running, rx, waiter);
+                // The session's own folder of sent files goes with it.
+                if let Some(dir) = gone {
+                    let _ = std::fs::remove_dir_all(dir);
+                }
                 screen.post(Event::Ended(why));
             })
             .map_err(|e| OpenError::Other(e.to_string()))?;
@@ -1660,6 +1780,7 @@ pub fn open(
             resizes: fits,
             picture_setting: false,
             identity: Some(identity),
+            sent: sent.clone(),
         },
         screen,
         numbers,

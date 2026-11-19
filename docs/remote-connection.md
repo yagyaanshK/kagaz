@@ -57,7 +57,21 @@ the other kinds: saved devices, Found nearby, Add.
   scaled to fit, with zoom. One slider from Sharper to Smoother, automatic
   by default, with the measured delay shown. Clipboard text both ways;
   sound and sending files over RDP (VNC has neither, and Kagaz says
-  so). Choosing a monitor was dropped on 2026-11-17: over RDP the
+  so). Sending files (the owner, 2026-11-19, after the clipboard way did
+  nothing on the real PC: "build all", plus a dialog on Windows' own
+  Remote Desktop) goes one of four ways, a setting per device:
+  Windows asks where to save them (default: the files are put in the
+  session's own folder, shown there as the drive `\\tsclient\Kagaz`
+  once something is sent, and Kagaz opens Windows' Run box and starts a
+  small PowerShell helper from that drive: Windows' own folder chooser,
+  then Windows' own copy with its progress, nothing installed); their
+  folder opens there; on its clipboard to be pasted (the old way, now
+  saying it waits, with each clipboard step in the log); or over SSH
+  with scp into a folder there. A folder of this computer can also be
+  shared with a device as a drive, both ways, from the next connection.
+  A computer running Kagaz takes the files at once into its person's
+  Downloads, beside what is there, with "N files in Downloads" on its
+  sign to show them. Choosing a monitor was dropped on 2026-11-17: over RDP the
   computer makes one screen for the viewer. The picture comes by RDP's
   graphics pipeline, H.264 decoded by OpenH264 built in from source
   (chosen 2026-11-17), with the older picture as a per-computer switch.

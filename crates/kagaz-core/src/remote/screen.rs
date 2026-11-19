@@ -126,6 +126,10 @@ pub enum Sending {
     Withdrawn,
     /// They could not be offered, or one could not be read.
     Failed { why: String },
+    /// A step of the clipboard's own while they are on offer (the
+    /// computer took or refused the list, kept it, asked for a size or a
+    /// piece), for the log: words and numbers, never names.
+    Step { step: String },
 }
 
 /// One step in bringing a shown copy of the screen up to date; the steps

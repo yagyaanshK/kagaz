@@ -723,6 +723,33 @@ Plan: `docs/remote-connection.md` (agreed 2026-11-16).
       when asked; Kagaz asks at once, so what is copied on the computer
       is on this device's clipboard without a further step. Tested
       against the test server, not yet against real Windows.
+- [ ] **Sending files, four ways** (the owner, 2026-11-19: three .exe
+      files offered by the clipboard never arrived on the real PC; Ctrl +
+      V in a folder there did nothing; Kagaz's log shows "files offered
+      3, 52847616 bytes" and nothing after, so Windows never asked for a
+      byte. Not explained yet: the viewer now logs each clipboard step
+      while files are on offer (the list taken or refused, kept, size or
+      pieces asked, pushed aside by a copy on either side). Built, **not
+      yet tried on the PC**: a setting per device, "Files sent from
+      here": (1) it asks where to save them (default): the files are put
+      in the session's own folder (`~/.cache/kagaz/sent/…`, gone with the
+      session), shown there as the drive `\\tsclient\Kagaz` once
+      something is sent (IronRDP's filesystem backend, two folders routed
+      by drive), and Kagaz types Windows + R and a line starting
+      `\\tsclient\Kagaz\.kagaz\save.ps1` (Windows' folder chooser, then
+      Windows' own copy with progress, then Explorer on the result);
+      (2) their folder opens there; (3) on its clipboard (says it waits
+      until pasted); (4) over SSH (system scp, the session's account and
+      password through a private askpass helper, Downloads unless said).
+      "Share a folder with it": a folder of this computer as a drive
+      there, both ways, from the next connection. A computer running
+      Kagaz: files into its person's Downloads, "N files in Downloads" on
+      the sign. **To try on the PC:** send two files and a folder with
+      each way; the dialog should open on the PC within a few seconds;
+      press nothing there while Kagaz types into the Run box; share a
+      folder, reconnect, open This PC there. If the clipboard way still
+      does nothing, send the `files:` lines from Kagaz's log
+      (`~/.cache/kagaz/cameras.log`).
 - [x] **Step 1, Remote Desktop, sending files** (2026-11-17): by the
       computer's clipboard, as Windows' own viewer does. Kagaz says which
       files there are (names made fit for Windows, sizes, when last

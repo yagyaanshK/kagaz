@@ -55,6 +55,8 @@ pub enum Asked {
     /// number, whatever is copied next; and later, that it is done.
     Lock(u32),
     Unlock(u32),
+    /// The computer took the list of what is here (true) or refused it.
+    Listed(bool),
 }
 
 /// What the session and the channel both look at.
@@ -169,6 +171,10 @@ impl CliprdrBackend for Backend {
         self.ask(Asked::List);
     }
 
+    fn on_format_list_response(&mut self, ok: bool) {
+        self.ask(Asked::Listed(ok));
+    }
+
     fn on_process_negotiated_capabilities(&mut self, capabilities: ClipboardGeneralCapabilityFlags) {
         let files = capabilities.contains(ClipboardGeneralCapabilityFlags::STREAM_FILECLIP_ENABLED);
         self.shared.files.store(files, Ordering::Release);
@@ -275,7 +281,7 @@ const MOST_AT_ONCE: u64 = 8 << 20;
 
 /// A name a Windows computer can keep a file under: none of the signs it
 /// reserves, no dot or space at the end, none of its device names.
-fn name_there(name: &str) -> String {
+pub(crate) fn name_there(name: &str) -> String {
     let mut out: String = name
         .chars()
         .map(|c| if c.is_control() || r#"\/:*?"<>|"#.contains(c) { '_' } else { c })
@@ -302,7 +308,7 @@ fn name_there(name: &str) -> String {
 }
 
 /// "report.pdf" for the second file of that name: "report (2).pdf".
-fn numbered(name: &str, n: usize) -> String {
+pub(crate) fn numbered(name: &str, n: usize) -> String {
     match name.rfind('.').filter(|at| *at > 0) {
         Some(at) => format!("{} ({n}){}", &name[..at], &name[at..]),
         None => format!("{name} ({n})"),

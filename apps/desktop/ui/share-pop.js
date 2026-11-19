@@ -49,10 +49,15 @@
       $("sign-mode").textContent = st.control ? "Watch only" : "Let it control";
       $("sign-mode").classList.toggle("hidden", !st.control && !may);
       $("sign-mode").dataset.control = st.control ? "1" : "";
+      // Files the device sent, in Downloads: shown in Explorer.
+      const got = st.received;
+      $("sign-files").classList.toggle("hidden", !got);
+      if (got) $("sign-files").textContent = got.count === 1 ? "1 file in Downloads" : `${got.count} files in Downloads`;
     };
     invoke("share_status").then(show);
     listen("share", (ev) => show(ev.payload));
     $("sign-mode").addEventListener("click", () => send($("sign-mode").dataset.control ? "watch" : "control"));
     $("sign-end").addEventListener("click", () => send("end"));
+    $("sign-files").addEventListener("click", () => send("show-received"));
   }
 })();

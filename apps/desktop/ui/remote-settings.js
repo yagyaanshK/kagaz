@@ -143,6 +143,69 @@ const KagazRemoteSettings = (() => {
     }));
     keys.append(keysRow, el("p", "muted small", "Print Screen, the Windows key, Alt + Tab, Ctrl + Alt + Del and the like, which this computer otherwise keeps. Each press goes to one of the two, never both. Ctrl + Esc leaves full screen; the first time, this computer asks whether Kagaz may have its keys."));
 
+    // Files sent from here to a Remote Desktop computer, and a folder of
+    // this computer shown there as a drive.
+    const files = el("section", "set-section");
+    if (o.rdp && !d.paired) {
+      files.append(el("h3", "", "Files"));
+      const ssh = (d.ways || []).some((w) => w.speaks === "ssh");
+      const ways = [["ask", "It asks where to save them"], ["open", "Their folder opens there"], ["clipboard", "On its clipboard, to paste"]];
+      if (ssh) ways.push(["ssh", "Over SSH, into a folder"]);
+      const how = settings.send_files || "ask";
+      const sshRow = el("div");
+      const drawSsh = (v) => {
+        sshRow.replaceChildren();
+        if (v !== "ssh") return;
+        const folder = el("input");
+        folder.type = "text";
+        folder.placeholder = "Downloads";
+        folder.value = settings.ssh_folder || "";
+        folder.addEventListener("change", () => {
+          if (folder.value.trim()) settings.ssh_folder = folder.value.trim();
+          else delete settings.ssh_folder;
+          keep();
+        });
+        sshRow.append(setRow("Folder there", "From the account's home; with the session's password", folder));
+      };
+      const notes = {
+        ask: "Windows' own dialog there, through the Kagaz drive",
+        open: "On the Kagaz drive there, in a window",
+        clipboard: "Waiting until Ctrl + V in a folder there",
+        ssh: "With scp; the computer runs an SSH server",
+      };
+      const howRow = setRow("Files sent from here", notes[how], select(null, ways, how, (v) => {
+        if (v === "ask") delete settings.send_files;
+        else settings.send_files = v;
+        howRow.querySelector(".set-label .muted").textContent = notes[v];
+        drawSsh(v);
+        keep();
+      }));
+      files.append(howRow, sshRow);
+      drawSsh(how);
+      // A folder of this computer, shown there as a drive both ways.
+      const shared = settings.shared_folder;
+      const pick = el("span", "rc-buttons");
+      const choose = el("button", "", shared ? "Change" : "Choose…");
+      choose.type = "button";
+      choose.addEventListener("click", async () => {
+        const folder = o.pickFolder ? await o.pickFolder() : null;
+        if (!folder) return;
+        settings.shared_folder = folder;
+        keep();
+      });
+      pick.append(choose);
+      if (shared) {
+        const stop = el("button", "", "Stop sharing");
+        stop.type = "button";
+        stop.addEventListener("click", () => {
+          delete settings.shared_folder;
+          keep();
+        });
+        pick.append(stop);
+      }
+      files.append(setRow("Share a folder with it", shared ? `${shared}: a drive there, both ways, from the next connection` : "None: only files you send are shown there", pick));
+    }
+
     const signIn = el("section", "set-section");
     signIn.append(el("h3", "", "Sign-in"));
     if (d.paired) {
@@ -152,7 +215,7 @@ const KagazRemoteSettings = (() => {
       if (o.canRemember) {
         signIn.append(switchRow(!!d.remember, "Remember the PIN", "In this computer's password store, once the computer accepts it. Turning this off forgets it.", (on) => o.remember(on)));
       }
-      return { screen, mouse, keys, signIn };
+      return { screen, mouse, keys, signIn, files };
     }
     const userRow = el("div", "set-row");
     const userLabel = el("label", "", "Sign in as");
@@ -169,7 +232,7 @@ const KagazRemoteSettings = (() => {
     if (o.canRemember) {
       signIn.append(switchRow(!!d.remember, "Remember the password", "In this computer's password store, once the device accepts it. Turning this off forgets it.", (on) => o.remember(on)));
     }
-    return { screen, mouse, keys, signIn };
+    return { screen, mouse, keys, signIn, files };
   }
 
   // What holds for every session window; `keep(change)` saves a change.

@@ -248,7 +248,13 @@ try` opens a session and tells it in numbers, a line a second (how often
 the picture came, how much travelled, the delay), without showing or
 keeping any picture. `remote clip` sends text to the device's clipboard
 (over Remote Desktop text is handed over when something is pasted there,
-so the command stays connected for half a minute). `remote send` sends
+so the command stays connected for half a minute). In the window,
+Send files goes the way chosen for the device: by default Windows there
+asks where to save them (Kagaz shows the files as a drive, `\\tsclient\Kagaz`,
+and starts Windows' own folder chooser and copy from its Run box); or
+their folder opens there; or over SSH into a folder there; or by the
+clipboard as below. A folder of this computer can be shared with a
+device as a drive, both ways. `remote send` sends
 files over Remote Desktop, by the computer's clipboard: Kagaz says which
 files there are (their names and sizes, never where they are kept), and
 the computer reads them when they are pasted there, into whichever folder
@@ -258,8 +264,8 @@ the terminal instead, for a computer that someone sits at. VNC carries no
 files (`remote copy` does, where the device runs an SSH server). `remote
 pattern` serves a moving test card over VNC, to try the viewer without a
 real screen. A session in the terminal plays no sound: the computer's
-sound is for the window. Over Remote Desktop sending whole folders is not
-built yet; there are no monitors to choose from, as the computer makes
+sound is for the window. By the clipboard, whole folders are refused
+(through the drive they go whole); there are no monitors to choose from, as the computer makes
 one screen for the viewer. `remote try` ends by saying how the picture
 came (which codecs, how many frames) and tells each second how much work
 decoding it was. Both kinds of session are checked against test servers

@@ -500,13 +500,14 @@ const KagazRemote = (() => {
     // session's own window (remote-settings.js). What is saved is read
     // back from the list, so that one change does not undo another.
     const now = () => data.devices.find((x) => x.id === d.id) || d;
-    const { screen, mouse, keys, signIn } = KagazRemoteSettings.device(d, {
+    const { screen, mouse, keys, signIn, files } = KagazRemoteSettings.device(d, {
       rdp: overRdp(d),
       vnc: canConnect(d),
       canRemember,
       settings: (next) => save(() => invoke("remote_settings", { id: d.id, settings: next, user: now().user || null, shape: now().shape || null }), "Could not save it").then(() => tellSettings(d.id)),
       user: (name) => save(() => invoke("remote_settings", { id: d.id, settings: now().settings || {}, user: name, shape: now().shape || null }), "Could not save it"),
       remember: (on) => save(() => invoke("remote_remember", { id: d.id, on }), "Could not change it"),
+      pickFolder: () => invoke("remote_pick_folder").catch(() => null),
     });
 
     const paths = el("section", "set-section");
@@ -563,7 +564,7 @@ const KagazRemote = (() => {
     note.setAttribute("role", "status");
     // Keep what is being typed when a check finishes under the person.
     const typing = document.activeElement && document.activeElement.id === "remote-user" ? document.activeElement.value : null;
-    box.replaceChildren(head, soon, note, paths, screen, mouse, keys, signIn, about, forget);
+    box.replaceChildren(head, soon, note, paths, screen, mouse, keys, files, signIn, about, forget);
     if (typing !== null) {
       const again = $("remote-user");
       again.value = typing;

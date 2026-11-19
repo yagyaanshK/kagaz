@@ -1356,7 +1356,7 @@ body.share-sign-body { background: var(--accent); overflow: hidden; }
 .rc-mode { display: inline-flex; border: 1px solid currentColor; border-color: color-mix(in srgb, currentColor 45%, transparent); border-radius: 999px; overflow: hidden; margin: 0 4px; }
 .rc-mode button { min-height: 28px; padding: 0 12px; border: none; border-radius: 0; background: transparent; color: inherit; font: inherit; font-size: 13px; }
 .rc-mode button.on { background: rgba(255, 255, 255, 0.22); font-weight: 600; }
-#remote-share-view .set-row > label.set-label { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; flex: 1 1 auto; min-width: 0; }
+#remote .set-row > label.set-label, #sw-panel .set-row > label.set-label { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; flex: 1 1 auto; min-width: 0; }
 #remote-share-view .set-row { gap: 12px; }
 .share-pin { display: inline-flex; gap: 6px; align-items: center; }
 .share-pin input { width: 160px; }

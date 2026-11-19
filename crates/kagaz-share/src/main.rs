@@ -736,11 +736,25 @@ fn main() -> anyhow::Result<()> {
         None
     };
     // The clipboard and files.
-    let received = match &home {
+    // Files from the viewer: into the person's Downloads (the one signed
+    // in at this screen, when the helper runs it), else a folder of
+    // Kagaz's own, whose old sendings are let go.
+    let fallback = match &home {
         Some(h) => h.join("received"),
         None => std::env::temp_dir().join("kagaz").join("received"),
     };
-    tidy(&received);
+    tidy(&fallback);
+    let received: Arc<dyn Fn() -> PathBuf + Send + Sync> = if pattern {
+        Arc::new(move || fallback.clone())
+    } else {
+        #[cfg(windows)]
+        {
+            let system = home.is_some();
+            Arc::new(move || win::downloads(system).unwrap_or_else(|| fallback.clone()))
+        }
+        #[cfg(not(windows))]
+        Arc::new(move || fallback.clone())
+    };
     let clipboard = if args.iter().any(|a| a == "--no-clipboard") {
         None
     } else {

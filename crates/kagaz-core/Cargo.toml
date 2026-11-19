@@ -88,6 +88,12 @@ ringbuf = "0.5"
 ironrdp-rdpdr = "0.9"
 x509-cert = { version = "0.2", default-features = false, features = ["std"] }
 
+# Folders of this computer shown to a Remote Desktop computer as drives
+# (files sent from here, a shared folder): IronRDP's filesystem backend
+# for this system.
+[target.'cfg(any(target_os = "linux", target_os = "macos"))'.dependencies]
+ironrdp-rdpdr-native = "0.9"
+
 [target.'cfg(not(target_os = "android"))'.dependencies]
 # Atomberg fans over this computer's Bluetooth LE adapter (Linux through
 # BlueZ, Windows WinRT, macOS CoreBluetooth). Async by nature, so a small

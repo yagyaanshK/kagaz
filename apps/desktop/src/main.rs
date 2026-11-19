@@ -2093,6 +2093,7 @@ pub fn run() {
             remote_view::remote_keys,
             remote_view::remote_locks,
             remote_view::remote_pinch,
+            remote_view::remote_pick_folder,
             remote_view::remote_close_window,
             remote_windows::remote_windows,
             remote_windows::remote_window_open,

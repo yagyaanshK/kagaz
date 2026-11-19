@@ -92,6 +92,9 @@ pub struct Status {
     pub control: bool,
     pub asking: Vec<Value>,
     pub problem: Option<String>,
+    /// Files the device connected sent, in Downloads: how many, and the
+    /// first, to show.
+    pub received: Option<Value>,
     /// Windows (the tray, starting with Windows, the helper are offered).
     pub windows: bool,
     /// Kagaz's helper service is installed, and this window steers it.
@@ -529,7 +532,9 @@ fn heard(app: &AppHandle, ev: Value) {
             "left" => {
                 st.session = None;
                 st.control = false;
+                st.received = None;
             }
+            "received" => st.received = Some(ev.clone()),
             _ => {}
         }
     }
@@ -765,6 +770,20 @@ pub fn share_send(app: AppHandle, line: String) -> Result<(), String> {
     let first = line.split_whitespace().next().unwrap_or("");
     // Windows' own page for Remote Desktop, from the choice for the
     // sign-in screen.
+    // The files the device sent, shown in Explorer.
+    if line == "show-received" {
+        let first = app.state::<Share>().status.lock().unwrap().received.as_ref().and_then(|r| r["first"].as_str().map(String::from));
+        let first = first.ok_or("no files were sent")?;
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            // Explorer reads its own line: the path in quotes after the comma.
+            let _ = quiet("explorer.exe").raw_arg(format!("/select,\"{first}\"")).spawn();
+        }
+        #[cfg(not(windows))]
+        let _ = first;
+        return Ok(());
+    }
     if line == "open-rdp-settings" {
         #[cfg(windows)]
         {

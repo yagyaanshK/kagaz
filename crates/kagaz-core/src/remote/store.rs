@@ -171,6 +171,19 @@ pub struct Settings {
     /// Where this computer's own keys go during a session.
     #[serde(default, skip_serializing_if = "SystemKeys::is_default")]
     pub system_keys: SystemKeys,
+    /// How files sent from here reach a Remote Desktop computer: "ask"
+    /// (the computer asks where to save them; none means this), "open"
+    /// (a folder with them opens there), "clipboard" (pasted there),
+    /// "ssh" (copied over SSH into `ssh_folder`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub send_files: Option<String>,
+    /// The folder there that files sent over SSH go into (Downloads
+    /// unless said).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ssh_folder: Option<String>,
+    /// A folder of this computer shown to it as a drive in every session.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shared_folder: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]

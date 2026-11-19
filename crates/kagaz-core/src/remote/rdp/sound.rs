@@ -186,3 +186,27 @@ impl RdpsndClientHandler for Sound {
         }
     }
 }
+
+/// The sound's older channel for a session whose sound stays on the
+/// computer: there only because Windows offers the drives' channel
+/// beside it, it takes no form of sound, so none can be sent.
+#[derive(Debug)]
+pub struct Silent;
+
+impl RdpsndClientHandler for Silent {
+    fn get_formats(&self) -> &[AudioFormat] {
+        &[]
+    }
+
+    fn choose_formats(&self, _server_formats: &[AudioFormat]) -> Vec<AudioFormat> {
+        Vec::new()
+    }
+
+    fn wave(&mut self, _format: &AudioFormat, _ts: u32, _data: Cow<'_, [u8]>) {}
+
+    fn set_volume(&mut self, _volume: VolumePdu) {}
+
+    fn set_pitch(&mut self, _pitch: PitchPdu) {}
+
+    fn close(&mut self) {}
+}

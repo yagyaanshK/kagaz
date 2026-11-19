@@ -44,6 +44,9 @@ pub enum Input {
     /// they are pasted there. How they get on comes back as
     /// [`super::Event::Sending`].
     Files(Vec<std::path::PathBuf>),
+    /// Show the drive of files sent from here on the device (see
+    /// [`Info::sent`]), if it is not shown yet.
+    ShowSent,
     /// Sharper (0) to smoother (10); none lets Kagaz follow the link.
     Picture(Option<u8>),
     /// The lock keys as they are on this keyboard: a device that can sets
@@ -198,6 +201,11 @@ pub struct Info {
     /// to remember, and to compare the next time.
     #[serde(skip)]
     pub identity: Option<Identity>,
+    /// Where files sent through a drive are put for the device to take
+    /// (`\\tsclient\Kagaz` on a Windows computer), in a session that has
+    /// one: a folder of its own, removed when the session ends.
+    #[serde(skip)]
+    pub sent: Option<std::path::PathBuf>,
 }
 
 /// The session in numbers, kept up to date as it runs.

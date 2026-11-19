@@ -616,3 +616,25 @@ pub fn lock() {
         let _ = windows::Win32::System::Shutdown::LockWorkStation();
     }
 }
+
+/// The person's Downloads folder: the one running this, or (run by the
+/// helper, as the system) the one signed in at this screen.
+pub fn downloads(system: bool) -> Option<std::path::PathBuf> {
+    use windows::Win32::System::Com::CoTaskMemFree;
+    use windows::Win32::System::RemoteDesktop::{WTSGetActiveConsoleSessionId, WTSQueryUserToken};
+    use windows::Win32::UI::Shell::{SHGetKnownFolderPath, FOLDERID_Downloads, KF_FLAG_DEFAULT};
+    unsafe {
+        let mut token = HANDLE::default();
+        if system && WTSQueryUserToken(WTSGetActiveConsoleSessionId(), &mut token).is_err() {
+            return None;
+        }
+        let found = SHGetKnownFolderPath(&FOLDERID_Downloads, KF_FLAG_DEFAULT, if system { Some(token) } else { None });
+        if system {
+            let _ = windows::Win32::Foundation::CloseHandle(token);
+        }
+        let path = found.ok()?;
+        let text = path.to_string().ok();
+        CoTaskMemFree(Some(path.0 as *const core::ffi::c_void));
+        text.map(std::path::PathBuf::from)
+    }
+}

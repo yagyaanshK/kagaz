@@ -75,7 +75,7 @@
     note = document.createElement("p");
     note.className = "muted small";
     note.setAttribute("role", "status");
-    const { screen, mouse, keys, signIn } = KagazRemoteSettings.device(device, {
+    const { screen, mouse, keys, signIn, files } = KagazRemoteSettings.device(device, {
       rdp: !!can.rdp && device.ways.some((w) => w.speaks === "rdp"),
       vnc: device.ways.some((w) => w.speaks === "vnc"),
       canRemember: !!can.remember,
@@ -85,6 +85,7 @@
         invoke("remote_settings", { id: device.id, settings: device.settings || {}, user: name, shape: device.shape || null })
           .then(() => tell({})).catch((e) => panelNote("Not saved: " + e));
       },
+      pickFolder: () => invoke("remote_pick_folder").catch(() => null),
       remember: (on) => {
         invoke("remote_remember", { id: device.id, on }).then((saved) => {
           const now = saved && saved.devices && saved.devices.find((d) => d.id === device.id);
@@ -125,7 +126,7 @@
     page.textContent = "Its addresses and more, in Kagaz's main window";
     page.addEventListener("click", () => emit("remote-edit-device", device.id).then(() => invoke("remote_main_show")).catch(() => {}));
     more.append(page);
-    body.replaceChildren(head, note, keys, screen, mouse, signIn, every, windows, more);
+    body.replaceChildren(head, note, keys, screen, mouse, files, signIn, every, windows, more);
     if (typeof KagazIcons !== "undefined") KagazIcons.fill(body);
     body.scrollTop = keepScroll;
   }
