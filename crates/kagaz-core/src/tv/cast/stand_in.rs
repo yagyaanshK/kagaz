@@ -25,16 +25,117 @@ const ME: &str = "receiver-0";
 /// saying what happens through `say`; `lose`: every that-many-th packet
 /// of the stream is lost, as on a weak link.
 pub fn run(name: &str, port: u16, lose: Option<u64>, stop: &AtomicBool, mut say: impl FnMut(String)) -> Result<(), String> {
+    let (_announced, ip) = announce(name, "Kagaz stand-in", port)?;
+    let r = serve_losing(TcpListener::bind(("0.0.0.0", port)).map_err(|e| format!("port {port} is taken: {e}"))?, lose, stop, &mut say, Some(&format!("\"{name}\" is on the network at {ip} as a Google Cast TV, waiting for a sender (Ctrl+C ends).")));
+    r
+}
+
+/// This computer listed on the network as a Google Cast screen while it
+/// lives.
+pub struct Announced(mdns_sd::ServiceDaemon);
+
+impl Drop for Announced {
+    fn drop(&mut self) {
+        let _ = self.0.shutdown();
+    }
+}
+
+/// Lists this computer as a Cast screen called `name` (`model` says what
+/// it is), at `port`; with the address it is listed at.
+pub fn announce(name: &str, model: &str, port: u16) -> Result<(Announced, IpAddr), String> {
     let ip = local_ip().ok_or("this computer has no address on the network")?;
     let daemon = mdns_sd::ServiceDaemon::new().map_err(|e| e.to_string())?;
     let id = hex(&super::super::miracast::random_bytes::<16>());
-    let txt = [("id", id.as_str()), ("fn", name), ("md", "Kagaz stand-in"), ("ve", "05"), ("ca", "4101"), ("st", "0"), ("rs", "")];
-    let info = mdns_sd::ServiceInfo::new("_googlecast._tcp.local.", &format!("Kagaz-stand-in-{}", &id[..8]), "kagaz-stand-in.local.", ip, port, &txt[..])
+    let txt = [("id", id.as_str()), ("fn", name), ("md", model), ("ve", "05"), ("ca", "4101"), ("st", "0"), ("rs", "")];
+    let info = mdns_sd::ServiceInfo::new("_googlecast._tcp.local.", &format!("Kagaz-{}", &id[..8]), "kagaz-screen.local.", ip, port, &txt[..])
         .map_err(|e| e.to_string())?;
     daemon.register(info).map_err(|e| e.to_string())?;
-    let r = serve_losing(TcpListener::bind(("0.0.0.0", port)).map_err(|e| format!("port {port} is taken: {e}"))?, lose, stop, &mut say, Some(&format!("\"{name}\" is on the network at {ip} as a Google Cast TV, waiting for a sender (Ctrl+C ends).")));
-    let _ = daemon.shutdown();
-    r
+    Ok((Announced(daemon), ip))
+}
+
+/// Who asks to show their screen here.
+#[derive(Debug, Clone)]
+pub struct Who {
+    pub address: IpAddr,
+    /// The name the sender gave, or what it is ("Kagaz", a browser).
+    pub name: String,
+}
+
+/// What a screen that takes senders does with them: the stand-in only
+/// counts; the app shows the pictures and plays the sound.
+pub trait Screen {
+    /// A sender asks to start showing its screen: whether to take it.
+    fn ask(&mut self, _who: &Who) -> bool {
+        true
+    }
+    /// A whole picture (H.264, Annex B); `key`: whole by itself.
+    fn picture(&mut self, _data: Vec<u8>, _key: bool) {}
+    /// A sound packet, Opus or (`aac`) AAC, 48 kHz stereo.
+    fn sound(&mut self, _packet: Vec<u8>, _aac: bool) {}
+    /// A line for the record.
+    fn say(&mut self, line: String);
+    /// The sender's session ended (or never started).
+    fn ended(&mut self) {}
+    /// Asked often: false ends this sender's session (this screen's Stop).
+    fn keep(&mut self) -> bool {
+        true
+    }
+}
+
+/// A sender's sound on this computer's speakers: Opus at 48 kHz stereo,
+/// through remote desktop's player (a small reserve that steers itself).
+/// AAC (a Windows sender's) is not played yet; nor is anything on Windows,
+/// whose Opus is not built in.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+pub struct Speaker {
+    player: crate::remote::rdp::play::Player,
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+impl Default for Speaker {
+    fn default() -> Self {
+        Speaker { player: crate::remote::rdp::play::Player::new() }
+    }
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+impl Speaker {
+    /// One packet; false when it could not be played here.
+    pub fn play(&mut self, packet: &[u8], aac: bool) -> bool {
+        use ironrdp_rdpsnd::pdu::{AudioFormat, WaveFormat};
+        if aac {
+            return false;
+        }
+        let opus = AudioFormat {
+            format: WaveFormat::OPUS,
+            n_channels: 2,
+            n_samples_per_sec: 48_000,
+            n_avg_bytes_per_sec: 20_000,
+            n_block_align: 4,
+            bits_per_sample: 16,
+            data: None,
+        };
+        self.player.wave(&opus, packet) > 0
+    }
+
+    pub fn set_volume(&mut self, level: f32) {
+        let v = (level.clamp(0.0, 1.0) * 65535.0) as u16;
+        self.player.set_volume(v, v);
+    }
+
+    /// The sound stops at once.
+    pub fn close(&mut self) {
+        self.player.close();
+    }
+}
+
+/// Only lines, through a closure (the stand-in).
+struct Saying<'a>(&'a mut dyn FnMut(String));
+
+impl Screen for Saying<'_> {
+    fn say(&mut self, line: String) {
+        (self.0)(line)
+    }
 }
 
 /// Takes senders one at a time on `listener` until `stop`.
@@ -45,19 +146,27 @@ pub fn serve(listener: TcpListener, stop: &AtomicBool, say: &mut dyn FnMut(Strin
 /// The same, losing every `lose`th packet of the stream (a weak link, for
 /// tests of resending and of the rate).
 pub fn serve_losing(listener: TcpListener, lose: Option<u64>, stop: &AtomicBool, say: &mut dyn FnMut(String), hello: Option<&str>) -> Result<(), String> {
-    listener.set_nonblocking(true).map_err(|e| e.to_string())?;
-    let config = tls_setup()?;
     if let Some(h) = hello {
         say(h.to_string());
     }
+    receive(listener, lose, stop, &mut Saying(say))
+}
+
+/// Takes senders one at a time on `listener` until `stop`, each handed to
+/// `screen`.
+pub fn receive(listener: TcpListener, lose: Option<u64>, stop: &AtomicBool, screen: &mut dyn Screen) -> Result<(), String> {
+    listener.set_nonblocking(true).map_err(|e| e.to_string())?;
+    let config = tls_setup()?;
     while !stop.load(Ordering::Relaxed) {
         match listener.accept() {
             Ok((tcp, from)) => {
-                say(format!("A sender connected from {}.", from.ip()));
-                match session(tcp, config.clone(), lose, stop, say) {
-                    Ok(()) => say("The sender left.".into()),
-                    Err(e) => say(format!("The session ended: {e}")),
+                screen.say(format!("A sender connected from {}.", from.ip()));
+                let r = session(tcp, from.ip(), config.clone(), lose, stop, screen);
+                match r {
+                    Ok(()) => screen.say("The sender left.".into()),
+                    Err(e) => screen.say(format!("The session ended: {e}")),
                 }
+                screen.ended();
             }
             Err(e) if e.kind() == ErrorKind::WouldBlock => std::thread::sleep(Duration::from_millis(50)),
             Err(e) => return Err(e.to_string()),
@@ -183,7 +292,8 @@ struct Taken {
     aac: bool,
 }
 
-fn session(mut tcp: TcpStream, config: Arc<rustls::ServerConfig>, lose: Option<u64>, stop: &AtomicBool, say: &mut dyn FnMut(String)) -> Result<(), String> {
+fn session(mut tcp: TcpStream, address: IpAddr, config: Arc<rustls::ServerConfig>, lose: Option<u64>, stop: &AtomicBool, screen: &mut dyn Screen) -> Result<(), String> {
+    let mut who = Who { address, name: String::new() };
     tcp.set_nonblocking(false).ok();
     tcp.set_nodelay(true).ok();
     tcp.set_read_timeout(Some(Duration::from_secs(10))).ok();
@@ -224,9 +334,27 @@ fn session(mut tcp: TcpStream, config: Arc<rustls::ServerConfig>, lose: Option<u
             let request = j["requestId"].as_i64().unwrap_or(0);
             match (namespace.as_str(), kind) {
                 (HEARTBEAT, "PING") => link.send(&from, HEARTBEAT, &json!({ "type": "PONG" }))?,
+                // Kagaz's sender gives its device's name; others what
+                // they are.
+                ("urn:x-cast:com.google.cast.tp.connection", "CONNECT") if who.name.is_empty() => {
+                    who.name = j["senderName"]
+                        .as_str()
+                        .or_else(|| j["userAgent"].as_str())
+                        .unwrap_or("")
+                        .chars()
+                        .filter(|c| !c.is_control())
+                        .take(60)
+                        .collect();
+                }
+                (super::channel::RECEIVER, "LAUNCH") if j["appId"] == super::APP && !app_running && !screen.ask(&who) => {
+                    screen.say(format!("Declined {}.", if who.name.is_empty() { who.address.to_string() } else { who.name.clone() }));
+                    let r = json!({ "type": "LAUNCH_ERROR", "requestId": request, "reason": "CANCELLED" });
+                    link.send(&from, super::channel::RECEIVER, &r)?;
+                    return Ok(());
+                }
                 (super::channel::RECEIVER, "LAUNCH") if j["appId"] == super::APP => {
                     app_running = true;
-                    say("The sender started screen mirroring.".into());
+                    screen.say("The sender started screen mirroring.".into());
                     let mut s = status(true);
                     s["requestId"] = json!(request);
                     link.send(&from, super::channel::RECEIVER, &s)?;
@@ -241,7 +369,7 @@ fn session(mut tcp: TcpStream, config: Arc<rustls::ServerConfig>, lose: Option<u
                     link.send(&from, super::channel::RECEIVER, &s)?;
                 }
                 (super::channel::RECEIVER, "STOP") => {
-                    say("The sender stopped screen mirroring.".into());
+                    screen.say("The sender stopped screen mirroring.".into());
                     link.send(&from, super::channel::RECEIVER, &status(false))?;
                     return Ok(());
                 }
@@ -259,7 +387,7 @@ fn session(mut tcp: TcpStream, config: Arc<rustls::ServerConfig>, lose: Option<u
                             "display": { "dimensions": { "width": 3840, "height": 2160, "frameRate": "60" }, "scaling": "sender" },
                         }
                     });
-                    say(format!(
+                    screen.say(format!(
                         "Offered {}; took {} (port {port}).",
                         j["offer"]["supportedStreams"].as_array().map(|s| s.len()).unwrap_or(0),
                         taken.iter().map(|t| if t.sound { "the sound" } else { "the pictures" }).collect::<Vec<_>>().join(" and ")
@@ -272,6 +400,10 @@ fn session(mut tcp: TcpStream, config: Arc<rustls::ServerConfig>, lose: Option<u
         }
         if last_heard.elapsed() > Duration::from_secs(20) {
             return Err("the sender went quiet".into());
+        }
+        if !screen.keep() {
+            screen.say("Stopped here.".into());
+            return Ok(());
         }
         let Some(socket) = &udp else {
             std::thread::sleep(Duration::from_millis(5));
@@ -297,15 +429,19 @@ fn session(mut tcp: TcpStream, config: Arc<rustls::ServerConfig>, lose: Option<u
                         while let Some(p) = t.receiver.picture() {
                             completed = true;
                             if t.sound {
+                                screen.sound(p.clone(), t.aac);
                                 sound_packets += 1;
                                 sound_samples += if t.aac { 1024 } else { super::super::miracast::external::opus_samples(&p) as u64 };
                             } else {
                                 pictures += 1;
                                 bytes += p.len() as u64;
-                                if let Some(s) = sps_size(&p) {
+                                let key = whole_by_itself(&p);
+                                let sized = sps_size(&p);
+                                screen.picture(p, key);
+                                if let Some(s) = sized {
                                     whole += 1;
                                     if size != Some(s) {
-                                        say(format!("The pictures are {} x {} now.", s.0, s.1));
+                                        screen.say(format!("The pictures are {} x {} now.", s.0, s.1));
                                         size = Some(s);
                                     }
                                 }
@@ -330,7 +466,7 @@ fn session(mut tcp: TcpStream, config: Arc<rustls::ServerConfig>, lose: Option<u
             let secs = noted.elapsed().as_secs_f64();
             noted = Instant::now();
             if pictures > 0 || sound_packets > 0 {
-                say(format!(
+                screen.say(format!(
                     "{:.0} pictures a second, {:.1} Mbit/s, {whole} whole; sound: {sound_packets} packets, {:.2} s of it.",
                     pictures as f64 / secs,
                     bytes as f64 * 8.0 / secs / 1e6,
@@ -382,6 +518,11 @@ fn take_offer(j: &Value) -> Vec<Taken> {
         out.push(Taken { index: s["index"].as_u64().unwrap_or(0), receiver: Receiver::new(agreed), sound, aac: codec == "aac" });
     }
     out
+}
+
+/// Whether an Annex B picture is whole by itself (holds an IDR slice).
+pub fn whole_by_itself(annex_b: &[u8]) -> bool {
+    annex_b.windows(4).any(|w| w[..3] == [0, 0, 1] && w[3] & 0x1f == 5)
 }
 
 /// The picture size a whole picture's sequence header gives (H.264).

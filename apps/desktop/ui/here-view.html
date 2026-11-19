@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en" data-viewer="on" data-pop="here-view">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Kagaz</title>
+  <script src="platform.js"></script>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="skins.css">
+</head>
+<body class="here-body">
+  <!-- Another device's screen shown on this computer (here.rs opens this
+       window once the person allowed it): its picture under Kagaz's green
+       bar, which fades away in full screen until the pointer moves. -->
+  <header id="bar" class="here-bar">
+    <h1 id="bar-title">A device's screen</h1>
+    <span id="here-info" class="here-info" aria-live="polite"></span>
+    <div class="bar-actions">
+      <button id="here-full" type="button" class="bar-btn" title="Full screen" aria-label="Full screen"><span class="ic" data-icon="full"></span></button>
+      <button id="here-stop" type="button" class="here-stop">Stop</button>
+    </div>
+  </header>
+  <main id="here-stage" class="here-stage" aria-label="The device's screen">
+    <p id="here-wait" class="here-wait">Waiting for the first picture…</p>
+  </main>
+  <script src="icons.js"></script>
+  <script src="player.js"></script>
+  <script src="here-pop.js"></script>
+</body>
+</html>

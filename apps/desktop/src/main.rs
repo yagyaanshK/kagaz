@@ -35,6 +35,8 @@ mod ring_notice;
 mod ringtones;
 mod prefs;
 mod tvs;
+#[cfg(not(mobile))]
+mod here;
 mod saving;
 mod xiaomi;
 
@@ -2004,6 +2006,16 @@ pub fn run() {
             tvs::tv_phone,
             tvs::tv_controls,
             tvs::tv_control,
+            #[cfg(not(mobile))]
+            here::here_status,
+            #[cfg(not(mobile))]
+            here::here_set,
+            #[cfg(not(mobile))]
+            here::here_answer,
+            #[cfg(not(mobile))]
+            here::here_watch,
+            #[cfg(not(mobile))]
+            here::here_stop,
             saving::save_folder_open,
             saving::save_picture,
             xiaomi::xiaomi_signed_in,

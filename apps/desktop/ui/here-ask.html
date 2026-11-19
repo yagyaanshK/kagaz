@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en" data-pop="here-ask">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Kagaz</title>
+  <script src="platform.js"></script>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="skins.css">
+</head>
+<body class="share-pop">
+  <!-- A phone or computer asks to show its screen on this one (here.rs
+       opens this window on top of everything). -->
+  <form id="ask" class="share-ask">
+    <h1 class="share-ask-title"><span class="ic" data-icon="tv"></span><span id="ask-who">A device wants to show its screen here</span></h1>
+    <p class="muted small">Its screen opens in a window, with its sound.</p>
+    <div class="actions">
+      <button id="ask-no" type="button">Decline</button>
+      <button id="ask-yes" type="submit" class="accent">Allow</button>
+    </div>
+    <p id="ask-left" class="muted small" role="status"></p>
+  </form>
+  <script src="icons.js"></script>
+  <script src="here-pop.js"></script>
+</body>
+</html>

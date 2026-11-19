@@ -755,9 +755,38 @@ resent, a second of sound each second.
   frame. Whether the LG's Cast receiver takes the change of size is to
   be seen.
 
+### This computer as a screen, first step (2026-11-19, built; not yet used)
+
+The TVs page on a computer has "This computer as a screen": "Let phones
+and computers show their screen here", off until turned on (and back
+on at Kagaz's start only if left on). While on (`here.rs`), Kagaz lists
+this computer as a Google Cast screen under its name (port 8009) and
+takes senders one at a time through the stand-in's receiving side
+(`cast/stand_in.rs`, its `Screen`): each is asked about first in a small
+window on top at the bottom right (`here-ask.html`, as sharing's
+question: Allow or Decline, no answer in 30 seconds is Decline; a
+declined sender is told the screen would not start); an allowed one
+opens a window of its own (`here-view.html`: its name and screen under
+Kagaz's green bar, the size and pictures a second beside it, Full screen
+(F) and Stop in red; in full screen the bar fades until the pointer
+moves; closing the window is Stop). The pictures go to the page as the
+cameras' do and the page decodes them (WebCodecs, AVCC); the sound plays
+on this computer's speakers through remote desktop's player (Opus; AAC
+from a Windows sender is not played yet, nor anything on Windows, whose
+Opus is not built in). Kagaz's sender gives its device's name when it
+connects ("a phone" from a phone). This computer is left out of its
+own list of TVs.
+
+Who can send here now: Kagaz itself (a phone, another computer), since
+Kagaz's sender takes a screen's certificate as shown. Android's and
+Chrome's own Cast check the screen's certificate against Google's and
+will not send to it; Windows' own Cast and Samsung's Smart View speak
+Miracast, next.
+
 ## Next, agreed 2026-11-18
 
-- **This computer as a screen** (the owner approved the plan): on the TVs
+- **This computer as a screen** (the owner approved the plan; the first
+  step, from Kagaz senders over Cast, is built, see above): on the TVs
   page, off until switched on ("Let phones and computers show their
   screen here"); while on, Kagaz announces this computer as a display;
   each sender is asked about first (Allow / Decline); the picture opens in

@@ -8,7 +8,7 @@
 //! that [`InputSender`] pokes, so a key or a click leaves at once.
 
 mod clip;
-mod play;
+pub(crate) mod play;
 mod sound;
 
 use super::keys;

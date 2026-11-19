@@ -354,7 +354,9 @@ const KagazTvs = (() => {
     $("tvs-tiles").replaceChildren(...saved.flatMap((t) => (showing === t.name && playing && sw && sw.live ? [tile(t), switches()] : [tile(t)])));
     $("tvs-tiles").classList.toggle("hidden", saved.length === 0);
     $("tvs-empty").classList.toggle("hidden", saved.length > 0);
-    const others = found.filter((f) => !f.added && !saved.some((s) => s.name === f.name));
+    // This computer itself, listed as a screen, is not one to show on.
+    const self = (f) => here && here.on && f.model === "Kagaz" && f.name === here.name;
+    const others = found.filter((f) => !f.added && !saved.some((s) => s.name === f.name) && !self(f));
     $("tvs-found").replaceChildren(...others.map(foundRow));
     $("tvs-found-head").classList.toggle("hidden", others.length === 0);
   }
@@ -428,6 +430,60 @@ const KagazTvs = (() => {
     sw = Object.assign({}, sw, e.payload);
     render();
   });
+
+  // This computer as a screen (here.rs): a row as "This computer's
+  // screens" has, below the TVs; off until turned on. Computers only.
+  let here = null;
+  function hereSection() {
+    if (PHONE) return;
+    let sec = document.getElementById("tvs-here");
+    if (!sec) {
+      sec = el("section", "set-section here-section");
+      sec.id = "tvs-here";
+      document.querySelector("#tvs .tv-about").before(sec);
+    }
+    const st = here || { on: false, name: "" };
+    const r = el("div", "set-row");
+    const l = el("label", "set-label");
+    l.htmlFor = "here-on";
+    l.append(
+      el("span", "", "Let phones and computers show their screen here"),
+      el("span", "muted small", st.on ? `Listed as “${st.name}” on this network. Each one is asked about first.` : "This computer is listed as a screen on this network while this is on. Each one is asked about first.")
+    );
+    const c = el("span", "set-control");
+    const box = el("input", "tv-switch");
+    box.type = "checkbox";
+    box.setAttribute("role", "switch");
+    box.id = "here-on";
+    box.checked = !!st.on;
+    box.addEventListener("change", async () => {
+      try {
+        here = await invoke("here_set", { on: box.checked });
+      } catch (e) {
+        toast(String(e), true);
+      }
+      hereSection();
+    });
+    c.append(box);
+    r.append(l, c);
+    const parts = [el("h3", "", "This computer as a screen"), r];
+    if (st.problem) parts.push(el("p", "cap-warn small", st.problem));
+    if (st.showing) parts.push(el("p", "muted small", `${st.showing}'s screen is showing in its own window.`));
+    sec.replaceChildren(...parts);
+  }
+  if (!PHONE) {
+    invoke("here_status")
+      .then((st) => {
+        here = st;
+        hereSection();
+      })
+      .catch(() => {});
+    listen("here", (e) => {
+      here = e.payload;
+      hereSection();
+      render();
+    });
+  }
 
   $("tvs").addEventListener("refresh", rescan);
 

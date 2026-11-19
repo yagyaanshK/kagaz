@@ -464,6 +464,9 @@ struct Said {
 pub fn init() -> tauri::plugin::TauriPlugin<tauri::Wry> {
     tauri::plugin::Builder::new("kagaz-tv")
         .setup(|_app, _api| {
+            // This computer as a screen, if it was left on.
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            super::here::resume(_app);
             // A session's shortcuts (registered only while one runs).
             #[cfg(any(windows, target_os = "macos"))]
             {

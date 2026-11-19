@@ -115,6 +115,33 @@ pub fn fields(mut b: &[u8]) -> Option<[String; 7]> {
     Some(out)
 }
 
+/// This device's name, for a screen that asks who wants to show here
+/// (another Kagaz): the computer's name, or "a phone".
+pub fn device_name() -> String {
+    #[cfg(windows)]
+    let host = std::env::var("COMPUTERNAME").unwrap_or_default();
+    #[cfg(unix)]
+    let host = {
+        let mut buf = [0u8; 256];
+        // SAFETY: a buffer of the length given; the name ends in a nul.
+        let r = unsafe { libc::gethostname(buf.as_mut_ptr().cast(), buf.len()) };
+        if r == 0 {
+            let end = buf.iter().position(|b| *b == 0).unwrap_or(buf.len());
+            String::from_utf8_lossy(&buf[..end]).into_owned()
+        } else {
+            String::new()
+        }
+    };
+    #[cfg(not(any(windows, unix)))]
+    let host = String::new();
+    let host = host.trim().trim_end_matches(".local").to_string();
+    if cfg!(any(target_os = "android", target_os = "ios")) || host.is_empty() || host == "localhost" {
+        "a phone".into()
+    } else {
+        host
+    }
+}
+
 /// TLS that takes the TV's own certificate as shown. Cast devices make
 /// their certificate themselves, some in the old version 1 form that
 /// certificate libraries refuse to read, so neither it nor the signature
@@ -197,7 +224,8 @@ impl Channel {
 
     /// Opens a conversation with the TV, or with an app on it.
     pub fn greet(&mut self, to: &str) -> Result<(), String> {
-        self.send(to, CONNECTION, &json!({ "type": "CONNECT", "userAgent": "Kagaz", "connType": 0, "origin": {} }))
+        let name = device_name();
+        self.send(to, CONNECTION, &json!({ "type": "CONNECT", "userAgent": "Kagaz", "senderName": name, "connType": 0, "origin": {} }))
     }
 
     pub fn send(&mut self, to: &str, namespace: &str, json: &Value) -> Result<(), String> {

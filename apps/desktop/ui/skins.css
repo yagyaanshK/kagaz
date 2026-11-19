@@ -535,6 +535,21 @@ input.tv-switch { appearance: none; -webkit-appearance: none; position: relative
 input.tv-switch::before { content: ""; position: absolute; top: 50%; left: 6px; width: 16px; height: 16px; border-radius: 50%; background: var(--muted); transform: translateY(-50%); transition: left 150ms, width 150ms, height 150ms, background 150ms; }
 input.tv-switch:checked { border-color: var(--accent); background: var(--accent); }
 input.tv-switch:checked::before { left: 22px; width: 24px; height: 24px; background: var(--accent-text); }
+/* Each system's own switch: GNOME's (a wide pill, the knob white on the
+   accent), Fluent's toggle (a 40 x 20 outline, a small knob), the Mac's
+   (a filled 38 x 22 pill, a white knob). */
+[data-os="gnome"] input.tv-switch { width: 48px; height: 26px; border: none; border-radius: 13px; background: rgba(127, 127, 127, 0.3); }
+[data-os="gnome"] input.tv-switch::before { left: 3px; width: 20px; height: 20px; background: #fff; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3); }
+[data-os="gnome"] input.tv-switch:checked { background: var(--accent); }
+[data-os="gnome"] input.tv-switch:checked::before { left: 25px; width: 20px; height: 20px; background: #fff; }
+[data-os="windows"] input.tv-switch { width: 40px; height: 20px; border: 1px solid var(--muted); border-radius: 10px; background: transparent; }
+[data-os="windows"] input.tv-switch::before { left: 4px; width: 12px; height: 12px; }
+[data-os="windows"] input.tv-switch:checked { border-color: var(--accent); background: var(--accent); }
+[data-os="windows"] input.tv-switch:checked::before { left: 23px; width: 12px; height: 12px; background: var(--accent-text); }
+[data-os="macos"] input.tv-switch { width: 38px; height: 22px; border: none; border-radius: 11px; background: rgba(127, 127, 127, 0.3); }
+[data-os="macos"] input.tv-switch::before { left: 2px; width: 18px; height: 18px; background: #fff; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3); }
+[data-os="macos"] input.tv-switch:checked { background: var(--accent); }
+[data-os="macos"] input.tv-switch:checked::before { left: 18px; width: 18px; height: 18px; background: #fff; }
 /* On a computer the sheet is a dialog: the rows keep its padding. */
 :root:not([data-os="android"]):not([data-os="ios"]) .tv-ways { margin: 4px -20px 0; }
 :root:not([data-os="android"]):not([data-os="ios"]) .tv-ways .tv-way { min-height: 56px; padding: 8px 20px; }
@@ -581,3 +596,21 @@ body.tv-strip-body { display: block; min-height: 0; margin: 0; overflow: hidden;
 .tv-strip-stop { padding: 0 14px; border: none; border-radius: var(--r-btn, 999px); background: #C62828; color: #fff; font-weight: 600; }
 [data-os="windows"] .tv-strip button { border-radius: 4px; }
 [data-os="windows"] .tv-strip { border-radius: 0; }
+/* This computer as a screen (here-view.html): the device's screen under
+   Kagaz's green bar (as a remote session's window), black around the
+   picture; in full screen the bar fades away until the pointer moves. */
+body.here-body { display: flex; flex-direction: column; height: 100vh; margin: 0; overflow: hidden; background: #000; }
+.here-bar { display: flex; align-items: center; gap: 12px; flex: none; }
+.here-bar #bar-title { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.here-info { flex: 1 1 auto; min-width: 0; font-size: 13px; opacity: 0.85; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+.here-stop { min-height: 32px; margin: 0 4px 0 6px; padding: 0 16px; border: none; border-radius: var(--r-btn, 999px); background: #C62828; color: #fff; font: inherit; font-weight: 600; }
+.here-stage { position: relative; flex: 1 1 auto; min-height: 0; display: flex; align-items: center; justify-content: center; background: #000; }
+.here-stage .kz-player { position: absolute; inset: 0; }
+.here-stage .kz-canvas { width: 100%; height: 100%; object-fit: contain; }
+.here-wait { position: relative; z-index: 1; margin: 0; color: #c8ccc9; }
+:fullscreen .here-bar { position: fixed; top: 0; left: 0; right: 0; z-index: 5; transition: opacity 300ms; }
+body.here-idle .here-bar { opacity: 0; pointer-events: none; }
+body.here-idle { cursor: none; }
+/* The TVs page: this computer as a screen, a row as "This computer's
+   screens" has. */
+.here-section { margin-top: 24px; }
