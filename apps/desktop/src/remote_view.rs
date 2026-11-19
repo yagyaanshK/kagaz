@@ -412,6 +412,7 @@ fn forward(app: AppHandle, id: u64, session: remote::Session, channel: Channel<I
         let mut socket = pipe.and_then(|p| p.accept(Duration::from_secs(2)));
         #[cfg(not(target_os = "linux"))]
         let _ = pipe;
+        #[cfg_attr(not(target_os = "linux"), allow(unused_mut))]
         let mut send = |packet: Vec<u8>| {
             #[cfg(target_os = "linux")]
             if let Some(s) = socket.as_mut() {
@@ -774,15 +775,22 @@ pub async fn remote_clipboard_push(app: AppHandle, session: u64, asked: Option<b
 }
 
 /// A folder of this computer to share with a device, chosen by the
-/// person; none when they chose nothing.
+/// person; none when they chose nothing. A phone's dialog has no folder
+/// chooser, so there it is always none.
 #[tauri::command]
 pub async fn remote_pick_folder(app: AppHandle) -> Result<Option<String>, String> {
-    blocking(move || {
+    #[cfg(desktop)]
+    return blocking(move || {
         use tauri_plugin_dialog::DialogExt;
         let picked = app.dialog().file().set_title("A folder to share with the device").blocking_pick_folder();
         Ok(picked.and_then(|p| p.into_path().ok()).map(|p| p.to_string_lossy().to_string()))
     })
-    .await
+    .await;
+    #[cfg(mobile)]
+    {
+        let _ = app;
+        Ok(None)
+    }
 }
 
 /// How files were sent, for the page to say.
