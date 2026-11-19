@@ -781,3 +781,27 @@ body.here-idle { cursor: none; }
 [data-os="android"] #add-grid .kind-tile .kind-note { font-size: 14px; color: var(--muted); }
 [data-os="android"] #add-grid .kind-tile.soon .kind-icon { background: none; color: var(--muted); }
 [data-os="android"] #main .brand-tile { border: none; border-radius: 16px; background: var(--tile-bg); }
+
+/* ===================== A button feels pressed when pressed =====================
+   Every button and clickable row shades while the pointer is over it and
+   shades more while held down, in its own text colour, so the same rule
+   works on a filled, a tonal and a flat button. Laid over the button's
+   own colour as an image, so no part's colour has to change. Strengths
+   as each system sets them: libadwaita 7% and 16% of the text colour,
+   Material's state layers 8% and 10%, Fluent and macOS lighter on hover
+   and a clear step darker when pressed. */
+:root { --state-hover: 7%; --state-press: 16%; }
+:root[data-os="android"], :root[data-os="ios"] { --state-hover: 8%; --state-press: 12%; }
+:root[data-os="windows"] { --state-hover: 5%; --state-press: 11%; }
+:root[data-os="macos"] { --state-hover: 5%; --state-press: 14%; }
+:is(button, [role="button"], .set-door, summary):not(:disabled):not([aria-disabled="true"]):hover {
+  background-image: linear-gradient(color-mix(in srgb, currentColor var(--state-hover), transparent), color-mix(in srgb, currentColor var(--state-hover), transparent)) !important;
+}
+:is(button, [role="button"], .set-door, summary):not(:disabled):not([aria-disabled="true"]):active {
+  background-image: linear-gradient(color-mix(in srgb, currentColor var(--state-press), transparent), color-mix(in srgb, currentColor var(--state-press), transparent)) !important;
+}
+button, [role="button"], .set-door { transition: background-color 120ms ease-out, box-shadow 120ms ease-out; }
+/* A phone has no pointer over a button: only the press shows. */
+@media (hover: none) {
+  :is(button, [role="button"], .set-door, summary):not(:active):hover { background-image: none !important; }
+}
