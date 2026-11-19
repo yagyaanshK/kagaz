@@ -471,9 +471,14 @@ try {
 } catch { exit 1 }
 "#;
 
-/// The line typed into Windows' Run box for a helper on the Kagaz drive.
-pub fn helper_line(script: &str, argument: &str) -> String {
-    format!(r#"powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \\tsclient\Kagaz\.kagaz\{script} "{argument}""#)
+/// The line typed into Windows' Run box for a helper on the Kagaz drive,
+/// given `arguments`: PowerShell, waiting up to ten seconds for the drive
+/// to appear there (it is announced only a moment before).
+pub fn helper_line(script: &str, arguments: &[&str]) -> String {
+    let arguments: String = arguments.iter().map(|a| format!(" '{}'", a.replace('\'', "''"))).collect();
+    format!(
+        r#"powershell -nop -ep bypass -w hidden -c "$f='\\tsclient\Kagaz\.kagaz\{script}'; for ($i = 0; $i -lt 40 -and !(Test-Path $f); $i++) {{ sleep -m 250 }}; & $f{arguments}""#
+    )
 }
 
 /// Where a batch goes there.
@@ -491,8 +496,8 @@ pub enum Place {
 /// the batch's folder opened.
 pub fn run_line(batch: &str, place: Place) -> String {
     match place {
-        Place::Ask => helper_line("save.ps1", batch),
-        Place::At(x, y) => format!(r#"{} "{x},{y}""#, helper_line("save.ps1", batch)),
+        Place::Ask => helper_line("save.ps1", &[batch]),
+        Place::At(x, y) => helper_line("save.ps1", &[batch, &format!("{x},{y}")]),
         Place::Open => format!(r#"explorer "\\tsclient\Kagaz\{batch}""#),
     }
 }
@@ -518,8 +523,13 @@ mod tests {
         assert_eq!(last, (8, 8));
         assert_eq!(stage(&sent, &[from.join("a:b.txt")], |_, _| {}).unwrap(), "Sent 2");
         assert_eq!(shared_name(Path::new("/home/x/Some: Folder.")), "Some Folder");
-        assert!(run_line("Sent 1", Place::At(640, -2)).ends_with(r#"save.ps1 "Sent 1" "640,-2""#));
-        assert!(run_line("Sent 1", Place::Ask).ends_with(r#"save.ps1 "Sent 1""#));
+        assert_eq!(
+            run_line("Sent 1", Place::At(640, -2)),
+            r#"powershell -nop -ep bypass -w hidden -c "$f='\\tsclient\Kagaz\.kagaz\save.ps1'; for ($i = 0; $i -lt 40 -and !(Test-Path $f); $i++) { sleep -m 250 }; & $f 'Sent 1' '640,-2'""#
+        );
+        assert!(run_line("It's", Place::Ask).ends_with(r#"& $f 'It''s'""#));
+        // Windows' Run box takes up to 259 letters.
+        assert!(run_line("Sent 99", Place::At(-32000, -32000)).chars().count() < 259);
         let _ = std::fs::remove_dir_all(&here);
     }
 }

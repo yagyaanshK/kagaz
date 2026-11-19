@@ -1631,11 +1631,12 @@ pub fn open(
         #[cfg(any(target_os = "linux", target_os = "macos"))]
         let devices = match &sent {
             Some(dir) => {
-                let mut r = Rdpdr::new(Box::new(drives::Drives::new(dir, shared.as_deref())), "Kagaz".into());
-                if let Some(folder) = &shared {
-                    r = r.with_drives(Some(vec![(drives::SHARED, drives::shared_name(folder))]));
-                }
-                r
+                // Drives on from the start, even with none to announce yet:
+                // the drive of sent files is added on the first send, which
+                // the channel refuses unless they were on before Windows
+                // was told what this side can do.
+                let initial = shared.as_ref().map(|folder| vec![(drives::SHARED, drives::shared_name(folder))]);
+                Rdpdr::new(Box::new(drives::Drives::new(dir, shared.as_deref())), "Kagaz".into()).with_drives(initial)
             }
             None => Rdpdr::new(Box::new(NoopRdpdrBackend), "Kagaz".into()),
         };

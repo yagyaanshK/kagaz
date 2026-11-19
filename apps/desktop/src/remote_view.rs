@@ -834,9 +834,9 @@ pub async fn remote_send_files(
     at: Option<(i32, i32)>,
 ) -> Result<Sent, String> {
     blocking(move || {
-        let (device_id, sent, window, input) = app
+        let (device_id, sent, window, input, numbers) = app
             .state::<Viewers>()
-            .with(session, |o| (o.device.clone(), o.sent.clone(), o.window.clone(), o.input.clone()))?;
+            .with(session, |o| (o.device.clone(), o.sent.clone(), o.window.clone(), o.input.clone(), o.numbers.clone()))?;
         let device = Devices::load(&Devices::default_path()).ok().and_then(|d| d.find(&device_id).ok().cloned());
         let paired = device.as_ref().is_some_and(|d| d.paired);
         let chosen = how.or_else(|| device.as_ref().and_then(|d| d.settings.send_files.clone()));
@@ -882,7 +882,7 @@ pub async fn remote_send_files(
                     ("open", _) => Place::Open,
                     _ => Place::Ask,
                 };
-                through_drive(&app, &window, &input, sent.as_deref(), &paths, place).map(|_| Sent { count, how, folder: None })
+                through_drive(&app, &window, &input, &numbers, sent.as_deref(), &paths, place).map(|_| Sent { count, how, folder: None })
             }
         }
     })
@@ -898,6 +898,7 @@ fn through_drive(
     app: &AppHandle,
     window: &str,
     input: &kagaz_core::remote::InputSender,
+    numbers: &Numbers,
     sent: Option<&std::path::Path>,
     paths: &[std::path::PathBuf],
     place: Place,
@@ -914,25 +915,43 @@ fn through_drive(
     let helper = sent.join(".kagaz");
     std::fs::create_dir_all(&helper).map_err(|e| e.to_string())?;
     std::fs::write(helper.join("save.ps1"), kagaz_core::remote::rdp::SAVE_SCRIPT).map_err(|e| e.to_string())?;
-    run_there(input, &kagaz_core::remote::rdp::run_line(&batch, place));
-    Ok(())
+    run_there(input, numbers, &kagaz_core::remote::rdp::run_line(&batch, place))
 }
 
 /// The Kagaz drive shown there, then Windows' Run box opened and `line`
 /// typed into it and run. What is typed goes as letters, whatever the
-/// keyboard layout there.
+/// keyboard layout there. The line waits for the drive itself.
 #[cfg(any(target_os = "linux", target_os = "macos"))]
-fn run_there(input: &kagaz_core::remote::InputSender, line: &str) {
+fn run_there(input: &kagaz_core::remote::InputSender, numbers: &Numbers, line: &str) -> Result<(), String> {
     input.send(Input::ShowSent);
-    // The drive takes a moment to appear there; the helpers wait too.
-    std::thread::sleep(Duration::from_millis(1200));
+    std::thread::sleep(Duration::from_millis(300));
     let key = |key: &str, code: &str, down: bool| Input::Key { key: key.into(), code: code.into(), down };
     // Windows + R: the Run box.
+    let before = numbers.read().updates;
     input.send(key("Meta", "MetaLeft", true));
     input.send(key("r", "KeyR", true));
     input.send(key("r", "KeyR", false));
     input.send(key("Meta", "MetaLeft", false));
-    std::thread::sleep(Duration::from_millis(900));
+    // Typed only once the Run box is on its screen: the screen has
+    // changed, then been still a moment (or a moving picture there keeps
+    // it changing). Typed before, the letters went to whatever had the
+    // focus there, and the Run box got the rest of the line.
+    let asked = std::time::Instant::now();
+    let (mut last, mut still) = (before, std::time::Instant::now());
+    loop {
+        std::thread::sleep(Duration::from_millis(50));
+        let now = numbers.read().updates;
+        if now != last {
+            (last, still) = (now, std::time::Instant::now());
+        }
+        let waited = asked.elapsed();
+        if last != before && waited >= Duration::from_millis(500) && (still.elapsed() >= Duration::from_millis(300) || waited >= Duration::from_millis(3000)) {
+            break;
+        }
+        if waited >= Duration::from_secs(6) {
+            return Err("Windows' Run box did not open there; nothing was typed. Try again in a moment.".into());
+        }
+    }
     for c in line.chars() {
         let letter = c.to_string();
         input.send(key(&letter, "", true));
@@ -940,6 +959,7 @@ fn run_there(input: &kagaz_core::remote::InputSender, line: &str) {
     }
     input.send(key("Enter", "Enter", true));
     input.send(key("Enter", "Enter", false));
+    Ok(())
 }
 
 /// The computer's own graphics chip for drawing and encoding its Remote
@@ -952,14 +972,15 @@ pub async fn remote_graphics(app: AppHandle, session: u64, on: bool) -> Result<S
     blocking(move || {
         #[cfg(any(target_os = "linux", target_os = "macos"))]
         {
-            let (device_id, sent, input) = app.state::<Viewers>().with(session, |o| (o.device.clone(), o.sent.clone(), o.input.clone()))?;
+            let (device_id, sent, input, numbers) =
+                app.state::<Viewers>().with(session, |o| (o.device.clone(), o.sent.clone(), o.input.clone(), o.numbers.clone()))?;
             let sent = sent.ok_or("this session has no drive to start it from (Remote Desktop to Windows only)")?;
             let helper = sent.join(".kagaz");
             std::fs::create_dir_all(&helper).map_err(|e| e.to_string())?;
             std::fs::write(helper.join("graphics.ps1"), kagaz_core::remote::rdp::GRAPHICS_SCRIPT).map_err(|e| e.to_string())?;
             let result = helper.join("graphics-result.txt");
             let _ = std::fs::remove_file(&result);
-            run_there(&input, &kagaz_core::remote::rdp::helper_line("graphics.ps1", if on { "on" } else { "off" }));
+            run_there(&input, &numbers, &kagaz_core::remote::rdp::helper_line("graphics.ps1", &[if on { "on" } else { "off" }]))?;
             let until = std::time::Instant::now() + Duration::from_secs(120);
             let code = loop {
                 if let Ok(text) = std::fs::read_to_string(&result) {
@@ -1007,6 +1028,7 @@ fn through_drive(
     _app: &AppHandle,
     _window: &str,
     _input: &kagaz_core::remote::InputSender,
+    _numbers: &Numbers,
     _sent: Option<&std::path::Path>,
     _paths: &[std::path::PathBuf],
     _place: Place,

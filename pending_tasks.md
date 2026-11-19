@@ -776,6 +776,13 @@ Plan: `docs/remote-connection.md` (agreed 2026-11-16).
       window), (c)/(d) onto the desktop or into that folder, (e) opens
       Windows' folder chooser. Also try Explorer with two tabs, a
       scaled screen there (125 % or 150 %), and This PC (should ask).
+      First try (2026-11-20) failed twice: the drive was refused ("dynamic
+      drives require capability configuration before server negotiation":
+      drives are now on from the start of every session with a folder of
+      sent files), and the Run box got only the end of the line, the
+      start typed before it opened. Kagaz now waits for the screen there
+      to change and settle before typing (else says so and types
+      nothing), and the line waits up to ten seconds for the drive.
 - [x] **Step 1, Remote Desktop, sending files** (2026-11-17): by the
       computer's clipboard, as Windows' own viewer does. Kagaz says which
       files there are (names made fit for Windows, sizes, when last
