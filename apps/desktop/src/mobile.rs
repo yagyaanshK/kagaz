@@ -505,7 +505,15 @@ pub fn ring_in_dnd(app: &AppHandle) -> Result<bool, String> {
     Ok(r.on)
 }
 
-/// Android's page for that switch.
+/// Whether doorbell rings can show: Kagaz's notifications are on, and the
+/// "Doorbell calls" kind is not turned off.
+pub fn rings_shown(app: &AppHandle) -> Result<bool, String> {
+    let r: On = phone(app)?.run_mobile_plugin("ringsShown", Nothing {}).map_err(|e| e.to_string())?;
+    Ok(r.on)
+}
+
+/// Android's page for that switch (or for all of Kagaz's notifications,
+/// when those are what is off).
 pub fn ring_settings(app: &AppHandle) -> Result<(), String> {
     phone(app)?.run_mobile_plugin::<()>("ringSettings", Nothing {}).map_err(|e| e.to_string())
 }

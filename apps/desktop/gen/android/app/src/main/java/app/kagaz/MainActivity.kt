@@ -65,6 +65,12 @@ class MainActivity : TauriActivity() {
       showOverLockScreen(intent)
       fromRing(intent)
     }
+    // Opened by KagazBoot after a restart or an update, only so the
+    // doorbell line starts: out of the way at once, as if closed with Home.
+    if (fresh && intent.getBooleanExtra(KagazBoot.EXTRA_BACKGROUND, false)) {
+      intent.removeExtra(KagazBoot.EXTRA_BACKGROUND)
+      moveTaskToBack(true)
+    }
     pipReady()
     // Android 15 and later draw apps under the status and navigation bars;
     // keep the page clear of them (and of the keyboard when it is up).

@@ -205,7 +205,7 @@ const KagazHome = (() => {
         },
       };
     });
-    const chips = trouble ? [{ icon: "print", text: trouble === 1 && savedPrinters.length === 1 ? "Printer needs a look" : `${trouble} printers need a look`, tone: "warn", open }] : [];
+    const chips = trouble ? [{ icon: "print", text: trouble === 1 && savedPrinters.length === 1 ? "Printer needs a look" : `${trouble} printer${trouble === 1 ? " needs" : "s need"} a look`, tone: "warn", open }] : [];
     return { id: "print", icon: "print", title: "Printers & scanners", status: "", devices: devs, open, chips, count: devs.length };
   }
 

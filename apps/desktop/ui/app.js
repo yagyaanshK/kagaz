@@ -311,6 +311,10 @@ async function select(i) {
   KagazNav.push("print-detail", () => $("detail-back").click());
   $("main").scrollTop = 0;
   $("d-title").textContent = title(d);
+  // Its name in the app bar too (on Android the page's own heading gives
+  // way to it, skins.css).
+  if (/^(android|ios)$/.test(document.documentElement.dataset.os || "")) $("detail").dataset.title = title(d);
+  if (typeof KagazShell !== "undefined" && KagazShell.refresh) KagazShell.refresh();
   $("d-sub").textContent = [d.manufacturer, d.model, where(d)].filter(Boolean).join(" · ");
   showSavedButton(d);
   scanId.reset();
@@ -728,10 +732,12 @@ function selectCategory(cat) {
   KagazNav.root(cat === "home" ? null : cat, () => selectCategory("home"));
   // The sidebar and the bottom bar mark the section on screen, and only
   // it. Add a device has an entry of its own in the sidebar; a phone's
-  // bar has none, and there it is part of Home. On a device's page the
-  // bottom bar marks nothing, as that page has no button there.
+  // bar has none, and there it is part of Home, as is each device's page.
   document.querySelectorAll("#categories li[data-cat], #bottom-nav button").forEach((el) => {
-    const on = el.dataset.cat === (cat === "add" && el.tagName === "BUTTON" ? "home" : cat);
+    // On a phone's bar a page reached from Home keeps Home marked, as
+    // Android's navigation bar does (it marked nothing, or Tools).
+    const bar = el.tagName === "BUTTON" && !["home", "tools", "settings"].includes(cat) ? "home" : cat;
+    const on = el.dataset.cat === bar;
     el.classList.toggle("active", on);
     if (on) el.setAttribute("aria-current", "page");
     else el.removeAttribute("aria-current");
@@ -758,6 +764,7 @@ function selectCategory(cat) {
   if (cat === "doorbell") {
     if (!KagazNav.has("door-settings")) doorSettings(false);
     refreshDoorbell();
+    checkRings();
   }
   if (cat === "fans" && typeof KagazFans !== "undefined") KagazFans.show();
   if (cat === "purifiers" && typeof KagazPurifiers !== "undefined") KagazPurifiers.show();
@@ -3274,10 +3281,10 @@ function renderDoorbell() {
       : `in call · ${st.from}`;
     $("door-video-note").textContent = ringing
       ? (st.has_video ? "Answer to see and hear the door camera." : "This station offers no video.")
-      : (st.has_video ? "Door camera picture: coming in the next build. Sound and the door button work." : "No video from this station.");
+      : (st.has_video ? "Sound and the door button work; Kagaz does not show this station's picture yet." : "No video from this station.");
     if (st.door_opened_at) {
       $("door-call-note").textContent = `Door opened at ${new Date(st.door_opened_at * 1000).toLocaleTimeString()}.`;
-      $("door-open").textContent = "Door opened ✓";
+      $("door-open").textContent = "Door opened";
       $("door-open").classList.add("done");
     } else {
       $("door-call-note").textContent = "";
@@ -3610,6 +3617,19 @@ function resumeCameras() {
   }
   if (back.playback) resumeCells(cellsOf($("cam-grid")));
 }
+
+// A phone with Kagaz's notifications off shows no ring (reported
+// 2026-11-19: the switch was off and calls came in unseen): the doorbell
+// page says so. Checked on showing the page and on coming back to it from
+// Android's settings. A computer answers none and shows nothing.
+async function checkRings() {
+  const shown = await invoke("rings_shown").catch(() => null);
+  $("door-rings-off").classList.toggle("hidden", shown !== false);
+}
+$("door-rings-on").addEventListener("click", () => invoke("ring_dnd_settings").catch(() => {}));
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden && currentView === "doorbell") checkRings();
+});
 
 let pausedOutOfSight = null; // the doorbell's live view and videos to bring back
 

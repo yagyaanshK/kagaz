@@ -177,6 +177,9 @@ class KagazPlugin(private val first: Activity) : Plugin(first) {
         val args = invoke.parseArgs(ListenArgs::class.java)
         val context = activity.applicationContext
         val service = Intent(context, KagazCallService::class.java)
+        // Remembered for KagazBoot: after a restart or an update the line
+        // comes back only if it was on.
+        KagazBoot.wanted(context, args.on)
         activity.runOnUiThread {
             try {
                 if (args.on) {
@@ -211,6 +214,32 @@ class KagazPlugin(private val first: Activity) : Plugin(first) {
             activity.startActivity(
                 Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:" + activity.packageName))
             )
+            return // one question at a time; the next launch asks the next
+        }
+        // "Appear on top": Android lets an app start itself in the
+        // background (after the phone restarts, or Kagaz is updated) only
+        // with it. Without it KagazBoot asks for a tap instead.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
+            !Settings.canDrawOverlays(activity) && !prefs.getBoolean("asked_overlay", false)
+        ) {
+            prefs.edit().putBoolean("asked_overlay", true).apply()
+            android.app.AlertDialog.Builder(activity, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                .setTitle("Keep the doorbell after a restart?")
+                .setMessage(
+                    "When the phone restarts or Kagaz is updated, Kagaz can start listening for doorbell calls " +
+                        "again by itself. Android allows that only to apps that may appear on top. Kagaz uses it for " +
+                        "nothing else.\n\nWithout it, a notification asks you to tap to start listening."
+                )
+                .setNegativeButton("Not now", null)
+                .setPositiveButton("Allow") { _, _ ->
+                    try {
+                        activity.startActivity(
+                            Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + activity.packageName))
+                        )
+                    } catch (e: Exception) {
+                    }
+                }
+                .show()
         }
     }
 
@@ -410,11 +439,27 @@ class KagazPlugin(private val first: Activity) : Plugin(first) {
         invoke.resolve(ret)
     }
 
-    /** That page, opened for the person; else Kagaz's notifications. */
+    /** Whether doorbell rings can show (KagazCallService.ringsShown). */
+    @Command
+    fun ringsShown(invoke: Invoke) {
+        KagazCallService.channels(activity)
+        val ret = JSObject()
+        ret.put("on", KagazCallService.ringsShown(activity))
+        invoke.resolve(ret)
+    }
+
+    /** That page, opened for the person; else Kagaz's notifications. With
+     *  all of Kagaz's notifications off, their page first: that is the
+     *  switch to turn on. */
     @Command
     fun ringSettings(invoke: Invoke) {
         KagazCallService.channels(activity)
         val tries = mutableListOf<Intent>()
+        val nm = activity.getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !nm.areNotificationsEnabled()) {
+            tries += Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                .putExtra(Settings.EXTRA_APP_PACKAGE, activity.packageName)
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             tries += Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS)
                 .putExtra(Settings.EXTRA_APP_PACKAGE, activity.packageName)

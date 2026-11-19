@@ -35,6 +35,8 @@ function openCamera(cam) {
   // From the recordings of every camera: this one goes on from where it is.
   const at = isPlayback() && tile ? tileNow(tile) : null;
   camFocus = { id: cam.device_id, listMode: $("cam-when").value, at };
+  // The camera's name in the app bar, where the page's title goes.
+  if (/^(android|ios)$/.test(document.documentElement.dataset.os || "")) $("cameras").dataset.title = camName(cam);
   KagazNav.push("cam-page", closeCamera);
   renderCameraGrid();
   $("main").scrollTop = 0;
@@ -45,6 +47,7 @@ function closeCamera() {
   if (cpRec) cpStopRecord();
   const mode = camFocus.listMode;
   camFocus = null;
+  delete $("cameras").dataset.title;
   KagazNav.pop("cam-page");
   document.querySelectorAll("#cam-grid .kz-full").forEach((el) => KagazPlayer.fullscreen(el, false));
   $("cam-when").value = mode;

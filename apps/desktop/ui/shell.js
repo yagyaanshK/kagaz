@@ -152,7 +152,10 @@ const KagazShell = (() => {
     back.querySelector(".bar-back-word").textContent = levels > 1 && TITLES[view] && view !== "add" ? shortTitle(view) : "Home";
     back.setAttribute("aria-label", "Back");
     // A page can name a step inside it (data-title on its section).
-    const pane = $(view);
+    // Printers has no pane of its own name: a printer's page (#detail),
+    // while it shows, names the step.
+    const detail = view === "print" && !$("detail").classList.contains("hidden") ? $("detail") : null;
+    const pane = detail || $(view);
     const step = pane && pane.dataset.title;
     $("bar-title").textContent = view === "add" ? $("add-title").textContent || TITLES.add : step || TITLES[view] || "Kagaz";
     $("bar-add").classList.toggle("hidden", view !== "home");
@@ -292,5 +295,5 @@ const KagazShell = (() => {
   showKinds();
   if (typeof KagazHome !== "undefined") KagazHome.kinds();
 
-  return { place, ring, kinds, layout: () => layout };
+  return { place, ring, kinds, layout: () => layout, refresh: () => updateBar() };
 })();

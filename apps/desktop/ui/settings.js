@@ -662,7 +662,7 @@ const KagazSettings = (() => {
     pane.dataset.title = title;
     const body = $("settings-body");
     body.replaceChildren();
-    draw(body).then?.(() => {}, () => {});
+    Promise.resolve().then(() => draw(body)).catch(() => {}); // some pages draw at once, others wait for Rust
     KagazNav.push("settings-sub", () => {
       delete pane.dataset.title;
       drawIndex();

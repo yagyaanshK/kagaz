@@ -54,6 +54,24 @@ class KagazCallService : Service() {
         const val EXTRA_ANSWER = "kagaz_answer"
         const val EXTRA_FROM_APP = "kagaz_from_app"
         const val STOPPED_ID = 3
+        const val OFF_CHANNEL = "kagaz-line-off"
+
+        /** The line is not running and a tap starts Kagaz (and it) again. */
+        fun notListening(context: Context, title: String, text: String) {
+            channels(context)
+            val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            nm.notify(
+                STOPPED_ID,
+                NotificationCompat.Builder(context, OFF_CHANNEL)
+                    .setSmallIcon(R.drawable.ic_stat_kagaz)
+                    .setContentTitle(title)
+                    .setContentText(text)
+                    .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+                    .setAutoCancel(true)
+                    .setContentIntent(openApp(context, false))
+                    .build()
+            )
+        }
         private var running: KagazCallService? = null
         private var lineText = "Ready for doorbell calls"
 
@@ -79,6 +97,13 @@ class KagazCallService : Service() {
                 NotificationChannel(LINE_CHANNEL, "Doorbell line", NotificationManager.IMPORTANCE_MIN).apply {
                     description = "Shown while Kagaz is ready to ring for doorbell calls"
                     setShowBadge(false)
+                }
+            )
+            // The line has stopped and needs a tap: seen, unlike the line's
+            // own quiet notification.
+            nm.createNotificationChannel(
+                NotificationChannel(OFF_CHANNEL, "Doorbell not listening", NotificationManager.IMPORTANCE_DEFAULT).apply {
+                    description = "Shown when Kagaz has stopped listening for doorbell calls (Android closed it, the phone restarted or Kagaz was updated) and a tap starts it again"
                 }
             )
             // Earlier ones: with the system's sound; with a fixed vibration.
@@ -147,6 +172,18 @@ class KagazCallService : Service() {
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return false
             val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             return nm.getNotificationChannel(RING_CHANNEL)?.canBypassDnd() == true
+        }
+
+        /** Whether a ring can show at all: Kagaz's notifications are on
+         *  (Android's switch for the whole app, which the person or a
+         *  long press on the line's notification can turn off) and the
+         *  "Doorbell calls" kind is not off. */
+        fun ringsShown(context: Context): Boolean {
+            val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && !nm.areNotificationsEnabled()) return false
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return true
+            val ring = nm.getNotificationChannel(RING_CHANNEL) ?: return true
+            return ring.importance != NotificationManager.IMPORTANCE_NONE
         }
 
         /** Vibrate as a phone call does, until stopped. */
@@ -322,16 +359,7 @@ class KagazCallService : Service() {
         } else {
             // Restarted by Android after it stopped the app: the line is not
             // running. Say so, and let a tap start Kagaz (and the line) again.
-            nm.notify(
-                STOPPED_ID,
-                NotificationCompat.Builder(this, LINE_CHANNEL)
-                    .setSmallIcon(R.drawable.ic_stat_kagaz)
-                    .setContentTitle("Kagaz stopped listening")
-                    .setContentText("Android closed Kagaz. Tap to listen for doorbell calls again.")
-                    .setAutoCancel(true)
-                    .setContentIntent(openApp(this, false))
-                    .build()
-            )
+            notListening(this, "Kagaz stopped listening", "Android closed Kagaz. Tap to listen for doorbell calls again.")
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) stopForeground(STOP_FOREGROUND_REMOVE) else @Suppress("DEPRECATION") stopForeground(true)
             stopSelf()
             return START_NOT_STICKY

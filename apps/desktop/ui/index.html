@@ -380,6 +380,13 @@
           <button id="door-gear" type="button" class="icon" data-bar title="Doorbell settings" aria-label="Doorbell settings"><span class="ic" data-icon="settings"></span></button>
         </div>
       </div>
+      <!-- On a phone whose switch for Kagaz's notifications is off, a ring
+           comes in unseen; said here, with the way to turn it on (app.js). -->
+      <div id="door-rings-off" class="rings-off hidden" role="alert">
+        <span class="ic" data-icon="bell"></span>
+        <span class="rings-off-text"><strong>Doorbell rings won't show</strong><span>Kagaz's notifications are turned off on this phone.</span></span>
+        <button id="door-rings-on" type="button">Turn on</button>
+      </div>
       <!-- Doorbell settings (settings.js): what applies to every doorbell,
            then each kind's own (OneTouch, stations on this network; other
            brands add theirs). Shown instead of the rest of the page. -->
@@ -998,6 +1005,7 @@
   <script src="remote.js"></script>
   <script src="history.js"></script>
   <script src="settings.js"></script>
+  <script src="prefs-android.js"></script>
   <script src="home.js"></script>
   <script src="shell.js"></script>
 </body>

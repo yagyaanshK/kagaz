@@ -113,7 +113,7 @@ const KagazNav = (() => {
   // and so does a kind's settings: coming back to the doorbell from its
   // tile opens the doorbell, not the settings last seen there (reported
   // 2026-11-19). Choosing the page you are on goes to its top.
-  const FLOATING = new Set(["cam-menu", "ot-menu", "ask", "viewer", "full", "ot-card", "door-settings", "remote-settings", "settings-sub"]);
+  const FLOATING = new Set(["cam-menu", "ot-menu", "ask", "viewer", "full", "ot-card", "door-settings", "remote-settings", "settings-sub", "pref-dialog"]);
   const kept = new Map(); // page -> its levels, as left
   function root(id, close) {
     if (closing) return;

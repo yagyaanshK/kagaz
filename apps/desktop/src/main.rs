@@ -303,6 +303,22 @@ fn ring_in_dnd(app: AppHandle) -> Result<Option<bool>, String> {
     }
 }
 
+/// On a phone: whether doorbell rings can show at all (Kagaz's
+/// notifications on, and the calls' own kind not off); none on a computer.
+/// Off, a ring comes in unseen, so the doorbell page warns.
+#[tauri::command]
+fn rings_shown(app: AppHandle) -> Result<Option<bool>, String> {
+    #[cfg(mobile)]
+    {
+        mobile::rings_shown(&app).map(Some)
+    }
+    #[cfg(not(mobile))]
+    {
+        let _ = app;
+        Ok(None)
+    }
+}
+
 /// On a phone: open the system page where that switch is.
 #[tauri::command]
 fn ring_dnd_settings(app: AppHandle) -> Result<(), String> {
@@ -1986,6 +2002,7 @@ pub fn run() {
             phone_call_audio,
             phone_call_mic,
             ring_in_dnd,
+            rings_shown,
             ring_dnd_settings,
             camera_talk_stop,
             media::camera_record_start,

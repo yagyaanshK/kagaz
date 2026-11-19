@@ -91,6 +91,8 @@ body {
 .home-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--tile-min, 220px), 1fr)); gap: 8px; }
 .home-tile { display: flex; align-items: center; min-width: 0; min-height: 64px; border-radius: var(--r-card); background: var(--tile-bg); border: 1px solid var(--tile-line, transparent); box-shadow: var(--card-shadow, none); overflow: hidden; }
 .home-tile.has-actions { grid-column: span 2; }
+/* One size a group, as on phones below. */
+.home-tiles:has(> .has-actions) > .home-tile { grid-column: span 2; }
 .tile-main { display: flex; align-items: center; gap: 12px; flex: 1 1 auto; min-width: 0; min-height: 64px; padding: 8px 12px; border: none; border-radius: 0; background: none; text-align: left; color: var(--text); }
 .tile-icon { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; border-radius: var(--r-icon, 50%); background: var(--icon-bg); color: var(--icon-fg); }
 .tile-icon svg { width: 22px; height: 22px; }
@@ -113,6 +115,13 @@ body {
    takes the row, its Live and Call as round icon buttons. */
 @media (max-width: 599px) {
   .home-tile.has-actions { grid-column: 1 / -1; }
+  /* One size a group: when some cards have buttons, every card takes the
+     row (a door station without Live or Call was half as long as its
+     neighbours, reported 2026-11-19). */
+  .home-tiles:has(> .has-actions) > .home-tile { grid-column: 1 / -1; }
+  /* One card a row on a phone, as Android lists its items: two a row cut
+     names short ("Bedroom · S…") and left a lone card half the width. */
+  .home-tiles { grid-template-columns: 1fr; }
   .tile-act { width: 40px; min-height: 40px !important; padding: 0; border-radius: 50%; }
   .tile-act span { display: none; }
   .tile-act svg { width: 20px !important; height: 20px !important; }
@@ -656,15 +665,15 @@ body.here-idle { cursor: none; }
 :where([data-os="android"] #main) select { padding-right: 40px; background-position: calc(100% - 22px) 55%, calc(100% - 17px) 55%; }
 :where([data-os="android"] #main) label { font-size: 14px; }
 /* A setting's on/off: Material's switch (as the TVs' sheet has it). */
-:where([data-os="android"] #main) :is(.set-row, .switch, .ot-remember, .set-control) input[type="checkbox"] {
+:where([data-os="android"]) :is(#main, dialog, .rc-pop) input[type="checkbox"]:not(.keep-box) {
   appearance: none; -webkit-appearance: none; position: relative; flex: none; width: 52px; height: 32px; min-height: 0; margin: 0; padding: 0;
   border: 2px solid var(--control); border-radius: 16px; background: rgba(127, 127, 127, 0.14); transition: background 150ms, border-color 150ms;
 }
-:where([data-os="android"] #main) :is(.set-row, .switch, .ot-remember, .set-control) input[type="checkbox"]::before {
+:where([data-os="android"]) :is(#main, dialog, .rc-pop) input[type="checkbox"]:not(.keep-box)::before {
   content: ""; position: absolute; top: 50%; left: 6px; width: 16px; height: 16px; border-radius: 50%; background: var(--control); transform: translateY(-50%); transition: left 150ms, width 150ms, height 150ms;
 }
-:where([data-os="android"] #main) :is(.set-row, .switch, .ot-remember, .set-control) input[type="checkbox"]:checked { border-color: var(--accent); background: var(--accent); }
-:where([data-os="android"] #main) :is(.set-row, .switch, .ot-remember, .set-control) input[type="checkbox"]:checked::before { left: 22px; width: 24px; height: 24px; background: var(--accent-text); }
+:where([data-os="android"]) :is(#main, dialog, .rc-pop) input[type="checkbox"]:not(.keep-box):checked { border-color: var(--accent); background: var(--accent); }
+:where([data-os="android"]) :is(#main, dialog, .rc-pop) input[type="checkbox"]:not(.keep-box):checked::before { left: 22px; width: 24px; height: 24px; background: var(--accent-text); }
 /* The switch after its words, the row as wide as the page. */
 [data-os="android"] #main .switch, [data-os="android"] #main .ot-remember { display: flex; flex-direction: row-reverse; justify-content: space-between; align-items: center; gap: 16px; min-height: 56px; white-space: normal; font-size: 16px; color: var(--text); }
 /* Settings as lists: a heading in the accent, rows without boxes. */
@@ -805,3 +814,305 @@ button, [role="button"], .set-door { transition: background-color 120ms ease-out
 @media (hover: none) {
   :is(button, [role="button"], .set-door, summary):not(:active):hover { background-image: none !important; }
 }
+
+/* ---- Doorbell rings won't show (Kagaz's notifications off on a phone):
+   a warning card at the top of the doorbell page, with the way to turn
+   them on. Material's banner shape on Android, a plain card elsewhere. */
+.rings-off {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 8px 0 12px;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--warn) 10%, var(--panel, transparent));
+}
+.rings-off.hidden { display: none; }
+.rings-off > .ic { color: var(--warn); flex: none; }
+.rings-off-text { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+.rings-off-text > span { color: var(--muted); font-size: var(--small, 13px); }
+.rings-off > button { flex: none; }
+:where([data-os="android"] #main) .rings-off {
+  border: 0;
+  border-radius: 16px;
+  padding: 16px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+:where([data-os="android"] #main) .rings-off > button {
+  margin-left: auto;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* ---- Android settings rows (prefs-android.js): Android's list and text
+   preferences. The row is the control: its title, the choice under it;
+   the list or field opens in a Material 3 basic dialog. */
+[data-os="android"] #main .set-row.pref-row { cursor: pointer; flex-wrap: nowrap; margin: 0 calc(-1 * var(--edge)); padding: 12px var(--edge); }
+[data-os="android"] #main .pref-row > .set-control { display: none; }
+[data-os="android"] #main .pref-row .pref-note { display: none; }
+[data-os="android"] #main .pref-row .pref-value { color: var(--muted); font-size: 14px; }
+[data-os="android"] #main .pref-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+/* A slider across the row, under its title (Material's slider). */
+[data-os="android"] #main .set-row:has(input[type="range"]) { flex-direction: column; align-items: stretch; gap: 4px; }
+[data-os="android"] #main .set-row:has(input[type="range"]) .set-control { width: 100%; }
+[data-os="android"] #main .set-control input[type="range"] { width: 100%; height: 44px; margin: 0; }
+/* "A tone for one device or person": a row that opens, not a link. */
+[data-os="android"] #main details.set-more > summary { display: flex; align-items: center; min-height: 56px; margin: 0 calc(-1 * var(--edge)); padding: 0 var(--edge); font-size: 16px; color: var(--text); list-style: none; cursor: pointer; }
+[data-os="android"] #main details.set-more > summary::-webkit-details-marker { display: none; }
+[data-os="android"] #main details.set-more > summary::after { content: ""; margin-left: auto; width: 8px; height: 8px; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: rotate(45deg); transition: transform .2s; }
+[data-os="android"] #main details.set-more[open] > summary::after { transform: rotate(-135deg); }
+
+.md-scrim { position: fixed; inset: 0; z-index: 1000; display: flex; align-items: center; justify-content: center; padding: 24px; background: rgb(0 0 0 / 32%); }
+.md-dialog { display: flex; flex-direction: column; width: min(560px, 100%); min-width: 280px; max-height: calc(100vh - 48px); padding: 24px 0 8px; border-radius: 28px; background: color-mix(in srgb, var(--accent) 6%, var(--panel, var(--bg))); color: var(--text); box-shadow: 0 8px 24px rgb(0 0 0 / 20%); }
+.md-headline { margin: 0 24px 16px; font-size: 24px; font-weight: 400; line-height: 32px; }
+.md-support { margin: -4px 24px 16px; color: var(--muted); font-size: 14px; line-height: 20px; }
+.md-list { display: flex; flex-direction: column; overflow-y: auto; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.md-radio { display: flex; align-items: center; gap: 16px; min-height: 56px; padding: 0 24px; font-size: 16px; cursor: pointer; }
+.md-radio input { width: 20px; height: 20px; margin: 0; accent-color: var(--accent); flex: none; }
+.md-field { padding: 0 24px 8px; }
+.md-field input { width: 100%; box-sizing: border-box; height: 56px; padding: 0 16px; border: 1px solid var(--muted); border-radius: 4px; background: transparent; color: var(--text); font-size: 16px; }
+.md-field input:focus { outline: none; border: 2px solid var(--accent); padding: 0 15px; }
+.md-actions { display: flex; justify-content: flex-end; gap: 8px; padding: 16px 24px 16px; }
+.md-text { min-height: 40px; padding: 0 12px; border: 0; border-radius: 20px; background: transparent; color: var(--accent); font-size: 14px; font-weight: 500; }
+/* Over the general label rules: the radio before its words, on the left. */
+.md-scrim .md-list label.md-radio { display: flex; flex-direction: row; align-items: center; justify-content: flex-start; text-align: left; gap: 16px; min-height: 56px; margin: 0; padding: 0 24px; }
+.md-scrim .md-list label.md-radio > span { flex: 1; }
+/* The slider's title keeps its own height when the row stacks. */
+[data-os="android"] #main .set-row:has(input[type="range"]) > .set-label { flex: none; min-height: 0; }
+
+/* A row that opens a page (icon, name, chevron) also carrying .set-row:
+   the name next to its icon, not spread to the middle. */
+#main .set-row.set-door { justify-content: flex-start; flex-wrap: nowrap; }
+#main .set-row.set-door > .set-label { flex: 1 1 auto; }
+/* A row whose control is a switch keeps it at the end of its words, never
+   wrapped under them. */
+[data-os="android"] #main .set-row:has(> .set-control > .switch input[type="checkbox"]),
+[data-os="android"] #main .set-row:has(> .set-control > input[type="checkbox"]) { flex-wrap: nowrap; align-items: center; }
+[data-os="android"] #main .set-row > .set-control > .switch { width: auto; min-height: 0; }
+#main .set-row.set-door > span.set-door-icon.ic, #main .set-row.set-door > span.set-door-go.ic { flex: none; }
+/* A kind's devices on Home stay folded until it is opened (home.js sets
+   hidden; the grid's display had overruled it). */
+.home-tiles[hidden] { display: none; }
+
+/* ---- Android: every other list to pick from (prefs-android.js) is a
+   Material outlined field with its choice and a trailing arrow; the native
+   <select> stays hidden behind it. */
+[data-os="android"] select.md-hidden-select { display: none !important; }
+[data-os="android"] .md-select { display: inline-flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 112px; max-width: 100%; min-height: 48px; padding: 0 8px 0 16px; border: 1px solid var(--muted); border-radius: 4px; background: transparent; color: var(--text); font-size: 16px; font-weight: 400; text-align: left; }
+[data-os="android"] .md-select[hidden] { display: none; }
+[data-os="android"] .md-select:disabled { opacity: .38; }
+[data-os="android"] .md-select-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+[data-os="android"] .md-select-arrow svg { width: 24px; height: 24px; color: var(--muted); }
+
+/* ======================================================================
+   Android, Material 3 throughout (the full sweep of 2026-11-19: every
+   surface shot and reviewed; these are the shared causes behind most of
+   what was found). Phones only; computers keep their own systems' look.
+   ====================================================================== */
+
+/* No hover on a touch screen: Android's WebView keeps :hover on what was
+   tapped last, so fills stayed on tabs, tiles, rows and the bar's cells.
+   Only the press shows (skins.css's pressed states). */
+:root[data-os="android"] { --hover: transparent; }
+[data-os="android"] :is(button, [role="button"], .set-door, summary):not(:active):hover { background-image: none !important; }
+[data-os="android"] :is(.brand-tile, .kind-tile, ul.cards li, .btn-like, .dev-btn, .ot-qr-btn):hover { border-color: var(--tile-line, transparent); }
+.pair-words { background: rgba(127, 127, 127, 0.12); }
+/* Focus rings only for a keyboard (prefs-android.js marks its use): a
+   tapped or programmatically focused button showed a double green ring. */
+[data-os="android"]:not([data-keys]) :focus { outline: none !important; }
+[data-os="android"]:not([data-keys]) :is(button, input[type="radio"], input[type="checkbox"], .tab, .chip):focus { box-shadow: none !important; }
+
+/* Every button a pill, the desktop's square boxes gone ("Show", "Add",
+   "Undo", "Start over", "Remove from my printers"…). Icon buttons, rows,
+   tiles, menus, tabs and chips keep their own shapes (more specific). */
+[data-os="android"] button:where(:not(.icon, .tile-main, .tile-act, .tile-star, .home-group-toggle, .link, .md-select, .md-text, .tab, .chip, .set-door, .brand-tile, .kind-tile, .cat, .act-item, .cp-btn, .kz-button, .bar-btn, .bar-back, .tv-way, .tile-play)) {
+  border-radius: 20px;
+}
+[data-os="android"] #main button:where(:not(.icon, .tile-main, .tile-act, .tile-star, .home-group-toggle, .link, .md-select, .md-text, .tab, .chip, .set-door, .brand-tile, .kind-tile, .act-item, .cp-btn, .kz-button, .tv-way, .tile-play)) {
+  min-height: 40px;
+  padding-left: 16px;
+  padding-right: 16px;
+  font-weight: 500;
+}
+[data-os="android"] button:disabled { opacity: .38; }
+
+/* Dialogs: Material 3's basic dialog. 28 corners, 280 to 560 wide, a 24
+   headline, text buttons at the bottom right (a destructive one in the
+   error colour). Bottom sheets (.sheet) keep their own shape. */
+[data-os="android"] dialog:not(.sheet):not(.tv-sheet) {
+  width: min(560px, calc(100vw - 48px));
+  min-width: min(280px, calc(100vw - 48px));
+  box-sizing: border-box;
+  padding: 24px;
+  border: none;
+  border-radius: 28px;
+  background: color-mix(in srgb, var(--accent) 6%, var(--panel, var(--bg)));
+  color: var(--text);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 20%);
+}
+[data-os="android"] dialog::backdrop { background: rgb(0 0 0 / 32%); }
+[data-os="android"] dialog:not(.sheet):not(.tv-sheet) .ask-title { font-size: 24px; font-weight: 400; line-height: 32px; margin: 0 0 16px; }
+[data-os="android"] dialog:not(.sheet):not(.tv-sheet) .ask-title + .muted, [data-os="android"] dialog .muted.small { font-size: 14px; line-height: 20px; }
+[data-os="android"] dialog .actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 24px; }
+[data-os="android"] dialog .actions button { width: auto; min-height: 40px; padding: 0 12px; border: none !important; border-radius: 20px; background: none !important; color: var(--accent); font-weight: 500; box-shadow: none; }
+[data-os="android"] dialog .actions button.danger { color: var(--bad); }
+[data-os="android"] dialog .actions button:disabled { color: var(--muted); }
+[data-os="android"] dialog textarea { resize: none; }
+
+/* Text fields: Material's outlined field, 56 high, as wide as their form
+   (they stopped at 265 of 348 and left a ragged edge). */
+[data-os="android"] :is(#main, dialog) :is(input[type="text"], input[type="password"], input[type="email"], input[type="tel"], input[type="url"], input[type="number"], input:not([type]), textarea):not(.set-search input) {
+  box-sizing: border-box;
+  min-height: 56px;
+  padding: 0 16px;
+  border: 1px solid var(--muted);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text);
+  font-size: 16px;
+}
+[data-os="android"] :is(#main, dialog) textarea { padding: 16px; resize: none; }
+[data-os="android"] :is(#main, dialog) :is(input[type="text"], input[type="password"], input[type="email"], input[type="tel"], input[type="url"], input:not([type]), textarea):not(.set-search input):focus { border: 2px solid var(--accent); padding: 0 15px; }
+[data-os="android"] :is(#main, dialog) textarea:focus { padding: 15px; }
+[data-os="android"] :is(#main, dialog) label > :is(input[type="text"], input[type="password"], input[type="email"], input[type="tel"], input[type="url"], input:not([type]), textarea),
+[data-os="android"] :is(#main, dialog) .field > :is(input, textarea),
+[data-os="android"] :is(#main, dialog) form :is(input[type="text"], input[type="password"], input[type="email"], input[type="tel"]) { width: 100%; }
+/* Show-password: an eye inside the field (reveal.js's button, drawn as the icon), not a button
+   beside it in one of three styles. */
+[data-os="android"] .reveal-field { position: relative; display: block; width: 100%; }
+[data-os="android"] .reveal-field > input { width: 100%; padding-right: 52px !important; }
+[data-os="android"] .reveal-field > .reveal-button { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); width: 48px; min-width: 48px; height: 48px; min-height: 48px; padding: 0; border: none; border-radius: 50%; background: none; color: var(--muted); font-size: 0; }
+[data-os="android"] .reveal-field > .reveal-button::before { content: ""; display: block; width: 24px; height: 24px; margin: auto; background: currentColor; -webkit-mask: var(--md-eye) center / contain no-repeat; mask: var(--md-eye) center / contain no-repeat; }
+[data-os="android"] .reveal-field > .reveal-button[aria-pressed="true"]::before { -webkit-mask-image: var(--md-eye-off); mask-image: var(--md-eye-off); }
+:root {
+  --md-eye: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 5C6.5 5 2.7 9.2 1.5 12c1.2 2.8 5 7 10.5 7s9.3-4.2 10.5-7C21.3 9.2 17.5 5 12 5zm0 11.5a4.5 4.5 0 1 1 0-9 4.5 4.5 0 0 1 0 9zm0-7a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z'/%3E%3C/svg%3E");
+  --md-eye-off: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M3.3 2 2 3.3l3.1 3.1C3.3 7.8 2.1 9.8 1.5 12c1.2 2.8 5 7 10.5 7 1.9 0 3.6-.5 5-1.2l3.7 3.7 1.3-1.3zM12 16.5A4.5 4.5 0 0 1 7.5 12c0-.7.2-1.4.5-2l1.5 1.5v.5a2.5 2.5 0 0 0 2.5 2.5h.5l1.5 1.5c-.6.3-1.3.5-2 .5zM12 5c-1.3 0-2.5.2-3.6.6l2 2c.5-.1 1-.1 1.6-.1a4.5 4.5 0 0 1 4.5 4.5c0 .6-.1 1.1-.3 1.6l3 3c1.5-1.2 2.6-2.8 3.3-4.6C21.3 9.2 17.5 5 12 5z'/%3E%3C/svg%3E");
+}
+
+/* Tabs: an underline under the chosen one, never a filled box; the row
+   runs from edge to edge. */
+[data-os="android"] .tab, [data-os="android"] .tab.active, [data-os="android"] .tab[aria-pressed="true"] { background: none !important; box-shadow: none !important; border-radius: 0; }
+[data-os="android"] .tab.active, [data-os="android"] .tab[aria-pressed="true"] { color: var(--accent); border-bottom: 3px solid var(--accent); }
+
+/* Chips: Material's filter chips, 32 high, 8 corners, never a circle. */
+[data-os="android"] .chips { display: flex; flex-wrap: nowrap; gap: 8px; overflow-x: auto; scrollbar-width: none; }
+[data-os="android"] .chip { flex: none; min-width: 0; min-height: 32px; height: 32px; padding: 0 16px; border: 1px solid var(--muted); border-radius: 8px; background: transparent; color: var(--text); font-size: 14px; font-weight: 500; }
+[data-os="android"] .chip.active, [data-os="android"] .chip[aria-pressed="true"] { border-color: transparent; background: var(--accent-soft); color: var(--nav-active-fg); }
+
+/* Headings: Material's section header (title-small in the accent) on
+   every page, not black bold on some and green on others. */
+[data-os="android"] #main :is(.section-title, .list-head) { margin: 16px 0 8px; font-size: 14px; font-weight: 500; color: var(--accent); }
+[data-os="android"] #main section > h3:not(.ask-title), [data-os="android"] #main .pane > h3, [data-os="android"] #main .ot-panel > h3 { font-size: 14px; font-weight: 500; color: var(--accent); }
+/* A line under a section header: 14, not 12. */
+[data-os="android"] #main :is(section, .pane) > p.muted.small { font-size: 14px; line-height: 20px; }
+
+/* Disclosures (camera groups, "A tone for one…"): a chevron at the end,
+   not the browser's ▼ in front. */
+[data-os="android"] #main summary { list-style: none; display: flex; align-items: center; gap: 8px; min-height: 48px; cursor: pointer; }
+[data-os="android"] #main summary::-webkit-details-marker { display: none; }
+[data-os="android"] #main summary::after { content: ""; margin-left: auto; flex: none; width: 8px; height: 8px; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: rotate(45deg); transition: transform .2s; }
+[data-os="android"] #main details[open] > summary::after { transform: rotate(-135deg); }
+
+/* The play/stop beside a tone: Material's icon, not ▶ and ■. */
+[data-os="android"] .play-tone { font-size: 0 !important; }
+[data-os="android"] .play-tone::before { content: ""; display: block; width: 24px; height: 24px; background: currentColor; -webkit-mask: var(--md-play) center / contain no-repeat; mask: var(--md-play) center / contain no-repeat; }
+:root { --md-play: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M8 5v14l11-7z'/%3E%3C/svg%3E"); }
+
+/* The top app bar takes the surface-container colour once the page
+   scrolls under it (prefs-android.js marks it), so cut-off rows no longer
+   show right under the title. */
+[data-os="android"][data-scrolled] #bar { background: color-mix(in srgb, var(--accent) 8%, var(--bg)); transition: background-color .2s; }
+
+/* Bottom sticky action rows: their own surface, nothing showing under. */
+[data-os="android"] #main .actions.bar { background: var(--bg); box-shadow: 0 -1px 0 var(--line); margin-left: calc(-1 * var(--edge)); margin-right: calc(-1 * var(--edge)); padding: 12px var(--edge); }
+/* Room at the end of every page, so its last button is not on the bar. */
+[data-os="android"] #main > section.pane { padding-bottom: 24px; }
+/* Fields beside their label rather than in it (OneTouch, Xiaomi, Tapo's
+   code), and fields given a fixed width elsewhere: the form's full width. */
+[data-os="android"] #main :is(.ot-panel, .signin-card, .cam-field, .ot-password-field, form) :is(input[type="text"], input[type="password"], input[type="email"], input[type="tel"], input[type="url"], input:not([type])) { width: 100% !important; max-width: none !important; }
+[data-os="android"] #main .cam-field { display: flex; flex-direction: column; gap: 4px; width: 100%; }
+[data-os="android"] #main .ot-panel label:has(> input:not([type="checkbox"], [type="radio"])) { display: flex; flex-direction: column; gap: 4px; width: 100%; }
+[data-os="android"] #main .ot-password-field { display: block; width: 100%; }
+/* OneTouch's own show-password: the eye inside the field, as reveal.js's. */
+[data-os="android"] .ot-password-row { position: relative; display: block; width: 100%; }
+[data-os="android"] .ot-password-row > input { padding-right: 52px !important; }
+[data-os="android"] .ot-password-row > #ot-password-toggle { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); width: 48px; min-width: 48px; height: 48px; min-height: 48px; padding: 0; border: none; border-radius: 50%; background: none; color: var(--muted); font-size: 0; }
+[data-os="android"] .ot-password-row > #ot-password-toggle::before { content: ""; display: block; width: 24px; height: 24px; margin: auto; background: currentColor; -webkit-mask: var(--md-eye) center / contain no-repeat; mask: var(--md-eye) center / contain no-repeat; }
+[data-os="android"] .ot-password-row > #ot-password-toggle[aria-label="Hide password"]::before { -webkit-mask-image: var(--md-eye-off); mask-image: var(--md-eye-off); }
+/* Brand cards: every logo at the same height from the top, whether or not
+   a name follows it (a logo that is the name has none); "Coming soon" in
+   sentence case, quiet. */
+[data-os="android"] #main .brand-tile { justify-content: flex-start; }
+[data-os="android"] #main .brand-tile .soon-badge { margin-top: auto; font-size: 12px; font-weight: 400; letter-spacing: 0; text-transform: none; color: var(--muted); }
+/* Doorbell. An opened device (live view) keeps its neighbours' inset
+   inside the account card, rather than breaking out to the page's edge. */
+[data-os="android"] #ot-devices .dev-card.open { margin: 0; border-radius: 16px; }
+/* History: one leading slot for a picture or an icon, and every row's time
+   in the same column whether or not it has a chevron. */
+[data-os="android"] .act-pic.icon { width: 72px; }
+[data-os="android"] .act-go { width: 24px; text-align: center; }
+[data-os="android"] .act-item:not(:has(> .act-go)) { padding-right: 46px; }
+/* "Recent rings": list rows, not a bulleted web list. */
+[data-os="android"] #door-recent { margin: 0; padding: 0; list-style: none; }
+[data-os="android"] #door-recent li { padding: 12px 0; border-bottom: 1px solid var(--line); font-size: 14px; line-height: 20px; }
+/* Saved door stations and other card lists: tonal cards, as everywhere else. */
+[data-os="android"] #main ul.cards li { border: none; border-radius: 16px; background: var(--tile-bg); }
+/* A picture opened full screen: black, over everything, as Android's
+   photo viewers are (the page showed through behind its caption). */
+[data-os="android"] .viewer { z-index: 2000; background: #000; }
+/* A call on a phone: each round button named under it, as Android's own
+   call screen does (they were unlabelled circles); the buttons sit in the
+   lower part of the screen, not right under the picture with the rest
+   empty. */
+@media (max-width: 599px) {
+  [data-os="android"] body > #call-card .call-actions button.cbtn { position: relative; overflow: visible; }
+  [data-os="android"] #call-card .cbtn .cl { top: calc(100% + 8px); left: 50%; transform: translateX(-50%); width: auto; height: auto; overflow: visible; clip: auto; font-size: 12px; font-weight: 500; color: var(--text); }
+  [data-os="android"] #call-card .call-actions { padding-bottom: 28px; }
+  [data-os="android"] body > #call-card { display: flex; flex-direction: column; }
+  [data-os="android"] body > #call-card.hidden { display: none; }
+  [data-os="android"] body > #call-card .call-body { flex: 1; display: flex; flex-direction: column; justify-content: space-between; padding-bottom: calc(32px + env(safe-area-inset-bottom)); }
+}
+/* A camera's page: its name and Back in the app bar (campage.js sets the
+   title), not a second bar under it with a second back arrow. */
+[data-os="android"] .cp-head .cp-back, [data-os="android"] .cp-head h2 { display: none; }
+[data-os="android"] .cp-head { justify-content: flex-end; min-height: 0; }
+/* A camera group's fold: Material's chevron, not ▾ and ▸. */
+[data-os="android"] .cam-group-head .collapse { font-size: 0; width: 48px; min-width: 48px; height: 48px; padding: 0; border: none; background: none; color: var(--muted); }
+[data-os="android"] .cam-group-head .collapse::before { content: ""; display: block; width: 8px; height: 8px; margin: auto; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: rotate(-135deg); }
+[data-os="android"] .cam-group-head .collapse[title="Show this group"]::before { transform: rotate(45deg); }
+/* Disclosures and on/off boxes inside dialogs too. */
+[data-os="android"] dialog summary { list-style: none; display: flex; align-items: center; min-height: 48px; }
+[data-os="android"] dialog summary::-webkit-details-marker { display: none; }
+[data-os="android"] dialog summary::after { content: ""; margin-left: auto; width: 8px; height: 8px; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: rotate(45deg); }
+[data-os="android"] dialog details[open] > summary::after { transform: rotate(-135deg); }
+/* A label holding an on/off box: its words first, the switch at the end,
+   as a settings row (it showed a desktop checkbox before its words). */
+[data-os="android"] :is(#main, dialog) label:not(.switch, .ot-remember):has(> input[type="checkbox"]:not(.keep-box)) { display: flex; flex-direction: row; justify-content: space-between; align-items: center; gap: 16px; min-height: 48px; }
+[data-os="android"] :is(#main, dialog) label:not(.switch, .ot-remember) > input[type="checkbox"]:not(.keep-box) { order: 2; margin-left: auto; }
+/* A printer's page: its name in the app bar (app.js), not repeated in the
+   page; the Scan-button table scrolls sideways inside the page rather than
+   running off the screen. */
+[data-os="android"] #detail #d-title { display: none; }
+[data-os="android"] #button-panel { overflow-x: auto; }
+[data-os="android"] #button-table { min-width: 520px; border-collapse: collapse; }
+/* Purifiers: tonal cards, as fans and TVs (they kept a desktop outline). */
+[data-os="android"] #main .purifier-card { border: none; border-radius: 16px; background: var(--tile-bg); }
+/* Remote viewer on a phone: its tools as a Material bottom app bar (icon
+   over a label, evenly spaced, no boxes), and Keys and Picture as bottom
+   sheets with a handle rather than floating desktop panels. */
+[data-os="android"] .rc-touchbar { display: flex; justify-content: space-around; gap: 0; padding: 8px 8px calc(8px + env(safe-area-inset-bottom)); background: color-mix(in srgb, var(--accent) 8%, var(--bg)); }
+[data-os="android"] .rc-touchbar > button { flex: 1 1 0; display: flex; flex-direction: column; align-items: center; gap: 4px; min-height: 56px; padding: 4px 0; border: none !important; border-radius: 16px; background: none !important; color: var(--text); font-size: 12px; font-weight: 500; }
+[data-os="android"] .rc-touchbar > button .ic svg { width: 24px; height: 24px; }
+[data-os="android"] .rc-touchbar > button:disabled { opacity: .38; }
+[data-os="android"][data-layout="bar"] .rc-pop { left: 0; right: 0; bottom: 0; max-width: 100%; min-width: 0; padding: 12px 24px 24px; border: none; border-radius: 28px 28px 0 0; background: color-mix(in srgb, var(--accent) 6%, var(--panel, var(--bg))); box-shadow: 0 -4px 16px rgb(0 0 0 / 20%); }
+[data-os="android"][data-layout="bar"] .rc-pop::before { content: ""; display: block; flex: none; width: 32px; height: 4px; margin: 0 auto 12px; border-radius: 2px; background: var(--muted); opacity: .5; }
+[data-os="android"] .rc-pop.keys button { min-height: 48px; padding: 0 8px; border-radius: 0; color: var(--text); font-size: 16px; font-weight: 400; }
+[data-os="android"] .rc-pop p { font-size: 14px; line-height: 20px; }
+/* Printers, mine and found: tonal cards as every other list of devices. */
+[data-os="android"] #main :is(#devices, #found-devices) li { border: none; border-radius: 16px; background: var(--tile-bg); }
+/* A menu's items line up whether or not they have an icon. */
+[data-os="android"] .cam-settings > button:not(:has(svg)) { padding-left: 52px; }
