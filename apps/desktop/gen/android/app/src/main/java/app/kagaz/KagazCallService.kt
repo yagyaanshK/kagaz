@@ -181,6 +181,16 @@ class KagazCallService : Service() {
         fun ringsShown(context: Context): Boolean {
             val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && !nm.areNotificationsEnabled()) return false
+            // The notification permission can be "ignore" while Android's
+            // settings page shows the switch on, and areNotificationsEnabled
+            // says yes (seen on a Samsung phone with Android 12, 2026-11-19:
+            // every ring dropped unseen). Ask the permission itself too.
+            try {
+                val ops = context.getSystemService(Context.APP_OPS_SERVICE) as android.app.AppOpsManager
+                val mode = ops.unsafeCheckOpNoThrow("android:post_notification", android.os.Process.myUid(), context.packageName)
+                if (mode != android.app.AppOpsManager.MODE_ALLOWED && mode != android.app.AppOpsManager.MODE_DEFAULT) return false
+            } catch (e: Exception) {
+            }
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return true
             val ring = nm.getNotificationChannel(RING_CHANNEL) ?: return true
             return ring.importance != NotificationManager.IMPORTANCE_NONE
