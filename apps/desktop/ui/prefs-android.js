@@ -278,6 +278,7 @@
   }, 700);
 
   const scan = () => {
+    shim();
     for (const r of document.querySelectorAll("#main .set-row")) enhance(r);
     for (const s of document.querySelectorAll("select")) {
       if (s.closest(".pref-row") || s.closest(".md-scrim")) continue;
@@ -300,6 +301,32 @@
     }
   };
   main.addEventListener("scroll", scrolled, { passive: true });
+
+  // WebViews without :has() (Chromium before 105; a Samsung with Android
+  // 12 had 102): tag what skins.css's :has() rules pick, so their twins
+  // written with these classes apply. Cheap, so done on every scan.
+  const hasHas = (() => { try { return CSS.supports("selector(:has(*))"); } catch (e) { return false; } })();
+  const tag = (el, cls, on) => { if (el.classList.contains(cls) !== on) el.classList.toggle(cls, on); };
+  const kids = (el, sel) => [...el.children].some((c) => c.matches(sel));
+  function shim() {
+    if (hasHas) return;
+    for (const b of document.querySelectorAll("button")) {
+      const ic = kids(b, "svg.kz-i, .ic");
+      tag(b, "kz-ic", ic);
+      if (b.parentElement && (b.parentElement.matches(".bar-page") || b.parentElement.matches(".cam-settings"))) tag(b, "kz-noic", !b.querySelector("svg, .ic"));
+    }
+    for (const h of document.querySelectorAll(".pane > .pane-head")) tag(h, "kz-only-h2", h.children.length === 1 && h.children[0].tagName === "H2");
+    for (const t of document.querySelectorAll(".home-tiles")) tag(t, "kz-acts", kids(t, ".has-actions"));
+    for (const r of document.querySelectorAll("#main .set-row")) {
+      tag(r, "kz-range", !!r.querySelector('input[type="range"]'));
+      tag(r, "kz-switchrow", !!r.querySelector(':scope > .set-control > .switch input[type="checkbox"], :scope > .set-control > input[type="checkbox"]'));
+    }
+    for (const l of document.querySelectorAll("#main .ot-panel label")) tag(l, "kz-field", kids(l, 'input:not([type="checkbox"]):not([type="radio"])'));
+    for (const a of document.querySelectorAll(".act-item")) tag(a, "kz-nogo", !kids(a, ".act-go"));
+    for (const l of document.querySelectorAll("#main label, dialog label")) {
+      tag(l, "kz-checklabel", !l.matches(".switch, .ot-remember") && kids(l, 'input[type="checkbox"]:not(.keep-box)'));
+    }
+  }
 
   // Once a frame at most, however much the page changes.
   let queued = false;

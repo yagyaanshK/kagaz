@@ -804,10 +804,10 @@ body.here-idle { cursor: none; }
 :root[data-os="windows"] { --state-hover: 5%; --state-press: 11%; }
 :root[data-os="macos"] { --state-hover: 5%; --state-press: 14%; }
 :is(button, [role="button"], .set-door, summary):not(:disabled):not([aria-disabled="true"]):hover {
-  background-image: linear-gradient(color-mix(in srgb, currentColor var(--state-hover), transparent), color-mix(in srgb, currentColor var(--state-hover), transparent)) !important;
+  background-image: linear-gradient(rgba(127, 127, 127, 0.12), rgba(127, 127, 127, 0.12)); background-image: linear-gradient(color-mix(in srgb, currentColor var(--state-hover), transparent), color-mix(in srgb, currentColor var(--state-hover), transparent)) !important;
 }
 :is(button, [role="button"], .set-door, summary):not(:disabled):not([aria-disabled="true"]):active {
-  background-image: linear-gradient(color-mix(in srgb, currentColor var(--state-press), transparent), color-mix(in srgb, currentColor var(--state-press), transparent)) !important;
+  background-image: linear-gradient(rgba(127, 127, 127, 0.12), rgba(127, 127, 127, 0.12)); background-image: linear-gradient(color-mix(in srgb, currentColor var(--state-press), transparent), color-mix(in srgb, currentColor var(--state-press), transparent)) !important;
 }
 button, [role="button"], .set-door { transition: background-color 120ms ease-out, box-shadow 120ms ease-out; }
 /* A phone has no pointer over a button: only the press shows. */
@@ -824,9 +824,9 @@ button, [role="button"], .set-door { transition: background-color 120ms ease-out
   gap: 12px;
   margin: 8px 0 12px;
   padding: 12px 14px;
-  border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent);
+  border: 1px solid var(--warn); border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent);
   border-radius: 12px;
-  background: color-mix(in srgb, var(--warn) 10%, var(--panel, transparent));
+  background: var(--panel, var(--bg)); background: color-mix(in srgb, var(--warn) 10%, var(--panel, transparent));
 }
 .rings-off.hidden { display: none; }
 .rings-off > .ic { color: var(--warn); flex: none; }
@@ -867,7 +867,7 @@ button, [role="button"], .set-door { transition: background-color 120ms ease-out
 [data-os="android"] #main details.set-more[open] > summary::after { transform: rotate(-135deg); }
 
 .md-scrim { position: fixed; inset: 0; z-index: 1000; display: flex; align-items: center; justify-content: center; padding: 24px; background: rgb(0 0 0 / 32%); }
-.md-dialog { display: flex; flex-direction: column; width: min(560px, 100%); min-width: 280px; max-height: calc(100vh - 48px); padding: 24px 0 8px; border-radius: 28px; background: color-mix(in srgb, var(--accent) 6%, var(--panel, var(--bg))); color: var(--text); box-shadow: 0 8px 24px rgb(0 0 0 / 20%); }
+.md-dialog { display: flex; flex-direction: column; width: min(560px, 100%); min-width: 280px; max-height: calc(100vh - 48px); padding: 24px 0 8px; border-radius: 28px; background: var(--panel, var(--bg)); background: color-mix(in srgb, var(--accent) 6%, var(--panel, var(--bg))); color: var(--text); box-shadow: 0 8px 24px rgb(0 0 0 / 20%); }
 .md-headline { margin: 0 24px 16px; font-size: 24px; font-weight: 400; line-height: 32px; }
 .md-support { margin: -4px 24px 16px; color: var(--muted); font-size: 14px; line-height: 20px; }
 .md-list { display: flex; flex-direction: column; overflow-y: auto; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
@@ -950,7 +950,7 @@ button, [role="button"], .set-door { transition: background-color 120ms ease-out
   padding: 24px;
   border: none;
   border-radius: 28px;
-  background: color-mix(in srgb, var(--accent) 6%, var(--panel, var(--bg)));
+  background: var(--panel, var(--bg)); background: color-mix(in srgb, var(--accent) 6%, var(--panel, var(--bg)));
   color: var(--text);
   box-shadow: 0 8px 24px rgb(0 0 0 / 20%);
 }
@@ -1025,7 +1025,7 @@ button, [role="button"], .set-door { transition: background-color 120ms ease-out
 /* The top app bar takes the surface-container colour once the page
    scrolls under it (prefs-android.js marks it), so cut-off rows no longer
    show right under the title. */
-[data-os="android"][data-scrolled] #bar { background: color-mix(in srgb, var(--accent) 8%, var(--bg)); transition: background-color .2s; }
+[data-os="android"][data-scrolled] #bar { background: var(--panel, var(--bg)); background: color-mix(in srgb, var(--accent) 8%, var(--bg)); transition: background-color .2s; }
 
 /* Bottom sticky action rows: their own surface, nothing showing under. */
 [data-os="android"] #main .actions.bar { background: var(--bg); box-shadow: 0 -1px 0 var(--line); margin-left: calc(-1 * var(--edge)); margin-right: calc(-1 * var(--edge)); padding: 12px var(--edge); }
@@ -1104,11 +1104,11 @@ button, [role="button"], .set-door { transition: background-color 120ms ease-out
 /* Remote viewer on a phone: its tools as a Material bottom app bar (icon
    over a label, evenly spaced, no boxes), and Keys and Picture as bottom
    sheets with a handle rather than floating desktop panels. */
-[data-os="android"] .rc-touchbar { display: flex; justify-content: space-around; gap: 0; padding: 8px 8px calc(8px + env(safe-area-inset-bottom)); background: color-mix(in srgb, var(--accent) 8%, var(--bg)); }
+[data-os="android"] .rc-touchbar { display: flex; justify-content: space-around; gap: 0; padding: 8px 8px calc(8px + env(safe-area-inset-bottom)); background: var(--panel, var(--bg)); background: color-mix(in srgb, var(--accent) 8%, var(--bg)); }
 [data-os="android"] .rc-touchbar > button { flex: 1 1 0; display: flex; flex-direction: column; align-items: center; gap: 4px; min-height: 56px; padding: 4px 0; border: none !important; border-radius: 16px; background: none !important; color: var(--text); font-size: 12px; font-weight: 500; }
 [data-os="android"] .rc-touchbar > button .ic svg { width: 24px; height: 24px; }
 [data-os="android"] .rc-touchbar > button:disabled { opacity: .38; }
-[data-os="android"][data-layout="bar"] .rc-pop { left: 0; right: 0; bottom: 0; max-width: 100%; min-width: 0; padding: 12px 24px 24px; border: none; border-radius: 28px 28px 0 0; background: color-mix(in srgb, var(--accent) 6%, var(--panel, var(--bg))); box-shadow: 0 -4px 16px rgb(0 0 0 / 20%); }
+[data-os="android"][data-layout="bar"] .rc-pop { left: 0; right: 0; bottom: 0; max-width: 100%; min-width: 0; padding: 12px 24px 24px; border: none; border-radius: 28px 28px 0 0; background: var(--panel, var(--bg)); background: color-mix(in srgb, var(--accent) 6%, var(--panel, var(--bg))); box-shadow: 0 -4px 16px rgb(0 0 0 / 20%); }
 [data-os="android"][data-layout="bar"] .rc-pop::before { content: ""; display: block; flex: none; width: 32px; height: 4px; margin: 0 auto 12px; border-radius: 2px; background: var(--muted); opacity: .5; }
 [data-os="android"] .rc-pop.keys button { min-height: 48px; padding: 0 8px; border-radius: 0; color: var(--text); font-size: 16px; font-weight: 400; }
 [data-os="android"] .rc-pop p { font-size: 14px; line-height: 20px; }
@@ -1116,3 +1116,22 @@ button, [role="button"], .set-door { transition: background-color 120ms ease-out
 [data-os="android"] #main :is(#devices, #found-devices) li { border: none; border-radius: 16px; background: var(--tile-bg); }
 /* A menu's items line up whether or not they have an icon. */
 [data-os="android"] .cam-settings > button:not(:has(svg)) { padding-left: 52px; }
+
+/* ---- The same rules for WebViews without :has() (Chromium before 105:
+   the user's Samsung had WebView 102, and icons sat off-centre in their
+   circles). prefs-android.js tags the elements; these are the :has() rules
+   above, written with its classes. */
+button.kz-ic { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.pane > .pane-head.kz-only-h2 { display: none; }
+.home-tiles.kz-acts > .home-tile { grid-column: span 2; }
+@media (max-width: 599px) { .home-tiles.kz-acts > .home-tile { grid-column: 1 / -1; } }
+.bar-page > button.kz-ic > span:not(.ic) { display: none; }
+.bar-page > button.kz-noic { padding: 0 12px; border-radius: var(--r-btn, 8px); color: var(--accent); }
+[data-os="android"] #main .set-row.kz-range { flex-direction: column; align-items: stretch; gap: 4px; }
+[data-os="android"] #main .set-row.kz-range .set-control { width: 100%; }
+[data-os="android"] #main .set-row.kz-range > .set-label { flex: none; min-height: 0; }
+[data-os="android"] #main .set-row.kz-switchrow { flex-wrap: nowrap; align-items: center; }
+[data-os="android"] #main .ot-panel label.kz-field { display: flex; flex-direction: column; gap: 4px; width: 100%; }
+[data-os="android"] .act-item.kz-nogo { padding-right: 46px; }
+[data-os="android"] :is(#main, dialog) label.kz-checklabel { display: flex; flex-direction: row; justify-content: space-between; align-items: center; gap: 16px; min-height: 48px; }
+[data-os="android"] .cam-settings > button.kz-noic { padding-left: 52px; }
