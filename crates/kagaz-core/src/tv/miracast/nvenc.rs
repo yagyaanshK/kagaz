@@ -55,6 +55,7 @@ const LOCK_INPUT_VER: u32 = ver(1);
 const LOCK_BITSTREAM_VER: u32 = ver(2);
 const PIC_PARAMS_VER: u32 = ver(6) | (1 << 31);
 const RC_PARAMS_VER: u32 = ver(1);
+const RECONFIGURE_VER: u32 = ver(1) | (1 << 31);
 const INFINITE: u32 = 0xffff_ffff;
 
 const fn guid(d1: u32, d2: u16, d3: u16, d4: [u8; 8]) -> GUID {
@@ -78,6 +79,11 @@ pub struct Nvenc {
     height: usize,
     frame: u64,
     key_next: bool,
+    /// The settings the session was opened with, kept for a new rate
+    /// (`init` points at `config`, so both stay boxed).
+    config: Box<NV_ENC_CONFIG>,
+    init: Box<NV_ENC_INITIALIZE_PARAMS>,
+    fps: u32,
     /// For the record: the chip's encoder and its setting.
     pub described: String,
 }
@@ -144,6 +150,9 @@ impl Nvenc {
                 height,
                 frame: 0,
                 key_next: true,
+                config: Box::new(std::mem::zeroed()),
+                init: Box::new(std::mem::zeroed()),
+                fps,
                 described: String::new(),
             };
             v.start(fps, bits_per_second, power)?;
@@ -222,6 +231,7 @@ impl Nvenc {
         vui.transferCharacteristics = _NV_ENC_VUI_TRANSFER_CHARACTERISTIC_NV_ENC_VUI_TRANSFER_CHARACTERISTIC_SMPTE170M;
         vui.colourMatrix = _NV_ENC_VUI_MATRIX_COEFFS_NV_ENC_VUI_MATRIX_COEFFS_SMPTE170M;
 
+        *self.config = cfg;
         let mut ip: NV_ENC_INITIALIZE_PARAMS = std::mem::zeroed();
         ip.version = INITIALIZE_VER;
         ip.encodeGUID = H264;
@@ -235,10 +245,12 @@ impl Nvenc {
         ip.frameRateNum = fps;
         ip.frameRateDen = 1;
         ip.enablePTD = 1;
-        ip.encodeConfig = &mut cfg;
+        ip.encodeConfig = &mut *self.config;
         ip.tuningInfo = tuning;
         ip.bufferFormat = _NV_ENC_BUFFER_FORMAT_NV_ENC_BUFFER_FORMAT_NV12;
-        self.check("set-up", init(self.enc, &mut ip))?;
+        *self.init = ip;
+        let initialised = init(self.enc, &mut *self.init);
+        self.check("set-up", initialised)?;
 
         let mut ci: NV_ENC_CREATE_INPUT_BUFFER = std::mem::zeroed();
         ci.version = CREATE_INPUT_VER;
@@ -257,6 +269,28 @@ impl Nvenc {
 
     pub fn key_next(&mut self) {
         self.key_next = true;
+    }
+
+    /// A new rate for the running session (NVENC's reconfiguration, no
+    /// whole picture). Not yet tried on an NVIDIA chip.
+    pub fn set_bit_rate(&mut self, bits_per_second: u32) -> bool {
+        let Some(reconfigure) = self.lib.api.nvEncReconfigureEncoder else { return false };
+        let rc = &mut self.config.rcParams;
+        rc.averageBitRate = bits_per_second;
+        rc.maxBitRate = bits_per_second / 2 * 3;
+        rc.vbvBufferSize = bits_per_second / self.fps.max(1);
+        rc.vbvInitialDelay = rc.vbvBufferSize;
+        self.init.encodeConfig = &mut *self.config;
+        // SAFETY: the session is open; the parameters point at the kept
+        // configuration, which lives as long as the session.
+        unsafe {
+            let mut r: NV_ENC_RECONFIGURE_PARAMS = std::mem::zeroed();
+            r.version = RECONFIGURE_VER;
+            r.reInitEncodeParams = *self.init;
+            r.set_resetEncoder(0);
+            r.set_forceIDR(0);
+            reconfigure(self.enc, &mut r) == _NVENCSTATUS_NV_ENC_SUCCESS
+        }
     }
 
     /// Encodes one RGBA picture; Annex B bytes, and whether it is a whole

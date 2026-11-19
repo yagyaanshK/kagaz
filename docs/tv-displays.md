@@ -744,8 +744,8 @@ resent, a second of sound each second.
   next picture (its rate control sent between whole pictures), Media
   Foundation and VideoToolbox in place, the phone's MediaCodec through
   `PARAMETER_KEY_VIDEO_BITRATE`; OpenH264 starts again at the new rate
-  (a whole picture); NVENC keeps its rate (reconfiguring it is
-  untried).
+  (a whole picture); NVENC through its reconfiguration, no whole picture
+  (written to the SDK, untried: this computer has no NVIDIA chip).
 - **Upright** (`KagazTv.kt`): over Cast (which allows a new size
   mid-stream; Miracast fixes it), a phone standing upright encodes its
   own shape, 1920 tall (about 912 x 1920 on a 19:9 phone; within H.264
@@ -810,7 +810,7 @@ it.
   phone as a screen later.
 - **Google Cast, further** (the sender itself is built, see above):
   Windows' and macOS's sound seen on real computers; one window's own
-  app's sound on Linux; NVENC's rate fitted.
+  app's sound on Linux; NVENC's rate change seen on an NVIDIA chip.
 - **LG Link** (file transfer between LG Link or gram Link apps, PIN
   pairing): LG's own protocol; learn it from what LG's phone app sends to
   the TV, with step 3 (send media).

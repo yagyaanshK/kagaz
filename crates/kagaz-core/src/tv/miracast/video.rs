@@ -428,9 +428,9 @@ impl AnyVideo {
                 v.set_bit_rate(bits_per_second);
                 true
             }
-            // Not yet: NVENC's reconfiguration is untried.
+            // Untried on an NVIDIA chip.
             #[cfg(target_os = "linux")]
-            AnyVideo::Nvenc(_) => false,
+            AnyVideo::Nvenc(v) => v.set_bit_rate(bits_per_second),
             #[cfg(windows)]
             AnyVideo::Mf(v) => v.set_bit_rate(bits_per_second),
             #[cfg(target_os = "macos")]
