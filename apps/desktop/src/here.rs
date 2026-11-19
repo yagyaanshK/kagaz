@@ -1,7 +1,8 @@
 //! This computer as a screen: while turned on (the TVs page, off until
 //! then), Kagaz lists this computer on the network as a Google Cast
-//! screen; each sender (Kagaz on a phone or another computer) is asked
-//! about first in a small window on top (Allow or Decline, no answer in 30
+//! screen and as a Miracast one; each sender (Kagaz on a phone or another
+//! computer over Cast, Windows' own Cast over Miracast) is asked about
+//! first in a small window on top (Allow or Decline, no answer in 30
 //! seconds is Decline); its picture opens in a window of its own (the
 //! page decodes it, as the cameras' player does) and its sound plays on
 //! this computer's speakers.
@@ -40,8 +41,11 @@ pub struct Status {
 
 struct Running {
     stop: Arc<AtomicBool>,
-    thread: JoinHandle<()>,
+    threads: Vec<JoinHandle<()>>,
 }
+
+/// A sender's screen shows now (one at a time, whichever way it came).
+static BUSY: AtomicBool = AtomicBool::new(false);
 
 static RUNNING: Mutex<Option<Running>> = Mutex::new(None);
 static STATUS: Mutex<Option<Status>> = Mutex::new(None);
@@ -122,52 +126,74 @@ fn start(app: &AppHandle) {
         return;
     }
     let stop = Arc::new(AtomicBool::new(false));
-    let s = stop.clone();
-    let a = app.clone();
-    let thread = std::thread::Builder::new()
-        .name("kagaz-here".into())
-        .spawn(move || {
-            let n = name();
-            let listener = match std::net::TcpListener::bind(("0.0.0.0", PORT)) {
-                Ok(l) => l,
-                Err(e) => {
-                    tell(&a, |st| {
-                        st.on = false;
-                        st.problem = Some(format!("Another program uses port {PORT} (Google Cast's): {e}"));
-                    });
-                    return;
+    let mut threads = Vec::new();
+    // Google Cast (Kagaz's senders).
+    let (s, a) = (stop.clone(), app.clone());
+    threads.extend(
+        std::thread::Builder::new()
+            .name("kagaz-here-cast".into())
+            .spawn(move || {
+                let n = name();
+                let listener = match std::net::TcpListener::bind(("0.0.0.0", PORT)) {
+                    Ok(l) => l,
+                    Err(e) => {
+                        tell(&a, |st| {
+                            st.on = false;
+                            st.problem = Some(format!("Another program uses port {PORT} (Google Cast's): {e}"));
+                        });
+                        return;
+                    }
+                };
+                let announced = match stand_in::announce(&n, "Kagaz", PORT) {
+                    Ok((announced, _)) => announced,
+                    Err(e) => {
+                        tell(&a, |st| {
+                            st.on = false;
+                            st.problem = Some(format!("This computer could not be listed on the network: {e}"));
+                        });
+                        return;
+                    }
+                };
+                tell(&a, |st| {
+                    st.on = true;
+                    st.name = n;
+                    st.problem = None;
+                });
+                let mut screen = Here::new(&a);
+                if let Err(e) = stand_in::receive(listener, None, &s, &mut screen) {
+                    tell(&a, |st| st.problem = Some(e));
                 }
-            };
-            let announced = match stand_in::announce(&n, "Kagaz", PORT) {
-                Ok((announced, _)) => announced,
-                Err(e) => {
-                    tell(&a, |st| {
-                        st.on = false;
-                        st.problem = Some(format!("This computer could not be listed on the network: {e}"));
-                    });
+                drop(announced);
+                tell(&a, |st| {
+                    st.on = false;
+                    st.asking = None;
+                    st.showing = None;
+                });
+            })
+            .ok(),
+    );
+    // Miracast over the network (Windows' own Cast). Without it, Cast
+    // alone goes on.
+    let (s, a) = (stop.clone(), app.clone());
+    threads.extend(
+        std::thread::Builder::new()
+            .name("kagaz-here-miracast".into())
+            .spawn(move || {
+                use kagaz_core::tv::miracast::{mice, stand_in as wfd};
+                let Ok(listener) = std::net::TcpListener::bind(("0.0.0.0", mice::PORT)) else {
+                    eprintln!("here: port {} is taken; Miracast senders cannot reach this screen", mice::PORT);
                     return;
+                };
+                let Ok((announced, _)) = wfd::announce(&name()) else { return };
+                let mut screen = Here::new(&a);
+                if let Err(e) = wfd::receive(listener, &s, &mut screen) {
+                    eprintln!("here: Miracast: {e}");
                 }
-            };
-            tell(&a, |st| {
-                st.on = true;
-                st.name = n;
-                st.problem = None;
-            });
-            let mut screen = Here { app: a.clone(), speaker: Speaker::default(), who: None, started: Instant::now(), lines: 0 };
-            if let Err(e) = stand_in::receive(listener, None, &s, &mut screen) {
-                tell(&a, |st| st.problem = Some(e));
-            }
-            drop(announced);
-            tell(&a, |st| {
-                st.on = false;
-                st.asking = None;
-                st.showing = None;
-            });
-        })
-        .ok();
-    if let Some(thread) = thread {
-        *running = Some(Running { stop, thread });
-    }
+                drop(announced);
+            })
+            .ok(),
+    );
+    *running = Some(Running { stop, threads });
 }
 
 fn stop(app: &AppHandle) {
@@ -175,7 +201,9 @@ fn stop(app: &AppHandle) {
     if let Some(r) = r {
         r.stop.store(true, Ordering::SeqCst);
         here_answer(false);
-        let _ = r.thread.join();
+        for t in r.threads {
+            let _ = t.join();
+        }
     }
     close(app, ASK);
     close(app, VIEW);
@@ -238,6 +266,12 @@ struct Here {
     lines: u64,
 }
 
+impl Here {
+    fn new(app: &AppHandle) -> Here {
+        Here { app: app.clone(), speaker: Speaker::default(), who: None, started: Instant::now(), lines: 0 }
+    }
+}
+
 /// How a sender is named to the person: its name, a phone as "A phone",
 /// one that gives none by its address.
 fn label(who: &Who) -> String {
@@ -252,6 +286,10 @@ fn label(who: &Who) -> String {
 
 impl Screen for Here {
     fn ask(&mut self, who: &Who) -> bool {
+        // One at a time: another device's screen shows already.
+        if BUSY.load(Ordering::SeqCst) {
+            return false;
+        }
         let name = label(who);
         {
             *ANSWER.0.lock().unwrap() = None;
@@ -272,6 +310,9 @@ impl Screen for Here {
         let a = self.app.clone();
         let _ = self.app.run_on_main_thread(move || close(&a, ASK));
         tell(&self.app, |st| st.asking = None);
+        if allow && BUSY.swap(true, Ordering::SeqCst) {
+            return false;
+        }
         if allow {
             self.who = Some(name.clone());
             self.started = Instant::now();
@@ -295,6 +336,10 @@ impl Screen for Here {
         self.speaker.play(&packet, aac);
     }
 
+    fn pcm(&mut self, samples: Vec<i16>) {
+        self.speaker.play_pcm(&samples);
+    }
+
     fn say(&mut self, line: String) {
         eprintln!("here: {line}");
         self.lines += 1;
@@ -304,6 +349,7 @@ impl Screen for Here {
     fn ended(&mut self) {
         self.speaker.close();
         if self.who.take().is_some() {
+            BUSY.store(false, Ordering::SeqCst);
             if let Some(ch) = PICTURES.lock().unwrap().take() {
                 let _ = super::media::send(&ch, &kagaz_core::media::Media::Ended("The device stopped showing its screen.".into()));
             }

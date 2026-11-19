@@ -72,6 +72,8 @@ pub trait Screen {
     fn picture(&mut self, _data: Vec<u8>, _key: bool) {}
     /// A sound packet, Opus or (`aac`) AAC, 48 kHz stereo.
     fn sound(&mut self, _packet: Vec<u8>, _aac: bool) {}
+    /// Plain sound (Miracast's LPCM): 16-bit 48 kHz stereo, interleaved.
+    fn pcm(&mut self, _samples: Vec<i16>) {}
     /// A line for the record.
     fn say(&mut self, line: String);
     /// The sender's session ended (or never started).
@@ -116,6 +118,23 @@ impl Speaker {
             data: None,
         };
         self.player.wave(&opus, packet) > 0
+    }
+
+    /// Plain sound: 16-bit, 48 kHz, stereo, interleaved (a Miracast
+    /// sender's LPCM, its bytes already put in this machine's order).
+    pub fn play_pcm(&mut self, samples: &[i16]) -> bool {
+        use ironrdp_rdpsnd::pdu::{AudioFormat, WaveFormat};
+        let pcm = AudioFormat {
+            format: WaveFormat::PCM,
+            n_channels: 2,
+            n_samples_per_sec: 48_000,
+            n_avg_bytes_per_sec: 192_000,
+            n_block_align: 4,
+            bits_per_sample: 16,
+            data: None,
+        };
+        let bytes: Vec<u8> = samples.iter().flat_map(|v| v.to_le_bytes()).collect();
+        self.player.wave(&pcm, &bytes) > 0
     }
 
     pub fn set_volume(&mut self, level: f32) {

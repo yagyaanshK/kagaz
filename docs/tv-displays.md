@@ -777,11 +777,22 @@ Opus is not built in). Kagaz's sender gives its device's name when it
 connects ("a phone" from a phone). This computer is left out of its
 own list of TVs.
 
-Who can send here now: Kagaz itself (a phone, another computer), since
-Kagaz's sender takes a screen's certificate as shown. Android's and
-Chrome's own Cast check the screen's certificate against Google's and
-will not send to it; Windows' own Cast and Samsung's Smart View speak
-Miracast, next.
+Who can send here now: Kagaz itself (a phone, another computer) over
+Cast, since Kagaz's sender takes a screen's certificate as shown; and
+over Miracast on the network (MS-MICE, port 7250, listed as
+`_display._tcp`): Windows' own Cast, and Kagaz's Miracast sender. The
+Miracast side (`miracast/stand_in.rs`, now on the same `Screen` as Cast)
+asks when the sender says it is ready, answers the session with the
+LG's abilities but plain sound only (LPCM, 48 kHz stereo, which every
+sender has; played as it comes, no decoder), and hands over each picture
+whole (a PES packet each). Measured with Kagaz's Miracast sender on this
+computer: 60 pictures a second put together, all decoded, 1920 x 1080,
+none lost. One sender at a time, whichever way it comes; a second is
+declined while one shows. Not yet seen: Windows' own Cast here (it may
+give up if the question waits long), and Samsung's Smart View, which
+uses Miracast over Wi-Fi Direct (next). Android's and Chrome's own Cast
+check the screen's certificate against Google's and will not send to
+it.
 
 ## Next, agreed 2026-11-18
 
