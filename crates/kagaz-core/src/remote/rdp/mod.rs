@@ -585,74 +585,198 @@ struct Running {
     quiet: Arc<AtomicBool>,
     /// Keys that are down, to let go when the session closes.
     held: HashMap<String, FastPathInputEvent>,
-    /// The device's H.264 pictures as they came (see [`Videos`]).
-    videos: Arc<Mutex<Videos>>,
+    /// What the newer picture's thread has to send (see [`Paced`]); none
+    /// with the older picture.
+    outbox: Option<Arc<Mutex<Outbox>>>,
+    /// The newer picture's thread has drawn something.
+    drawn: Arc<AtomicBool>,
 }
 
 /// The longest a picture's acknowledgement waits for the window: a window
 /// out of sight or busy must not stop the computer altogether.
 const HOLD_MOST: Duration = Duration::from_millis(200);
 
-/// The newer picture's channel, with its acknowledgements held back until
-/// the window has shown what came. The computer judges from them how fast
-/// this side keeps up and sends no faster: acknowledged on arrival, it
-/// would go on at the link's pace while pictures wait to be shown here,
-/// and each would be older when it is. Lag comes first.
+/// The newer picture's channel, run on a thread of its own: decoding a
+/// picture (H.264 above all) never holds up a key, a click or the sound,
+/// which the session's thread reads and sends meanwhile. The channel hands
+/// each message to that thread ([`picture_thread`]) and answers nothing
+/// itself; what the pipeline answers waits in [`Outbox`] for the session's
+/// thread to send.
 ///
-/// The session drains a channel of the library's own type by itself; this
-/// one it drains in [`Running::graphics`] instead.
+/// Its acknowledgements wait there until the window has shown what came:
+/// the computer judges from them how fast this side keeps up and sends no
+/// faster. Acknowledged on arrival, it would go on at the link's pace
+/// while pictures wait to be shown here, each older when it is. Lag
+/// comes first.
 struct Paced {
-    inner: GraphicsPipelineClient,
-    channel: Option<u32>,
-    held: Vec<DvcMessage>,
-    since: Option<Instant>,
+    pipeline: Arc<Mutex<GraphicsPipelineClient>>,
+    outbox: Arc<Mutex<Outbox>>,
+    work: mpsc::Sender<(u32, Vec<u8>)>,
 }
 
-impl Paced {
-    fn new(inner: GraphicsPipelineClient) -> Paced {
-        Paced { inner, channel: None, held: Vec::new(), since: None }
-    }
+/// What the picture's thread has for the session's to send.
+#[derive(Default)]
+struct Outbox {
+    channel: Option<u32>,
+    /// Answers to send at once (capabilities, cache replies).
+    now: Vec<DvcMessage>,
+    /// Acknowledgements held until the window has shown the pictures.
+    held: Vec<DvcMessage>,
+    since: Option<Instant>,
+    /// The pipeline could not read something: the session ends with this.
+    failed: Option<String>,
 }
 
 /// RDPGFX_CMDID_FRAMEACKNOWLEDGE (MS-RDPEGFX 2.2.2.13), the first two bytes
 /// of the message, little-endian.
 const FRAME_ACKNOWLEDGE: [u8; 2] = [0x0d, 0x00];
 
-impl DvcProcessor for Paced {
-    fn channel_name(&self) -> &str {
-        self.inner.channel_name()
-    }
-
-    fn start(&mut self, channel_id: u32) -> ironrdp_pdu::PduResult<Vec<DvcMessage>> {
-        self.channel = Some(channel_id);
-        self.held.clear();
-        self.since = None;
-        self.inner.start(channel_id)
-    }
-
-    fn process(&mut self, channel_id: u32, payload: &[u8]) -> ironrdp_pdu::PduResult<Vec<DvcMessage>> {
-        let mut now = Vec::new();
-        for message in self.inner.process(channel_id, payload)? {
+impl Outbox {
+    fn put(&mut self, messages: Vec<DvcMessage>) {
+        for message in messages {
             let ack = ironrdp_core::encode_vec(message.as_ref()).is_ok_and(|b| b.starts_with(&FRAME_ACKNOWLEDGE));
             if ack {
                 self.since.get_or_insert_with(Instant::now);
                 self.held.push(message);
             } else {
-                now.push(message);
+                self.now.push(message);
             }
         }
-        Ok(now)
+    }
+}
+
+impl DvcProcessor for Paced {
+    fn channel_name(&self) -> &str {
+        ironrdp_egfx::CHANNEL_NAME
+    }
+
+    fn start(&mut self, channel_id: u32) -> ironrdp_pdu::PduResult<Vec<DvcMessage>> {
+        {
+            let mut out = self.outbox.lock().unwrap_or_else(|e| e.into_inner());
+            *out = Outbox { channel: Some(channel_id), ..Outbox::default() };
+        }
+        self.pipeline.lock().unwrap_or_else(|e| e.into_inner()).start(channel_id)
+    }
+
+    fn process(&mut self, channel_id: u32, payload: &[u8]) -> ironrdp_pdu::PduResult<Vec<DvcMessage>> {
+        // A thread that has ended has said why in the outbox.
+        let _ = self.work.send((channel_id, payload.to_vec()));
+        Ok(Vec::new())
     }
 
     fn close(&mut self, channel_id: u32) {
-        self.held.clear();
-        self.since = None;
-        self.inner.close(channel_id);
+        self.pipeline.lock().unwrap_or_else(|e| e.into_inner()).close(channel_id);
+        let mut out = self.outbox.lock().unwrap_or_else(|e| e.into_inner());
+        out.held.clear();
+        out.since = None;
     }
 }
 
 impl DvcClientProcessor for Paced {}
 ironrdp_core::impl_as_any!(Paced);
+
+/// What the picture's thread needs.
+struct PictureThread {
+    pipeline: Arc<Mutex<GraphicsPipelineClient>>,
+    outbox: Arc<Mutex<Outbox>>,
+    work: mpsc::Receiver<(u32, Vec<u8>)>,
+    screen: Arc<Screen>,
+    numbers: Arc<Numbers>,
+    videos: Arc<Mutex<Videos>>,
+    /// Rouses the session's thread: there is something to send.
+    wake: Arc<dyn Fn() + Send + Sync>,
+    /// Something was drawn (for the words when a device turns one away).
+    drawn: Arc<AtomicBool>,
+}
+
+/// Takes the channel's messages in turn, decodes them and puts the picture
+/// on the screen, until the session ends.
+fn picture_thread(t: PictureThread) {
+    let mut image = DecodedImage::new(PixelFormat::RgbA32, 0, 0);
+    while let Ok(first) = t.work.recv() {
+        let began = Instant::now();
+        // What came meanwhile too, before the screen is told.
+        let mut batch = vec![first];
+        while let Ok(more) = t.work.try_recv() {
+            batch.push(more);
+        }
+        let done = {
+            let mut pipeline = t.pipeline.lock().unwrap_or_else(|e| e.into_inner());
+            let mut answers = Vec::new();
+            let mut failed = None;
+            for (channel, payload) in &batch {
+                match pipeline.process(*channel, payload) {
+                    Ok(out) => answers.extend(out),
+                    Err(e) => {
+                        failed = Some(format!("the device sent a picture Kagaz could not read ({e})"));
+                        break;
+                    }
+                }
+            }
+            let done = composite_graphics_pipeline(&mut pipeline, &mut image)
+                .map_err(|e| format!("the device sent a picture Kagaz could not put together ({e})"));
+            let mut out = t.outbox.lock().unwrap_or_else(|e| e.into_inner());
+            out.put(answers);
+            match (failed, done) {
+                (Some(why), _) | (None, Err(why)) => {
+                    out.failed = Some(why);
+                    drop(out);
+                    (t.wake)();
+                    return;
+                }
+                (None, Ok(done)) => done,
+            }
+        };
+        if paint(&t.screen, &t.videos, &image, &done) {
+            t.drawn.store(true, Ordering::Release);
+            t.numbers.add_update();
+        }
+        t.screen.commit();
+        t.numbers.add_work(began.elapsed());
+        (t.wake)();
+    }
+}
+
+/// What the picture's thread put together, onto the screen. True when
+/// anything was drawn.
+fn paint(screen: &Screen, videos: &Mutex<Videos>, image: &DecodedImage, done: &ironrdp_session::CompositedGraphics) -> bool {
+    let size = (image.width(), image.height());
+    if done.reset || (done.region.is_some() && screen.size() != size) {
+        screen.resize(size.0, size.1);
+    }
+    // The frames now on the screen: their H.264 pictures go to a viewer
+    // that decodes them, in order, before the areas sent as pixels; an
+    // area only H.264 changed is not sent again.
+    let frames = std::mem::take(&mut videos.lock().unwrap_or_else(|e| e.into_inner()).done);
+    let wanted = screen.video_wanted();
+    let mut painted: Vec<Rect> = Vec::new();
+    let mut others: Vec<Rect> = Vec::new();
+    for (pictures, changed) in frames {
+        if !wanted {
+            continue;
+        }
+        for v in pictures {
+            painted.extend_from_slice(&v.regions);
+            screen.video(v);
+        }
+        others.extend(changed);
+    }
+    let mut drew = false;
+    for region in &done.regions {
+        let rect = area_of(image, region);
+        if rect.is_empty() {
+            continue;
+        }
+        let video_only = painted.iter().any(|p| p.contains(&rect)) && !others.iter().any(|o| o.intersects(&rect));
+        if video_only {
+            screen.put_from_video(rect, image.data(), image.stride());
+        } else {
+            screen.put_from(rect, image.data(), image.stride());
+        }
+        drew = true;
+    }
+    drew
+}
 
 /// What is here for the computer's clipboard: handed over when it asks.
 enum Here {
@@ -713,81 +837,45 @@ impl Running {
         self.framed.write_all(frame).map_err(|_| "the connection to the device broke".to_string())
     }
 
-    /// What the newer picture's channel has put together since last time,
-    /// onto the screen (the session no longer does it for this channel:
-    /// see [`Paced`]).
-    fn graphics(&mut self) -> Result<(), String> {
-        let Some(mut paced) = self.stage.get_dvc_mut::<Paced>() else {
+    /// What the picture's thread has to send: its answers at once, its
+    /// acknowledgements once the window has shown everything (or once
+    /// they have waited long enough).
+    fn send_answers(&mut self) -> Result<(), String> {
+        let Some(outbox) = self.outbox.clone() else {
             return Ok(());
         };
-        let done = composite_graphics_pipeline(&mut paced.processor_mut().inner, &mut self.image)
-            .map_err(|e| format!("the device sent a picture Kagaz could not put together ({e})"))?;
-        let size = (self.image.width(), self.image.height());
-        if done.reset || (done.region.is_some() && self.screen.size() != size) {
-            self.screen.resize(size.0, size.1);
-        }
-        // The frames now on the screen: their H.264 pictures go to a
-        // viewer that decodes them, in order, before the areas sent as
-        // pixels; an area only H.264 changed is not sent again.
-        let frames = std::mem::take(&mut self.videos.lock().unwrap_or_else(|e| e.into_inner()).done);
-        let wanted = self.screen.video_wanted();
-        let mut painted: Vec<Rect> = Vec::new();
-        let mut others: Vec<Rect> = Vec::new();
-        for (pictures, changed) in frames {
-            if !wanted {
-                continue;
-            }
-            for v in pictures {
-                painted.extend_from_slice(&v.regions);
-                self.screen.video(v);
-            }
-            others.extend(changed);
-        }
-        for region in &done.regions {
-            let rect = area_of(&self.image, region);
-            if rect.is_empty() {
-                continue;
-            }
-            let video_only = painted.iter().any(|p| p.contains(&rect)) && !others.iter().any(|o| o.intersects(&rect));
-            if video_only {
-                self.screen.put_from_video(rect, self.image.data(), self.image.stride());
-            } else {
-                self.screen.put_from(rect, self.image.data(), self.image.stride());
-            }
-            self.drew = true;
-        }
-        Ok(())
-    }
-
-    /// The held acknowledgements go once the window has shown everything,
-    /// or once they have waited long enough.
-    fn release(&mut self) -> Result<(), String> {
         let settled = self.screen.settled();
-        let Some(mut handle) = self.stage.get_dvc_mut::<Paced>() else {
-            return Ok(());
+        let (channel, mut messages) = {
+            let mut out = outbox.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(why) = out.failed.take() {
+                return Err(why);
+            }
+            let Some(channel) = out.channel else {
+                return Ok(());
+            };
+            let mut messages = std::mem::take(&mut out.now);
+            if out.since.is_some_and(|since| settled || since.elapsed() >= HOLD_MOST) {
+                messages.append(&mut out.held);
+                out.since = None;
+            }
+            (channel, messages)
         };
-        let paced = handle.processor_mut();
-        let (Some(channel), Some(since)) = (paced.channel, paced.since) else {
-            return Ok(());
-        };
-        if !settled && since.elapsed() < HOLD_MOST {
+        if messages.is_empty() {
             return Ok(());
         }
-        let held = std::mem::take(&mut paced.held);
-        paced.since = None;
-        let messages = ironrdp_dvc::encode_dvc_messages(channel, held, ironrdp_svc::ChannelFlags::empty())
+        let encoded = ironrdp_dvc::encode_dvc_messages(channel, std::mem::take(&mut messages), ironrdp_svc::ChannelFlags::empty())
             .map_err(|e| format!("something the session could not send ({e})"))?;
         let frame = self
             .stage
-            .encode_dvc_messages(messages)
+            .encode_dvc_messages(encoded)
             .map_err(|e| format!("something the session could not send ({e})"))?;
         self.write(&frame)
     }
 
     /// How long the loop may wait before held acknowledgements are due.
-    fn hold_left(&mut self) -> Option<Duration> {
-        let paced = self.stage.get_dvc::<Paced>()?;
-        Some(HOLD_MOST.saturating_sub(paced.processor().since?.elapsed()))
+    fn hold_left(&self) -> Option<Duration> {
+        let out = self.outbox.as_ref()?.lock().unwrap_or_else(|e| e.into_inner());
+        Some(HOLD_MOST.saturating_sub(out.since?.elapsed()))
     }
 
     /// What the session's parts ask for after handling something.
@@ -1256,7 +1344,7 @@ fn run(mut s: Running, rx: mpsc::Receiver<Input>, mut waiter: waker::Waiter) -> 
                 Err(_) => return "the connection to the device broke".into(),
             };
             let working = Instant::now();
-            let drew = s.drew;
+            let drew = s.drew || s.drawn.load(Ordering::Acquire);
             let handled = s
                 .stage
                 .process(&mut s.image, action, &payload, s.framed.last_read_at())
@@ -1270,8 +1358,7 @@ fn run(mut s: Running, rx: mpsc::Receiver<Input>, mut waiter: waker::Waiter) -> 
                         "it turned the session away before showing anything (from a computer running Kagaz: not allowed there, or a wrong PIN)".to_string()
                     }
                 })
-                .and_then(|outputs| s.outputs(outputs))
-                .and_then(|next| s.graphics().map(|()| next));
+                .and_then(|outputs| s.outputs(outputs));
             s.numbers.add_work(working.elapsed());
             match handled {
                 Ok(Next::Go) => {}
@@ -1285,7 +1372,7 @@ fn run(mut s: Running, rx: mpsc::Receiver<Input>, mut waiter: waker::Waiter) -> 
         // once the computer has said it takes such asking. It answers by
         // starting its screen over.
         if let Some((width, height)) = s.wanted {
-            if (width, height) == (s.image.width(), s.image.height()) {
+            if (width, height) == s.screen.size() {
                 s.wanted = None;
             } else if let Some(frame) = s.stage.encode_resize(width as u32, height as u32, Some(s.scale), None) {
                 s.wanted = None;
@@ -1298,7 +1385,7 @@ fn run(mut s: Running, rx: mpsc::Receiver<Input>, mut waiter: waker::Waiter) -> 
         if std::mem::take(&mut s.drew) {
             s.numbers.add_update();
         }
-        if let Err(why) = s.release() {
+        if let Err(why) = s.send_answers() {
             return why;
         }
         if measured.elapsed() > Duration::from_secs(1) {
@@ -1367,6 +1454,13 @@ pub fn open(
     // computer sends as fast as this side keeps up.
     let newer_picture = !settings.older_picture;
     let videos: Arc<Mutex<Videos>> = Arc::default();
+    let screen = Arc::new(Screen::new());
+    if view.is_some_and(|v| v.video) {
+        screen.video_on();
+    }
+    let (waiter, wake) = waker::pair()?;
+    let drawn = Arc::new(AtomicBool::new(false));
+    let mut outbox = None;
     let mut dynamic = DrdynvcClient::new().with_dynamic_channel(DisplayControlClient::new(|_| Ok(Vec::new())));
     if newer_picture {
         let decoder = OpenH264Decoder::new().ok().map(|d| {
@@ -1382,7 +1476,25 @@ pub fn open(
             frames: 0,
             videos: videos.clone(),
         };
-        dynamic = dynamic.with_dynamic_channel(Paced::new(GraphicsPipelineClient::new(Box::new(watching), decoder)));
+        let pipeline = Arc::new(Mutex::new(GraphicsPipelineClient::new(Box::new(watching), decoder)));
+        let out: Arc<Mutex<Outbox>> = Arc::default();
+        let (work, taken) = mpsc::channel();
+        let thread = PictureThread {
+            pipeline: pipeline.clone(),
+            outbox: out.clone(),
+            work: taken,
+            screen: screen.clone(),
+            numbers: numbers.clone(),
+            videos: videos.clone(),
+            wake: wake.clone(),
+            drawn: drawn.clone(),
+        };
+        std::thread::Builder::new()
+            .name("rdp-picture".into())
+            .spawn(move || picture_thread(thread))
+            .map_err(|e| OpenError::Other(e.to_string()))?;
+        dynamic = dynamic.with_dynamic_channel(Paced { pipeline, outbox: out.clone(), work });
+        outbox = Some(out);
     } else {
         numbers.set_via("older picture".into());
     }
@@ -1485,10 +1597,6 @@ pub fn open(
     };
 
     let size = result.desktop_size;
-    let screen = Arc::new(Screen::new());
-    if view.is_some_and(|v| v.video) {
-        screen.video_on();
-    }
     screen.resize(size.width, size.height);
     let activation = result.activation_factory;
     let stage = ActiveStageBuilder {
@@ -1503,7 +1611,6 @@ pub fn open(
     }
     .build();
     connection.set_read_timeout(Some(READ_SLICE))?;
-    let (waiter, wake) = waker::pair()?;
     let (tx, rx) = mpsc::channel();
     let running = Running {
         framed,
@@ -1529,7 +1636,8 @@ pub fn open(
         told: None,
         quiet,
         held: HashMap::new(),
-        videos,
+        outbox,
+        drawn,
     };
     {
         let screen = screen.clone();
