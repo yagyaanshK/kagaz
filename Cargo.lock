@@ -3693,6 +3693,7 @@ dependencies = [
  "ironrdp-rdpdr",
  "ironrdp-rdpsnd",
  "ironrdp-session",
+ "ironrdp-svc",
  "libc",
  "lzma-rs",
  "md-5 0.11.0",

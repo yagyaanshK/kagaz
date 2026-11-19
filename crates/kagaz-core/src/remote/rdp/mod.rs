@@ -31,7 +31,7 @@ use ironrdp_connector::{
 };
 use ironrdp_core::{IntoOwned as _, WriteBuf};
 use ironrdp_displaycontrol::client::DisplayControlClient;
-use ironrdp_dvc::DrdynvcClient;
+use ironrdp_dvc::{DrdynvcClient, DvcClientProcessor, DvcMessage, DvcProcessor};
 use ironrdp_egfx::client::{BitmapUpdate, GraphicsPipelineClient, GraphicsPipelineHandler};
 use ironrdp_egfx::decode::{H264Decoder, OpenH264Decoder};
 use ironrdp_egfx::pdu::{CapabilitySet, Codec1Type};
@@ -44,7 +44,7 @@ use ironrdp_pdu::input::mouse_x::{MouseXPdu, PointerXFlags};
 use ironrdp_pdu::rdp::capability_sets::{client_codecs_capabilities, MajorPlatformType, RailSupportLevel};
 use ironrdp_pdu::rdp::client_info::{CompressionType, PerformanceFlags, TimezoneInfo};
 use ironrdp_session::image::DecodedImage;
-use ironrdp_session::{ActiveStage, ActiveStageBuilder, ActiveStageOutput};
+use ironrdp_session::{composite_graphics_pipeline, ActiveStage, ActiveStageBuilder, ActiveStageOutput};
 use std::collections::HashMap;
 use std::io::{self, Read, Write};
 use std::net::{Shutdown, SocketAddr, TcpStream};
@@ -183,7 +183,13 @@ fn config(
         // channel to take it.
         enable_audio_playback: sound,
         enable_audio_capture: false,
-        performance_flags: PerformanceFlags::default(),
+        // Less for the computer to send, so less to wait for: no
+        // wallpaper and no pointer shadow, beside what is off already (a
+        // window's contents while dragged, menus' animations). Lag comes
+        // first; text keeps its smoothing.
+        performance_flags: PerformanceFlags::default()
+            | PerformanceFlags::DISABLE_WALLPAPER
+            | PerformanceFlags::DISABLE_CURSOR_SHADOW,
         license_cache: None,
         timezone_info: TimezoneInfo::default(),
         compression_type: Some(CompressionType::K64),
@@ -431,6 +437,71 @@ struct Running {
     held: HashMap<String, FastPathInputEvent>,
 }
 
+/// The longest a picture's acknowledgement waits for the window: a window
+/// out of sight or busy must not stop the computer altogether.
+const HOLD_MOST: Duration = Duration::from_millis(200);
+
+/// The newer picture's channel, with its acknowledgements held back until
+/// the window has shown what came. The computer judges from them how fast
+/// this side keeps up and sends no faster: acknowledged on arrival, it
+/// would go on at the link's pace while pictures wait to be shown here,
+/// and each would be older when it is. Lag comes first.
+///
+/// The session drains a channel of the library's own type by itself; this
+/// one it drains in [`Running::graphics`] instead.
+struct Paced {
+    inner: GraphicsPipelineClient,
+    channel: Option<u32>,
+    held: Vec<DvcMessage>,
+    since: Option<Instant>,
+}
+
+impl Paced {
+    fn new(inner: GraphicsPipelineClient) -> Paced {
+        Paced { inner, channel: None, held: Vec::new(), since: None }
+    }
+}
+
+/// RDPGFX_CMDID_FRAMEACKNOWLEDGE (MS-RDPEGFX 2.2.2.13), the first two bytes
+/// of the message, little-endian.
+const FRAME_ACKNOWLEDGE: [u8; 2] = [0x0d, 0x00];
+
+impl DvcProcessor for Paced {
+    fn channel_name(&self) -> &str {
+        self.inner.channel_name()
+    }
+
+    fn start(&mut self, channel_id: u32) -> ironrdp_pdu::PduResult<Vec<DvcMessage>> {
+        self.channel = Some(channel_id);
+        self.held.clear();
+        self.since = None;
+        self.inner.start(channel_id)
+    }
+
+    fn process(&mut self, channel_id: u32, payload: &[u8]) -> ironrdp_pdu::PduResult<Vec<DvcMessage>> {
+        let mut now = Vec::new();
+        for message in self.inner.process(channel_id, payload)? {
+            let ack = ironrdp_core::encode_vec(message.as_ref()).is_ok_and(|b| b.starts_with(&FRAME_ACKNOWLEDGE));
+            if ack {
+                self.since.get_or_insert_with(Instant::now);
+                self.held.push(message);
+            } else {
+                now.push(message);
+            }
+        }
+        Ok(now)
+    }
+
+    fn close(&mut self, channel_id: u32) {
+        self.held.clear();
+        self.since = None;
+        self.inner.close(channel_id);
+    }
+}
+
+impl DvcClientProcessor for Paced {}
+ironrdp_core::impl_as_any!(Paced);
+
 /// What is here for the computer's clipboard: handed over when it asks.
 enum Here {
     Nothing,
@@ -488,6 +559,60 @@ enum Next {
 impl Running {
     fn write(&mut self, frame: &[u8]) -> Result<(), String> {
         self.framed.write_all(frame).map_err(|_| "the connection to the device broke".to_string())
+    }
+
+    /// What the newer picture's channel has put together since last time,
+    /// onto the screen (the session no longer does it for this channel:
+    /// see [`Paced`]).
+    fn graphics(&mut self) -> Result<(), String> {
+        let Some(mut paced) = self.stage.get_dvc_mut::<Paced>() else {
+            return Ok(());
+        };
+        let done = composite_graphics_pipeline(&mut paced.processor_mut().inner, &mut self.image)
+            .map_err(|e| format!("the device sent a picture Kagaz could not put together ({e})"))?;
+        let size = (self.image.width(), self.image.height());
+        if done.reset || (done.region.is_some() && self.screen.size() != size) {
+            self.screen.resize(size.0, size.1);
+        }
+        for region in &done.regions {
+            let rect = area_of(&self.image, region);
+            if !rect.is_empty() {
+                self.screen.put_from(rect, self.image.data(), self.image.stride());
+                self.drew = true;
+            }
+        }
+        Ok(())
+    }
+
+    /// The held acknowledgements go once the window has shown everything,
+    /// or once they have waited long enough.
+    fn release(&mut self) -> Result<(), String> {
+        let settled = self.screen.settled();
+        let Some(mut handle) = self.stage.get_dvc_mut::<Paced>() else {
+            return Ok(());
+        };
+        let paced = handle.processor_mut();
+        let (Some(channel), Some(since)) = (paced.channel, paced.since) else {
+            return Ok(());
+        };
+        if !settled && since.elapsed() < HOLD_MOST {
+            return Ok(());
+        }
+        let held = std::mem::take(&mut paced.held);
+        paced.since = None;
+        let messages = ironrdp_dvc::encode_dvc_messages(channel, held, ironrdp_svc::ChannelFlags::empty())
+            .map_err(|e| format!("something the session could not send ({e})"))?;
+        let frame = self
+            .stage
+            .encode_dvc_messages(messages)
+            .map_err(|e| format!("something the session could not send ({e})"))?;
+        self.write(&frame)
+    }
+
+    /// How long the loop may wait before held acknowledgements are due.
+    fn hold_left(&mut self) -> Option<Duration> {
+        let paced = self.stage.get_dvc::<Paced>()?;
+        Some(HOLD_MOST.saturating_sub(paced.processor().since?.elapsed()))
     }
 
     /// What the session's parts ask for after handling something.
@@ -878,6 +1003,9 @@ impl Running {
             Input::Files(paths) => self.offer(paths),
             // The computer suits its picture to the link by itself.
             Input::Picture(_) => {}
+            // The window showed a picture: held acknowledgements may go
+            // (each turn of the loop looks).
+            Input::Shown => {}
             Input::Close => {}
         }
     }
@@ -967,7 +1095,8 @@ fn run(mut s: Running, rx: mpsc::Receiver<Input>, mut waiter: waker::Waiter) -> 
                         "it turned the session away before showing anything (from a computer running Kagaz: not allowed there, or a wrong PIN)".to_string()
                     }
                 })
-                .and_then(|outputs| s.outputs(outputs));
+                .and_then(|outputs| s.outputs(outputs))
+                .and_then(|next| s.graphics().map(|()| next));
             s.numbers.add_work(working.elapsed());
             match handled {
                 Ok(Next::Go) => {}
@@ -994,6 +1123,9 @@ fn run(mut s: Running, rx: mpsc::Receiver<Input>, mut waiter: waker::Waiter) -> 
         if std::mem::take(&mut s.drew) {
             s.numbers.add_update();
         }
+        if let Err(why) = s.release() {
+            return why;
+        }
         if measured.elapsed() > Duration::from_secs(1) {
             measured = Instant::now();
             if let Some(delay) = measured_delay(&s.connection) {
@@ -1004,7 +1136,9 @@ fn run(mut s: Running, rx: mpsc::Receiver<Input>, mut waiter: waker::Waiter) -> 
             }
         }
         if quiet {
-            waiter.wait(&s.connection, Duration::from_secs(1));
+            // Not past the time held acknowledgements are due.
+            let most = s.hold_left().map_or(Duration::from_secs(1), |left| left.max(Duration::from_millis(1)));
+            waiter.wait(&s.connection, most.min(Duration::from_secs(1)));
         }
     }
 }
@@ -1066,7 +1200,7 @@ pub fn open(
             areas: Vec::new(),
             frames: 0,
         };
-        dynamic = dynamic.with_dynamic_channel(GraphicsPipelineClient::new(Box::new(watching), decoder));
+        dynamic = dynamic.with_dynamic_channel(Paced::new(GraphicsPipelineClient::new(Box::new(watching), decoder)));
     } else {
         numbers.set_via("older picture".into());
     }

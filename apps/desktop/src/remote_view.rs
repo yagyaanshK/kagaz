@@ -3,7 +3,7 @@
 //! thread here takes what changed and hands it to the page as binary
 //! packets over a channel, the way the cameras' pictures travel
 //! (media.rs). The page paints them on a canvas and says when it has, so
-//! that no more than two pictures are ever on their way to it: a slow
+//! that no more than one picture is ever on its way to it: a slow
 //! page skips pictures instead of falling behind.
 //!
 //! A packet starts with its kind:
@@ -33,11 +33,15 @@ use std::time::Duration;
 use tauri::ipc::{Channel, InvokeResponseBody};
 use tauri::{AppHandle, Manager};
 
-/// The page may be this many pictures behind before Kagaz waits for it.
-const AHEAD: u32 = 2;
+/// The page may be this many pictures behind before Kagaz waits for it:
+/// one, so that a picture never waits behind another (lag comes first;
+/// what changes meanwhile is merged into the next).
+const AHEAD: u32 = 1;
 
 struct Open {
     input: InputSender,
+    /// The session's screen, told when the page has shown a picture.
+    screen: Arc<remote::Screen>,
     numbers: Arc<Numbers>,
     /// Pictures sent that the page has not painted yet.
     unpainted: Arc<(Mutex<u32>, Condvar)>,
@@ -252,6 +256,9 @@ fn forward(app: AppHandle, id: u64, session: remote::Session, channel: Channel<I
                     .unwrap_or_else(|e| e.into_inner());
                 if *guard >= AHEAD {
                     *guard = 0;
+                    // Taken as shown, so that the device is not held back
+                    // by a page that is not there to show it.
+                    session.screen.shown();
                 }
             }
             if !session.screen.wait(Duration::from_millis(250)) {
@@ -430,8 +437,12 @@ pub async fn remote_connect(
         }
         let viewers = app.state::<Viewers>();
         let id = viewers.next.fetch_add(1, Ordering::SeqCst) + 1;
+        // The page says when it has shown each picture: the session holds
+        // the device back until it has (lag comes first).
+        session.screen.pace();
         let open = Open {
             input: session.sender(),
+            screen: session.screen.clone(),
             numbers: session.numbers.clone(),
             unpainted: Arc::new((Mutex::new(0), Condvar::new())),
             stop: Arc::new(AtomicBool::new(false)),
@@ -503,6 +514,8 @@ pub fn remote_painted(viewers: tauri::State<'_, Viewers>, session: u64) -> Resul
         let mut n = count.lock().unwrap_or_else(|e| e.into_inner());
         *n = n.saturating_sub(1);
         painted.notify_all();
+        open.screen.shown();
+        open.input.send(Input::Shown);
     })
 }
 

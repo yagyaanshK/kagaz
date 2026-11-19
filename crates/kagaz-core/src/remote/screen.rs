@@ -173,6 +173,11 @@ struct Inner {
     events: Vec<Event>,
     /// There is something to take, and it is not half an update.
     ready: bool,
+    /// Whoever shows it says when it has shown what it took (the window
+    /// does; the command line does not).
+    paced: bool,
+    /// Takes not yet shown.
+    out: u32,
 }
 
 impl Inner {
@@ -396,6 +401,27 @@ impl Screen {
 
     // ---- the side that shows it ----
 
+    /// Whoever shows the screen will say when it has shown each take
+    /// ([`Screen::shown`]), so that the session can hold the device back
+    /// until it has ([`Screen::settled`]).
+    pub fn pace(&self) {
+        self.lock().paced = true;
+    }
+
+    /// What was last taken is on screen now.
+    pub fn shown(&self) {
+        let mut s = self.lock();
+        s.out = s.out.saturating_sub(1);
+    }
+
+    /// Everything the device sent is on screen: nothing waits to be taken
+    /// and nothing taken waits to be shown. Always so for a screen nobody
+    /// paces.
+    pub fn settled(&self) -> bool {
+        let s = self.lock();
+        !s.paced || (s.out == 0 && s.ops.is_empty() && !s.resized)
+    }
+
     /// Wait until there is something to take; false when the time ran out.
     pub fn wait(&self, timeout: Duration) -> bool {
         let s = self.lock();
@@ -436,6 +462,9 @@ impl Screen {
                     Op::Move { from_x, from_y, rect } => Piece::Move { from_x, from_y, rect },
                 });
             }
+        }
+        if s.paced && !pieces.is_empty() {
+            s.out += 1;
         }
         Taken {
             pieces,
@@ -652,6 +681,27 @@ mod tests {
         }
         let taken = screen.take();
         assert!(taken.pieces.len() <= MAX_AREAS, "{} pieces", taken.pieces.len());
+    }
+
+    #[test]
+    fn a_paced_screen_is_settled_once_what_was_taken_is_shown() {
+        let screen = Screen::new();
+        screen.resize(4, 4);
+        assert!(screen.settled(), "nobody paces it yet");
+        screen.pace();
+        assert!(!screen.settled(), "the first picture waits to be taken");
+        assert!(!screen.take().pieces.is_empty());
+        assert!(!screen.settled(), "taken, not yet shown");
+        screen.shown();
+        assert!(screen.settled());
+        screen.put(Rect::new(0, 0, 2, 2), &[9; 16]);
+        assert!(!screen.settled(), "a change waits to be taken");
+        screen.take();
+        screen.shown();
+        assert!(screen.settled());
+        // Nothing taken: nothing to show.
+        assert!(screen.take().pieces.is_empty());
+        assert!(screen.settled());
     }
 
     #[test]

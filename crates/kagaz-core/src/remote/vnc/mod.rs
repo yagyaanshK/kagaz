@@ -533,6 +533,8 @@ fn write_loop(rx: mpsc::Receiver<Input>, link: &Link, settings: &Settings) {
                 // A VNC server's screen is the size it is, and it sends
                 // no sound.
                 Input::Resize { .. } | Input::Sound(_) => {}
+                // VNC asks for each picture itself.
+                Input::Shown => {}
                 // VNC has no word for the lock keys' state.
                 Input::Locks { .. } => {}
                 Input::Close => close = true,

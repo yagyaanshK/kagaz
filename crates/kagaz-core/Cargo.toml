@@ -65,6 +65,7 @@ ironrdp-pdu = "0.11"
 ironrdp-graphics = "0.11"
 ironrdp-core = "0.3"
 ironrdp-dvc = "0.10"
+ironrdp-svc = "0.10"
 ironrdp-displaycontrol = "0.10"
 ironrdp-cliprdr = "0.9"
 # Pictures on the clipboard: between PNG and the form Windows keeps them in.

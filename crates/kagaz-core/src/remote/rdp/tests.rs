@@ -512,6 +512,40 @@ fn the_newer_picture_arrives_as_h264_and_each_frame_is_acknowledged() {
     assert!(until(|| server.heard().iter().any(|h| h == "Move { x: 30, y: 40 }")), "heard {:?}", server.heard());
 }
 
+/// A window that says when it has shown each picture: the computer hears
+/// that a picture arrived only once it has been shown, so that it sends no
+/// faster than this side shows (lag comes first). A window that says
+/// nothing holds it back no longer than a moment.
+#[test]
+fn a_picture_is_acknowledged_once_the_window_has_shown_it() {
+    let Some(mut server) = serve_with(320, 240, &["--h264"]) else { return };
+    let session = connect(&server, Some("asha"), Some("sesame"), &Trust::default()).unwrap();
+    assert!(until(|| card_apart(&session, 320, 240, 0) < CLOSE));
+    let acks = |server: &TestServer| server.heard().iter().filter(|h| *h == "FrameAck").count();
+    session.screen.pace();
+    // What came so far is shown: nothing is held.
+    session.screen.take();
+    session.screen.shown();
+    session.send(Input::Shown);
+    std::thread::sleep(Duration::from_millis(300));
+    let before = acks(&server);
+    // A new picture arrives and waits to be shown: its acknowledgement waits.
+    server.tick(40);
+    assert!(until(|| card_apart(&session, 320, 240, 40) < CLOSE));
+    std::thread::sleep(Duration::from_millis(60));
+    assert_eq!(acks(&server), before, "acknowledged before the window showed it");
+    // Shown: it goes at once.
+    session.screen.take();
+    session.screen.shown();
+    session.send(Input::Shown);
+    assert!(until(|| acks(&server) > before), "never acknowledged after it was shown");
+    // A window that says nothing: the acknowledgement goes after a moment.
+    let shown = acks(&server);
+    server.tick(80);
+    assert!(until(|| card_apart(&session, 320, 240, 80) < CLOSE));
+    assert!(until(|| acks(&server) > shown), "held for good by a silent window");
+}
+
 #[test]
 fn the_newer_picture_follows_the_viewers_size() {
     let Some(server) = serve_with(320, 240, &["--h264", "--fit"]) else { return };

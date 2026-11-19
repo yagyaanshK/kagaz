@@ -57,6 +57,10 @@ pub enum Input {
     /// The viewer is this size now, in pixels: a device that can redraws
     /// its screen to fit.
     Resize { width: u16, height: u16 },
+    /// The viewer has shown what it last took from the screen (see
+    /// [`super::Screen::shown`]): a session holding the device back for it
+    /// may let it go on.
+    Shown,
     Close,
 }
 
