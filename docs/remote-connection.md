@@ -69,6 +69,16 @@ the other kinds: saved devices, Found nearby, Add.
   saying it waits, with each clipboard step in the log); or over SSH
   with scp into a folder there. A folder of this computer can also be
   shared with a device as a drive, both ways, from the next connection.
+  Files dragged from this computer onto the session's window (the
+  owner, 2026-11-20: "where you let go") go through the drive whatever
+  the setting: the device's pointer follows the drag, and the helper is
+  given the point they were let go at. There it asks Windows what is
+  under that point: an item in File Explorer that is a folder takes
+  them; else the folder that window shows (its tab named in the title),
+  and they are chosen there; the desktop (or a folder on it); anywhere
+  else, or a folder that is not on a disk (This PC, Home), Windows'
+  folder chooser asks. A program or a web page there cannot take them:
+  Windows accepts a drop into those only from a drag made there.
   A computer running Kagaz takes the files at once into its person's
   Downloads, beside what is there, with "N files in Downloads" on its
   sign to show them.

@@ -270,7 +270,9 @@
     }
   });
 
-  listen("tauri://drag-drop", (e) => {
+  // Dropped on this window only: a session's window has drops of its own.
+  const thisWindow = window.__TAURI__.webviewWindow.getCurrentWebviewWindow();
+  thisWindow.listen("tauri://drag-drop", (e) => {
     if ($("tab-print").classList.contains("hidden")) return;
     const paths = (e.payload && e.payload.paths) || [];
     const p = paths.find((x) => /\.(pdf|jpe?g|png)$/i.test(x));

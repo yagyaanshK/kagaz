@@ -36,6 +36,18 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Condvar, Mutex};
 use std::time::Duration;
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+use kagaz_core::remote::rdp::Place;
+/// Where files sent through a drive go there (see the core's `Place`):
+/// no drive here yet.
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+#[allow(dead_code)]
+enum Place {
+    Ask,
+    Open,
+    At(i32, i32),
+}
 use tauri::ipc::{Channel, InvokeResponseBody};
 use tauri::{AppHandle, Manager};
 
@@ -798,8 +810,9 @@ pub async fn remote_pick_folder(app: AppHandle) -> Result<Option<String>, String
 pub struct Sent {
     count: usize,
     /// "clipboard" (waiting to be pasted there), "ask" (the computer asks
-    /// where to save them), "open" (their folder opens there), "ssh"
-    /// (copied there into `folder`).
+    /// where to save them), "open" (their folder opens there), "drop"
+    /// (saved where they were let go there), "ssh" (copied there into
+    /// `folder`).
     how: String,
     folder: Option<String>,
 }
@@ -809,9 +822,17 @@ pub struct Sent {
 /// drive, with the computer asking where to save them or opening their
 /// folder; or over SSH into a folder there. Without `paths` the person is
 /// asked which (folders too, where they can go). A computer running Kagaz
-/// takes them by itself.
+/// takes them by itself. Files dropped on its screen here come with the
+/// point they were let go at (`at`, in the screen's pixels there): with
+/// a drive, the computer saves them where that is.
 #[tauri::command]
-pub async fn remote_send_files(app: AppHandle, session: u64, paths: Option<Vec<String>>, how: Option<String>) -> Result<Sent, String> {
+pub async fn remote_send_files(
+    app: AppHandle,
+    session: u64,
+    paths: Option<Vec<String>>,
+    how: Option<String>,
+    at: Option<(i32, i32)>,
+) -> Result<Sent, String> {
     blocking(move || {
         let (device_id, sent, window, input) = app
             .state::<Viewers>()
@@ -821,6 +842,7 @@ pub async fn remote_send_files(app: AppHandle, session: u64, paths: Option<Vec<S
         let chosen = how.or_else(|| device.as_ref().and_then(|d| d.settings.send_files.clone()));
         let how = match chosen.as_deref() {
             _ if paired => "clipboard",
+            _ if at.is_some() && sent.is_some() => "drop",
             Some("ask" | "open") if sent.is_some() => chosen.as_deref().unwrap_or("ask"),
             Some("ssh") => "ssh",
             Some("clipboard") => "clipboard",
@@ -854,7 +876,14 @@ pub async fn remote_send_files(app: AppHandle, session: u64, paths: Option<Vec<S
                 over_ssh(&app, session, device.as_ref().ok_or("this device is no longer saved")?, &paths, &folder)?;
                 Ok(Sent { count, how, folder: Some(folder) })
             }
-            _ => through_drive(&app, &window, &input, sent.as_deref(), &paths, how == "ask").map(|_| Sent { count, how, folder: None }),
+            _ => {
+                let place = match (how.as_str(), at) {
+                    ("drop", Some((x, y))) => Place::At(x, y),
+                    ("open", _) => Place::Open,
+                    _ => Place::Ask,
+                };
+                through_drive(&app, &window, &input, sent.as_deref(), &paths, place).map(|_| Sent { count, how, folder: None })
+            }
         }
     })
     .await
@@ -871,7 +900,7 @@ fn through_drive(
     input: &kagaz_core::remote::InputSender,
     sent: Option<&std::path::Path>,
     paths: &[std::path::PathBuf],
-    ask: bool,
+    place: Place,
 ) -> Result<(), String> {
     use tauri::Emitter;
     let sent = sent.ok_or("this session has no drive for files")?;
@@ -885,7 +914,7 @@ fn through_drive(
     let helper = sent.join(".kagaz");
     std::fs::create_dir_all(&helper).map_err(|e| e.to_string())?;
     std::fs::write(helper.join("save.ps1"), kagaz_core::remote::rdp::SAVE_SCRIPT).map_err(|e| e.to_string())?;
-    run_there(input, &kagaz_core::remote::rdp::run_line(&batch, ask));
+    run_there(input, &kagaz_core::remote::rdp::run_line(&batch, place));
     Ok(())
 }
 
@@ -980,7 +1009,7 @@ fn through_drive(
     _input: &kagaz_core::remote::InputSender,
     _sent: Option<&std::path::Path>,
     _paths: &[std::path::PathBuf],
-    _ask: bool,
+    _place: Place,
 ) -> Result<(), String> {
     Err("sending through a drive comes to this system later".into())
 }

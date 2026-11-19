@@ -1091,15 +1091,20 @@ const KagazRemoteView = (() => {
   // Kagaz's drive there, with Windows asking where to save them (or
   // their folder opening); by its clipboard, to be pasted there; or over
   // SSH. A computer running Kagaz takes them by itself. Without `paths`
-  // the person is asked which files.
-  async function sendFiles(paths) {
+  // the person is asked which files. Dropped on its screen, they come
+  // with the point they were let go at (`point`).
+  async function sendFiles(paths, point) {
     if (!cur || cur.session == null) return;
     closePop();
     const there = cur.device.name;
     try {
-      const sent = await invoke("remote_send_files", { session: cur.session, paths: paths || null });
+      const at = point ? [point.x, point.y] : null;
+      const sent = await invoke("remote_send_files", { session: cur.session, paths: paths || null, at });
       const what = sent.count === 1 ? "the file" : `${sent.count} files`;
-      if (sent.how === "ask") {
+      if (sent.how === "drop") {
+        toast(`Saving ${what} where you let go on ${there}.`, 8000);
+        log(`files dropped by the drive, ${sent.count}`);
+      } else if (sent.how === "ask") {
         toast(`On ${there}, Windows asks where to save ${what}.`, 8000);
         log(`files sent by the drive, ${sent.count}, asked where`);
       } else if (sent.how === "open") {
@@ -1114,6 +1119,45 @@ const KagazRemoteView = (() => {
     }
     stage.focus();
   }
+  // Files dragged here from this computer: the device's pointer follows
+  // the drag, so that its folders show where they would go, and where
+  // they are let go is where they are saved there (remote_view.rs). Let
+  // go elsewhere in the window, they go the way chosen for the device.
+  // Tauri says where in the page's own pixels here (Linux, macOS), in
+  // the screen's on Windows.
+  function dragAt(position) {
+    if (!position || !cur || cur.session == null || cur.away || canvas.classList.contains("hidden")) return null;
+    const k = /Windows/.test(navigator.userAgent) ? window.devicePixelRatio || 1 : 1;
+    const ev = { clientX: position.x / k, clientY: position.y / k };
+    const r = canvas.getBoundingClientRect();
+    if (ev.clientX < r.left || ev.clientX >= r.right || ev.clientY < r.top || ev.clientY >= r.bottom) return null;
+    return at(ev);
+  }
+  function dragOver(position, now) {
+    const p = dragAt(position);
+    if (!p) return null;
+    cur.point = p;
+    const last = outbox[outbox.length - 1];
+    if (!now && last && last.t === "pointer" && last.buttons === 0) outbox.pop();
+    did({ t: "pointer", x: p.x, y: p.y, buttons: 0 }, now);
+    return p;
+  }
+  function dragEnter(payload) {
+    if (!cur || cur.session == null || cur.away) return;
+    if (!cur.dragging) {
+      cur.dragging = true;
+      toast(`Let go where they should go on ${cur.device.name}.`, 4000);
+    }
+    dragOver(payload && payload.position, false);
+  }
+  function dropped(payload) {
+    if (!cur || cur.session == null || cur.away) return;
+    cur.dragging = false;
+    const paths = (payload && payload.paths) || [];
+    if (!paths.length) return;
+    sendFiles(paths, dragOver(payload.position, true));
+  }
+
   // Large files take a moment to be got ready for the drive.
   function sendReady(p) {
     if (!cur || !(p.total > 20e6)) return;
@@ -1444,6 +1488,14 @@ const KagazRemoteView = (() => {
   if (events && events.listen) {
     hear("remote-pinch", (ev) => pinch(ev.payload.scale, ev.payload.begin, ev.payload.end));
     hear("remote-send-ready", (ev) => sendReady(ev.payload));
+    hear("tauri://drag-enter", (ev) => dragEnter(ev.payload));
+    hear("tauri://drag-over", (ev) => {
+      if (cur && cur.dragging) dragOver(ev.payload && ev.payload.position, false);
+    });
+    hear("tauri://drag-leave", () => {
+      if (cur) cur.dragging = false;
+    });
+    hear("tauri://drag-drop", (ev) => dropped(ev.payload));
     hear("remote-close-asked", async () => {
       if (cur && cur.session != null) {
         const yes = await KagazAsk.confirm(

@@ -238,12 +238,17 @@ pub fn stage(sent: &Path, paths: &[PathBuf], mut progress: impl FnMut(u64, u64))
     Ok(batch)
 }
 
-/// The helper the computer runs (from `\\tsclient\Kagaz\.kagaz`) to ask
-/// where to save a batch: Windows' own folder chooser, then Windows' own
-/// copy with its progress and its questions about files already there,
-/// then the folder opened with them. Written in PowerShell, which every
-/// Windows has; nothing is installed.
-pub const SAVE_SCRIPT: &str = r#"param([string]$Batch)
+/// The helper the computer runs (from `\\tsclient\Kagaz\.kagaz`) to save
+/// a batch. Given `x,y` (files dropped on its screen there), it saves them
+/// where they were let go, as Windows does with a drop: into the folder
+/// under the point in File Explorer, else into the folder that window
+/// shows (and chooses them there), or onto the desktop (into a folder on
+/// it, if let go over one). Otherwise, and where that cannot be told,
+/// Windows' own folder chooser asks. Then Windows' own copy, with its
+/// progress and its questions about files already there; a chosen
+/// folder opens with them. Written in PowerShell, which every Windows
+/// has; nothing is installed.
+pub const SAVE_SCRIPT: &str = r#"param([string]$Batch, [string]$At = '')
 $ErrorActionPreference = 'Stop'
 $src = Join-Path '\\tsclient\Kagaz' $Batch
 # The drive can take a moment to appear.
@@ -286,6 +291,30 @@ public static class KagazFolder {
   [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = false)]
   static extern void SHCreateItemFromParsingName(string path, IntPtr bindContext, ref Guid iid, out IShellItem item);
   [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll")] static extern bool SetProcessDpiAwarenessContext(IntPtr context);
+  [DllImport("user32.dll")] static extern bool SetProcessDPIAware();
+  [StructLayout(LayoutKind.Sequential)] struct Point { public int X; public int Y; }
+  [DllImport("user32.dll")] static extern IntPtr WindowFromPoint(Point point);
+  [DllImport("user32.dll")] static extern IntPtr GetAncestor(IntPtr window, uint flags);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetClassName(IntPtr window, System.Text.StringBuilder name, int size);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr window, System.Text.StringBuilder text, int size);
+  // The screen's own pixels, as the session's picture has them, whatever
+  // the scaling there.
+  public static void Aware() {
+    try { if (SetProcessDpiAwarenessContext(new IntPtr(-4))) return; } catch {}
+    try { SetProcessDPIAware(); } catch {}
+  }
+  // The top window under a point of the screen.
+  public static IntPtr Under(int x, int y) {
+    Point p; p.X = x; p.Y = y;
+    return GetAncestor(WindowFromPoint(p), 2);
+  }
+  public static string Kind(IntPtr window) {
+    var s = new System.Text.StringBuilder(256); GetClassName(window, s, 256); return s.ToString();
+  }
+  public static string Title(IntPtr window) {
+    var s = new System.Text.StringBuilder(512); GetWindowText(window, s, 512); return s.ToString();
+  }
   public static string Pick(string title, string start) {
     IFileDialog d = (IFileDialog)new Dialog();
     // Folders only, on a disk, that are there.
@@ -307,12 +336,84 @@ public static class KagazFolder {
   }
 }
 '@
-$downloads = (New-Object -ComObject Shell.Application).NameSpace('shell:Downloads').Self.Path
-$what = if ($items.Count -eq 1) { $items[0].Name } else { "$($items.Count) files" }
-$to = [KagazFolder]::Pick("Save $what from Kagaz", $downloads)
-if (-not $to) { exit }
+$shell = New-Object -ComObject Shell.Application
+$downloads = $shell.NameSpace('shell:Downloads').Self.Path
+$start = $downloads
+$to = $null
+$view = $null
+function Test-Folder($path) { $path -and [System.IO.Path]::IsPathRooted($path) -and (Test-Path -LiteralPath $path -PathType Container) }
+if ($At -match '^(-?\d+),(-?\d+)$') {
+  try {
+    $x = [int]$Matches[1]; $y = [int]$Matches[2]
+    [KagazFolder]::Aware()
+    $window = [KagazFolder]::Under($x, $y)
+    $kind = [KagazFolder]::Kind($window)
+    # What is under the point: an item (its name), or the folder tree.
+    $name = $null; $tree = $false
+    try {
+      Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
+      $e = [System.Windows.Automation.AutomationElement]::FromPoint((New-Object System.Windows.Point($x, $y)))
+      $walker = [System.Windows.Automation.TreeWalker]::ControlViewWalker
+      for ($i = 0; $e -and $i -lt 6; $i++) {
+        $type = $e.Current.ControlType
+        if ($type -eq [System.Windows.Automation.ControlType]::ListItem) { $name = $e.Current.Name; break }
+        if ($type -eq [System.Windows.Automation.ControlType]::TreeItem) { $tree = $true; break }
+        $e = $walker.GetParent($e)
+      }
+    } catch {}
+    if ($kind -eq 'CabinetWClass') {
+      # File Explorer: of its tabs, the one shown (named in its title).
+      $title = [KagazFolder]::Title($window)
+      $tabs = @($shell.Windows() | Where-Object { try { [int64]$_.HWND -eq $window.ToInt64() } catch { $false } })
+      $w = $tabs | Where-Object { $_.LocationName -and ($title -eq $_.LocationName -or $title.StartsWith($_.LocationName + ' - ')) } | Select-Object -First 1
+      if (-not $w -and $tabs.Count -eq 1) { $w = $tabs[0] }
+      if ($w) {
+        $folder = $w.Document.Folder
+        $here = $folder.Self.Path
+        if ($name -and -not $tree) {
+          $item = $folder.ParseName($name)
+          if (-not $item -and -not (Test-Folder $here)) { $item = @($folder.Items()) | Where-Object { $_.Name -eq $name } | Select-Object -First 1 }
+          if ($item -and (Test-Folder $item.Path)) { $to = $item.Path }
+        }
+        if (-not $to -and -not $tree -and (Test-Folder $here)) { $to = $here; $view = $w }
+        if (-not $to -and (Test-Folder $here)) { $start = $here }
+      }
+    } elseif ($kind -eq 'Progman' -or $kind -eq 'WorkerW') {
+      $desktop = [Environment]::GetFolderPath('Desktop')
+      if ($name) {
+        foreach ($d in @($desktop, [Environment]::GetFolderPath('CommonDesktopDirectory'))) {
+          $p = Join-Path $d $name
+          if (Test-Folder $p) { $to = $p; break }
+        }
+      }
+      if (-not $to) { $to = $desktop }
+    }
+  } catch { $to = $null; $view = $null }
+}
+$chosen = $false
+if (-not $to) {
+  $what = if ($items.Count -eq 1) { $items[0].Name } else { "$($items.Count) files" }
+  $to = [KagazFolder]::Pick("Save $what from Kagaz", $start)
+  if (-not $to) { exit }
+  $chosen = $true
+}
 [Microsoft.VisualBasic.FileIO.FileSystem]::CopyDirectory($src, $to, [Microsoft.VisualBasic.FileIO.UIOption]::AllDialogs, [Microsoft.VisualBasic.FileIO.UICancelOption]::DoNothing)
-Start-Process explorer.exe -ArgumentList "/select,`"$(Join-Path $to $items[0].Name)`""
+if ($view) {
+  # Chosen in the window they were let go on, once it shows them.
+  for ($i = 0; $i -lt 15; $i++) {
+    Start-Sleep -Milliseconds 200
+    try {
+      $first = $true
+      foreach ($n in $items) {
+        $it = $view.Document.Folder.ParseName($n.Name)
+        if ($it) { $view.Document.SelectItem($it, $(if ($first) { 29 } else { 1 })); $first = $false }
+      }
+      if (@($view.Document.SelectedItems()).Count -ge $items.Count) { break }
+    } catch {}
+  }
+} elseif ($chosen) {
+  Start-Process explorer.exe -ArgumentList "/select,`"$(Join-Path $to $items[0].Name)`""
+}
 "#;
 
 /// The helper that lets a Windows computer draw and encode its Remote
@@ -375,13 +476,24 @@ pub fn helper_line(script: &str, argument: &str) -> String {
     format!(r#"powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \\tsclient\Kagaz\.kagaz\{script} "{argument}""#)
 }
 
+/// Where a batch goes there.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Place {
+    /// Windows' folder chooser asks.
+    Ask,
+    /// The batch's folder on the drive opens.
+    Open,
+    /// Let go at this point of the screen there.
+    At(i32, i32),
+}
+
 /// The line typed into Windows' Run box for a batch: the save helper, or
 /// the batch's folder opened.
-pub fn run_line(batch: &str, ask: bool) -> String {
-    if ask {
-        helper_line("save.ps1", batch)
-    } else {
-        format!(r#"explorer "\\tsclient\Kagaz\{batch}""#)
+pub fn run_line(batch: &str, place: Place) -> String {
+    match place {
+        Place::Ask => helper_line("save.ps1", batch),
+        Place::At(x, y) => format!(r#"{} "{x},{y}""#, helper_line("save.ps1", batch)),
+        Place::Open => format!(r#"explorer "\\tsclient\Kagaz\{batch}""#),
     }
 }
 
@@ -406,6 +518,8 @@ mod tests {
         assert_eq!(last, (8, 8));
         assert_eq!(stage(&sent, &[from.join("a:b.txt")], |_, _| {}).unwrap(), "Sent 2");
         assert_eq!(shared_name(Path::new("/home/x/Some: Folder.")), "Some Folder");
+        assert!(run_line("Sent 1", Place::At(640, -2)).ends_with(r#"save.ps1 "Sent 1" "640,-2""#));
+        assert!(run_line("Sent 1", Place::Ask).ends_with(r#"save.ps1 "Sent 1""#));
         let _ = std::fs::remove_dir_all(&here);
     }
 }

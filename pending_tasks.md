@@ -767,6 +767,15 @@ Plan: `docs/remote-connection.md` (agreed 2026-11-16).
       folder, reconnect, open This PC there. If the clipboard way still
       does nothing, send the `files:` lines from Kagaz's log
       (`~/.cache/kagaz/cameras.log`).
+- [ ] **Dropping files onto the window** (the owner, 2026-11-20: "where
+      you let go"). Built, **not yet tried on the PC**: drag files from
+      Files onto the session's window; the PC's pointer follows the drag;
+      let go over (a) an open File Explorer folder, (b) a folder icon in
+      it, (c) the desktop, (d) a folder on the desktop, (e) a program's
+      window: (a) and (b) save into that folder ((a) chooses them in the
+      window), (c)/(d) onto the desktop or into that folder, (e) opens
+      Windows' folder chooser. Also try Explorer with two tabs, a
+      scaled screen there (125 % or 150 %), and This PC (should ask).
 - [x] **Step 1, Remote Desktop, sending files** (2026-11-17): by the
       computer's clipboard, as Windows' own viewer does. Kagaz says which
       files there are (names made fit for Windows, sizes, when last
