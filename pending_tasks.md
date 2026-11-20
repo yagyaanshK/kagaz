@@ -772,9 +772,10 @@ Plan: `docs/remote-connection.md` (agreed 2026-11-16).
       above"). Built, **not yet tried on the PC**: a session helper there
       holds a real Windows drag (docs/remote-connection.md). To try:
       (1) without Kagaz share there: drag two files onto the window; the
-      Run box shows once (the first drop may be saved where let go, or
-      ask, while the helper starts); drag again: no Run box, Windows'
-      own drag follows the pointer; drop into an Explorer folder, onto a
+      Run box opens with the line pasted and Kagaz says to press Enter
+      there (once a session; the first drop is saved where it was let
+      go once the helper runs); drag again: no Run box, Windows' own drag
+      follows the pointer; drop into an Explorer folder, onto a
       folder icon, the desktop, a browser's upload box, and a program
       that takes no files ("Nothing there took the files"); drag out of
       the window again (the drag there should end). (2) With Kagaz

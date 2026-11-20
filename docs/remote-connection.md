@@ -84,8 +84,12 @@ the other kinds: saved devices, Found nearby, Add.
   a page's upload box, with Windows' own highlight while over them.
   Leaving the window presses Escape there. The helper runs for the
   whole session (it ends when the drive goes) and also does Send
-  files' saving; it starts from Windows' Run box once a session (typed
-  only after the screen there changed and settled), or, where the
+  files' saving; it starts from Windows' Run box once a session (the
+  line pasted there, never typed: the Run box's completion lost typed
+  letters; and run by the person's Enter, never pressed blind: the
+  Windows key changes the taskbar at once, which passed for the Run box
+  on a real PC, and keys pressed before it came went to File Explorer,
+  where Enter opens and Delete deletes), or, where the
   person turned on "Files from Kagaz over Remote Desktop" in Kagaz's
   Share page on that computer, `kagaz-share --drops` (started at
   sign-in, idle outside Remote Desktop sessions) starts it from its

@@ -1583,6 +1583,14 @@ const KagazRemoteView = (() => {
     hear("tauri://drag-leave", () => dragLeave());
     hear("tauri://drag-drop", (ev) => dropped(ev.payload));
     hear("remote-drag-ready", (ev) => dragReady(ev.payload));
+    // Kagaz put a line in Windows' Run box there: run by the person, who
+    // sees where it is (Kagaz cannot see what has the focus there).
+    hear("remote-run-box", () => {
+      if (!cur || cur.session == null) return;
+      toast(`On ${cur.device.name}, press Enter in the Run box: it starts Kagaz's helper there, once a session. `
+        + `(Kagaz share there, with "Take them without the Run box" on, needs no Run box.)`, 20000);
+      log("run box: line pasted, waiting for Enter there");
+    });
     hear("remote-close-asked", async () => {
       if (cur && cur.session != null) {
         const yes = await KagazAsk.confirm(
