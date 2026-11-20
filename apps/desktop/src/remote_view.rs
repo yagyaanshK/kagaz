@@ -896,7 +896,7 @@ fn through_drive(
     let batch = stage_batch(app, window, sent, paths)?;
     input.send(Input::ShowSent);
     kagaz_core::remote::rdp::ask(sent, what, &batch, at)?;
-    helper_started(input, numbers, sent)
+    helper_started(app, input, numbers, sent)
 }
 
 /// The files put in a batch folder of their own on the drive, large ones
@@ -918,7 +918,12 @@ fn stage_batch(app: &AppHandle, window: &str, sent: &std::path::Path, paths: &[s
 /// else from Windows' Run box, once a session. A helper still starting
 /// is waited for, not started again.
 #[cfg(any(target_os = "linux", target_os = "macos"))]
-fn helper_started(input: &kagaz_core::remote::InputSender, numbers: &Numbers, sent: &std::path::Path) -> Result<(), String> {
+fn helper_started(
+    app: &AppHandle,
+    input: &kagaz_core::remote::InputSender,
+    numbers: &Numbers,
+    sent: &std::path::Path,
+) -> Result<(), String> {
     use kagaz_core::remote::rdp::{helper_alive, helper_run_line, helper_started_there};
     static STARTED: Mutex<Vec<(std::path::PathBuf, std::time::Instant)>> = Mutex::new(Vec::new());
     if helper_alive(sent) {
@@ -941,7 +946,7 @@ fn helper_started(input: &kagaz_core::remote::InputSender, numbers: &Numbers, se
         }
         std::thread::sleep(Duration::from_millis(100));
     }
-    let ran = run_there(input, numbers, &helper_run_line());
+    let ran = run_there(app, input, numbers, &helper_run_line());
     if ran.is_err() {
         let mut started = STARTED.lock().unwrap_or_else(|e| e.into_inner());
         started.retain(|(dir, _)| dir != sent);
@@ -981,7 +986,7 @@ pub async fn remote_drag_begin(app: AppHandle, session: u64, paths: Vec<String>)
             DRAGS.lock().unwrap_or_else(|e| e.into_inner()).push((id.clone(), sent.clone(), batch));
             let drag = id.clone();
             std::thread::spawn(move || {
-                let started = helper_started(&input, &numbers, &sent);
+                let started = helper_started(&app, &input, &numbers, &sent);
                 if let Err(e) = started {
                     let _ = app.emit_to(&window, "remote-drag-ready", serde_json::json!({ "id": drag, "failed": e }));
                     return;
@@ -1055,7 +1060,7 @@ pub async fn remote_drag_end(app: AppHandle, session: u64, id: String, pressed: 
                 Some(at) => {
                     let (input, numbers) = app.state::<Viewers>().with(session, |o| (o.input.clone(), o.numbers.clone()))?;
                     ask(&sent, "save", &batch, Some(at))?;
-                    helper_started(&input, &numbers, &sent)?;
+                    helper_started(&app, &input, &numbers, &sent)?;
                     Ok(DragEnd { how: "saving".into(), effect: 0 })
                 }
                 None => Ok(DragEnd { how: "none".into(), effect: 0 }),
@@ -1071,11 +1076,18 @@ pub async fn remote_drag_end(app: AppHandle, session: u64, id: String, pressed: 
 }
 
 /// The Kagaz drive shown there, then Windows' Run box opened and `line`
-/// typed into it and run. What is typed goes as letters, whatever the
-/// keyboard layout there. The line waits for the drive itself.
+/// pasted into it and run. The line waits for the drive itself.
+///
+/// Pasted, not typed: the Run box completes what is typed from what it
+/// ran before, and in doing so set itself back to the first letters,
+/// losing those typed meanwhile and leaving its own suggestion chosen,
+/// so that Enter ran nothing ("power" and the line's end, on a real
+/// computer). The line goes on its clipboard for the paste; this
+/// computer's clipboard is offered there again after.
 #[cfg(any(target_os = "linux", target_os = "macos"))]
-fn run_there(input: &kagaz_core::remote::InputSender, numbers: &Numbers, line: &str) -> Result<(), String> {
+fn run_there(app: &AppHandle, input: &kagaz_core::remote::InputSender, numbers: &Numbers, line: &str) -> Result<(), String> {
     input.send(Input::ShowSent);
+    input.send(Input::Clipboard(line.to_string()));
     std::thread::sleep(Duration::from_millis(300));
     let key = |key: &str, code: &str, down: bool| Input::Key { key: key.into(), code: code.into(), down };
     // Windows + R: the Run box.
@@ -1104,13 +1116,28 @@ fn run_there(input: &kagaz_core::remote::InputSender, numbers: &Numbers, line: &
             return Err("Windows' Run box did not open there; nothing was typed. Try again in a moment.".into());
         }
     }
-    for c in line.chars() {
-        let letter = c.to_string();
-        input.send(key(&letter, "", true));
-        input.send(key(&letter, "", false));
-    }
+    input.send(key("Control", "ControlLeft", true));
+    input.send(key("v", "KeyV", true));
+    input.send(key("v", "KeyV", false));
+    input.send(key("Control", "ControlLeft", false));
+    // The Run box waits for the line to come from here; the keys after
+    // wait behind it. Delete takes away a suggestion it may add (chosen
+    // after the cursor); with none, it does nothing.
+    std::thread::sleep(Duration::from_millis(400));
+    input.send(key("Delete", "Delete", true));
+    input.send(key("Delete", "Delete", false));
     input.send(key("Enter", "Enter", true));
     input.send(key("Enter", "Enter", false));
+    // This computer's clipboard there again, in the line's place.
+    std::thread::sleep(Duration::from_millis(1500));
+    let again = match clipboard_now(app) {
+        Copied { png: Some(png), text } => Some(Input::ClipboardPicture { png, text }),
+        Copied { text: Some(text), .. } => Some(Input::Clipboard(text)),
+        _ => None,
+    };
+    if let Some(again) = again {
+        input.send(again);
+    }
     Ok(())
 }
 
@@ -1132,7 +1159,7 @@ pub async fn remote_graphics(app: AppHandle, session: u64, on: bool) -> Result<S
             std::fs::write(helper.join("graphics.ps1"), kagaz_core::remote::rdp::GRAPHICS_SCRIPT).map_err(|e| e.to_string())?;
             let result = helper.join("graphics-result.txt");
             let _ = std::fs::remove_file(&result);
-            run_there(&input, &numbers, &kagaz_core::remote::rdp::helper_line("graphics.ps1", &[if on { "on" } else { "off" }]))?;
+            run_there(&app, &input, &numbers, &kagaz_core::remote::rdp::helper_line("graphics.ps1", &[if on { "on" } else { "off" }]))?;
             let until = std::time::Instant::now() + Duration::from_secs(120);
             let code = loop {
                 if let Ok(text) = std::fs::read_to_string(&result) {
