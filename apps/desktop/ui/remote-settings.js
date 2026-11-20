@@ -204,6 +204,40 @@ const KagazRemoteSettings = (() => {
         pick.append(stop);
       }
       files.append(setRow("Share a folder with it", shared ? `${shared}: a drive there, both ways, from the next connection` : "None: only files you send are shown there", pick));
+      // Files from it to here (its drop zone, copied there and pasted
+      // here): where they go.
+      const comes = settings.receive_files || "ask";
+      const into = el("div");
+      const drawInto = (v) => {
+        into.replaceChildren();
+        if (v !== "folder") return;
+        const at = settings.receive_folder;
+        const change = el("button", "", at ? "Change" : "Choose…");
+        change.type = "button";
+        change.addEventListener("click", async () => {
+          const folder = o.pickFolder ? await o.pickFolder() : null;
+          if (!folder) return;
+          settings.receive_folder = folder;
+          keep();
+        });
+        const b = el("span", "rc-buttons");
+        b.append(change);
+        into.append(setRow("Their folder", at || "None chosen yet: Downloads until then", b));
+      };
+      const comesNotes = {
+        ask: "This computer's folder chooser asks, each time",
+        downloads: "Beside what is there, numbered where a name is taken",
+        folder: "The folder chosen below",
+      };
+      const comesRow = setRow("Files from it", comesNotes[comes], select(null, [["ask", "Ask where each time"], ["downloads", "Into Downloads"], ["folder", "Into a folder"]], comes, (v) => {
+        if (v === "ask") delete settings.receive_files;
+        else settings.receive_files = v;
+        comesRow.querySelector(".set-label .muted").textContent = comesNotes[v];
+        drawInto(v);
+        keep();
+      }));
+      files.append(comesRow, into);
+      drawInto(comes);
     }
 
     const signIn = el("section", "set-section");

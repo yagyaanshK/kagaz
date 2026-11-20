@@ -12,7 +12,7 @@ mod clip;
 mod drives;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub use drives::{
-    answer, ask, cancel, drop_stale, helper_alive, helper_line, helper_run_line, helper_started_there, stage, take_back, GRAPHICS_SCRIPT,
+    answer, ask, bring_in, cancel, drop_stale, helper_alive, helper_line, helper_run_line, helper_started_there, stage, take_back, GRAPHICS_SCRIPT,
 };
 pub(crate) mod play;
 mod sound;
@@ -1627,7 +1627,9 @@ pub fn open(
     // for files sent from here (shown once something is sent), and the
     // folder the person shares with this device, from the start.
     #[cfg(any(target_os = "linux", target_os = "macos"))]
-    let sent = drives::sent_folder().ok();
+    // With its helper and this computer's name on it from the start, for
+    // Kagaz share there to start the helper as soon as the drive shows.
+    let sent = drives::sent_folder().ok().filter(|dir| drives::prepare(dir).is_ok());
     #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     let sent: Option<std::path::PathBuf> = None;
     let shared = settings.shared_folder.as_deref().map(std::path::PathBuf::from).filter(|p| p.is_dir());

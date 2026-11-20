@@ -1303,6 +1303,8 @@ html[data-viewer] #bar .rc-chip.open svg { color: inherit; }
 .rc-pop .switch { white-space: normal; }
 [data-layout="bar"] .rc-pop { top: auto; bottom: 8px; left: 12px; right: 12px; }
 .rc-toast { position: absolute; left: 50%; bottom: 16px; z-index: 6; transform: translateX(-50%); max-width: calc(100% - 32px); margin: 0; padding: 8px 14px; border-radius: 999px; background: rgba(20, 22, 24, 0.88); color: #fff; font-size: var(--small, 13px); text-align: center; pointer-events: none; }
+/* A toast that does something when clicked (show files that arrived). */
+.rc-toast.rc-toast-act { pointer-events: auto; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
 .rc-head .accent { min-height: 40px; padding: 0 22px; font-weight: 600; }
 .rc-wrong { color: var(--bad); }
 

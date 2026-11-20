@@ -12,6 +12,12 @@
 #                      open  open the batch's folder
 #   cancel-<id>.txt  stop holding that drag
 #
+# The other way, files from here to Kagaz: while something is dragged
+# here (the left button held and moved), a strip at the side of the
+# screen takes files dropped on it; Windows copies them to the drive's
+# in-<id> folder and in-<id>.txt says they are all there. name.txt holds
+# the name of Kagaz's computer, for the strip to say.
+#
 # and it answers ready-<id>.txt (the drag is held) and done-<id>.txt (how
 # it went: for a drag Windows' drop effect, 0 when nothing took them).
 # helper-alive.txt is written every two seconds while it runs.
@@ -181,6 +187,81 @@ public static class Kagaz {
     Application.Run(c);
     return c.Effect;
   }
+
+  [DllImport("user32.dll")] static extern short GetAsyncKeyState(int key);
+  [DllImport("user32.dll")] static extern int GetSystemMetrics(int index);
+  // The (left, or primary) button held now.
+  public static bool Held() {
+    int key = GetSystemMetrics(23) != 0 ? 2 : 1;
+    return (GetAsyncKeyState(key) & 0x8000) != 0;
+  }
+  public static int[] Pointer() {
+    Spot c;
+    GetCursorPos(out c);
+    return new int[] { c.X, c.Y };
+  }
+
+  // The drop zone: a strip at the side of the screen the pointer is on,
+  // shown while something is dragged, taking files dropped on it.
+  public class Zone : Form {
+    static readonly Color Dark = Color.FromArgb(32, 33, 36);
+    static readonly Color Green = Color.FromArgb(46, 125, 80);
+    readonly string words;
+    string[] dropped;
+    public Zone(string to) {
+      words = "Drop files here\nto send them to\n" + to;
+      FormBorderStyle = FormBorderStyle.None;
+      ShowInTaskbar = false;
+      TopMost = true;
+      StartPosition = FormStartPosition.Manual;
+      AllowDrop = true;
+      BackColor = Dark;
+      ForeColor = Color.White;
+      Opacity = 0.94;
+      DragEnter += (s, e) => {
+        bool files = e.Data.GetDataPresent(DataFormats.FileDrop);
+        e.Effect = files ? DragDropEffects.Copy : DragDropEffects.None;
+        if (files) { BackColor = Green; Invalidate(); }
+      };
+      DragLeave += (s, e) => { BackColor = Dark; Invalidate(); };
+      DragDrop += (s, e) => {
+        dropped = e.Data.GetData(DataFormats.FileDrop) as string[];
+        BackColor = Dark;
+        Invalidate();
+      };
+    }
+    protected override bool ShowWithoutActivation { get { return true; } }
+    protected override CreateParams CreateParams {
+      get {
+        var p = base.CreateParams;
+        p.ExStyle |= 0x80 | 0x08000000;
+        return p;
+      }
+    }
+    protected override void OnPaint(PaintEventArgs e) {
+      base.OnPaint(e);
+      using (var f = new Font("Segoe UI", 11f))
+      using (var b = new SolidBrush(ForeColor)) {
+        var at = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
+        e.Graphics.DrawString(words, f, b, ClientRectangle, at);
+      }
+    }
+    // At the right side of the screen the pointer is on, halfway down.
+    public void Come() {
+      if (Visible) return;
+      Spot c;
+      GetCursorPos(out c);
+      var area = Screen.FromPoint(new Point(c.X, c.Y)).WorkingArea;
+      float k = DeviceDpi / 96f;
+      if (k <= 0) k = 1;
+      Size = new Size((int)(200 * k), (int)(130 * k));
+      Location = new Point(area.Right - Width - (int)(12 * k), area.Top + (area.Height - Height) / 2);
+      BackColor = Dark;
+      Show();
+    }
+    public void Go() { if (Visible) Hide(); }
+    public string[] Take() { var d = dropped; dropped = null; return d; }
+  }
 }
 '@
 [Kagaz]::Aware()
@@ -277,8 +358,52 @@ function Save-Batch($src, $items, $At) {
   return 1
 }
 
+# Files dropped on the zone: copied to the drive by Windows (its own
+# progress), then said to be there.
+function Send-Dropped($paths) {
+  $id = [DateTime]::UtcNow.Ticks
+  $to = Join-Path $dir "in-$id"
+  New-Item -ItemType Directory -Path $to -Force | Out-Null
+  $ui = [Microsoft.VisualBasic.FileIO.UIOption]::AllDialogs
+  $no = [Microsoft.VisualBasic.FileIO.UICancelOption]::DoNothing
+  foreach ($p in $paths) {
+    $name = Split-Path -Leaf $p
+    if (Test-Path -LiteralPath $p -PathType Container) {
+      [Microsoft.VisualBasic.FileIO.FileSystem]::CopyDirectory($p, (Join-Path $to $name), $ui, $no)
+    } else {
+      [Microsoft.VisualBasic.FileIO.FileSystem]::CopyFile($p, (Join-Path $to $name), $ui, $no)
+    }
+  }
+  Write-Answer "in-$id.txt" $paths.Count
+}
+
+$here = 'Kagaz'
+try { $here = (Get-Content -LiteralPath (Join-Path $dir 'name.txt') -TotalCount 1).Trim() } catch {}
+$zone = New-Object 'Kagaz+Zone' -ArgumentList $here
+$pressed = $null
 $beat = [DateTime]::MinValue
+$looked = [DateTime]::MinValue
 while ($true) {
+  # The zone's window and drops are Windows messages: taken here.
+  [System.Windows.Forms.Application]::DoEvents()
+  # Something dragged: the left button held a moment and moved.
+  if ([Kagaz]::Held()) {
+    $now = [Kagaz]::Pointer()
+    if (-not $pressed) { $pressed = @{ At = Get-Date; X = $now[0]; Y = $now[1] } }
+    elseif (((Get-Date) - $pressed.At).TotalMilliseconds -gt 300 -and ([Math]::Abs($now[0] - $pressed.X) + [Math]::Abs($now[1] - $pressed.Y)) -gt 24) { $zone.Come() }
+  } else {
+    $pressed = $null
+    $zone.Go()
+  }
+  $paths = $zone.Take()
+  if ($paths) {
+    try { Send-Dropped $paths } catch {}
+  }
+  if (((Get-Date) - $looked).TotalMilliseconds -lt 200) {
+    Start-Sleep -Milliseconds 30
+    continue
+  }
+  $looked = Get-Date
   if (-not (Test-Path -LiteralPath $dir)) {
     # The drive is gone: the session ended, or Kagaz there was closed.
     break
@@ -317,5 +442,4 @@ while ($true) {
       Remove-Item -LiteralPath (Join-Path $dir "cancel-$id.txt") -Force -ErrorAction SilentlyContinue
     } catch {}
   }
-  Start-Sleep -Milliseconds 200
 }

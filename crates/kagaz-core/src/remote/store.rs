@@ -184,6 +184,14 @@ pub struct Settings {
     /// A folder of this computer shown to it as a drive in every session.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shared_folder: Option<String>,
+    /// Where files from it go here, when they come other than by a drop
+    /// on a folder (its drop zone, say): "ask" (where, each time; none
+    /// means this), "downloads", "folder" (`receive_folder`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub receive_files: Option<String>,
+    /// The folder files from it go into, for "folder".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub receive_folder: Option<String>,
     /// Kagaz turned on the computer's own settings for drawing and
     /// encoding its Remote Desktop screen with its graphics chip (and
     /// can put back what was there before).

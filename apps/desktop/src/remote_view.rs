@@ -656,6 +656,10 @@ pub async fn remote_connect(
         #[cfg(target_os = "linux")]
         let connected = Connected { pipe: pipe.as_ref().and_then(|p| p.address()), ..connected };
         forward(app.clone(), id, session, channel, &open, pipe);
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        if let Some(sent) = open.sent.clone() {
+            watch_arrivals(app.clone(), id, sent);
+        }
         viewers.list.lock().map_err(Failed::other)?.insert(id, open);
         Ok(connected)
     })
@@ -967,6 +971,115 @@ fn helper_started(
         started.retain(|(dir, _)| dir != sent);
     }
     ran
+}
+
+/// Files from the computer (its drop zone, its clipboard): Kagaz's helper
+/// there puts each lot in `.kagaz/in-<id>/` on the drive, then says so
+/// with `in-<id>.txt`; each lot goes where the device's setting says
+/// (`arrived`). Looked for while the session lasts; the drive is a folder
+/// of this computer, so looking costs nothing on the way.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn watch_arrivals(app: AppHandle, session: u64, sent: std::path::PathBuf) {
+    std::thread::spawn(move || loop {
+        std::thread::sleep(Duration::from_millis(400));
+        let Ok((device, window)) = app.state::<Viewers>().with(session, |o| (o.device.clone(), o.window.clone())) else {
+            return;
+        };
+        let dir = sent.join(".kagaz");
+        let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+        for e in entries.flatten() {
+            let name = e.file_name().to_string_lossy().to_string();
+            let Some(id) = name.strip_prefix("in-").and_then(|n| n.strip_suffix(".txt")) else { continue };
+            let lot = dir.join(format!("in-{id}"));
+            let _ = std::fs::remove_file(e.path());
+            arrived(&app, &window, &device, &lot);
+            let _ = std::fs::remove_dir_all(&lot);
+        }
+    });
+}
+
+/// A lot of files from the computer, moved where its device's setting
+/// says: Downloads, a folder chosen once, or (unless said) a folder the
+/// person chooses now. The page is told where they went.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn arrived(app: &AppHandle, window: &str, device_id: &str, lot: &std::path::Path) {
+    use tauri::Emitter;
+    let count = std::fs::read_dir(lot).map(|e| e.count()).unwrap_or(0);
+    if count == 0 {
+        return;
+    }
+    let device = Devices::load(&Devices::default_path()).ok().and_then(|d| d.find(device_id).ok().cloned());
+    let name = device.as_ref().map(|d| d.name.clone()).unwrap_or_else(|| "the computer".into());
+    let settings = device.map(|d| d.settings).unwrap_or_default();
+    let downloads = app.path().download_dir().ok();
+    let into = match settings.receive_files.as_deref() {
+        Some("downloads") => downloads,
+        Some("folder") => settings.receive_folder.map(std::path::PathBuf::from).filter(|p| p.is_dir()).or(downloads),
+        _ => {
+            use tauri_plugin_dialog::DialogExt;
+            let what = if count == 1 { "a file".to_string() } else { format!("{count} files") };
+            let mut chooser = app.dialog().file().set_title(format!("Where to save {what} from {name}"));
+            if let Some(d) = &downloads {
+                chooser = chooser.set_directory(d);
+            }
+            chooser.blocking_pick_folder().and_then(|p| p.into_path().ok())
+        }
+    };
+    let Some(into) = into else {
+        let _ = app.emit_to(window, "remote-received", serde_json::json!({ "count": count, "kept": false }));
+        return;
+    };
+    match kagaz_core::remote::rdp::bring_in(lot, &into) {
+        Ok(placed) => {
+            let _ = app.emit_to(
+                window,
+                "remote-received",
+                serde_json::json!({ "count": count, "kept": true, "folder": into, "first": placed.first() }),
+            );
+        }
+        Err(e) => {
+            let _ = app.emit_to(window, "remote-received", serde_json::json!({ "count": count, "kept": false, "why": e.to_string() }));
+        }
+    }
+}
+
+/// Whether Kagaz's helper runs on the computer (for files from it: its
+/// drop zone), or Kagaz share there starts it; false where there is no
+/// drive (no Remote Desktop to Windows, a computer running Kagaz).
+#[tauri::command]
+pub fn remote_helper_running(app: AppHandle, session: u64) -> bool {
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    {
+        let sent = app.state::<Viewers>().with(session, |o| o.sent.clone()).ok().flatten();
+        sent.is_some_and(|s| kagaz_core::remote::rdp::helper_alive(&s) || kagaz_core::remote::rdp::helper_started_there(&s))
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    {
+        let _ = (app, session);
+        false
+    }
+}
+
+/// Kagaz's helper started on the computer (the person asked: to send
+/// files from it), from Windows' Run box unless it runs already.
+#[tauri::command]
+pub async fn remote_helper_start(app: AppHandle, session: u64) -> Result<(), String> {
+    blocking(move || {
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        {
+            let (sent, window, input, numbers) =
+                app.state::<Viewers>().with(session, |o| (o.sent.clone(), o.window.clone(), o.input.clone(), o.numbers.clone()))?;
+            let sent = sent.ok_or("this session has no drive for files")?;
+            input.send(Input::ShowSent);
+            helper_started(&app, &window, &input, &numbers, &sent)
+        }
+        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+        {
+            let _ = (app, session);
+            Err("this comes to this system later".into())
+        }
+    })
+    .await
 }
 
 /// Files being dragged over a session's screen (see `remote_drag_begin`):

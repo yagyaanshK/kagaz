@@ -74,6 +74,8 @@ pub struct Drives {
     shared: Option<NixRdpdrBackend>,
     /// The shared folder's name there, announced by this side at logon.
     shared_name: Option<String>,
+    /// The Kagaz drive has been announced.
+    announced: bool,
     /// Where what the computer says of the drives is told, for the log.
     told: Option<std::sync::Arc<crate::remote::screen::Screen>>,
     /// The drives the computer has opened something on yet.
@@ -94,6 +96,7 @@ impl Drives {
             sent: NixRdpdrBackend::new(sent.to_string_lossy().to_string()),
             shared: shared.map(|p| NixRdpdrBackend::new(p.to_string_lossy().to_string())),
             shared_name: shared.map(shared_name),
+            announced: false,
             told,
             opened: [false; 2],
         }
@@ -202,10 +205,18 @@ impl RdpdrBackend for Drives {
         if let Some(s) = self.shared.as_mut() {
             all.extend(s.handle_user_logged_on(rdpdr)?);
         }
-        // The shared folder's drive, announced here as Windows reads it
-        // (see `announce`), where IronRDP would announce it next as UTF-16
-        // (its first letter alone there). Once a session: the channel
-        // knows it from then on.
+        // The drives, announced here as Windows reads them (see
+        // `announce`), where IronRDP would announce them as UTF-16 (their
+        // first letter alone there). Once a session: the channel knows them
+        // from then on. The Kagaz drive from the start, so that files can
+        // come from the computer too, and Kagaz share there can start the
+        // helper at once.
+        if !self.announced {
+            self.announced = true;
+            let _ = rdpdr.add_drive(SENT, SENT_NAME.into());
+            all.push(announce(SENT, SENT_NAME));
+            self.tell("the Kagaz drive was announced to the computer".into());
+        }
         if let Some(name) = self.shared_name.take() {
             let _ = rdpdr.add_drive(SHARED, name.clone());
             all.push(announce(SHARED, &name));
@@ -296,7 +307,19 @@ fn helper_dir(sent: &Path) -> Result<PathBuf, String> {
     if std::fs::metadata(&script).map(|m| m.len() as usize != HELPER_SCRIPT.len()).unwrap_or(true) {
         std::fs::write(&script, HELPER_SCRIPT).map_err(|e| e.to_string())?;
     }
+    // This computer's name, for its drop zone there to say.
+    let name = dir.join("name.txt");
+    if !name.exists() {
+        let here = std::fs::read_to_string("/etc/hostname").ok().map(|n| n.trim().to_string()).filter(|n| !n.is_empty());
+        let _ = std::fs::write(&name, here.unwrap_or_else(|| "Kagaz".into()));
+    }
     Ok(dir)
+}
+
+/// The session's drive made ready for the helper: it and this computer's
+/// name on it.
+pub fn prepare(sent: &Path) -> Result<(), String> {
+    helper_dir(sent).map(|_| ())
 }
 
 /// Asks the helper to do `what` ("drag", "save" or "open") with a batch,
@@ -313,6 +336,48 @@ pub fn ask(sent: &Path, what: &str, batch: &str, at: Option<(i32, i32)>) -> Resu
     std::fs::write(&part, format!("{what}\r\n{batch}\r\n{at}\r\n")).map_err(|e| e.to_string())?;
     std::fs::rename(&part, dir.join(format!("ask-{id}.txt"))).map_err(|e| e.to_string())?;
     Ok(id)
+}
+
+/// Files from the computer that arrived in `from`, moved into `into`
+/// beside what is there: a name taken is numbered ("a (2).txt"). Where
+/// they now are.
+pub fn bring_in(from: &Path, into: &Path) -> std::io::Result<Vec<PathBuf>> {
+    fn copy_all(from: &Path, to: &Path) -> std::io::Result<()> {
+        if from.is_dir() {
+            std::fs::create_dir_all(to)?;
+            for e in std::fs::read_dir(from)? {
+                let e = e?;
+                copy_all(&e.path(), &to.join(e.file_name()))?;
+            }
+            Ok(())
+        } else {
+            std::fs::copy(from, to).map(|_| ())
+        }
+    }
+    std::fs::create_dir_all(into)?;
+    let mut placed = Vec::new();
+    let mut entries: Vec<_> = std::fs::read_dir(from)?.flatten().collect();
+    entries.sort_by_key(|e| e.file_name());
+    for e in entries {
+        let name = e.file_name().to_string_lossy().to_string();
+        let mut to = into.join(&name);
+        let mut k = 2;
+        while to.exists() {
+            to = into.join(super::clip::numbered(&name, k));
+            k += 1;
+        }
+        // Moved where it can be (the same disk), else copied.
+        if std::fs::rename(e.path(), &to).is_err() {
+            copy_all(&e.path(), &to)?;
+            if e.path().is_dir() {
+                let _ = std::fs::remove_dir_all(e.path());
+            } else {
+                let _ = std::fs::remove_file(e.path());
+            }
+        }
+        placed.push(to);
+    }
+    Ok(placed)
 }
 
 /// Questions older than `age` the helper has not taken (asked before a
@@ -510,6 +575,18 @@ mod tests {
         std::fs::write(sent.join(".kagaz").join(format!("done-{id}.txt")), "\u{feff}5\r\n".encode_utf16().flat_map(u16::to_le_bytes).collect::<Vec<u8>>()).unwrap();
         assert_eq!(answer(&sent, "done", &id), Some(5));
         assert!(take_back(&sent, &id));
+        // Files from the computer, beside what is here.
+        let lot = here.join("lot");
+        let into = here.join("into");
+        std::fs::create_dir_all(lot.join("folder")).unwrap();
+        std::fs::create_dir_all(&into).unwrap();
+        std::fs::write(lot.join("a.txt"), b"new").unwrap();
+        std::fs::write(lot.join("folder").join("b.txt"), b"b").unwrap();
+        std::fs::write(into.join("a.txt"), b"old").unwrap();
+        let placed = bring_in(&lot, &into).unwrap();
+        assert_eq!(placed, vec![into.join("a (2).txt"), into.join("folder")]);
+        assert_eq!(std::fs::read(into.join("a.txt")).unwrap(), b"old");
+        assert_eq!(std::fs::read(into.join("folder").join("b.txt")).unwrap(), b"b");
         assert!(!take_back(&sent, &id));
         assert!(!helper_alive(&sent));
         let _ = std::fs::remove_dir_all(&here);
@@ -532,8 +609,12 @@ mod tests {
         let mut channel = Rdpdr::new(Box::new(ironrdp_rdpdr::NoopRdpdrBackend), "Kagaz".into()).with_drives(None);
         let mut drives = Drives::new(&here, Some(&folder), None);
         let said = drives.handle_user_logged_on(&mut channel).unwrap();
-        assert_eq!(said.len(), 1);
-        assert!(said[0].encode_unframed_pdu().unwrap().ends_with(b"My_Docs\0"));
+        assert_eq!(said.len(), 2);
+        assert!(said[0].encode_unframed_pdu().unwrap().ends_with(b"Kagaz\0"));
+        assert!(said[1].encode_unframed_pdu().unwrap().ends_with(b"My_Docs\0"));
+        // The Kagaz drive shown again later (a send) is no second
+        // announcement.
+        assert!(channel.add_dynamic_drive(SENT, SENT_NAME.into()).unwrap().is_empty());
         assert!(drives.handle_user_logged_on(&mut channel).unwrap().is_empty());
         let _ = std::fs::remove_dir_all(&here);
     }

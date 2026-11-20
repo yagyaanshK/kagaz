@@ -456,9 +456,13 @@ const KagazRemoteView = (() => {
   }
 
   let toastTimer = 0;
-  function toast(text, stays) {
+  // A toast says something for a while; with `clicked`, a click on it
+  // does that (and it says so by its pointer).
+  function toast(text, stays, clicked) {
     const t = $("rv-toast");
     t.textContent = text;
+    t.onclick = clicked || null;
+    t.classList.toggle("rc-toast-act", !!clicked);
     t.classList.remove("hidden");
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => t.classList.add("hidden"), stays || 3500);
@@ -832,12 +836,39 @@ const KagazRemoteView = (() => {
     tellLocks(LOCKS.map((k) => ev.getModifierState(k)));
   }
 
+  // Something dragged on a Windows computer's screen (the left button
+  // held a moment and moved): files can come here by its drop zone, which
+  // Kagaz's helper there shows. Where it is not running, the person is
+  // told once a session, and can start it.
+  function draggedThere(p) {
+    if (!cur || cur.helperTold || !cur.info || cur.info.speaks !== "rdp" || cur.device.paired) return;
+    if (!(cur.buttons & LEFT)) {
+      cur.pressedAt = null;
+      return;
+    }
+    if (!cur.pressedAt) {
+      cur.pressedAt = { t: performance.now(), x: p.x, y: p.y };
+      return;
+    }
+    const far = Math.abs(p.x - cur.pressedAt.x) + Math.abs(p.y - cur.pressedAt.y);
+    if (performance.now() - cur.pressedAt.t < 700 || far < 40) return;
+    cur.helperTold = true;
+    const state = cur;
+    invoke("remote_helper_running", { session: cur.session }).then((running) => {
+      if (running || cur !== state) return;
+      toast(`To send files from ${cur.device.name} here, Kagaz's helper has to run there. Click to start it (once a session), then drag them onto the strip at the side of its screen.`, 12000, () => {
+        invoke("remote_helper_start", { session: state.session }).catch((e) => toast(sentence(e), 6000));
+      });
+    }).catch(() => {});
+  }
+
   function pointer(ev, now) {
     if (!cur || cur.session == null) return;
     locks(ev);
     const p = at(ev);
     cur.point = p;
     cur.buttons = held(ev);
+    draggedThere(p);
     // Of moves waiting to go, only the last matters.
     const last = outbox[outbox.length - 1];
     if (!now && last && last.t === "pointer" && last.buttons === cur.buttons) outbox.pop();
@@ -1583,6 +1614,22 @@ const KagazRemoteView = (() => {
     hear("tauri://drag-leave", () => dragLeave());
     hear("tauri://drag-drop", (ev) => dropped(ev.payload));
     hear("remote-drag-ready", (ev) => dragReady(ev.payload));
+    // Files from the computer arrived here (remote_view.rs's `arrived`).
+    hear("remote-received", (ev) => {
+      const r = ev.payload || {};
+      if (!cur) return;
+      const what = r.count === 1 ? "A file" : `${r.count} files`;
+      if (!r.kept) {
+        toast(r.why ? `${what} from ${cur.device.name} could not be saved: ${r.why}.` : `${what} from ${cur.device.name}: not saved.`, 6000);
+        log(`files from the device not kept, ${r.count}`);
+        return;
+      }
+      const folder = String(r.folder || "").split("/").filter(Boolean).pop() || "the folder";
+      toast(`${what} from ${cur.device.name} in ${folder}. Click to show.`, 10000, () => {
+        invoke("show_in_folder", { path: String(r.first || r.folder) }).catch(() => {});
+      });
+      log(`files from the device kept, ${r.count}`);
+    });
     // Kagaz put a line in Windows' Run box there: run by the person, who
     // sees where it is (Kagaz cannot see what has the focus there).
     hear("remote-run-box", () => {

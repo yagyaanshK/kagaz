@@ -799,6 +799,22 @@ Plan: `docs/remote-connection.md` (agreed 2026-11-16).
       replaces it) and older questions are dropped. The shared folder's
       drive is now announced by Kagaz at logon too, its full name (to
       try: share a folder, reconnect, look in This PC there).
+- [ ] **Files from the PC to here** (the owner, 2026-11-20: "all of
+      the above": a drop zone there, a real drag out of the window,
+      copy and paste; where they land a setting per device, "Ask where
+      each time" by default, or Downloads, or a folder chosen once).
+      Built, **not yet tried on the PC**: (1) the setting ("Files from
+      it" in the device's Files settings); (2) the drop zone: while
+      something is dragged on the PC (left button held and moved), the
+      helper shows a strip at the right side of that screen; files
+      dropped there are copied by Windows onto the Kagaz drive and land
+      here as set, with "Click to show". The Kagaz drive is now
+      announced at sign-in in every session (so Kagaz share there starts
+      the helper at once); without Kagaz share, the first drag there in
+      a session says the helper is not running and a click starts it.
+      To try: both with and without Kagaz share there; each setting.
+      Still to build: (3) copy on the PC, paste here; (4) the real drag
+      out of the window.
 - [ ] **Session windows open at their last size** (the owner,
       2026-11-20): each device's window opens as it was last closed
       (size, maximised or not; full screen is not kept); a device's
