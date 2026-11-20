@@ -768,14 +768,20 @@ Plan: `docs/remote-connection.md` (agreed 2026-11-16).
       does nothing, send the `files:` lines from Kagaz's log
       (`~/.cache/kagaz/cameras.log`).
 - [ ] **Dropping files onto the window** (the owner, 2026-11-20: "where
-      you let go"). Built, **not yet tried on the PC**: drag files from
-      Files onto the session's window; the PC's pointer follows the drag;
-      let go over (a) an open File Explorer folder, (b) a folder icon in
-      it, (c) the desktop, (d) a folder on the desktop, (e) a program's
-      window: (a) and (b) save into that folder ((a) chooses them in the
-      window), (c)/(d) onto the desktop or into that folder, (e) opens
-      Windows' folder chooser. Also try Explorer with two tabs, a
-      scaled screen there (125 % or 150 %), and This PC (should ask).
+      you let go", then a real drop with no Run box: "all of the
+      above"). Built, **not yet tried on the PC**: a session helper there
+      holds a real Windows drag (docs/remote-connection.md). To try:
+      (1) without Kagaz share there: drag two files onto the window; the
+      Run box shows once (the first drop may be saved where let go, or
+      ask, while the helper starts); drag again: no Run box, Windows'
+      own drag follows the pointer; drop into an Explorer folder, onto a
+      folder icon, the desktop, a browser's upload box, and a program
+      that takes no files ("Nothing there took the files"); drag out of
+      the window again (the drag there should end). (2) With Kagaz
+      share: on that PC, in Kagaz's Share page, turn on "Take them
+      without the Run box"; connect from here again; drag: no Run box at
+      all. (3) A device set to send files "by its clipboard": a drop
+      offers them to paste. Also a scaled screen there (125 % or 150 %).
       First try (2026-11-20) failed twice: the drive was refused ("dynamic
       drives require capability configuration before server negotiation":
       drives are now on from the start of every session with a folder of

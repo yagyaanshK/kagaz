@@ -1119,12 +1119,16 @@ const KagazRemoteView = (() => {
     }
     stage.focus();
   }
-  // Files dragged here from this computer: the device's pointer follows
-  // the drag, so that its folders show where they would go, and where
-  // they are let go is where they are saved there (remote_view.rs). Let
-  // go elsewhere in the window, they go the way chosen for the device.
-  // Tauri says where in the page's own pixels here (Linux, macOS), in
-  // the screen's on Windows.
+  // Files dragged here from this computer. To a Windows computer they
+  // are put on the Kagaz drive at once, and Kagaz's helper there holds a
+  // real Windows drag of them at its pointer (remote_drag_begin); when it
+  // does, the button is pressed there, the drag moves with this one, and
+  // letting go drops them there as any drop: into a folder, onto the
+  // desktop, into a program or a page's upload box. Let go before the
+  // helper holds it (it starts once a session), they are saved where
+  // that was. Elsewhere (a computer running Kagaz, one whose files are to
+  // be pasted) they go the way chosen for the device. Tauri says where in
+  // the page's own pixels here (Linux, macOS), in the screen's on Windows.
   function dragAt(position) {
     if (!position || !cur || cur.session == null || cur.away || canvas.classList.contains("hidden")) return null;
     const k = /Windows/.test(navigator.userAgent) ? window.devicePixelRatio || 1 : 1;
@@ -1133,29 +1137,115 @@ const KagazRemoteView = (() => {
     if (ev.clientX < r.left || ev.clientX >= r.right || ev.clientY < r.top || ev.clientY >= r.bottom) return null;
     return at(ev);
   }
-  function dragOver(position, now) {
-    const p = dragAt(position);
-    if (!p) return null;
+  // The pointer there, with the button held once the drag is.
+  function dragMove(p, now) {
+    const buttons = cur.drag && cur.drag.pressed ? LEFT : 0;
     cur.point = p;
+    cur.buttons = buttons;
     const last = outbox[outbox.length - 1];
-    if (!now && last && last.t === "pointer" && last.buttons === 0) outbox.pop();
-    did({ t: "pointer", x: p.x, y: p.y, buttons: 0 }, now);
-    return p;
+    if (!now && last && last.t === "pointer" && last.buttons === buttons) outbox.pop();
+    did({ t: "pointer", x: p.x, y: p.y, buttons }, now);
   }
-  function dragEnter(payload) {
-    if (!cur || cur.session == null || cur.away) return;
-    if (!cur.dragging) {
-      cur.dragging = true;
-      toast(`Let go where they should go on ${cur.device.name}.`, 4000);
-    }
-    dragOver(payload && payload.position, false);
+  function dragPress() {
+    const d = cur && cur.drag;
+    if (!d || !d.ready || d.pressed || !d.over) return;
+    d.pressed = true;
+    dragMove(d.over, true);
+    log("files dragged: held there");
   }
-  function dropped(payload) {
+  // The held drag let go of without a drop there: Escape ends it.
+  function dragLetGo(d) {
+    if (!d.pressed) return;
+    did({ t: "key", key: "Escape", code: "Escape", down: true }, true);
+    did({ t: "key", key: "Escape", code: "Escape", down: false }, true);
+    d.pressed = false;
+    if (d.over) dragMove(d.over, true);
+  }
+  async function dragEnter(payload) {
     if (!cur || cur.session == null || cur.away) return;
-    cur.dragging = false;
     const paths = (payload && payload.paths) || [];
+    if (!paths.length || cur.drag) return;
+    const d = { paths, id: null, ready: false, pressed: false, over: dragAt(payload.position), state: cur };
+    cur.drag = d;
+    toast(`Let go where they should go on ${cur.device.name}.`, 4000);
+    if (d.over) dragMove(d.over, false);
+    try {
+      d.id = await invoke("remote_drag_begin", { session: d.state.session, paths });
+    } catch (e) {
+      log(`files dragged: ${sentence(e)}`);
+    }
+    // Over before the drive had them (they went the device's way): the
+    // helper there is not to hold them.
+    if (d.id && (!cur || cur.drag !== d)) {
+      invoke("remote_drag_end", { session: d.state.session, id: d.id, pressed: false, at: null }).catch(() => {});
+    }
+  }
+  function dragReady(p) {
+    const d = cur && cur.drag;
+    if (!d || d.id !== p.id) return;
+    if (p.failed) {
+      log(`files dragged: the helper there did not start (${p.failed})`);
+      return;
+    }
+    d.ready = true;
+    dragPress();
+  }
+  function dragOver(position) {
+    const d = cur && cur.drag;
+    if (!d) return;
+    d.over = dragAt(position);
+    if (!d.over) return;
+    if (d.ready && !d.pressed) dragPress();
+    else dragMove(d.over, false);
+  }
+  function dragLeave() {
+    const d = cur && cur.drag;
+    if (!d) return;
+    cur.drag = null;
+    dragLetGo(d);
+    if (d.id) invoke("remote_drag_end", { session: cur.session, id: d.id, pressed: false, at: null }).catch(() => {});
+    log("files dragged away again");
+  }
+  async function dropped(payload) {
+    const d = cur && cur.drag;
+    if (!cur || cur.session == null || cur.away) return;
+    cur.drag = null;
+    const paths = (payload && payload.paths) || (d && d.paths) || [];
     if (!paths.length) return;
-    sendFiles(paths, dragOver(payload.position, true));
+    const p = dragAt(payload && payload.position);
+    if (!d || !d.id) {
+      // Not to be dragged there: the way chosen for the device.
+      sendFiles(paths, p);
+      return;
+    }
+    const there = cur.device.name;
+    if (d.pressed && p) {
+      dragMove(p, true);
+      d.pressed = false;
+      dragMove(p, true);
+      try {
+        const end = await invoke("remote_drag_end", { session: cur.session, id: d.id, pressed: true, at: null });
+        if (end.effect === 0) toast(`Nothing there took the files on ${there}.`, 6000);
+        log(`files dropped there, effect ${end.effect}`);
+      } catch (e) {
+        toast(sentence(e), 8000);
+      }
+      return;
+    }
+    // Let go off its screen, or before the drag was held there.
+    dragLetGo(d);
+    try {
+      const end = await invoke("remote_drag_end", { session: cur.session, id: d.id, pressed: false, at: p ? [p.x, p.y] : null });
+      if (end.how === "saving") {
+        const what = paths.length === 1 ? "the file" : `${paths.length} files`;
+        toast(`Saving ${what} where you let go on ${there}.`, 8000);
+        log(`files dropped before the drag was held there, ${paths.length}`);
+      } else {
+        sendFiles(paths);
+      }
+    } catch (e) {
+      toast(sentence(e), 8000);
+    }
   }
 
   // Large files take a moment to be got ready for the drive.
@@ -1489,13 +1579,10 @@ const KagazRemoteView = (() => {
     hear("remote-pinch", (ev) => pinch(ev.payload.scale, ev.payload.begin, ev.payload.end));
     hear("remote-send-ready", (ev) => sendReady(ev.payload));
     hear("tauri://drag-enter", (ev) => dragEnter(ev.payload));
-    hear("tauri://drag-over", (ev) => {
-      if (cur && cur.dragging) dragOver(ev.payload && ev.payload.position, false);
-    });
-    hear("tauri://drag-leave", () => {
-      if (cur) cur.dragging = false;
-    });
+    hear("tauri://drag-over", (ev) => dragOver(ev.payload && ev.payload.position));
+    hear("tauri://drag-leave", () => dragLeave());
     hear("tauri://drag-drop", (ev) => dropped(ev.payload));
+    hear("remote-drag-ready", (ev) => dragReady(ev.payload));
     hear("remote-close-asked", async () => {
       if (cur && cur.session != null) {
         const yes = await KagazAsk.confirm(

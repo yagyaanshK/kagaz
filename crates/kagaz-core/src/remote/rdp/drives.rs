@@ -238,183 +238,73 @@ pub fn stage(sent: &Path, paths: &[PathBuf], mut progress: impl FnMut(u64, u64))
     Ok(batch)
 }
 
-/// The helper the computer runs (from `\\tsclient\Kagaz\.kagaz`) to save
-/// a batch. Given `x,y` (files dropped on its screen there), it saves them
-/// where they were let go, as Windows does with a drop: into the folder
-/// under the point in File Explorer, else into the folder that window
-/// shows (and chooses them there), or onto the desktop (into a folder on
-/// it, if let go over one). Otherwise, and where that cannot be told,
-/// Windows' own folder chooser asks. Then Windows' own copy, with its
-/// progress and its questions about files already there; a chosen
-/// folder opens with them. Written in PowerShell, which every Windows
-/// has; nothing is installed.
-pub const SAVE_SCRIPT: &str = r#"param([string]$Batch, [string]$At = '')
-$ErrorActionPreference = 'Stop'
-$src = Join-Path '\\tsclient\Kagaz' $Batch
-# The drive can take a moment to appear.
-for ($i = 0; $i -lt 40 -and -not (Test-Path -LiteralPath $src); $i++) { Start-Sleep -Milliseconds 250 }
-$items = @(Get-ChildItem -LiteralPath $src -Force)
-if ($items.Count -eq 0) { exit }
-Add-Type -AssemblyName Microsoft.VisualBasic
-Add-Type -TypeDefinition @'
-using System;
-using System.Runtime.InteropServices;
-public static class KagazFolder {
-  [ComImport, Guid("DC1C5A9C-E88A-4dde-A5A1-60F82A20AEF7")] class Dialog {}
-  [ComImport, Guid("42f85136-db7e-439c-85f1-e4075d135fc8"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-  interface IFileDialog {
-    [PreserveSig] int Show(IntPtr parent);
-    void SetFileTypes(uint count, IntPtr types);
-    void SetFileTypeIndex(uint index);
-    void GetFileTypeIndex(out uint index);
-    void Advise(IntPtr events, out uint cookie);
-    void Unadvise(uint cookie);
-    void SetOptions(uint options);
-    void GetOptions(out uint options);
-    void SetDefaultFolder(IShellItem item);
-    void SetFolder(IShellItem item);
-    void GetFolder(out IShellItem item);
-    void GetCurrentSelection(out IShellItem item);
-    void SetFileName([MarshalAs(UnmanagedType.LPWStr)] string name);
-    void GetFileName([MarshalAs(UnmanagedType.LPWStr)] out string name);
-    void SetTitle([MarshalAs(UnmanagedType.LPWStr)] string title);
-    void SetOkButtonLabel([MarshalAs(UnmanagedType.LPWStr)] string label);
-    void SetFileNameLabel([MarshalAs(UnmanagedType.LPWStr)] string label);
-    void GetResult(out IShellItem item);
-  }
-  [ComImport, Guid("43826D1E-E718-42EE-BC55-A1E261C37BFE"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-  interface IShellItem {
-    void BindToHandler(IntPtr bindContext, ref Guid handler, ref Guid iid, out IntPtr result);
-    void GetParent(out IShellItem parent);
-    void GetDisplayName(uint form, [MarshalAs(UnmanagedType.LPWStr)] out string name);
-  }
-  [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = false)]
-  static extern void SHCreateItemFromParsingName(string path, IntPtr bindContext, ref Guid iid, out IShellItem item);
-  [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
-  [DllImport("user32.dll")] static extern bool SetProcessDpiAwarenessContext(IntPtr context);
-  [DllImport("user32.dll")] static extern bool SetProcessDPIAware();
-  [StructLayout(LayoutKind.Sequential)] struct Point { public int X; public int Y; }
-  [DllImport("user32.dll")] static extern IntPtr WindowFromPoint(Point point);
-  [DllImport("user32.dll")] static extern IntPtr GetAncestor(IntPtr window, uint flags);
-  [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetClassName(IntPtr window, System.Text.StringBuilder name, int size);
-  [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr window, System.Text.StringBuilder text, int size);
-  // The screen's own pixels, as the session's picture has them, whatever
-  // the scaling there.
-  public static void Aware() {
-    try { if (SetProcessDpiAwarenessContext(new IntPtr(-4))) return; } catch {}
-    try { SetProcessDPIAware(); } catch {}
-  }
-  // The top window under a point of the screen.
-  public static IntPtr Under(int x, int y) {
-    Point p; p.X = x; p.Y = y;
-    return GetAncestor(WindowFromPoint(p), 2);
-  }
-  public static string Kind(IntPtr window) {
-    var s = new System.Text.StringBuilder(256); GetClassName(window, s, 256); return s.ToString();
-  }
-  public static string Title(IntPtr window) {
-    var s = new System.Text.StringBuilder(512); GetWindowText(window, s, 512); return s.ToString();
-  }
-  public static string Pick(string title, string start) {
-    IFileDialog d = (IFileDialog)new Dialog();
-    // Folders only, on a disk, that are there.
-    d.SetOptions(0x20 | 0x40 | 0x800);
-    d.SetTitle(title);
-    d.SetOkButtonLabel("Save here");
-    try {
-      Guid iid = typeof(IShellItem).GUID;
-      IShellItem folder;
-      SHCreateItemFromParsingName(start, IntPtr.Zero, ref iid, out folder);
-      d.SetFolder(folder);
-    } catch {}
-    if (d.Show(GetForegroundWindow()) != 0) return null;
-    IShellItem result;
-    d.GetResult(out result);
-    string path;
-    result.GetDisplayName(0x80058000, out path);
-    return path;
-  }
-}
-'@
-$shell = New-Object -ComObject Shell.Application
-$downloads = $shell.NameSpace('shell:Downloads').Self.Path
-$start = $downloads
-$to = $null
-$view = $null
-function Test-Folder($path) { $path -and [System.IO.Path]::IsPathRooted($path) -and (Test-Path -LiteralPath $path -PathType Container) }
-if ($At -match '^(-?\d+),(-?\d+)$') {
-  try {
-    $x = [int]$Matches[1]; $y = [int]$Matches[2]
-    [KagazFolder]::Aware()
-    $window = [KagazFolder]::Under($x, $y)
-    $kind = [KagazFolder]::Kind($window)
-    # What is under the point: an item (its name), or the folder tree.
-    $name = $null; $tree = $false
-    try {
-      Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
-      $e = [System.Windows.Automation.AutomationElement]::FromPoint((New-Object System.Windows.Point($x, $y)))
-      $walker = [System.Windows.Automation.TreeWalker]::ControlViewWalker
-      for ($i = 0; $e -and $i -lt 6; $i++) {
-        $type = $e.Current.ControlType
-        if ($type -eq [System.Windows.Automation.ControlType]::ListItem) { $name = $e.Current.Name; break }
-        if ($type -eq [System.Windows.Automation.ControlType]::TreeItem) { $tree = $true; break }
-        $e = $walker.GetParent($e)
-      }
-    } catch {}
-    if ($kind -eq 'CabinetWClass') {
-      # File Explorer: of its tabs, the one shown (named in its title).
-      $title = [KagazFolder]::Title($window)
-      $tabs = @($shell.Windows() | Where-Object { try { [int64]$_.HWND -eq $window.ToInt64() } catch { $false } })
-      $w = $tabs | Where-Object { $_.LocationName -and ($title -eq $_.LocationName -or $title.StartsWith($_.LocationName + ' - ')) } | Select-Object -First 1
-      if (-not $w -and $tabs.Count -eq 1) { $w = $tabs[0] }
-      if ($w) {
-        $folder = $w.Document.Folder
-        $here = $folder.Self.Path
-        if ($name -and -not $tree) {
-          $item = $folder.ParseName($name)
-          if (-not $item -and -not (Test-Folder $here)) { $item = @($folder.Items()) | Where-Object { $_.Name -eq $name } | Select-Object -First 1 }
-          if ($item -and (Test-Folder $item.Path)) { $to = $item.Path }
-        }
-        if (-not $to -and -not $tree -and (Test-Folder $here)) { $to = $here; $view = $w }
-        if (-not $to -and (Test-Folder $here)) { $start = $here }
-      }
-    } elseif ($kind -eq 'Progman' -or $kind -eq 'WorkerW') {
-      $desktop = [Environment]::GetFolderPath('Desktop')
-      if ($name) {
-        foreach ($d in @($desktop, [Environment]::GetFolderPath('CommonDesktopDirectory'))) {
-          $p = Join-Path $d $name
-          if (Test-Folder $p) { $to = $p; break }
-        }
-      }
-      if (-not $to) { $to = $desktop }
+/// Kagaz's helper on a Windows computer (helper.ps1, which says how it
+/// is asked and answers): started once a session from the Kagaz drive,
+/// it holds real Windows drags of files sent from here, saves them where
+/// they were let go (else Windows' folder chooser asks), or opens them.
+pub const HELPER_SCRIPT: &str = include_str!("helper.ps1");
+
+/// The helper's folder on the drive, with the helper in it.
+fn helper_dir(sent: &Path) -> Result<PathBuf, String> {
+    let dir = sent.join(".kagaz");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let script = dir.join("helper.ps1");
+    if std::fs::metadata(&script).map(|m| m.len() as usize != HELPER_SCRIPT.len()).unwrap_or(true) {
+        std::fs::write(&script, HELPER_SCRIPT).map_err(|e| e.to_string())?;
     }
-  } catch { $to = $null; $view = $null }
+    Ok(dir)
 }
-$chosen = $false
-if (-not $to) {
-  $what = if ($items.Count -eq 1) { $items[0].Name } else { "$($items.Count) files" }
-  $to = [KagazFolder]::Pick("Save $what from Kagaz", $start)
-  if (-not $to) { exit }
-  $chosen = $true
+
+/// Asks the helper to do `what` ("drag", "save" or "open") with a batch,
+/// with the point of the screen it was let go at. The question's id.
+pub fn ask(sent: &Path, what: &str, batch: &str, at: Option<(i32, i32)>) -> Result<String, String> {
+    let dir = helper_dir(sent)?;
+    let id = format!(
+        "{}",
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0)
+    );
+    let at = at.map(|(x, y)| format!("{x},{y}")).unwrap_or_default();
+    // Whole or not at all: written aside, then named.
+    let part = dir.join(format!("ask-{id}.part"));
+    std::fs::write(&part, format!("{what}\r\n{batch}\r\n{at}\r\n")).map_err(|e| e.to_string())?;
+    std::fs::rename(&part, dir.join(format!("ask-{id}.txt"))).map_err(|e| e.to_string())?;
+    Ok(id)
 }
-[Microsoft.VisualBasic.FileIO.FileSystem]::CopyDirectory($src, $to, [Microsoft.VisualBasic.FileIO.UIOption]::AllDialogs, [Microsoft.VisualBasic.FileIO.UICancelOption]::DoNothing)
-if ($view) {
-  # Chosen in the window they were let go on, once it shows them.
-  for ($i = 0; $i -lt 15; $i++) {
-    Start-Sleep -Milliseconds 200
-    try {
-      $first = $true
-      foreach ($n in $items) {
-        $it = $view.Document.Folder.ParseName($n.Name)
-        if ($it) { $view.Document.SelectItem($it, $(if ($first) { 29 } else { 1 })); $first = $false }
-      }
-      if (@($view.Document.SelectedItems()).Count -ge $items.Count) { break }
-    } catch {}
-  }
-} elseif ($chosen) {
-  Start-Process explorer.exe -ArgumentList "/select,`"$(Join-Path $to $items[0].Name)`""
+
+/// Takes a question back if the helper has not taken it yet (true).
+pub fn take_back(sent: &Path, id: &str) -> bool {
+    std::fs::remove_file(sent.join(".kagaz").join(format!("ask-{id}.txt"))).is_ok()
 }
-"#;
+
+/// Tells the helper to stop holding a drag.
+pub fn cancel(sent: &Path, id: &str) {
+    let _ = std::fs::write(sent.join(".kagaz").join(format!("cancel-{id}.txt")), b"1");
+}
+
+/// The helper's answer `kind` ("ready" or "done") to a question, once
+/// there: for a drag, Windows' drop effect (0 when nothing took them);
+/// -1 when it went wrong.
+pub fn answer(sent: &Path, kind: &str, id: &str) -> Option<i32> {
+    let text = std::fs::read(sent.join(".kagaz").join(format!("{kind}-{id}.txt"))).ok()?;
+    // Written by PowerShell, perhaps as UTF-16: the number in it.
+    let text: String = text.iter().filter(|b| b.is_ascii_digit() || **b == b'-').map(|b| *b as char).collect();
+    text.parse().ok()
+}
+
+/// Whether the helper is running there (it says so every two seconds).
+pub fn helper_alive(sent: &Path) -> bool {
+    std::fs::metadata(sent.join(".kagaz").join("helper-alive.txt"))
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| t.elapsed().ok())
+        .is_some_and(|age| age < std::time::Duration::from_secs(6))
+}
+
+/// Whether Kagaz share on the computer starts the helper by itself (it
+/// says so once it sees the drive).
+pub fn helper_started_there(sent: &Path) -> bool {
+    sent.join(".kagaz").join("share-here.txt").exists()
+}
 
 /// The helper that lets a Windows computer draw and encode its Remote
 /// Desktop screen with its graphics chip (`on`), or puts back what was
@@ -481,25 +371,9 @@ pub fn helper_line(script: &str, arguments: &[&str]) -> String {
     )
 }
 
-/// Where a batch goes there.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Place {
-    /// Windows' folder chooser asks.
-    Ask,
-    /// The batch's folder on the drive opens.
-    Open,
-    /// Let go at this point of the screen there.
-    At(i32, i32),
-}
-
-/// The line typed into Windows' Run box for a batch: the save helper, or
-/// the batch's folder opened.
-pub fn run_line(batch: &str, place: Place) -> String {
-    match place {
-        Place::Ask => helper_line("save.ps1", &[batch]),
-        Place::At(x, y) => helper_line("save.ps1", &[batch, &format!("{x},{y}")]),
-        Place::Open => format!(r#"explorer "\\tsclient\Kagaz\{batch}""#),
-    }
+/// The line typed into Windows' Run box to start the helper.
+pub fn helper_run_line() -> String {
+    helper_line("helper.ps1", &[])
 }
 
 #[cfg(test)]
@@ -524,12 +398,23 @@ mod tests {
         assert_eq!(stage(&sent, &[from.join("a:b.txt")], |_, _| {}).unwrap(), "Sent 2");
         assert_eq!(shared_name(Path::new("/home/x/Some: Folder.")), "Some Folder");
         assert_eq!(
-            run_line("Sent 1", Place::At(640, -2)),
-            r#"powershell -nop -ep bypass -w hidden -c "$f='\\tsclient\Kagaz\.kagaz\save.ps1'; for ($i = 0; $i -lt 40 -and !(Test-Path $f); $i++) { sleep -m 250 }; & $f 'Sent 1' '640,-2'""#
+            helper_line("graphics.ps1", &["on"]),
+            r#"powershell -nop -ep bypass -w hidden -c "$f='\\tsclient\Kagaz\.kagaz\graphics.ps1'; for ($i = 0; $i -lt 40 -and !(Test-Path $f); $i++) { sleep -m 250 }; & $f 'on'""#
         );
-        assert!(run_line("It's", Place::Ask).ends_with(r#"& $f 'It''s'""#));
+        assert!(helper_line("x.ps1", &["It's"]).ends_with(r#"& $f 'It''s'""#));
         // Windows' Run box takes up to 259 letters.
-        assert!(run_line("Sent 99", Place::At(-32000, -32000)).chars().count() < 259);
+        assert!(helper_run_line().chars().count() < 259);
+        // Asked and answered.
+        let id = ask(&sent, "save", "Sent 1", Some((640, -2))).unwrap();
+        let asked = std::fs::read_to_string(sent.join(".kagaz").join(format!("ask-{id}.txt"))).unwrap();
+        assert_eq!(asked, "save\r\nSent 1\r\n640,-2\r\n");
+        assert_eq!(std::fs::read_to_string(sent.join(".kagaz").join("helper.ps1")).unwrap(), HELPER_SCRIPT);
+        assert!(answer(&sent, "done", &id).is_none());
+        std::fs::write(sent.join(".kagaz").join(format!("done-{id}.txt")), "\u{feff}5\r\n".encode_utf16().flat_map(u16::to_le_bytes).collect::<Vec<u8>>()).unwrap();
+        assert_eq!(answer(&sent, "done", &id), Some(5));
+        assert!(take_back(&sent, &id));
+        assert!(!take_back(&sent, &id));
+        assert!(!helper_alive(&sent));
         let _ = std::fs::remove_dir_all(&here);
     }
 }

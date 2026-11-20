@@ -11,7 +11,11 @@
 //!               [--keep DIR]
 //!   kagaz-share --system [--home DIR]
 //!   kagaz-share helper install --from DIR [--settings FILE] | remove --to DIR
+//!   kagaz-share --drops [--settings FILE]
 //!
+//! `--drops` (win_drops.rs): files dropped from Kagaz over Remote Desktop,
+//! without Windows' Run box: started at sign-in where the person turned
+//! it on, until Kagaz's setting in FILE is off.
 //! `--port` is the port it listens on (3390 unless said: Windows' own
 //! Remote Desktop keeps 3389). `--local` listens on this computer only,
 //! `--bind` on one address of it (its Tailscale address, say).
@@ -89,6 +93,8 @@ mod win;
 mod win_ask;
 #[cfg(windows)]
 mod win_clip;
+#[cfg(windows)]
+mod win_drops;
 #[cfg(windows)]
 mod win_helper;
 #[cfg(windows)]
@@ -591,6 +597,10 @@ fn main() -> anyhow::Result<()> {
     #[cfg(windows)]
     if args.get(1).map(String::as_str) == Some("helper") {
         return win_helper::main(&args);
+    }
+    #[cfg(windows)]
+    if args.iter().any(|a| a == "--drops") {
+        return win_drops::run(value(&args, "--settings").map(PathBuf::from));
     }
     #[cfg(windows)]
     win::dpi_aware();

@@ -254,9 +254,11 @@ asks where to save them (Kagaz shows the files as a drive, `\\tsclient\Kagaz`,
 and starts Windows' own folder chooser and copy from its Run box); or
 their folder opens there; or over SSH into a folder there; or by the
 clipboard as below. Files dragged from this computer onto the window
-go where they are let go, as a drop does in Windows: into the folder
-under the pointer, the folder File Explorer shows, or the desktop (and
-anywhere else Windows asks where). A folder of this computer can be shared with a
+are dropped there as a real Windows drop, wherever they are let go: a
+folder, the desktop, a program or a page's upload box (Kagaz's helper
+there holds the drag; it starts from Windows' Run box once a session,
+or by itself where "Files from Kagaz over Remote Desktop" is turned on
+in Kagaz's Share page on that computer). A folder of this computer can be shared with a
 device as a drive, both ways. `remote send` sends
 files over Remote Desktop, by the computer's clipboard: Kagaz says which
 files there are (their names and sizes, never where they are kept), and

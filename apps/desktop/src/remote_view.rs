@@ -36,18 +36,6 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Condvar, Mutex};
 use std::time::Duration;
-
-#[cfg(any(target_os = "linux", target_os = "macos"))]
-use kagaz_core::remote::rdp::Place;
-/// Where files sent through a drive go there (see the core's `Place`):
-/// no drive here yet.
-#[cfg(not(any(target_os = "linux", target_os = "macos")))]
-#[allow(dead_code)]
-enum Place {
-    Ask,
-    Open,
-    At(i32, i32),
-}
 use tauri::ipc::{Channel, InvokeResponseBody};
 use tauri::{AppHandle, Manager};
 
@@ -842,10 +830,12 @@ pub async fn remote_send_files(
         let chosen = how.or_else(|| device.as_ref().and_then(|d| d.settings.send_files.clone()));
         let how = match chosen.as_deref() {
             _ if paired => "clipboard",
+            // Dropped: where they were let go, unless they are to be
+            // pasted there.
+            Some("clipboard") => "clipboard",
             _ if at.is_some() && sent.is_some() => "drop",
             Some("ask" | "open") if sent.is_some() => chosen.as_deref().unwrap_or("ask"),
             Some("ssh") => "ssh",
-            Some("clipboard") => "clipboard",
             _ if sent.is_some() => "ask",
             _ => "clipboard",
         }
@@ -877,12 +867,9 @@ pub async fn remote_send_files(
                 Ok(Sent { count, how, folder: Some(folder) })
             }
             _ => {
-                let place = match (how.as_str(), at) {
-                    ("drop", Some((x, y))) => Place::At(x, y),
-                    ("open", _) => Place::Open,
-                    _ => Place::Ask,
-                };
-                through_drive(&app, &window, &input, &numbers, sent.as_deref(), &paths, place).map(|_| Sent { count, how, folder: None })
+                let what = if how == "open" { "open" } else { "save" };
+                let at = if how == "drop" { at } else { None };
+                through_drive(&app, &window, &input, &numbers, sent.as_deref(), &paths, what, at).map(|_| Sent { count, how, folder: None })
             }
         }
     })
@@ -890,10 +877,11 @@ pub async fn remote_send_files(
 }
 
 /// Through the session's Kagaz drive: the files put in a batch folder of
-/// its own, the drive shown there, and Windows' Run box asked to start
-/// the save helper (or open the folder). What is typed goes as letters,
-/// whatever the keyboard layout there.
+/// its own, the drive shown there, and Kagaz's helper there asked to do
+/// `what` with them ("save", where `at` is if let go there, or "open"),
+/// started first if it is not running.
 #[cfg(any(target_os = "linux", target_os = "macos"))]
+#[allow(clippy::too_many_arguments)]
 fn through_drive(
     app: &AppHandle,
     window: &str,
@@ -901,21 +889,185 @@ fn through_drive(
     numbers: &Numbers,
     sent: Option<&std::path::Path>,
     paths: &[std::path::PathBuf],
-    place: Place,
+    what: &str,
+    at: Option<(i32, i32)>,
 ) -> Result<(), String> {
-    use tauri::Emitter;
     let sent = sent.ok_or("this session has no drive for files")?;
+    let batch = stage_batch(app, window, sent, paths)?;
+    input.send(Input::ShowSent);
+    kagaz_core::remote::rdp::ask(sent, what, &batch, at)?;
+    helper_started(input, numbers, sent)
+}
+
+/// The files put in a batch folder of their own on the drive, large ones
+/// said to the page as they get ready. The batch's name.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn stage_batch(app: &AppHandle, window: &str, sent: &std::path::Path, paths: &[std::path::PathBuf]) -> Result<String, String> {
+    use tauri::Emitter;
     let mut told = std::time::Instant::now();
-    let batch = kagaz_core::remote::rdp::stage(sent, paths, |done, total| {
+    kagaz_core::remote::rdp::stage(sent, paths, |done, total| {
         if told.elapsed() > Duration::from_millis(250) || done == total {
             told = std::time::Instant::now();
             let _ = app.emit_to(window, "remote-send-ready", serde_json::json!({ "done": done, "total": total }));
         }
-    })?;
-    let helper = sent.join(".kagaz");
-    std::fs::create_dir_all(&helper).map_err(|e| e.to_string())?;
-    std::fs::write(helper.join("save.ps1"), kagaz_core::remote::rdp::SAVE_SCRIPT).map_err(|e| e.to_string())?;
-    run_there(input, numbers, &kagaz_core::remote::rdp::run_line(&batch, place))
+    })
+}
+
+/// Kagaz's helper on the computer, started if it is not running: by
+/// Kagaz share there where it is turned on (it says so on the drive),
+/// else from Windows' Run box, once a session. A helper still starting
+/// is waited for, not started again.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn helper_started(input: &kagaz_core::remote::InputSender, numbers: &Numbers, sent: &std::path::Path) -> Result<(), String> {
+    use kagaz_core::remote::rdp::{helper_alive, helper_run_line, helper_started_there};
+    static STARTED: Mutex<Vec<(std::path::PathBuf, std::time::Instant)>> = Mutex::new(Vec::new());
+    if helper_alive(sent) {
+        return Ok(());
+    }
+    {
+        let mut started = STARTED.lock().unwrap_or_else(|e| e.into_inner());
+        started.retain(|(_, when)| when.elapsed() < Duration::from_secs(30));
+        if started.iter().any(|(dir, _)| dir == sent) {
+            return Ok(());
+        }
+        started.push((sent.to_path_buf(), std::time::Instant::now()));
+    }
+    // Kagaz share there sees the drive within a second or two of its
+    // showing.
+    let until = std::time::Instant::now() + Duration::from_millis(2500);
+    while std::time::Instant::now() < until {
+        if helper_alive(sent) || helper_started_there(sent) {
+            return Ok(());
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    let ran = run_there(input, numbers, &helper_run_line());
+    if ran.is_err() {
+        let mut started = STARTED.lock().unwrap_or_else(|e| e.into_inner());
+        started.retain(|(dir, _)| dir != sent);
+    }
+    ran
+}
+
+/// Files being dragged over a session's screen (see `remote_drag_begin`):
+/// the drag's id, its session's drive, its batch.
+static DRAGS: Mutex<Vec<(String, std::path::PathBuf, String)>> = Mutex::new(Vec::new());
+
+/// Files dragged from here over a Windows computer's screen: put on its
+/// Kagaz drive, and Kagaz's helper there asked to hold a real Windows
+/// drag of them at the pointer (started first if need be). When it does,
+/// "remote-drag-ready" tells the page, which presses the button there,
+/// moves, and lets go: wherever that is takes them as any drop. The
+/// drag's id; none where files go another way (a computer running Kagaz,
+/// one whose files are to be pasted, a session without a drive).
+#[tauri::command]
+pub async fn remote_drag_begin(app: AppHandle, session: u64, paths: Vec<String>) -> Result<Option<String>, String> {
+    blocking(move || {
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        {
+            use tauri::Emitter;
+            let (device_id, sent, window, input, numbers) = app
+                .state::<Viewers>()
+                .with(session, |o| (o.device.clone(), o.sent.clone(), o.window.clone(), o.input.clone(), o.numbers.clone()))?;
+            let Some(sent) = sent else { return Ok(None) };
+            let device = Devices::load(&Devices::default_path()).ok().and_then(|d| d.find(&device_id).ok().cloned());
+            if device.as_ref().is_some_and(|d| d.paired || d.settings.send_files.as_deref() == Some("clipboard")) {
+                return Ok(None);
+            }
+            let paths: Vec<std::path::PathBuf> = paths.into_iter().map(Into::into).collect();
+            let batch = stage_batch(&app, &window, &sent, &paths)?;
+            input.send(Input::ShowSent);
+            let id = kagaz_core::remote::rdp::ask(&sent, "drag", &batch, None)?;
+            DRAGS.lock().unwrap_or_else(|e| e.into_inner()).push((id.clone(), sent.clone(), batch));
+            let drag = id.clone();
+            std::thread::spawn(move || {
+                let started = helper_started(&input, &numbers, &sent);
+                if let Err(e) = started {
+                    let _ = app.emit_to(&window, "remote-drag-ready", serde_json::json!({ "id": drag, "failed": e }));
+                    return;
+                }
+                let until = std::time::Instant::now() + Duration::from_secs(40);
+                while std::time::Instant::now() < until {
+                    let current = DRAGS.lock().unwrap_or_else(|e| e.into_inner()).iter().any(|(id, _, _)| *id == drag);
+                    if !current {
+                        return;
+                    }
+                    if kagaz_core::remote::rdp::answer(&sent, "ready", &drag).is_some() {
+                        let _ = app.emit_to(&window, "remote-drag-ready", serde_json::json!({ "id": drag }));
+                        return;
+                    }
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+            });
+            Ok(Some(id))
+        }
+        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+        {
+            let _ = (app, session, paths);
+            Ok(None)
+        }
+    })
+    .await
+}
+
+/// How a drag ended there.
+#[derive(Serialize, Default)]
+pub struct DragEnd {
+    /// "dropped" (a real drop there: `effect` says whether anything took
+    /// them), "saving" (let go before the drag was held there: the helper
+    /// saves them where that was), or "none".
+    how: String,
+    effect: i32,
+}
+
+/// The end of a drag begun with `remote_drag_begin`: `pressed` when the
+/// page had pressed the button there (and has now let go, or pressed
+/// Escape where the drag left the screen); else, let go at `at`, the
+/// files are saved where that was, the way Send files does.
+#[tauri::command]
+pub async fn remote_drag_end(app: AppHandle, session: u64, id: String, pressed: bool, at: Option<(i32, i32)>) -> Result<DragEnd, String> {
+    blocking(move || {
+        let drag = {
+            let mut drags = DRAGS.lock().unwrap_or_else(|e| e.into_inner());
+            let i = drags.iter().position(|(d, _, _)| *d == id);
+            i.map(|i| drags.remove(i))
+        };
+        let Some((id, sent, batch)) = drag else { return Ok(DragEnd { how: "none".into(), effect: 0 }) };
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        {
+            use kagaz_core::remote::rdp::{answer, ask, cancel, take_back};
+            if pressed {
+                // Windows' drop is done when the target has the files'
+                // names; copying them is its own after that.
+                let until = std::time::Instant::now() + Duration::from_secs(15);
+                while std::time::Instant::now() < until {
+                    if let Some(effect) = answer(&sent, "done", &id) {
+                        return Ok(DragEnd { how: "dropped".into(), effect });
+                    }
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+                return Ok(DragEnd { how: "dropped".into(), effect: -1 });
+            }
+            if !take_back(&sent, &id) {
+                cancel(&sent, &id);
+            }
+            match at {
+                Some(at) => {
+                    let (input, numbers) = app.state::<Viewers>().with(session, |o| (o.input.clone(), o.numbers.clone()))?;
+                    ask(&sent, "save", &batch, Some(at))?;
+                    helper_started(&input, &numbers, &sent)?;
+                    Ok(DragEnd { how: "saving".into(), effect: 0 })
+                }
+                None => Ok(DragEnd { how: "none".into(), effect: 0 }),
+            }
+        }
+        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+        {
+            let _ = (app, session, pressed, at, sent, batch, id);
+            Ok(DragEnd { how: "none".into(), effect: 0 })
+        }
+    })
+    .await
 }
 
 /// The Kagaz drive shown there, then Windows' Run box opened and `line`
@@ -1024,6 +1176,7 @@ pub async fn remote_graphics(app: AppHandle, session: u64, on: bool) -> Result<S
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+#[allow(clippy::too_many_arguments)]
 fn through_drive(
     _app: &AppHandle,
     _window: &str,
@@ -1031,7 +1184,8 @@ fn through_drive(
     _numbers: &Numbers,
     _sent: Option<&std::path::Path>,
     _paths: &[std::path::PathBuf],
-    _place: Place,
+    _what: &str,
+    _at: Option<(i32, i32)>,
 ) -> Result<(), String> {
     Err("sending through a drive comes to this system later".into())
 }

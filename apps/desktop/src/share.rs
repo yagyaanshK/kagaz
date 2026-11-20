@@ -46,6 +46,10 @@ pub struct Settings {
     /// the computer answers them), "rdp" (Windows' own Remote Desktop), or
     /// "service" (Kagaz's helper service).
     pub prompts: String,
+    /// Files dropped from Kagaz over Remote Desktop are taken without
+    /// Windows' Run box: `kagaz-share --drops` at sign-in (win_drops.rs).
+    /// A use of its own: whether this computer is shared or not.
+    pub drops: bool,
 }
 
 impl Default for Settings {
@@ -59,6 +63,7 @@ impl Default for Settings {
             record: true,
             startup: false,
             prompts: "person".into(),
+            drops: false,
         }
     }
 }
@@ -197,6 +202,30 @@ fn startup_apply(settings: &Settings) {
             }
         } else {
             let _ = quiet("reg.exe").args(["delete", RUN, "/v", "Kagaz", "/f"]).output();
+        }
+    }
+    #[cfg(not(windows))]
+    let _ = settings;
+}
+
+/// Files dropped from Kagaz over Remote Desktop: where turned on,
+/// `kagaz-share --drops` starts at sign-in and now; turned off, it ends by
+/// itself (it reads the setting) and nothing of it is left to start.
+fn drops_apply(settings: &Settings) {
+    #[cfg(windows)]
+    {
+        const RUN: &str = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run";
+        match program() {
+            Some(exe) if settings.drops => {
+                let file = settings_path();
+                let line = format!("\"{}\" --drops --settings \"{}\"", exe.to_string_lossy(), file.to_string_lossy());
+                let _ = quiet("reg.exe").args(["add", RUN, "/v", "Kagaz drops", "/t", "REG_SZ", "/d", &line, "/f"]).output();
+                // One at a time: one already running ends at once.
+                let _ = quiet(&exe.to_string_lossy()).arg("--drops").arg("--settings").arg(&file).spawn();
+            }
+            _ => {
+                let _ = quiet("reg.exe").args(["delete", RUN, "/v", "Kagaz drops", "/f"]).output();
+            }
         }
     }
     #[cfg(not(windows))]
@@ -733,6 +762,9 @@ fn apply(app: &AppHandle, before: Settings, settings: Settings) -> Result<Status
     let app = app.clone();
     save(&settings)?;
     startup_apply(&settings);
+    if settings.drops != before.drops {
+        drops_apply(&settings);
+    }
     let share = app.state::<Share>();
     if helper_installed() {
         // The helper's share takes the settings and starts again with them

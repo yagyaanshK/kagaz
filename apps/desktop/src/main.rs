@@ -2112,6 +2112,8 @@ pub fn run() {
             remote_view::remote_pinch,
             remote_view::remote_pick_folder,
             remote_view::remote_graphics,
+            remote_view::remote_drag_begin,
+            remote_view::remote_drag_end,
             remote_view::remote_close_window,
             remote_windows::remote_windows,
             remote_windows::remote_window_open,

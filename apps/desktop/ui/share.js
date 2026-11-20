@@ -157,6 +157,13 @@ const KagazShare = (() => {
     on.append(n);
     if (s.on && st.windows) on.append(row("Start with Windows", "Waits in the tray", check(!!s.startup, (v) => save({ startup: v }))));
     box.append(on);
+    // A use of its own: Kagaz elsewhere connected with Windows' Remote
+    // Desktop, files dragged onto its window of this computer.
+    if (st.windows) {
+      const drops = section("Files from Kagaz over Remote Desktop", "When Kagaz on another computer connects here with Windows' Remote Desktop and files are dragged onto its window.");
+      drops.append(row("Take them without the Run box", "Starts with Windows; does nothing outside those sessions", check(!!s.drops, (v) => save({ drops: v }))));
+      box.append(drops);
+    }
     if (!s.on) {
       // Still installed while sharing is off: it listens for nothing, and
       // can be removed here.

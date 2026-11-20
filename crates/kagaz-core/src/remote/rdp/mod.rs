@@ -11,7 +11,9 @@ mod clip;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 mod drives;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
-pub use drives::{helper_line, run_line, stage, Place, GRAPHICS_SCRIPT, SAVE_SCRIPT};
+pub use drives::{
+    answer, ask, cancel, helper_alive, helper_line, helper_run_line, helper_started_there, stage, take_back, GRAPHICS_SCRIPT,
+};
 pub(crate) mod play;
 mod sound;
 

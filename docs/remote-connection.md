@@ -70,15 +70,31 @@ the other kinds: saved devices, Found nearby, Add.
   with scp into a folder there. A folder of this computer can also be
   shared with a device as a drive, both ways, from the next connection.
   Files dragged from this computer onto the session's window (the
-  owner, 2026-11-20: "where you let go") go through the drive whatever
-  the setting: the device's pointer follows the drag, and the helper is
-  given the point they were let go at. There it asks Windows what is
-  under that point: an item in File Explorer that is a folder takes
-  them; else the folder that window shows (its tab named in the title),
-  and they are chosen there; the desktop (or a folder on it); anywhere
-  else, or a folder that is not on a disk (This PC, Home), Windows'
-  folder chooser asks. A program or a web page there cannot take them:
-  Windows accepts a drop into those only from a drag made there.
+  owner, 2026-11-20: "where you let go", then, after researching how
+  TeamViewer, Splashtop and RustDesk do it, "all of the above"): a real
+  Windows drop. Windows takes a drop only from a drag made on it, so,
+  as those tools do with their own program there, Kagaz's helper there
+  (helper.ps1 on the Kagaz drive, PowerShell with a little C#) holds
+  one: on the drag's entering, the files go on the drive and the
+  helper is asked (files on the drive: ask, ready, done, cancel); it
+  puts an all but invisible window under the pointer, Kagaz presses the
+  button there, the press starts Windows' own drag of the files
+  (`\\tsclient\Kagaz\…` paths), the pointer moves with the drag here,
+  and letting go is a drop like any: a folder, the desktop, a program,
+  a page's upload box, with Windows' own highlight while over them.
+  Leaving the window presses Escape there. The helper runs for the
+  whole session (it ends when the drive goes) and also does Send
+  files' saving; it starts from Windows' Run box once a session (typed
+  only after the screen there changed and settled), or, where the
+  person turned on "Files from Kagaz over Remote Desktop" in Kagaz's
+  Share page on that computer, `kagaz-share --drops` (started at
+  sign-in, idle outside Remote Desktop sessions) starts it from its
+  own copy when the drive appears, so no Run box is seen. Let go before
+  the helper holds the drag (the first drop of a session, while it
+  starts), the files are saved where they were let go: into the folder
+  under the point in File Explorer, else the folder that window shows,
+  or the desktop; elsewhere Windows' folder chooser asks. A device set
+  to send files by its clipboard gets dropped files there, to paste.
   A computer running Kagaz takes the files at once into its person's
   Downloads, beside what is there, with "N files in Downloads" on its
   sign to show them.
