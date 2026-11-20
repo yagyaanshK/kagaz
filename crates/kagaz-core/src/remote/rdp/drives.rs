@@ -72,6 +72,8 @@ pub fn shared_name(folder: &Path) -> String {
 pub struct Drives {
     sent: NixRdpdrBackend,
     shared: Option<NixRdpdrBackend>,
+    /// The shared folder's name there, announced by this side at logon.
+    shared_name: Option<String>,
     /// Where what the computer says of the drives is told, for the log.
     told: Option<std::sync::Arc<crate::remote::screen::Screen>>,
     /// The drives the computer has opened something on yet.
@@ -91,6 +93,7 @@ impl Drives {
         Drives {
             sent: NixRdpdrBackend::new(sent.to_string_lossy().to_string()),
             shared: shared.map(|p| NixRdpdrBackend::new(p.to_string_lossy().to_string())),
+            shared_name: shared.map(shared_name),
             told,
             opened: [false; 2],
         }
@@ -199,6 +202,14 @@ impl RdpdrBackend for Drives {
         if let Some(s) = self.shared.as_mut() {
             all.extend(s.handle_user_logged_on(rdpdr)?);
         }
+        // The shared folder's drive, announced here as Windows reads it
+        // (see `announce`), where IronRDP would announce it next as UTF-16
+        // (its first letter alone there). Once a session: the channel
+        // knows it from then on.
+        if let Some(name) = self.shared_name.take() {
+            let _ = rdpdr.add_drive(SHARED, name.clone());
+            all.push(announce(SHARED, &name));
+        }
         Ok(all)
     }
 }
@@ -302,6 +313,20 @@ pub fn ask(sent: &Path, what: &str, batch: &str, at: Option<(i32, i32)>) -> Resu
     std::fs::write(&part, format!("{what}\r\n{batch}\r\n{at}\r\n")).map_err(|e| e.to_string())?;
     std::fs::rename(&part, dir.join(format!("ask-{id}.txt"))).map_err(|e| e.to_string())?;
     Ok(id)
+}
+
+/// Questions older than `age` the helper has not taken (asked before a
+/// Run box that was closed unrun): taken away, so that a helper started
+/// later does not do them long after.
+pub fn drop_stale(sent: &Path, age: std::time::Duration) {
+    let Ok(entries) = std::fs::read_dir(sent.join(".kagaz")) else { return };
+    for e in entries.flatten() {
+        let name = e.file_name().to_string_lossy().to_string();
+        let old = e.metadata().and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).is_some_and(|a| a > age);
+        if name.starts_with("ask-") && old {
+            let _ = std::fs::remove_file(e.path());
+        }
+    }
 }
 
 /// Takes a question back if the helper has not taken it yet (true).
@@ -414,7 +439,15 @@ pub fn helper_line(script: &str, arguments: &[&str]) -> String {
 /// IronRDP writes it as UTF-16, which a real Windows 11 read as its first
 /// letter alone ("K on Kagaz", `\\tsclient\K`).
 pub fn announce(device_id: u32, name: &str) -> SvcMessage {
-    let plain: Vec<u8> = name.bytes().filter(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-' | b'.')).collect();
+    // Letters, digits and a few signs; a space as "_", as FreeRDP does.
+    let plain: Vec<u8> = name
+        .bytes()
+        .filter_map(|b| match b {
+            b' ' => Some(b'_'),
+            b if b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-' | b'.') => Some(b),
+            _ => None,
+        })
+        .collect();
     let mut pdu = Vec::new();
     // RDPDR_CTYP_CORE, PAKID_CORE_DEVICELIST_ANNOUNCE; one device.
     pdu.extend(0x4472u16.to_le_bytes());
@@ -492,11 +525,27 @@ mod tests {
     }
 
     #[test]
+    fn the_shared_folder_is_announced_once_at_logon_with_its_name() {
+        let here = std::env::temp_dir().join(format!("kagaz-drives-logon-{}", std::process::id()));
+        let folder = here.join("My Docs");
+        std::fs::create_dir_all(&folder).unwrap();
+        let mut channel = Rdpdr::new(Box::new(ironrdp_rdpdr::NoopRdpdrBackend), "Kagaz".into()).with_drives(None);
+        let mut drives = Drives::new(&here, Some(&folder), None);
+        let said = drives.handle_user_logged_on(&mut channel).unwrap();
+        assert_eq!(said.len(), 1);
+        assert!(said[0].encode_unframed_pdu().unwrap().ends_with(b"My_Docs\0"));
+        assert!(drives.handle_user_logged_on(&mut channel).unwrap().is_empty());
+        let _ = std::fs::remove_dir_all(&here);
+    }
+
+    #[test]
     fn the_drive_is_announced_with_its_name_as_windows_reads_it() {
         use ironrdp_rdpdr::pdu::RdpdrPdu;
         let bytes = announce(SENT, SENT_NAME).encode_unframed_pdu().unwrap();
         // The name in the device data, as plain text with a nul.
         assert!(bytes.ends_with(&[6, 0, 0, 0, b'K', b'a', b'g', b'a', b'z', 0]));
+        let shared = announce(SHARED, "My Docs").encode_unframed_pdu().unwrap();
+        assert!(shared.ends_with(b"My_Docs\0"));
         // And a whole, well-formed announcement of that drive.
         match ironrdp_core::decode::<RdpdrPdu>(&bytes).unwrap() {
             RdpdrPdu::ClientDeviceListAnnounce(list) => {

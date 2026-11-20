@@ -791,7 +791,19 @@ Plan: `docs/remote-connection.md` (agreed 2026-11-16).
       IronRDP at the start and may show as its first letter there (not
       fixed yet). Windows Terminal ignored PowerShell's "hidden": the
       line now runs it through `conhost --headless`; the helper's own
-      errors show in a box that stays.
+      errors show in a box that stays. **Worked on the PC** (2026-11-20,
+      "Kagaz on Kagaz", a dropped file copied into Downloads) after a
+      reconnect: a Run box closed with Cancel left nothing running and a
+      second try did nothing. Now: within 15 s Kagaz reminds; after, the
+      Run box opens again (its old text chosen first, so the paste
+      replaces it) and older questions are dropped. The shared folder's
+      drive is now announced by Kagaz at logon too, its full name (to
+      try: share a folder, reconnect, look in This PC there).
+- [ ] **Session windows open at their last size** (the owner,
+      2026-11-20): each device's window opens as it was last closed
+      (size, maximised or not; full screen is not kept); a device's
+      first window as the last one closed. To try: resize a session's
+      window, close it, connect again.
       First try (2026-11-20) failed twice: the drive was refused ("dynamic
       drives require capability configuration before server negotiation":
       drives are now on from the start of every session with a folder of

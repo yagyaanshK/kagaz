@@ -189,6 +189,19 @@ pub struct Settings {
     /// can put back what was there before).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub graphics_chip: bool,
+    /// Its session's window as it was last closed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window: Option<WindowSize>,
+}
+
+/// A session's window: its size in points (not maximised), and whether it
+/// was maximised.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WindowSize {
+    pub width: u32,
+    pub height: u32,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub maximized: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -339,6 +352,10 @@ pub struct Windows {
     /// and Decline.
     #[serde(default = "yes", skip_serializing_if = "Clone::clone")]
     pub ring: bool,
+    /// The last session's window closed, whichever device: how a device's
+    /// first window opens.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last: Option<WindowSize>,
 }
 
 fn yes() -> bool {
@@ -347,7 +364,7 @@ fn yes() -> bool {
 
 impl Default for Windows {
     fn default() -> Self {
-        Windows { keep_open: false, ring: true }
+        Windows { keep_open: false, ring: true, last: None }
     }
 }
 
@@ -750,7 +767,7 @@ mod tests {
         assert!(!text.contains("[windows]"), "{text}");
         assert!(saved.windows.ring && !saved.windows.keep_open);
         let (_, saved) = Devices::update(&path, |d| {
-            d.windows = Windows { keep_open: true, ring: false };
+            d.windows = Windows { keep_open: true, ring: false, last: None };
             Ok(())
         })
         .unwrap();

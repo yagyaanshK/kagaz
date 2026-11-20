@@ -913,10 +913,13 @@ fn stage_batch(app: &AppHandle, window: &str, sent: &std::path::Path, paths: &[s
     })
 }
 
-/// Kagaz's helper on the computer, started if it is not running: by
-/// Kagaz share there where it is turned on (it says so on the drive),
-/// else from Windows' Run box, once a session. A helper still starting
-/// is waited for, not started again.
+/// Kagaz's helper on the computer, started if it is not running (it says
+/// it is, every two seconds, on the drive): by Kagaz share there where it
+/// is turned on (it says so on the drive), else from Windows' Run box. A
+/// Run box opened in the last quarter minute is the person's to run: they
+/// are reminded. After that, one closed unrun (Cancel, on a real PC)
+/// leaves nothing running, so the Run box opens again, and what was asked
+/// before it is dropped rather than done long after.
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 fn helper_started(
     app: &AppHandle,
@@ -925,18 +928,28 @@ fn helper_started(
     numbers: &Numbers,
     sent: &std::path::Path,
 ) -> Result<(), String> {
-    use kagaz_core::remote::rdp::{helper_alive, helper_run_line, helper_started_there};
+    use kagaz_core::remote::rdp::{drop_stale, helper_alive, helper_run_line, helper_started_there};
+    use tauri::Emitter;
     static STARTED: Mutex<Vec<(std::path::PathBuf, std::time::Instant)>> = Mutex::new(Vec::new());
+    const WAITS: Duration = Duration::from_secs(15);
     if helper_alive(sent) {
         return Ok(());
     }
     {
         let mut started = STARTED.lock().unwrap_or_else(|e| e.into_inner());
-        // Started from the Run box, it waits for the person's Enter there.
-        started.retain(|(_, when)| when.elapsed() < Duration::from_secs(120));
-        if started.iter().any(|(dir, _)| dir == sent) {
+        if helper_started_there(sent) {
+            // Kagaz share there starts it (or has, and it is starting).
             return Ok(());
         }
+        let before = started.iter().find(|(dir, _)| dir == sent).map(|(_, when)| when.elapsed());
+        if before.is_some_and(|ago| ago < WAITS) {
+            let _ = app.emit_to(window, "remote-run-box", ());
+            return Ok(());
+        }
+        if before.is_some() {
+            drop_stale(sent, WAITS);
+        }
+        started.retain(|(dir, _)| dir != sent);
         started.push((sent.to_path_buf(), std::time::Instant::now()));
     }
     // Kagaz share there sees the drive within a second or two of its
@@ -1126,7 +1139,11 @@ fn run_there(app: &AppHandle, window: &str, input: &kagaz_core::remote::InputSen
             return Err("Windows' Run box did not open there; nothing was pasted. Try again in a moment.".into());
         }
     }
+    // All of what is in it chosen, so that the paste takes its place (a
+    // Run box shown again keeps what was pasted before).
     input.send(key("Control", "ControlLeft", true));
+    input.send(key("a", "KeyA", true));
+    input.send(key("a", "KeyA", false));
     input.send(key("v", "KeyV", true));
     input.send(key("v", "KeyV", false));
     input.send(key("Control", "ControlLeft", false));

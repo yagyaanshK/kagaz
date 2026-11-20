@@ -1587,8 +1587,8 @@ const KagazRemoteView = (() => {
     // sees where it is (Kagaz cannot see what has the focus there).
     hear("remote-run-box", () => {
       if (!cur || cur.session == null) return;
-      toast(`On ${cur.device.name}, press Enter in the Run box: it starts Kagaz's helper there, once a session. `
-        + `(Kagaz share there, with "Take them without the Run box" on, needs no Run box.)`, 20000);
+      toast(`Kagaz's helper is not running on ${cur.device.name} yet: press Enter in the Run box there (once a session). `
+        + `Closed it? Try again in a few seconds and it opens again. (Kagaz share there, with "Take them without the Run box" on, needs no Run box.)`, 20000);
       log("run box: line pasted, waiting for Enter there");
     });
     hear("remote-close-asked", async () => {

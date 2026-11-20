@@ -12,7 +12,7 @@ mod clip;
 mod drives;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub use drives::{
-    answer, ask, cancel, helper_alive, helper_line, helper_run_line, helper_started_there, stage, take_back, GRAPHICS_SCRIPT,
+    answer, ask, cancel, drop_stale, helper_alive, helper_line, helper_run_line, helper_started_there, stage, take_back, GRAPHICS_SCRIPT,
 };
 pub(crate) mod play;
 mod sound;
@@ -1639,13 +1639,14 @@ pub fn open(
         #[cfg(any(target_os = "linux", target_os = "macos"))]
         let devices = match &sent {
             Some(dir) => {
-                // Drives on from the start, even with none to announce yet:
-                // the drive of sent files is added on the first send, which
-                // the channel refuses unless they were on before Windows
-                // was told what this side can do.
-                let initial = shared.as_ref().map(|folder| vec![(drives::SHARED, drives::shared_name(folder))]);
+                // Drives on from the start, with none for IronRDP to
+                // announce: the drive of sent files is added on the first
+                // send, which the channel refuses unless they were on
+                // before Windows was told what this side can do; the
+                // shared folder's is announced at logon by `Drives`, with
+                // its name as Windows reads it.
                 Rdpdr::new(Box::new(drives::Drives::new(dir, shared.as_deref(), Some(screen.clone()))), "Kagaz".into())
-                    .with_drives(initial)
+                    .with_drives(None)
             }
             None => Rdpdr::new(Box::new(NoopRdpdrBackend), "Kagaz".into()),
         };
