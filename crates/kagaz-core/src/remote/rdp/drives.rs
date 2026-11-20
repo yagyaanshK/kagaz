@@ -126,12 +126,16 @@ impl RdpdrBackend for Drives {
         self.of(device_id).restore_drive(device_id)
     }
 
-    fn add_drive(&mut self, device_id: u32) -> PduResult<()> {
-        self.of(device_id).add_drive(device_id)
+    // Each drive is served from its own folder, ready from the start: the
+    // backend for this system keeps nothing per drive, and refuses to be
+    // asked (IronRDP's default), which kept the drive of sent files from
+    // being shown during a session.
+    fn add_drive(&mut self, _device_id: u32) -> PduResult<()> {
+        Ok(())
     }
 
-    fn remove_drive(&mut self, device_id: u32) -> PduResult<Vec<SvcMessage>> {
-        self.of(device_id).remove_drive(device_id)
+    fn remove_drive(&mut self, _device_id: u32) -> PduResult<Vec<SvcMessage>> {
+        Ok(Vec::new())
     }
 
     fn handle_server_device_announce_response(&mut self, pdu: ServerDeviceAnnounceResponse) -> PduResult<()> {
@@ -415,6 +419,15 @@ mod tests {
         assert!(take_back(&sent, &id));
         assert!(!take_back(&sent, &id));
         assert!(!helper_alive(&sent));
+        let _ = std::fs::remove_dir_all(&here);
+    }
+
+    #[test]
+    fn the_drive_of_sent_files_can_be_shown_during_a_session() {
+        let here = std::env::temp_dir().join(format!("kagaz-drives-test-{}", std::process::id()));
+        std::fs::create_dir_all(&here).unwrap();
+        let mut channel = Rdpdr::new(Box::new(Drives::new(&here, None)), "Kagaz".into()).with_drives(None);
+        assert!(channel.add_dynamic_drive(SENT, SENT_NAME.into()).is_ok());
         let _ = std::fs::remove_dir_all(&here);
     }
 }
