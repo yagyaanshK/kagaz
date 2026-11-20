@@ -16,8 +16,20 @@
 # it went: for a drag Windows' drop effect, 0 when nothing took them).
 # helper-alive.txt is written every two seconds while it runs.
 # Written in PowerShell, which every Windows has; nothing is installed.
+#
+# The drive's name there is "Kagaz", or "K" on a Windows that reads only
+# its first letter: this runs from the drive (its folder is where it
+# is), or from Kagaz share's copy, which names the folder (-Dir).
+param([string]$Dir = $PSScriptRoot)
 $ErrorActionPreference = 'Stop'
-$dir = '\\tsclient\Kagaz\.kagaz'
+# What goes wrong is said there in a box that stays (it runs without a
+# window).
+trap {
+  (New-Object -ComObject WScript.Shell).Popup("Kagaz's helper: $_", 0, 'Kagaz', 16) | Out-Null
+  exit 1
+}
+$dir = $Dir
+$drive = Split-Path -Parent $dir
 Add-Type -AssemblyName Microsoft.VisualBasic
 Add-Type -ReferencedAssemblies System.Windows.Forms, System.Drawing -TypeDefinition @'
 using System;
@@ -286,7 +298,7 @@ while ($true) {
       $lines = @(Get-Content -LiteralPath $a.FullName)
       Remove-Item -LiteralPath $a.FullName -Force
       $what = $lines[0]; $batch = $lines[1]; $at = if ($lines.Count -gt 2) { $lines[2] } else { '' }
-      $src = Join-Path '\\tsclient\Kagaz' $batch
+      $src = Join-Path $drive $batch
       $items = @(Get-ChildItem -LiteralPath $src -Force)
       if ($items.Count -gt 0) {
         if ($what -eq 'drag') {

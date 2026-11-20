@@ -1191,8 +1191,14 @@ impl Running {
             self.show_sent = false;
             match channel.add_dynamic_drive(drives::SENT, drives::SENT_NAME.into()) {
                 Ok(m) => {
-                    messages.extend(m);
+                    // Its announcement as Windows reads it (see `announce`).
+                    if m.len() == 1 {
+                        messages.push(drives::announce(drives::SENT, drives::SENT_NAME));
+                    } else {
+                        messages.extend(m);
+                    }
                     self.sent_shown = true;
+                    self.screen.post(Event::Sending(Sending::Step { step: "the Kagaz drive was announced to the computer".into() }));
                 }
                 Err(e) => self.screen.post(Event::Sending(Sending::Failed { why: format!("the Kagaz drive could not be shown there ({e})") })),
             }
@@ -1638,7 +1644,8 @@ pub fn open(
                 // the channel refuses unless they were on before Windows
                 // was told what this side can do.
                 let initial = shared.as_ref().map(|folder| vec![(drives::SHARED, drives::shared_name(folder))]);
-                Rdpdr::new(Box::new(drives::Drives::new(dir, shared.as_deref())), "Kagaz".into()).with_drives(initial)
+                Rdpdr::new(Box::new(drives::Drives::new(dir, shared.as_deref(), Some(screen.clone()))), "Kagaz".into())
+                    .with_drives(initial)
             }
             None => Rdpdr::new(Box::new(NoopRdpdrBackend), "Kagaz".into()),
         };

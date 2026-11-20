@@ -69,19 +69,37 @@ pub fn shared_name(folder: &Path) -> String {
     }
 }
 
-#[derive(Debug)]
 pub struct Drives {
     sent: NixRdpdrBackend,
     shared: Option<NixRdpdrBackend>,
+    /// Where what the computer says of the drives is told, for the log.
+    told: Option<std::sync::Arc<crate::remote::screen::Screen>>,
+    /// The drives the computer has opened something on yet.
+    opened: [bool; 2],
+}
+
+impl std::fmt::Debug for Drives {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Drives").field("sent", &self.sent).field("shared", &self.shared).finish()
+    }
 }
 
 impl_as_any!(Drives);
 
 impl Drives {
-    pub fn new(sent: &Path, shared: Option<&Path>) -> Drives {
+    pub fn new(sent: &Path, shared: Option<&Path>, told: Option<std::sync::Arc<crate::remote::screen::Screen>>) -> Drives {
         Drives {
             sent: NixRdpdrBackend::new(sent.to_string_lossy().to_string()),
             shared: shared.map(|p| NixRdpdrBackend::new(p.to_string_lossy().to_string())),
+            told,
+            opened: [false; 2],
+        }
+    }
+
+    /// For the log (the page's "files:" lines): words and numbers only.
+    fn tell(&self, step: String) {
+        if let Some(screen) = &self.told {
+            screen.post(crate::remote::screen::Event::Sending(crate::remote::screen::Sending::Step { step }));
         }
     }
 
@@ -140,6 +158,12 @@ impl RdpdrBackend for Drives {
 
     fn handle_server_device_announce_response(&mut self, pdu: ServerDeviceAnnounceResponse) -> PduResult<()> {
         let device = pdu.device_id;
+        let which = if device == SHARED { "shared folder's drive" } else { "Kagaz drive" };
+        if pdu.result_code == ironrdp_rdpdr::pdu::efs::NtStatus::SUCCESS {
+            self.tell(format!("the computer took the {which}"));
+        } else {
+            self.tell(format!("the computer refused the {which} ({:?})", pdu.result_code));
+        }
         self.of(device).handle_server_device_announce_response(pdu)
     }
 
@@ -149,6 +173,11 @@ impl RdpdrBackend for Drives {
 
     fn handle_drive_io_request(&mut self, req: ServerDriveIoRequest) -> PduResult<Vec<SvcMessage>> {
         let device = device_of(&req);
+        let which = usize::from(device == SHARED);
+        if !self.opened[which] {
+            self.opened[which] = true;
+            self.tell(format!("the computer opened the {}", if device == SHARED { "shared folder's drive" } else { "Kagaz drive" }));
+        }
         self.of(device).handle_drive_io_request(req)
     }
 
@@ -321,7 +350,7 @@ pub fn helper_started_there(sent: &Path) -> bool {
 /// `HKLM\SOFTWARE\Kagaz\Graphics` until it is put back. The result goes
 /// back to the drive: 0 done, 1223 the question answered no.
 pub const GRAPHICS_SCRIPT: &str = r#"param([string]$Turn = 'on')
-$result = '\\tsclient\Kagaz\.kagaz\graphics-result.txt'
+$result = Join-Path $PSScriptRoot 'graphics-result.txt'
 $me = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
 if (-not $me.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
   # Raised from a copy of its own: a raised program may not reach the drive.
@@ -365,14 +394,44 @@ try {
 } catch { exit 1 }
 "#;
 
-/// The line typed into Windows' Run box for a helper on the Kagaz drive,
-/// given `arguments`: PowerShell, waiting up to ten seconds for the drive
-/// to appear there (it is announced only a moment before).
+/// The line put in Windows' Run box for a helper on the Kagaz drive,
+/// given `arguments`: PowerShell, without a window (Windows 11's terminal
+/// shows PowerShell's console even when told to hide it, so Windows' own
+/// console host is asked to run it without one), waiting up to ten
+/// seconds for the drive to appear there (it is announced only a moment
+/// before), and saying so in a box that stays if it does not. The
+/// helpers say their own troubles the same way. Windows' Run box takes up
+/// to 259 letters.
 pub fn helper_line(script: &str, arguments: &[&str]) -> String {
     let arguments: String = arguments.iter().map(|a| format!(" '{}'", a.replace('\'', "''"))).collect();
     format!(
-        r#"powershell -nop -ep bypass -w hidden -c "$f='\\tsclient\Kagaz\.kagaz\{script}'; for ($i = 0; $i -lt 40 -and !(Test-Path $f); $i++) {{ sleep -m 250 }}; & $f{arguments}""#
+        r#"conhost --headless powershell -ep bypass -c "$f='\\tsclient\Kagaz\.kagaz\{script}';for($i=0;$i-lt 20-and!(Test-Path $f);$i++){{sleep -m 500}};if(Test-Path $f){{& $f{arguments}}}else{{(New-Object -Com WScript.Shell).Popup('No Kagaz drive here.')}}""#
     )
+}
+
+/// The drive's announcement to the computer, written as Windows reads it:
+/// its name in the device data as plain 8-bit text, as FreeRDP writes it.
+/// IronRDP writes it as UTF-16, which a real Windows 11 read as its first
+/// letter alone ("K on Kagaz", `\\tsclient\K`).
+pub fn announce(device_id: u32, name: &str) -> SvcMessage {
+    let plain: Vec<u8> = name.bytes().filter(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-' | b'.')).collect();
+    let mut pdu = Vec::new();
+    // RDPDR_CTYP_CORE, PAKID_CORE_DEVICELIST_ANNOUNCE; one device.
+    pdu.extend(0x4472u16.to_le_bytes());
+    pdu.extend(0x4441u16.to_le_bytes());
+    pdu.extend(1u32.to_le_bytes());
+    // RDPDR_DTYP_FILESYSTEM, its id, its DOS name (7 letters and a nul).
+    pdu.extend(8u32.to_le_bytes());
+    pdu.extend(device_id.to_le_bytes());
+    let mut dos = [0u8; 8];
+    for (to, from) in dos.iter_mut().zip(plain.iter().take(7)) {
+        *to = *from;
+    }
+    pdu.extend(dos);
+    let data: Vec<u8> = plain.iter().copied().chain([0]).collect();
+    pdu.extend((data.len() as u32).to_le_bytes());
+    pdu.extend(data);
+    SvcMessage::from(pdu)
 }
 
 /// The line typed into Windows' Run box to start the helper.
@@ -403,9 +462,10 @@ mod tests {
         assert_eq!(shared_name(Path::new("/home/x/Some: Folder.")), "Some Folder");
         assert_eq!(
             helper_line("graphics.ps1", &["on"]),
-            r#"powershell -nop -ep bypass -w hidden -c "$f='\\tsclient\Kagaz\.kagaz\graphics.ps1'; for ($i = 0; $i -lt 40 -and !(Test-Path $f); $i++) { sleep -m 250 }; & $f 'on'""#
+            r#"conhost --headless powershell -ep bypass -c "$f='\\tsclient\Kagaz\.kagaz\graphics.ps1';for($i=0;$i-lt 20-and!(Test-Path $f);$i++){sleep -m 500};if(Test-Path $f){& $f 'on'}else{(New-Object -Com WScript.Shell).Popup('No Kagaz drive here.')}""#
         );
-        assert!(helper_line("x.ps1", &["It's"]).ends_with(r#"& $f 'It''s'""#));
+        assert!(helper_line("graphics.ps1", &["off"]).chars().count() < 259);
+        assert!(helper_line("x.ps1", &["It's"]).contains(r#"& $f 'It''s'}"#));
         // Windows' Run box takes up to 259 letters.
         assert!(helper_run_line().chars().count() < 259);
         // Asked and answered.
@@ -426,8 +486,25 @@ mod tests {
     fn the_drive_of_sent_files_can_be_shown_during_a_session() {
         let here = std::env::temp_dir().join(format!("kagaz-drives-test-{}", std::process::id()));
         std::fs::create_dir_all(&here).unwrap();
-        let mut channel = Rdpdr::new(Box::new(Drives::new(&here, None)), "Kagaz".into()).with_drives(None);
+        let mut channel = Rdpdr::new(Box::new(Drives::new(&here, None, None)), "Kagaz".into()).with_drives(None);
         assert!(channel.add_dynamic_drive(SENT, SENT_NAME.into()).is_ok());
         let _ = std::fs::remove_dir_all(&here);
+    }
+
+    #[test]
+    fn the_drive_is_announced_with_its_name_as_windows_reads_it() {
+        use ironrdp_rdpdr::pdu::RdpdrPdu;
+        let bytes = announce(SENT, SENT_NAME).encode_unframed_pdu().unwrap();
+        // The name in the device data, as plain text with a nul.
+        assert!(bytes.ends_with(&[6, 0, 0, 0, b'K', b'a', b'g', b'a', b'z', 0]));
+        // And a whole, well-formed announcement of that drive.
+        match ironrdp_core::decode::<RdpdrPdu>(&bytes).unwrap() {
+            RdpdrPdu::ClientDeviceListAnnounce(list) => {
+                assert_eq!(list.device_list.len(), 1);
+                assert_eq!(list.device_list[0].device_id(), SENT);
+                assert_eq!(list.device_list[0].preferred_dos_name(), "Kagaz");
+            }
+            other => panic!("{other:?}"),
+        }
     }
 }

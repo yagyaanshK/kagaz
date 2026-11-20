@@ -12,8 +12,10 @@ use std::time::{Duration, Instant};
 
 /// Kagaz's helper (helper.ps1 in the core, which says what it does).
 const HELPER: &str = include_str!("../../kagaz-core/src/remote/rdp/helper.ps1");
-/// Where Kagaz asks it things, in a session from Kagaz.
-const DRIVE: &str = r"\\tsclient\Kagaz\.kagaz";
+/// Where Kagaz asks it things, in a session from Kagaz: its drive is
+/// "Kagaz" there, or "K" on a Windows that reads only the first letter of
+/// a drive's name.
+const DRIVES: [&str; 2] = [r"\\tsclient\Kagaz\.kagaz", r"\\tsclient\K\.kagaz"];
 
 /// Waits for sessions from Kagaz until `settings` (Kagaz's share.json)
 /// no longer has it on. One at a time: a second one ends at once.
@@ -42,10 +44,9 @@ pub fn run(settings: Option<PathBuf>) -> anyhow::Result<()> {
         if !remote_session() {
             continue;
         }
-        let dir = Path::new(DRIVE);
-        if !dir.is_dir() {
+        let Some(dir) = DRIVES.iter().map(Path::new).find(|d| d.join("helper.ps1").is_file()) else {
             continue;
-        }
+        };
         let here = dir.join("share-here.txt");
         if !here.exists() {
             let _ = std::fs::write(&here, b"1");
@@ -57,6 +58,8 @@ pub fn run(settings: Option<PathBuf>) -> anyhow::Result<()> {
         let spawned = std::process::Command::new("powershell.exe")
             .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File"])
             .arg(&script)
+            .arg("-Dir")
+            .arg(dir)
             .creation_flags(0x0800_0000)
             .spawn();
         if spawned.is_ok() {

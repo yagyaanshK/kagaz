@@ -783,6 +783,15 @@ Plan: `docs/remote-connection.md` (agreed 2026-11-16).
       without the Run box"; connect from here again; drag: no Run box at
       all. (3) A device set to send files "by its clipboard": a drop
       offers them to paste. Also a scaled screen there (125 % or 150 %).
+      Found on the real PC (2026-11-20, from screencasts): Windows 11
+      read the drive's name, which IronRDP sends as UTF-16, as its first
+      letter only ("K on Kagaz", so `\\tsclient\Kagaz` never appeared);
+      Kagaz now announces the Kagaz drive itself, its name as plain text
+      as FreeRDP does. The shared folder's drive is still announced by
+      IronRDP at the start and may show as its first letter there (not
+      fixed yet). Windows Terminal ignored PowerShell's "hidden": the
+      line now runs it through `conhost --headless`; the helper's own
+      errors show in a box that stays.
       First try (2026-11-20) failed twice: the drive was refused ("dynamic
       drives require capability configuration before server negotiation":
       drives are now on from the start of every session with a folder of
