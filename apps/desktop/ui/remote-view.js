@@ -862,6 +862,49 @@ const KagazRemoteView = (() => {
     }).catch(() => {});
   }
 
+  // A drag made on a Windows computer's screen, leaving this window with
+  // the button still held: Kagaz's helper there catches it at the edge
+  // (remote_drag_out). With files in it, a drag of them goes on here and
+  // the button is let go there, so its drop lands on the helper; dropped
+  // here in a folder or on the desktop, they arrive there. Meanwhile the
+  // pointer there is nudged a pixel at a time, for Windows' drag to see
+  // the helper's window come under it.
+  function draggedOut(ev) {
+    if (!cur || cur.dragOut || !(cur.buttons & LEFT) || !cur.info || cur.info.speaks !== "rdp" || cur.device.paired) return false;
+    const r = canvas.getBoundingClientRect();
+    const outside = ev.clientX < r.left || ev.clientX >= r.right || ev.clientY < r.top || ev.clientY >= r.bottom;
+    if (!outside) return false;
+    const state = cur;
+    const d = { nudged: 0 };
+    cur.dragOut = d;
+    d.nudge = setInterval(() => {
+      if (cur !== state || !cur.point) return;
+      const p = cur.point;
+      d.nudged ^= 1;
+      did({ t: "pointer", x: Math.max(0, p.x - d.nudged), y: p.y, buttons: LEFT }, true);
+    }, 120);
+    invoke("remote_drag_out", { session: cur.session }).then((count) => {
+      clearInterval(d.nudge);
+      if (cur !== state) return;
+      if (count) {
+        // Let go there: the computer's drop lands on the helper. The drag
+        // here goes on with this computer's own.
+        const p = cur.point;
+        cur.buttons = 0;
+        did({ t: "pointer", x: p.x, y: p.y, buttons: 0 }, true);
+        toast(`Drop ${count === 1 ? "it" : `the ${count}`} in a folder here, or on the desktop.`, 5000);
+        log(`files dragged out of the computer, ${count}`);
+      }
+      setTimeout(() => {
+        if (cur === state) cur.dragOut = null;
+      }, 1500);
+    }).catch(() => {
+      clearInterval(d.nudge);
+      if (cur === state) cur.dragOut = null;
+    });
+    return true;
+  }
+
   function pointer(ev, now) {
     if (!cur || cur.session == null) return;
     locks(ev);
@@ -869,6 +912,11 @@ const KagazRemoteView = (() => {
     cur.point = p;
     cur.buttons = held(ev);
     draggedThere(p);
+    // Out of the window with a drag there: the drag is handed over (the
+    // pointer there stays at the edge meanwhile). A letting go always
+    // goes there, whatever became of it.
+    const lettingGo = ev.type === "pointerup" || ev.type === "pointercancel";
+    if (!lettingGo && (cur.dragOut || draggedOut(ev))) return;
     // Of moves waiting to go, only the last matters.
     const last = outbox[outbox.length - 1];
     if (!now && last && last.t === "pointer" && last.buttons === cur.buttons) outbox.pop();
@@ -1247,6 +1295,9 @@ const KagazRemoteView = (() => {
   async function dropped(payload) {
     const d = cur && cur.drag;
     if (!cur || cur.session == null || cur.away) return;
+    // Files dragged out of the computer, let go back on its window: not
+    // sent back to it.
+    if (cur.dragOut) return;
     cur.drag = null;
     const paths = (payload && payload.paths) || (d && d.paths) || [];
     if (!paths.length) return;

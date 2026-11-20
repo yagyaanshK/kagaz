@@ -10,7 +10,13 @@
 #                            go: a real drop, wherever it lands
 #                      save  save them where the point is, else ask where
 #                      open  open the batch's folder
-#   cancel-<id>.txt  stop holding that drag
+#                      catch catch a drag of files made here, at the
+#                            pointer (it left Kagaz's window there): its
+#                            files' count goes in caught-<id>.txt; let go
+#                            on it, Windows copies them to out-<id> on the
+#                            drive, and out-<id>.txt says they are there;
+#                            nothing caught, done-<id>.txt says 0
+#   cancel-<id>.txt  stop holding that drag (or catching)
 #
 # The other way, files from here to Kagaz: while something is dragged
 # here (the left button held and moved), a strip at the side of the
@@ -262,6 +268,42 @@ public static class Kagaz {
     public void Go() { if (Visible) Hide(); }
     public string[] Take() { var d = dropped; dropped = null; return d; }
   }
+
+  // A drag of files made here, caught at the pointer as it leaves
+  // Kagaz's window there: an all but invisible window under it, which
+  // Windows' drag enters (its files are known then) and is let go on.
+  public class Net : Form {
+    public string[] Caught;
+    public string[] Dropped;
+    public Net() {
+      FormBorderStyle = FormBorderStyle.None;
+      ShowInTaskbar = false;
+      TopMost = true;
+      StartPosition = FormStartPosition.Manual;
+      BackColor = Color.Black;
+      Opacity = 0.01;
+      AllowDrop = true;
+      Spot c;
+      GetCursorPos(out c);
+      Size = new Size(160, 160);
+      Location = new Point(c.X - 80, c.Y - 80);
+      DragEnter += (s, e) => {
+        var files = e.Data.GetData(DataFormats.FileDrop) as string[];
+        if (files != null && files.Length > 0) { Caught = files; e.Effect = DragDropEffects.Copy; }
+        else e.Effect = DragDropEffects.None;
+      };
+      DragOver += (s, e) => { e.Effect = Caught != null ? DragDropEffects.Copy : DragDropEffects.None; };
+      DragDrop += (s, e) => { Dropped = e.Data.GetData(DataFormats.FileDrop) as string[]; };
+    }
+    protected override bool ShowWithoutActivation { get { return true; } }
+    protected override CreateParams CreateParams {
+      get {
+        var p = base.CreateParams;
+        p.ExStyle |= 0x80 | 0x08000000;
+        return p;
+      }
+    }
+  }
 }
 '@
 [Kagaz]::Aware()
@@ -362,7 +404,12 @@ function Save-Batch($src, $items, $At) {
 # progress), then said to be there.
 function Send-Dropped($paths) {
   $id = [DateTime]::UtcNow.Ticks
-  $to = Join-Path $dir "in-$id"
+  Copy-Out $paths (Join-Path $dir "in-$id")
+  Write-Answer "in-$id.txt" $paths.Count
+}
+
+# Files copied by Windows into a folder of the drive, then said to be there.
+function Copy-Out($paths, $to) {
   New-Item -ItemType Directory -Path $to -Force | Out-Null
   $ui = [Microsoft.VisualBasic.FileIO.UIOption]::AllDialogs
   $no = [Microsoft.VisualBasic.FileIO.UICancelOption]::DoNothing
@@ -374,11 +421,12 @@ function Send-Dropped($paths) {
       [Microsoft.VisualBasic.FileIO.FileSystem]::CopyFile($p, (Join-Path $to $name), $ui, $no)
     }
   }
-  Write-Answer "in-$id.txt" $paths.Count
 }
 
 $here = 'Kagaz'
 try { $here = (Get-Content -LiteralPath (Join-Path $dir 'name.txt') -TotalCount 1).Trim() } catch {}
+# A drag being caught (see "catch"): its id, its window, until when.
+$catching = $null
 $zone = New-Object 'Kagaz+Zone' -ArgumentList $here
 $pressed = $null
 $beat = [DateTime]::MinValue
@@ -398,6 +446,29 @@ while ($true) {
   $paths = $zone.Take()
   if ($paths) {
     try { Send-Dropped $paths } catch {}
+  }
+  # A drag caught as it left Kagaz's window: said once its files are
+  # known; let go on, copied to the drive; else, after a while or when
+  # Kagaz says, given up.
+  if ($catching) {
+    $c = $catching
+    try {
+      if ($c.Net.Caught -and -not $c.Told) {
+        Write-Answer "caught-$($c.Id).txt" $c.Net.Caught.Count
+        $c.Told = $true
+      }
+      if ($c.Net.Dropped) {
+        $paths = $c.Net.Dropped
+        $c.Net.Close()
+        $catching = $null
+        Copy-Out $paths (Join-Path $dir "out-$($c.Id)")
+        Write-Answer "out-$($c.Id).txt" $paths.Count
+      } elseif ((Get-Date) -gt $c.Until -or (Test-Path -LiteralPath (Join-Path $dir "cancel-$($c.Id).txt"))) {
+        $c.Net.Close()
+        $catching = $null
+        Write-Answer "done-$($c.Id).txt" 0
+      }
+    } catch { $catching = $null }
   }
   if (((Get-Date) - $looked).TotalMilliseconds -lt 200) {
     Start-Sleep -Milliseconds 30
@@ -423,6 +494,13 @@ while ($true) {
       $lines = @(Get-Content -LiteralPath $a.FullName)
       Remove-Item -LiteralPath $a.FullName -Force
       $what = $lines[0]; $batch = $lines[1]; $at = if ($lines.Count -gt 2) { $lines[2] } else { '' }
+      if ($what -eq 'catch') {
+        if ($catching) { $catching.Net.Close() }
+        $net = New-Object 'Kagaz+Net'
+        $net.Show()
+        $catching = @{ Id = $id; Net = $net; Until = (Get-Date).AddSeconds(8); Told = $false }
+        continue
+      }
       $src = Join-Path $drive $batch
       $items = @(Get-ChildItem -LiteralPath $src -Force)
       if ($items.Count -gt 0) {

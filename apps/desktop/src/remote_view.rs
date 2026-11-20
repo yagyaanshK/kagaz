@@ -384,19 +384,7 @@ fn set_clipboard(app: &AppHandle, text: Option<String>, png: Option<Vec<u8>>) ->
 /// folder (Files, the desktop) copies them there.
 #[cfg(target_os = "linux")]
 fn set_clipboard_files(app: &AppHandle, paths: Vec<String>) -> bool {
-    // file:// addresses, with what is not plain in a path escaped.
-    let uri = |path: &str| {
-        let mut out = String::from("file://");
-        for b in path.bytes() {
-            if b.is_ascii_alphanumeric() || b"/-_.~".contains(&b) {
-                out.push(b as char);
-            } else {
-                out.push_str(&format!("%{b:02X}"));
-            }
-        }
-        out
-    };
-    let uris: Vec<String> = paths.iter().map(|p| uri(p)).collect();
+    let uris: Vec<String> = paths.iter().map(|p| file_uri(p)).collect();
     app.run_on_main_thread(move || {
         let clipboard = gtk::Clipboard::get(&gtk::gdk::SELECTION_CLIPBOARD);
         let targets = [
@@ -1094,6 +1082,111 @@ fn arrived(app: &AppHandle, window: &str, device_id: &str, lot: &std::path::Path
 #[tauri::command]
 pub fn remote_fetch_their_files(app: AppHandle, session: u64, big: Option<bool>) -> Result<(), String> {
     app.state::<Viewers>().with(session, |o| o.input.send(Input::TheirFiles { big: big.unwrap_or(false) }))
+}
+
+/// A drag made on the computer has left the session's window here with
+/// the button still held: Kagaz's helper there is asked to catch it at
+/// the pointer (held at the screen's edge). Where it carries files, their
+/// count comes back, and a drag of them begins here (this computer's
+/// own, from this window, while the button is still down): the page then
+/// lets go there, so the computer's drop lands on the helper, which has
+/// Windows copy them onto the Kagaz drive; let go here (a folder, the
+/// desktop), they are handed over as soon as they are all here. None:
+/// nothing to carry (no files dragged, no helper running there).
+#[tauri::command]
+pub async fn remote_drag_out(window: tauri::WebviewWindow, session: u64) -> Result<Option<usize>, String> {
+    let app = window.app_handle().clone();
+    blocking(move || {
+        #[cfg(target_os = "linux")]
+        {
+            use kagaz_core::remote::rdp::{answer, ask, cancel, helper_alive};
+            let sent = app.state::<Viewers>().with(session, |o| o.sent.clone())?;
+            let Some(sent) = sent.filter(|s| helper_alive(s)) else { return Ok(None) };
+            let id = ask(&sent, "catch", "", None)?;
+            let until = std::time::Instant::now() + Duration::from_secs(4);
+            let caught = loop {
+                if let Some(n) = answer(&sent, "caught", &id) {
+                    break n;
+                }
+                if answer(&sent, "done", &id).is_some() || std::time::Instant::now() > until {
+                    break 0;
+                }
+                std::thread::sleep(Duration::from_millis(30));
+            };
+            if caught <= 0 {
+                cancel(&sent, &id);
+                return Ok(None);
+            }
+            drag_out_here(&window, sent, id)?;
+            Ok(Some(caught as usize))
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            let _ = (app, window, session);
+            Ok(None)
+        }
+    })
+    .await
+}
+
+/// A drag here of files on their way from the computer (into the
+/// drive's `out-<id>`), begun from the session's window while the button
+/// is down, for other programs only (Files, the desktop). Where it is let
+/// go, the files are handed over once they are all here; until then that
+/// program waits (two minutes at most).
+#[cfg(target_os = "linux")]
+fn drag_out_here(window: &tauri::WebviewWindow, sent: std::path::PathBuf, id: String) -> Result<(), String> {
+    window
+        .with_webview(move |webview| {
+            use gtk::prelude::*;
+            use std::cell::RefCell;
+            use std::rc::Rc;
+            let view = webview.inner();
+            let handlers: Rc<RefCell<Vec<gtk::glib::SignalHandlerId>>> = Rc::default();
+            let (from, which) = (sent.clone(), id.clone());
+            let gives = view.connect_drag_data_get(move |_, _, selection, _, _| {
+                let until = std::time::Instant::now() + Duration::from_secs(120);
+                while kagaz_core::remote::rdp::answer(&from, "out", &which).is_none() && std::time::Instant::now() < until {
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+                let dir = from.join(".kagaz").join(format!("out-{which}"));
+                let mut uris: Vec<String> = std::fs::read_dir(&dir)
+                    .map(|e| e.flatten().map(|e| file_uri(&e.path().to_string_lossy())).collect())
+                    .unwrap_or_default();
+                uris.sort();
+                let uris: Vec<&str> = uris.iter().map(String::as_str).collect();
+                selection.set_uris(&uris);
+            });
+            handlers.borrow_mut().push(gives);
+            let all = handlers.clone();
+            let ends = view.connect_drag_end(move |view, _| {
+                for handler in all.borrow_mut().drain(..) {
+                    view.disconnect(handler);
+                }
+            });
+            handlers.borrow_mut().push(ends);
+            let targets = gtk::TargetList::new(&[gtk::TargetEntry::new("text/uri-list", gtk::TargetFlags::OTHER_APP, 0)]);
+            if view.drag_begin_with_coordinates(&targets, gtk::gdk::DragAction::COPY, 1, None, -1, -1).is_none() {
+                for handler in handlers.borrow_mut().drain(..) {
+                    view.disconnect(handler);
+                }
+            }
+        })
+        .map_err(|e| e.to_string())
+}
+
+/// A file:// address, with what is not plain in a path escaped.
+#[cfg(target_os = "linux")]
+fn file_uri(path: &str) -> String {
+    let mut out = String::from("file://");
+    for b in path.bytes() {
+        if b.is_ascii_alphanumeric() || b"/-_.~".contains(&b) {
+            out.push(b as char);
+        } else {
+            out.push_str(&format!("%{b:02X}"));
+        }
+    }
+    out
 }
 
 /// Whether Kagaz's helper runs on the computer (for files from it: its

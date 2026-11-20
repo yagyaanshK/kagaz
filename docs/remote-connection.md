@@ -99,6 +99,19 @@ the other kinds: saved devices, Found nearby, Add.
   under the point in File Explorer, else the folder that window shows,
   or the desktop; elsewhere Windows' folder chooser asks. A device set
   to send files by its clipboard gets dropped files there, to paste.
+  The other way (the owner, 2026-11-20, "all of the above"): files from
+  a Windows computer land where a setting per device says ("Files from
+  it": ask where each time, the default; Downloads; a folder chosen
+  once), by its drop zone (the helper shows a strip at the side of its
+  screen while something is dragged there), by copy there and paste
+  here (fetched over Windows' clipboard channel when the session's
+  window loses the focus, piece by piece to disk, then put on this
+  computer's clipboard as copied files), or by a real drag out of the
+  window (the helper catches Windows' drag at the screen's edge, Kagaz
+  lets go there and carries the drag on here with this computer's own,
+  handing the files over when they have all come). The Kagaz drive is
+  announced at sign-in in every session for this, its name as plain
+  text (IronRDP's UTF-16 name showed as its first letter on Windows 11).
   A computer running Kagaz takes the files at once into its person's
   Downloads, beside what is there, with "N files in Downloads" on its
   sign to show them.

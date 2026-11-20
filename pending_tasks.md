@@ -821,8 +821,18 @@ Plan: `docs/remote-connection.md` (agreed 2026-11-16).
       ("ready to paste"); over 512 MB it asks first (click). Each copy
       there is fetched once; what Kagaz offered there itself is not
       fetched back. To try: copy two files and a folder in Explorer
-      there, click into Files here, Ctrl + V. Still to build: (4) the
-      real drag out of the window.
+      there, click into Files here, Ctrl + V. (4) The real drag out of
+      the window: a drag of files on the PC that leaves Kagaz's window
+      with the button held is caught by the helper at the screen's edge
+      (an all but invisible window under the pointer, nudged a pixel so
+      Windows' drag sees it); its file count comes back, Kagaz lets go
+      there (the PC's drop lands on the helper, Windows copies them to
+      out-<id> on the drive) and starts this computer's own drag from
+      its window (text/uri-list, other programs only); dropped in Files
+      or on the desktop, the files are handed over once all arrived (the
+      program waits up to two minutes). To try: drag a file from
+      Explorer there out of the window onto the desktop here; a folder;
+      a large file; and a window drag out of it (nothing should happen).
 - [ ] **Session windows open at their last size** (the owner,
       2026-11-20): each device's window opens as it was last closed
       (size, maximised or not; full screen is not kept); a device's
