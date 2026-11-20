@@ -57,6 +57,14 @@ pub enum Asked {
     Unlock(u32),
     /// The computer took the list of what is here (true) or refused it.
     Listed(bool),
+    /// The computer copied files of its own: their list can be had in
+    /// this format.
+    TheirFiles(ClipboardFormatId),
+    /// The list of the computer's copied files came, with its number for
+    /// the copy.
+    FileList(Vec<ironrdp_cliprdr::pdu::FileDescriptor>, Option<u32>),
+    /// A piece of one of them came (none: it could not be given).
+    Piece(u32, Option<Vec<u8>>),
 }
 
 /// What the session and the channel both look at.
@@ -153,8 +161,8 @@ const FILE_ABILITIES: ClipboardGeneralCapabilityFlags = ClipboardGeneralCapabili
 impl_as_any!(Backend);
 
 impl CliprdrBackend for Backend {
-    // Files go from here to the computer only: nothing is ever written
-    // here, so there is no folder for it.
+    // Files from the computer are written by the session itself (see
+    // theirs.rs), so the channel has no folder of its own.
     fn temporary_directory(&self) -> &str {
         ""
     }
@@ -188,6 +196,10 @@ impl CliprdrBackend for Backend {
             .any(|f| f.name().is_some_and(|n| n.value() == ClipboardFormatName::FILE_LIST.value()));
         if !files && !available_formats.is_empty() {
             self.ask(Asked::Theirs);
+        }
+        // Files: had here only when asked for (copy there, paste here).
+        if let Some(list) = available_formats.iter().find(|f| f.name().is_some_and(|n| n.value() == ClipboardFormatName::FILE_LIST.value())) {
+            self.ask(Asked::TheirFiles(list.id()));
         }
         if available_formats.iter().any(|f| f.id() == ClipboardFormatId::CF_UNICODETEXT) {
             self.wanted.push_back(Wanted::Text);
@@ -246,8 +258,13 @@ impl CliprdrBackend for Backend {
     fn on_file_contents_request(&mut self, request: FileContentsRequest) {
         self.ask(Asked::Contents(request));
     }
-    // Kagaz asks the computer for no files.
-    fn on_file_contents_response(&mut self, _response: FileContentsResponse<'_>) {}
+    fn on_file_contents_response(&mut self, response: FileContentsResponse<'_>) {
+        let data = (!response.is_error()).then(|| response.data().to_vec());
+        self.ask(Asked::Piece(response.stream_id(), data));
+    }
+    fn on_remote_file_list(&mut self, files: &[ironrdp_cliprdr::pdu::FileDescriptor], clip_data_id: Option<u32>) {
+        self.ask(Asked::FileList(files.to_vec(), clip_data_id));
+    }
     fn on_lock(&mut self, data_id: LockDataId) {
         self.ask(Asked::Lock(data_id.0));
     }

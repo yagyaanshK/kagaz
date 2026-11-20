@@ -1150,6 +1150,13 @@ const KagazRemoteView = (() => {
     }
     stage.focus();
   }
+  // Files copied on the computer come here when this window loses the
+  // focus: the person may be off to paste them in a folder here.
+  window.addEventListener("blur", () => {
+    if (!cur || cur.session == null || cur.away || !cur.info || cur.info.speaks !== "rdp" || cur.device.paired) return;
+    invoke("remote_fetch_their_files", { session: cur.session, big: false }).catch(() => {});
+  });
+
   // Files dragged here from this computer. To a Windows computer they
   // are put on the Kagaz drive at once, and Kagaz's helper there holds a
   // real Windows drag of them at its pointer (remote_drag_begin); when it
@@ -1314,6 +1321,21 @@ const KagazRemoteView = (() => {
     } else if (news.state === "failed") {
       toast(sentence(news.why), 6000);
       log("files not sent");
+    } else if (news.state === "theirsbig") {
+      // Copied there, more than is fetched without asking.
+      const what = news.count === 1 ? "a file" : `${news.count} files`;
+      toast(`${what[0].toUpperCase() + what.slice(1)} copied on ${there} (${size(news.bytes)}). Click to bring them here to paste.`, 12000, () => {
+        invoke("remote_fetch_their_files", { session: cur.session, big: true }).catch(() => {});
+      });
+      log(`files copied there, ${news.count}, ${news.bytes} bytes: asked first`);
+    } else if (news.state === "fetching") {
+      if (news.total > 20e6 && news.done < news.total) {
+        toast(`Bringing the files copied on ${there} here: ${Math.floor((news.done / Math.max(news.total, 1)) * 100)}%`, 4000);
+      }
+    } else if (news.state === "fetched") {
+      const what = news.count === 1 ? "The file" : `The ${news.count} files`;
+      toast(`${what} copied on ${there} can be pasted here now (Ctrl + V in a folder).`, 8000);
+      log(`files copied there fetched, ${news.count}`);
     }
   }
 

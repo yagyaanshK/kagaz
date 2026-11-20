@@ -380,6 +380,46 @@ fn set_clipboard(app: &AppHandle, text: Option<String>, png: Option<Vec<u8>>) ->
     .is_ok()
 }
 
+/// Put files on this computer's clipboard, as copied files: a paste in a
+/// folder (Files, the desktop) copies them there.
+#[cfg(target_os = "linux")]
+fn set_clipboard_files(app: &AppHandle, paths: Vec<String>) -> bool {
+    // file:// addresses, with what is not plain in a path escaped.
+    let uri = |path: &str| {
+        let mut out = String::from("file://");
+        for b in path.bytes() {
+            if b.is_ascii_alphanumeric() || b"/-_.~".contains(&b) {
+                out.push(b as char);
+            } else {
+                out.push_str(&format!("%{b:02X}"));
+            }
+        }
+        out
+    };
+    let uris: Vec<String> = paths.iter().map(|p| uri(p)).collect();
+    app.run_on_main_thread(move || {
+        let clipboard = gtk::Clipboard::get(&gtk::gdk::SELECTION_CLIPBOARD);
+        let targets = [
+            gtk::TargetEntry::new("x-special/gnome-copied-files", gtk::TargetFlags::empty(), 0),
+            gtk::TargetEntry::new("text/uri-list", gtk::TargetFlags::empty(), 1),
+        ];
+        clipboard.set_with_data(&targets, move |_, selection, form| {
+            let (atom, text) = if form == 0 {
+                ("x-special/gnome-copied-files", format!("copy\n{}", uris.join("\n")))
+            } else {
+                ("text/uri-list", uris.iter().map(|u| format!("{u}\r\n")).collect())
+            };
+            selection.set(&gtk::gdk::Atom::intern(atom), 8, text.as_bytes());
+        });
+    })
+    .is_ok()
+}
+
+#[cfg(not(target_os = "linux"))]
+fn set_clipboard_files(_app: &AppHandle, _paths: Vec<String>) -> bool {
+    false
+}
+
 // The clipboard of the other systems comes with their viewers.
 #[cfg(not(target_os = "linux"))]
 fn clipboard_now(_app: &AppHandle) -> Copied {
@@ -465,6 +505,11 @@ fn forward(app: AppHandle, id: u64, session: remote::Session, channel: Channel<I
                     Event::PointerDefault => (news_packet(serde_json::json!({ "type": "pointer-default" })), false),
                     Event::Bell => (news_packet(serde_json::json!({ "type": "bell" })), false),
                     Event::Sending(how) => {
+                        // Files copied on the device, here now: on this
+                        // computer's clipboard, for a paste in a folder.
+                        if let remote::Sending::Fetched { paths, .. } = &how {
+                            set_clipboard_files(&app, paths.clone());
+                        }
                         let mut news = serde_json::to_value(&how).unwrap_or_default();
                         news["type"] = "sending".into();
                         (news_packet(news), false)
@@ -1041,6 +1086,14 @@ fn arrived(app: &AppHandle, window: &str, device_id: &str, lot: &std::path::Path
             let _ = app.emit_to(window, "remote-received", serde_json::json!({ "count": count, "kept": false, "why": e.to_string() }));
         }
     }
+}
+
+/// Files copied on the device, fetched to here for this computer's
+/// clipboard (the window lost the focus: the person may paste them
+/// elsewhere); `big`: whatever their size (the person said so).
+#[tauri::command]
+pub fn remote_fetch_their_files(app: AppHandle, session: u64, big: Option<bool>) -> Result<(), String> {
+    app.state::<Viewers>().with(session, |o| o.input.send(Input::TheirFiles { big: big.unwrap_or(false) }))
 }
 
 /// Whether Kagaz's helper runs on the computer (for files from it: its

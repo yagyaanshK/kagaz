@@ -47,6 +47,10 @@ pub enum Input {
     /// Show the drive of files sent from here on the device (see
     /// [`Info::sent`]), if it is not shown yet.
     ShowSent,
+    /// Fetch the files on the device's clipboard (copied there) to here,
+    /// for this computer's clipboard (see [`super::Sending::Fetched`]);
+    /// `big`: whatever their size. Each copy there is fetched once.
+    TheirFiles { big: bool },
     /// Sharper (0) to smoother (10); none lets Kagaz follow the link.
     Picture(Option<u8>),
     /// The lock keys as they are on this keyboard: a device that can sets

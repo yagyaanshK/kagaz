@@ -813,8 +813,16 @@ Plan: `docs/remote-connection.md` (agreed 2026-11-16).
       the helper at once); without Kagaz share, the first drag there in
       a session says the helper is not running and a click starts it.
       To try: both with and without Kagaz share there; each setting.
-      Still to build: (3) copy on the PC, paste here; (4) the real drag
-      out of the window.
+      (3) Copy on the PC, paste here: when the PC's clipboard has files of
+      its own copy and Kagaz's window loses the focus, Kagaz fetches them
+      over Windows' clipboard channel (the list, then 1 MB pieces, one at
+      a time, straight to disk, into ~/.cache/kagaz/received/, gone after
+      a day) and puts them on this computer's clipboard as copied files
+      ("ready to paste"); over 512 MB it asks first (click). Each copy
+      there is fetched once; what Kagaz offered there itself is not
+      fetched back. To try: copy two files and a folder in Explorer
+      there, click into Files here, Ctrl + V. Still to build: (4) the
+      real drag out of the window.
 - [ ] **Session windows open at their last size** (the owner,
       2026-11-20): each device's window opens as it was last closed
       (size, maximised or not; full screen is not kept); a device's

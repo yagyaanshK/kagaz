@@ -130,6 +130,14 @@ pub enum Sending {
     /// computer took or refused the list, kept it, asked for a size or a
     /// piece), for the log: words and numbers, never names.
     Step { step: String },
+    /// The other way: files copied on the device, too many bytes to fetch
+    /// without asking ([`super::Input::TheirFiles`] with `big` fetches).
+    TheirsBig { count: usize, bytes: u64 },
+    /// Files copied on the device coming here: so much of all of it.
+    Fetching { done: u64, total: u64 },
+    /// They are here (`paths`, what was copied at the top), for this
+    /// computer's clipboard.
+    Fetched { count: usize, paths: Vec<String> },
 }
 
 /// One step in bringing a shown copy of the screen up to date; the steps

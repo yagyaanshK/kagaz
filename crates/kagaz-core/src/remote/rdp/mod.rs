@@ -16,6 +16,7 @@ pub use drives::{
 };
 pub(crate) mod play;
 mod sound;
+mod theirs;
 
 use super::keys;
 use super::reach;
@@ -594,6 +595,21 @@ struct Running {
     /// and whether it is.
     show_sent: bool,
     sent_shown: bool,
+    /// The other way: the computer's clipboard has files of its own copy
+    /// (their list can be had in this format), and whether they were
+    /// fetched here already.
+    their_files: Option<ClipboardFormatId>,
+    their_taken: bool,
+    /// The viewer asked for them (true: whatever their size); their list
+    /// was asked for of the computer.
+    want_theirs: Option<bool>,
+    listing: Option<bool>,
+    /// The files coming here.
+    fetch: Option<theirs::Fetch>,
+    /// The number of the next piece asked for.
+    stream: u32,
+    /// When the viewer was last told how the fetch is getting on.
+    fetch_told: Option<Instant>,
     /// The person has turned the computer's sound off here for now.
     quiet: Arc<AtomicBool>,
     /// Keys that are down, to let go when the session closes.
@@ -1082,6 +1098,53 @@ impl Running {
                     self.kept.remove(&number);
                     continue;
                 }
+                clip::Asked::TheirFiles(format) => {
+                    self.their_files = Some(format);
+                    self.their_taken = false;
+                    continue;
+                }
+                clip::Asked::FileList(files, data_id) => {
+                    // Only as asked: else a list the channel had anyway.
+                    let Some(big) = self.listing.take() else { continue };
+                    // What was offered from here, said back: not fetched.
+                    if let Here::Files(offer) = &self.here {
+                        if offer.names() == theirs::top_names(&files) {
+                            self.their_taken = true;
+                            continue;
+                        }
+                    }
+                    let bytes = theirs::bytes(&files);
+                    if bytes > theirs::MOST_UNASKED && !big {
+                        self.screen.post(Event::Sending(Sending::TheirsBig { count: theirs::top_names(&files).len(), bytes }));
+                        continue;
+                    }
+                    match theirs::Fetch::new(files, data_id) {
+                        Ok(fetch) => {
+                            self.screen.post(Event::Sending(Sending::Fetching { done: 0, total: fetch.total }));
+                            self.fetch_told = Some(Instant::now());
+                            self.fetch = Some(fetch);
+                        }
+                        Err(e) => self.screen.post(Event::Sending(Sending::Failed { why: format!("the files could not be fetched here ({e})") })),
+                    }
+                    continue;
+                }
+                clip::Asked::Piece(stream, data) => {
+                    let Some(fetch) = self.fetch.as_mut() else { continue };
+                    match fetch.took(stream, data) {
+                        theirs::Took::More => {
+                            if self.fetch_told.is_none_or(|at| at.elapsed() > Duration::from_millis(250)) {
+                                self.fetch_told = Some(Instant::now());
+                                self.screen.post(Event::Sending(Sending::Fetching { done: fetch.done, total: fetch.total }));
+                            }
+                        }
+                        theirs::Took::Failed(why) => {
+                            let _ = std::fs::remove_dir_all(&fetch.dir);
+                            self.fetch = None;
+                            self.screen.post(Event::Sending(Sending::Failed { why }));
+                        }
+                    }
+                    continue;
+                }
                 clip::Asked::Listed(ok) => {
                     self.step(if ok { "the computer took the list of files" } else { "the computer refused the list of files" });
                     continue;
@@ -1115,6 +1178,52 @@ impl Running {
             let frame = self.stage.process_svc_processor_messages(messages).map_err(|e| carried(&e))?;
             self.write(&frame)?;
         }
+    }
+
+    /// The other way: the computer's copied files asked for (their list,
+    /// when the viewer wants them), then each piece in turn; and when all
+    /// of it is here, the viewer told, for this computer's clipboard.
+    fn tend_theirs(&mut self) -> Result<(), String> {
+        if self.want_theirs.is_none() && self.fetch.is_none() {
+            return Ok(());
+        }
+        let carried = |e: &dyn std::fmt::Display| format!("the clipboard could not be carried ({e})");
+        let Some(channel) = self.stage.get_svc_processor_mut::<CliprdrClient>() else {
+            self.want_theirs = None;
+            return Ok(());
+        };
+        let mut messages = None;
+        if let Some(big) = self.want_theirs.take() {
+            if let (None, None, Some(format)) = (&self.fetch, self.listing, self.their_files) {
+                if !self.their_taken || big {
+                    self.listing = Some(big);
+                    messages = Some(channel.initiate_paste(format).map_err(|e| carried(&e))?);
+                }
+            }
+        } else if let Some(fetch) = self.fetch.as_mut() {
+            self.stream = self.stream.wrapping_add(1);
+            match fetch.next(self.stream) {
+                Ok(Some(request)) => messages = Some(channel.request_file_contents(request).map_err(|e| carried(&e))?),
+                Ok(None) if fetch.finished() => {
+                    let paths = fetch.top.iter().map(|p| p.to_string_lossy().to_string()).collect::<Vec<_>>();
+                    self.screen.post(Event::Sending(Sending::Fetching { done: fetch.total, total: fetch.total }));
+                    self.screen.post(Event::Sending(Sending::Fetched { count: paths.len(), paths }));
+                    self.fetch = None;
+                    self.their_taken = true;
+                }
+                Ok(None) => {}
+                Err(e) => {
+                    let _ = std::fs::remove_dir_all(&fetch.dir);
+                    self.fetch = None;
+                    self.screen.post(Event::Sending(Sending::Failed { why: format!("a file could not be written here ({e})") }));
+                }
+            }
+        }
+        if let Some(messages) = messages {
+            let frame = self.stage.process_svc_processor_messages(messages).map_err(|e| carried(&e))?;
+            self.write(&frame)?;
+        }
+        Ok(())
     }
 
     /// A step of the clipboard's for the files on offer, once each.
@@ -1337,6 +1446,7 @@ impl Running {
             Input::ClipboardPicture { png, text } => self.copied_picture(png, text),
             Input::Files(paths) => self.offer(paths),
             Input::ShowSent => self.show_sent = true,
+            Input::TheirFiles { big } => self.want_theirs = Some(*big),
             // The computer suits its picture to the link by itself.
             Input::Picture(_) => {}
             // The window showed a picture: held acknowledgements may go
@@ -1491,6 +1601,17 @@ fn run(mut s: Running, rx: mpsc::Receiver<Input>, mut waiter: waker::Waiter) -> 
             if let Err(why) = s.tend_drives() {
                 return why;
             }
+        }
+        // A piece of a fetch that came meanwhile is written and the next
+        // asked for now, not after the wait below (a second, when quiet):
+        // one piece is on its way at a time.
+        if s.fetch.is_some() {
+            if let Err(why) = s.clipboard() {
+                return why;
+            }
+        }
+        if let Err(why) = s.tend_theirs() {
+            return why;
         }
         if quiet {
             // Not past the time held acknowledgements are due.
@@ -1762,6 +1883,13 @@ pub fn open(
         steps: std::collections::HashSet::new(),
         show_sent: false,
         sent_shown: false,
+        their_files: None,
+        their_taken: false,
+        want_theirs: None,
+        listing: None,
+        fetch: None,
+        stream: 0,
+        fetch_told: None,
         quiet,
         held: HashMap::new(),
         outbox,

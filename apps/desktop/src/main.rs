@@ -2116,6 +2116,7 @@ pub fn run() {
             remote_view::remote_drag_end,
             remote_view::remote_helper_running,
             remote_view::remote_helper_start,
+            remote_view::remote_fetch_their_files,
             remote_view::remote_close_window,
             remote_windows::remote_windows,
             remote_windows::remote_window_open,
