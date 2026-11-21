@@ -7,8 +7,8 @@
 //! a knock on a few TCP ports of every address (an answer or a refusal both
 //! mean something is there, and the knock fills the neighbour table), mDNS
 //! (every service type announced), SSDP (`ssdp:all`, then each device's
-//! description), NetBIOS names (Windows computers, Samba) and ONVIF's probe
-//! (cameras). The neighbour
+//! description), NetBIOS names (Windows computers, Samba), ONVIF's probe
+//! (cameras) and a ping (phones that refuse every connection answer it). The neighbour
 //! table gives hardware addresses on computers; Android 10 and later hides
 //! it from apps, so there a device is known by its name and address only.
 //! The maker comes from the IEEE's public list of hardware address blocks
@@ -108,18 +108,20 @@ const META: &str = "_services._dns-sd._udp.local.";
 /// that showed itself, this device and the router included, by address.
 pub fn sweep(wait: Duration) -> Vec<Host> {
     let nets = local_networks();
-    let (knocked, mdns, ssdp, netbios, onvif) = std::thread::scope(|s| {
+    let (knocked, mdns, ssdp, netbios, onvif, pinged) = std::thread::scope(|s| {
         let knock = s.spawn(|| knock_all(&nets, Duration::from_millis(450)));
         let mdns = s.spawn(|| mdns_all(wait));
         let ssdp = s.spawn(|| ssdp_all(wait.min(Duration::from_millis(2500))));
         let netbios = s.spawn(|| netbios_all(&nets, wait.min(Duration::from_millis(1500))));
         let onvif = s.spawn(|| crate::cameras::local::probe(wait.min(Duration::from_secs(2))).unwrap_or_default());
+        let pinged = s.spawn(|| ping_all(&nets, wait.min(Duration::from_millis(2000))));
         (
             knock.join().unwrap_or_default(),
             mdns.join().unwrap_or_default(),
             ssdp.join().unwrap_or_default(),
             netbios.join().unwrap_or_default(),
             onvif.join().unwrap_or_default(),
+            pinged.join().unwrap_or_default(),
         )
     });
     let table = crate::cameras::local::neighbours();
@@ -165,6 +167,10 @@ pub fn sweep(wait: Duration) -> Vec<Host> {
             }
             h.services.push("netbios".into());
         }
+    }
+    // Whatever answered a ping: phones that refuse every connection do.
+    for ip in pinged {
+        let _ = on(&mut hosts, &nets, ip);
     }
     // Cameras that answered ONVIF's probe, with their model.
     for cam in onvif {
@@ -751,6 +757,68 @@ fn parse_description(xml: &str) -> Described {
     d
 }
 
+// ---------- ping ----------
+
+/// Ping every address once (ICMP echo) and return the ones that answered.
+/// An unprivileged ping socket: Android lets every app have one, as macOS
+/// does; on a Linux computer that does not allow it (ping_group_range),
+/// nothing, and the knock and the neighbour table do the work.
+#[cfg(any(target_os = "linux", target_os = "android", target_os = "macos", target_os = "ios"))]
+fn ping_all(nets: &[(Ipv4Addr, u8)], wait: Duration) -> Vec<Ipv4Addr> {
+    use socket2::{Domain, Protocol, Socket, Type};
+    let mut out = Vec::new();
+    let Ok(sock) = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::ICMPV4)) else {
+        return out;
+    };
+    let _ = sock.set_read_timeout(Some(Duration::from_millis(150)));
+    let echo = echo_request(0x4b47, 1);
+    for (ip, prefix) in nets {
+        for host in hosts(*ip, *prefix) {
+            let _ = sock.send_to(&echo, &SocketAddr::new(IpAddr::V4(host), 0).into());
+        }
+    }
+    let start = Instant::now();
+    let mut buf = [std::mem::MaybeUninit::<u8>::uninit(); 512];
+    while start.elapsed() < wait {
+        let Ok((n, from)) = sock.recv_from(&mut buf) else { continue };
+        // An echo reply (type 0); macOS hands the IP header too.
+        let bytes: Vec<u8> = buf[..n].iter().map(|b| unsafe { b.assume_init() }).collect();
+        let icmp = if bytes.first().map(|b| b >> 4) == Some(4) { &bytes[((bytes[0] & 0x0f) as usize * 4).min(n)..] } else { &bytes[..] };
+        if icmp.first() != Some(&0) {
+            continue;
+        }
+        if let Some(addr) = from.as_socket_ipv4() {
+            if !out.contains(addr.ip()) {
+                out.push(*addr.ip());
+            }
+        }
+    }
+    out
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "android", target_os = "macos", target_os = "ios")))]
+fn ping_all(_nets: &[(Ipv4Addr, u8)], _wait: Duration) -> Vec<Ipv4Addr> {
+    Vec::new()
+}
+
+/// An ICMP echo request with its checksum.
+fn echo_request(id: u16, seq: u16) -> Vec<u8> {
+    let mut p = vec![8, 0, 0, 0];
+    p.extend_from_slice(&id.to_be_bytes());
+    p.extend_from_slice(&seq.to_be_bytes());
+    p.extend_from_slice(b"kagaz");
+    let mut sum: u32 = 0;
+    for pair in p.chunks(2) {
+        sum += u32::from(pair[0]) << 8 | u32::from(*pair.get(1).unwrap_or(&0));
+    }
+    while sum > 0xffff {
+        sum = (sum & 0xffff) + (sum >> 16);
+    }
+    let c = !(sum as u16);
+    p[2..4].copy_from_slice(&c.to_be_bytes());
+    p
+}
+
 // ---------- NetBIOS ----------
 
 /// Ask every address its NetBIOS name (a Windows computer or Samba answers
@@ -993,6 +1061,20 @@ mod tests {
         entry("WORKGROUP", 0, 0x80);
         entry("STUDY-PC", 0, 0x04);
         assert_eq!(netbios_name(&r).as_deref(), Some("STUDY-PC"));
+    }
+
+    #[test]
+    fn echo_request_checksum_sums_to_ffff() {
+        let p = echo_request(0x1234, 7);
+        let mut sum: u32 = 0;
+        for pair in p.chunks(2) {
+            sum += u32::from(pair[0]) << 8 | u32::from(*pair.get(1).unwrap_or(&0));
+        }
+        while sum > 0xffff {
+            sum = (sum & 0xffff) + (sum >> 16);
+        }
+        assert_eq!(sum, 0xffff);
+        assert_eq!(p[0], 8);
     }
 
     #[test]
