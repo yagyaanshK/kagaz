@@ -96,6 +96,15 @@ const KagazNearby = (() => {
 
   // ---------- looking ----------
 
+  // Computers in the person's Tailscale network that are on now, and the
+  // one of them with this name (a computer found here and there too).
+  let tsPeers = [];
+  function peerNamed(name) {
+    const n = (name || "").toLowerCase();
+    return n ? tsPeers.find((p) => p.name.toLowerCase() === n) || null : null;
+  }
+  const BOTH = "on this network and Tailscale";
+
   // Each tool's own search, all at once: what it found and has not added.
   async function lookForUsable() {
     const out = [];
@@ -113,6 +122,7 @@ const KagazNearby = (() => {
     ]);
 
     known = new Map();
+    tsPeers = ((remote && remote.peers) || []).filter((p) => p.online && /^(windows|linux|macos)$/i.test(p.os));
     const knownAs = (addr, words) => { if (addr && !known.has(addr)) known.set(addr, words); };
 
     // Printers and scanners, as their page lists them.
@@ -189,11 +199,18 @@ const KagazNearby = (() => {
     // Computers and phones that show their screen (Remote Desktop, VNC).
     if (remote) {
       for (const n of remote.network || []) {
+        const peer = peerNamed(n.name);
         out.push({
           key: "remote:" + n.address, kind: "remote", icon: n.way && n.way.speaks === "vnc" ? "mobile" : "computer", ip: n.address,
           name: n.name || `A ${n.words} device`,
-          sub: [n.words, n.address].filter(Boolean).join(" · "),
+          sub: [n.words, peer ? BOTH : "", n.address].filter(Boolean).join(" · "),
+          // Found both ways: its sheet asks which way to connect.
           add: async () => {
+            if (peer) {
+              const h = hosts.find((x) => x.ip === n.address) || { ip: n.address, kind: "computer", services: [], open: [] };
+              openHost({ ...h, name: h.name || n.name, kind: "computer", open: [...new Set([...(h.open || []), n.way && n.way.speaks === "vnc" ? 5900 : 3389])] });
+              return null;
+            }
             selectCategory("remote");
             KagazRemote.openAdd(n.address, n.name || "");
             return null;
@@ -232,7 +249,7 @@ const KagazNearby = (() => {
 
     // Cameras added already, by where they play from.
     for (const c of (cams && cams.cameras) || []) knownAs(c.local_address, "Your camera");
-    return { list: out, cams };
+    return { list: out, cams, peers: tsPeers };
   }
 
   // A camera from the sweep that Kagaz's brands cover (Tapo, Xiaomi) and
@@ -274,8 +291,30 @@ const KagazNearby = (() => {
       .map((h) => ({
         key: "computer:" + h.ip, kind: "remote", icon: "computer", ip: h.ip,
         name: hostName(h),
-        sub: ["Computer", "Remote Desktop isn't on there", h.ip].join(" · "),
+        sub: peerNamed(h.name) ? ["Computer", BOTH, h.ip].join(" · ") : ["Computer", "Remote Desktop isn't on there", h.ip].join(" · "),
         add: async () => { openHost(h); return null; },
+      }));
+  }
+
+  // Computers in the person's Tailscale network that are on now and not
+  // added yet, wherever they are: one found on this network too is listed
+  // once, as found here. Phones and tablets there don't share a screen.
+  function tailscaleSuggestions(peers, sweep, list) {
+    const here = new Set([
+      ...sweep.filter((h) => h.name).map((h) => hostName(h).toLowerCase()),
+      ...list.map((u) => (u.name || "").toLowerCase()),
+    ]);
+    return peers
+      .filter((p) => !here.has(p.name.toLowerCase()) && !known.has(p.address))
+      .map((p) => ({
+        key: "tailscale:" + p.address, kind: "remote", icon: "computer", ip: p.address,
+        name: p.name,
+        sub: ["Computer", "on Tailscale, not this network", p.address].join(" · "),
+        add: async () => {
+          selectCategory("remote");
+          KagazRemote.openAdd(p.address, p.name);
+          return null;
+        },
       }));
   }
 
@@ -294,7 +333,12 @@ const KagazNearby = (() => {
       ]);
       hosts = sweep || [];
       btReady = bt;
-      usable = [...found.list, ...cameraSuggestions(hosts, found.cams), ...computerSuggestions(hosts, found.list)];
+      usable = [
+        ...found.list,
+        ...cameraSuggestions(hosts, found.cams),
+        ...computerSuggestions(hosts, found.list),
+        ...tailscaleSuggestions(found.peers, hosts, found.list),
+      ];
       usable.sort((a, b) => a.kind.localeCompare(b.kind) || a.name.localeCompare(b.name));
     } catch (e) {
       trouble = String(e);
@@ -402,15 +446,27 @@ const KagazNearby = (() => {
     const k = known.get(h.ip) || "";
     const page = Object.entries(PAGE_OF).find(([w]) => k.startsWith(w));
     if (page) out.push({ icon: "forward", name: `Open in ${PAGE_NAME[page[1]]}`, what: k, go: () => selectCategory(page[1]) });
-    const remote = (speaks, words) => ({ icon: "computer", name: `Connect with ${words}`, what: "See and use its screen here", go: () => { selectCategory("remote"); KagazRemote.openAdd(h.ip, h.name || ""); } });
+    // Found here and in Tailscale too: one way each, this network's first
+    // (the quicker at home), and the person picks.
+    const peer = h.kind === "computer" ? peerNamed(h.name) : null;
+    const remote = (speaks, words) => {
+      const add = (address) => () => { selectCategory("remote"); KagazRemote.openAdd(address, h.name || ""); };
+      const anyway = /anyway$/.test(words);
+      const way = words.replace(/ anyway$/, "");
+      if (!peer) return [{ icon: "computer", name: `Connect with ${words}`, what: "See and use its screen here", go: add(h.ip) }];
+      return [
+        { icon: "computer", name: `Connect on this network${anyway ? " anyway" : ""}`, what: `${way} · ${h.ip} · the quickest at home`, go: add(h.ip) },
+        { icon: "globe", name: `Connect over Tailscale${anyway ? " anyway" : ""}`, what: `${way} · ${peer.address} · works away from home too`, go: add(peer.address) },
+      ];
+    };
     if (!page) {
-      if (open.has(3389)) out.push(remote("rdp", "Remote Desktop"));
-      if (open.has(5900)) out.push(remote("vnc", "VNC"));
+      if (open.has(3389)) out.push(...remote("rdp", "Remote Desktop"));
+      if (open.has(5900)) out.push(...remote("vnc", "VNC"));
       switch (h.kind) {
         case "computer":
           if (!open.has(3389) && !open.has(5900)) {
-            out.push({ icon: "info", name: "Remote Desktop isn't on there", what: "On Windows Pro: Settings › System › Remote Desktop, then turn it on. On a Mac: Screen Sharing in System Settings › General › Sharing.", info: true });
-            out.push(remote("rdp", "Remote Desktop anyway"));
+            out.push({ icon: "info", name: "Remote Desktop isn't on there", what: "On Windows Pro or Ubuntu: Settings › System › Remote Desktop, then turn it on. On a Mac: Screen Sharing in System Settings › General › Sharing.", info: true });
+            out.push(...remote("rdp", "Remote Desktop anyway"));
           }
           break;
         case "printer":

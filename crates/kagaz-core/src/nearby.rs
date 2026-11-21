@@ -109,12 +109,12 @@ const META: &str = "_services._dns-sd._udp.local.";
 pub fn sweep(wait: Duration) -> Vec<Host> {
     let nets = local_networks();
     let (knocked, mdns, ssdp, netbios, onvif, pinged) = std::thread::scope(|s| {
-        let knock = s.spawn(|| knock_all(&nets, Duration::from_millis(450)));
+        let knock = s.spawn(|| knock_all(&nets, Duration::from_millis(1500)));
         let mdns = s.spawn(|| mdns_all(wait));
         let ssdp = s.spawn(|| ssdp_all(wait.min(Duration::from_millis(2500))));
         let netbios = s.spawn(|| netbios_all(&nets, wait.min(Duration::from_millis(1500))));
         let onvif = s.spawn(|| crate::cameras::local::probe(wait.min(Duration::from_secs(2))).unwrap_or_default());
-        let pinged = s.spawn(|| ping_all(&nets, wait.min(Duration::from_millis(2000))));
+        let pinged = s.spawn(|| ping_all(&nets, wait.min(Duration::from_millis(3000))));
         (
             knock.join().unwrap_or_default(),
             mdns.join().unwrap_or_default(),
@@ -189,6 +189,25 @@ pub fn sweep(wait: Duration) -> Vec<Host> {
     for (ip, mac) in &table {
         if let Some(h) = on(&mut hosts, &nets, *ip) {
             h.mac = Some(colons(mac));
+        }
+    }
+    // Names given when asked by address: a Linux computer (Avahi), a Mac or
+    // an iPhone, which announce no service by default, still answer this.
+    // Android answers only "Android".
+    // Asked once the rest is in, of what answered without a name only: a
+    // question for every address at once is mostly lost (the Wi-Fi holds
+    // the group's packets for sleeping devices and drops a long queue).
+    let unnamed: Vec<Ipv4Addr> = hosts.values().filter(|h| h.name.is_none() && !mine.contains(&h.ip)).map(|h| h.ip).collect();
+    for (ip, name) in mdns_names(&nets, &unnamed, Duration::from_millis(800)) {
+        if let Some(h) = on(&mut hosts, &nets, ip) {
+            if name.eq_ignore_ascii_case("android") {
+                h.services.push("android".into());
+            } else {
+                if h.name.is_none() {
+                    h.name = Some(name);
+                }
+                h.services.push("mdns-host".into());
+            }
         }
     }
     for ip in mine.iter().copied() {
@@ -276,6 +295,9 @@ pub fn guess(h: &Host) -> &'static str {
     if any(&["macbook", "imac", "mac mini", "macmini", "macpro", "laptop", "desktop", "-pc", "thinkpad"]) {
         return "computer";
     }
+    if any(&["esp32", "esp8266", "esp-", "shelly", "tasmota", "tuya", "sonoff", "wled"]) {
+        return "smart-home";
+    }
     if any(&["camera", "cam", "ipc", "nvr", "dvr"]) || h.open.contains(&554) {
         return "camera";
     }
@@ -294,7 +316,7 @@ pub fn guess(h: &Host) -> &'static str {
     if has("hap") || has("matter") || has("matterc") || has("miio") || has("esphomelib") || has("hue") || matches!(maker, "Espressif" | "Tuya" | "MXCHIP" | "iComm" | "Beken" | "Bouffalo Lab" | "WinnerMicro" | "Gaoshengda") {
         return "smart-home";
     }
-    if h.open.contains(&62078) || has("apple-mobdev2") {
+    if h.open.contains(&62078) || has("apple-mobdev2") || has("android") {
         return "phone";
     }
     if has("netbios") || has("smb") || has("ssh") || has("sftp-ssh") || has("rfb") || has("workstation") || has("companion-link") || has("nvstream") {
@@ -302,6 +324,12 @@ pub fn guess(h: &Host) -> &'static str {
     }
     if has("airplay") {
         return "tv";
+    }
+    // Named itself when asked by address and nothing else: phones (iPhones
+    // keep 62078 open, Android says "Android") and gadgets are out above,
+    // which leaves Linux computers and Macs.
+    if has("mdns-host") {
+        return "computer";
     }
     // A made-up hardware address, nothing announced: almost always a phone
     // or a laptop that keeps to itself.
@@ -458,7 +486,12 @@ fn knock(targets: Vec<(Ipv4Addr, u16)>, timeout: Duration) -> Vec<(Ipv4Addr, Opt
     use socket2::{Domain, Socket, Type};
     use std::os::fd::AsRawFd;
     let mut found = Vec::new();
-    for batch in targets.chunks(256) {
+    // All at once where the open-file limit allows (a phone's app has
+    // 32768; a terminal often 1024): batches each wait the whole timeout.
+    let mut limit = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
+    let soft = if unsafe { libc::getrlimit(libc::RLIMIT_NOFILE, &mut limit) } == 0 { limit.rlim_cur as usize } else { 1024 };
+    let size = soft.saturating_sub(256).clamp(128, 2048);
+    for batch in targets.chunks(size) {
         let mut open: Vec<(Socket, Ipv4Addr, u16)> = Vec::new();
         for &(host, port) in batch {
             let Ok(sock) = Socket::new(Domain::IPV4, Type::STREAM, None) else { continue };
@@ -597,7 +630,7 @@ fn mdns_all(wait: Duration) -> HashMap<Ipv4Addr, Announced> {
                             // printer queue or a web page's title).
                             if let Some(f) = txt("fn") {
                                 a.name = Some(f);
-                            } else if a.name.is_none() && !matches!(service.as_str(), "http" | "ipp" | "printer" | "uscan" | "miio" | "hap" | "matter" | "matterc") {
+                            } else if a.name.is_none() && !matches!(service.as_str(), "http" | "ipp" | "printer" | "uscan" | "miio" | "hap" | "matter" | "matterc" | "adb" | "adb-tls-connect" | "adb-tls-pairing") {
                                 if let Some(i) = &instance {
                                     // RAOP names are "<mac>@<name>".
                                     a.name = Some(i.split_once('@').map(|(_, n)| n.to_string()).unwrap_or_else(|| i.clone()));
@@ -634,6 +667,114 @@ fn short_type(ty: &str) -> String {
         .next()
         .unwrap_or(ty)
         .to_string()
+}
+
+/// Ask these addresses their names over mDNS (a reverse lookup,
+/// "<d>.<c>.<b>.<a>.in-addr.arpa", sent to the mDNS group from an ordinary
+/// port so the answers come straight back here). Names only, ".local" off.
+fn mdns_names(nets: &[(Ipv4Addr, u8)], ips: &[Ipv4Addr], wait: Duration) -> HashMap<Ipv4Addr, String> {
+    use socket2::{Domain, Protocol, Socket, Type};
+    let mut out = HashMap::new();
+    let Ok(sock) = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP)) else {
+        return out;
+    };
+    if sock.bind(&SocketAddr::from(([0, 0, 0, 0], 0)).into()).is_err() {
+        return out;
+    }
+    let sock: UdpSocket = sock.into();
+    let _ = sock.set_read_timeout(Some(Duration::from_millis(150)));
+    if ips.is_empty() {
+        return out;
+    }
+    let group = SocketAddr::from(([224, 0, 0, 251], 5353));
+    for (me, prefix) in nets {
+        let _ = socket2::SockRef::from(&sock).set_multicast_if_v4(me);
+        for (i, ip) in ips.iter().filter(|ip| same_net(**ip, *me, *prefix)).enumerate() {
+            let _ = sock.send_to(&reverse_query(i as u16, *ip), group);
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+    let start = Instant::now();
+    let mut buf = [0u8; 1500];
+    while start.elapsed() < wait {
+        let Ok((n, _)) = sock.recv_from(&mut buf) else { continue };
+        if let Some((ip, name)) = reverse_answer(&buf[..n]) {
+            out.insert(ip, name);
+            if out.len() == ips.len() {
+                break;
+            }
+        }
+    }
+    out
+}
+
+fn reverse_query(id: u16, ip: Ipv4Addr) -> Vec<u8> {
+    let mut q = Vec::with_capacity(48);
+    q.extend_from_slice(&id.to_be_bytes());
+    q.extend_from_slice(&[0, 0, 0, 1, 0, 0, 0, 0, 0, 0]);
+    let o = ip.octets();
+    for label in [o[3].to_string(), o[2].to_string(), o[1].to_string(), o[0].to_string(), "in-addr".into(), "arpa".into()] {
+        q.push(label.len() as u8);
+        q.extend_from_slice(label.as_bytes());
+    }
+    q.push(0);
+    q.extend_from_slice(&[0, 12, 0, 1]);
+    q
+}
+
+/// A DNS name at `at`, following compression; and where the name ends.
+fn dns_name(msg: &[u8], mut at: usize) -> Option<(String, usize)> {
+    let mut labels: Vec<String> = Vec::new();
+    let mut end = None;
+    for _ in 0..64 {
+        let len = *msg.get(at)? as usize;
+        if len == 0 {
+            return Some((labels.join("."), end.unwrap_or(at + 1)));
+        }
+        if len & 0xc0 == 0xc0 {
+            let to = ((len & 0x3f) << 8) | *msg.get(at + 1)? as usize;
+            end.get_or_insert(at + 2);
+            at = to;
+            continue;
+        }
+        labels.push(String::from_utf8_lossy(msg.get(at + 1..at + 1 + len)?).into_owned());
+        at += 1 + len;
+    }
+    None
+}
+
+/// The address asked about and the name in the first PTR answer.
+fn reverse_answer(msg: &[u8]) -> Option<(Ipv4Addr, String)> {
+    let count = |at: usize| u16::from_be_bytes([msg[at], msg[at + 1]]) as usize;
+    if msg.len() < 12 || msg[2] & 0x80 == 0 {
+        return None;
+    }
+    let (questions, answers) = (count(4), count(6));
+    let mut at = 12;
+    for _ in 0..questions {
+        at = dns_name(msg, at)?.1 + 4;
+    }
+    for _ in 0..answers {
+        let (owner, end) = dns_name(msg, at)?;
+        let head = msg.get(end..end + 10)?;
+        let (kind, len) = (u16::from_be_bytes([head[0], head[1]]), u16::from_be_bytes([head[8], head[9]]) as usize);
+        let data = end + 10;
+        if kind == 12 {
+            let parts: Vec<&str> = owner.strip_suffix(".in-addr.arpa")?.split('.').collect();
+            if parts.len() == 4 {
+                let o: Vec<u8> = parts.iter().rev().filter_map(|p| p.parse().ok()).collect();
+                if o.len() == 4 {
+                    let name = dns_name(msg, data)?.0;
+                    let name = name.strip_suffix(".local").unwrap_or(&name).to_string();
+                    if !name.is_empty() {
+                        return Some((Ipv4Addr::new(o[0], o[1], o[2], o[3]), name));
+                    }
+                }
+            }
+        }
+        at = data + len;
+    }
+    None
 }
 
 // ---------- SSDP ----------
@@ -770,16 +911,26 @@ fn ping_all(nets: &[(Ipv4Addr, u8)], wait: Duration) -> Vec<Ipv4Addr> {
     let Ok(sock) = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::ICMPV4)) else {
         return out;
     };
-    let _ = sock.set_read_timeout(Some(Duration::from_millis(150)));
-    let echo = echo_request(0x4b47, 1);
-    for (ip, prefix) in nets {
-        for host in hosts(*ip, *prefix) {
-            let _ = sock.send_to(&echo, &SocketAddr::new(IpAddr::V4(host), 0).into());
-        }
-    }
+    let _ = sock.set_read_timeout(Some(Duration::from_millis(100)));
+    let all: Vec<Ipv4Addr> = nets.iter().flat_map(|(ip, prefix)| hosts(*ip, *prefix)).collect();
+    // Three rounds over the wait, each to what has not answered yet: on a
+    // phone's Wi-Fi beside the other searches, much of one burst is lost
+    // (the lookups of the hardware addresses, mostly).
+    let rounds = 3u32;
+    let mut sent = 0u32;
     let start = Instant::now();
     let mut buf = [std::mem::MaybeUninit::<u8>::uninit(); 512];
     while start.elapsed() < wait {
+        if sent < rounds && start.elapsed() >= wait * sent / (rounds + 1) {
+            sent += 1;
+            let echo = echo_request(0x4b47, sent as u16);
+            for (i, host) in all.iter().filter(|h| !out.contains(*h)).enumerate() {
+                let _ = sock.send_to(&echo, &SocketAddr::new(IpAddr::V4(*host), 0).into());
+                if i % 32 == 31 {
+                    std::thread::sleep(Duration::from_millis(2));
+                }
+            }
+        }
         let Ok((n, from)) = sock.recv_from(&mut buf) else { continue };
         // An echo reply (type 0); macOS hands the IP header too.
         let bytes: Vec<u8> = buf[..n].iter().map(|b| unsafe { b.assume_init() }).collect();
@@ -1061,6 +1212,30 @@ mod tests {
         entry("WORKGROUP", 0, 0x80);
         entry("STUDY-PC", 0, 0x04);
         assert_eq!(netbios_name(&r).as_deref(), Some("STUDY-PC"));
+    }
+
+    #[test]
+    fn a_name_asked_for_by_address() {
+        let ip = Ipv4Addr::new(192, 0, 2, 15);
+        let q = reverse_query(7, ip);
+        assert_eq!(dns_name(&q, 12).map(|(n, _)| n).as_deref(), Some("15.2.0.192.in-addr.arpa"));
+        // The answer as Avahi sends it: the question echoed, then a PTR
+        // whose owner points back at the question's name.
+        let mut r = q.clone();
+        r[2] = 0x84;
+        r[7] = 1;
+        r.extend_from_slice(&[0xc0, 12, 0, 12, 0, 1, 0, 0, 0, 10]);
+        let target = b"\x09study-box\x05local\x00";
+        r.extend_from_slice(&(target.len() as u16).to_be_bytes());
+        r.extend_from_slice(target);
+        assert_eq!(reverse_answer(&r), Some((ip, "study-box".to_string())));
+        // A question with no answer, and a query (not an answer), say nothing.
+        assert_eq!(reverse_answer(&q), None);
+        let named = |n: &str, s: &str| Host { name: Some(n.into()), services: vec![s.into()], ..Default::default() };
+        assert_eq!(guess(&named("study-box", "mdns-host")), "computer");
+        assert_eq!(guess(&named("LGwebOSTV-1", "mdns-host")), "tv");
+        assert_eq!(guess(&named("shelly1-ab12", "mdns-host")), "smart-home");
+        assert_eq!(guess(&Host { services: vec!["android".into()], ..Default::default() }), "phone");
     }
 
     #[test]
