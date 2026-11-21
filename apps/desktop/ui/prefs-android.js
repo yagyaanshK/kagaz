@@ -206,8 +206,15 @@
       const l = document.querySelector(`label[for="${CSS.escape(sel.id)}"]`);
       if (l) return l.textContent.trim();
     }
+    // The label's own words: not the list, its field (which shows the
+    // choice: "It speaksFind out for me" was the dialog's title) or a hint.
     const l = sel.closest("label");
-    if (l) return l.textContent.replace(sel.textContent, "").trim();
+    if (l) {
+      const own = l.cloneNode(true);
+      for (const x of own.querySelectorAll("select, button, small, .muted, input")) x.remove();
+      const words = own.textContent.replace(/\s+/g, " ").trim();
+      if (words) return words;
+    }
     return sel.title || "Choose";
   }
   const fields = new Set();

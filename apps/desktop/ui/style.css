@@ -1263,7 +1263,8 @@ html[data-viewer] #bar { background: var(--accent); color: var(--accent-text); }
 html[data-viewer] #bar .bar-btn, [data-viewer] #bar .bar-back { color: inherit; background: none; box-shadow: none; -webkit-backdrop-filter: none; backdrop-filter: none; }
 html[data-viewer] #bar .bar-btn:hover:not([disabled]), [data-viewer] #bar .bar-back:hover, [data-viewer] #bar .bar-btn[aria-expanded="true"] { background: rgba(0, 0, 0, 0.16); color: inherit; }
 html[data-viewer] #bar .bar-btn:focus-visible, [data-viewer] #bar .bar-back:focus-visible { outline: 2px solid currentColor; outline-offset: -2px; }
-html[data-viewer] #bar .rc-chip { color: inherit; border-color: currentColor; border-color: color-mix(in srgb, currentColor 45%, transparent); }
+html[data-viewer] #bar .rc-chip { color: inherit; border-color: currentColor; }
+@supports (color: color-mix(in srgb, red 50%, blue)) { html[data-viewer] #bar .rc-chip { border-color: color-mix(in srgb, currentColor 45%, transparent); } }
 html[data-viewer] #bar .rc-chip.open svg { color: inherit; }
 .rc-viewer { flex: 1 1 auto; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .rc-stage { position: relative; flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; background: #16181a; outline: none; }
@@ -1282,7 +1283,8 @@ html[data-viewer] #bar .rc-chip.open svg { color: inherit; }
 [data-layout="bar"] .rc-touchbar { display: flex; justify-content: space-around; flex: none; padding: 6px 4px calc(6px + env(safe-area-inset-bottom)); background: var(--bar-bg, var(--bg)); border-top: 1px solid var(--line); }
 .rc-touchbar button { flex-direction: column; gap: 2px; min-width: 64px; min-height: 48px; border: none; background: none; font-size: 11px; color: var(--text); }
 .rc-touchbar button svg { width: 22px; height: 22px; }
-.rc-banner { display: flex; align-items: flex-start; gap: 10px; flex: none; padding: 10px var(--edge, 16px); background: color-mix(in srgb, var(--warn) 14%, var(--bg)); color: var(--text); border-bottom: 1px solid var(--line); font-size: var(--small, 13px); }
+.rc-banner { display: flex; align-items: flex-start; gap: 10px; flex: none; padding: 10px var(--edge, 16px); background: var(--bg); color: var(--text); border-bottom: 1px solid var(--line); font-size: var(--small, 13px); }
+@supports (color: color-mix(in srgb, red 50%, blue)) { .rc-banner { background: color-mix(in srgb, var(--warn) 14%, var(--bg)); } }
 .rc-banner svg { width: 18px; height: 18px; color: var(--warn); flex: none; margin-top: 1px; }
 .rc-card { position: relative; z-index: 2; width: min(440px, calc(100% - 32px)); max-height: calc(100% - 24px); overflow: auto; padding: 20px; border-radius: var(--r-card, 12px); background: var(--panel); color: var(--text); box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4); }
 .rc-stage > .rc-card:not(.hidden) ~ .rc-pop { display: none; }
@@ -1355,7 +1357,8 @@ body.share-sign-body { background: var(--accent); overflow: hidden; }
 .share-sign button.end { background: #fff; color: #1d1d1d; border-color: #fff; }
 
 /* Control or watch a computer running Kagaz (remote-view.js). */
-.rc-mode { display: inline-flex; border: 1px solid currentColor; border-color: color-mix(in srgb, currentColor 45%, transparent); border-radius: 999px; overflow: hidden; margin: 0 4px; }
+.rc-mode { display: inline-flex; border: 1px solid currentColor; border-radius: 999px; overflow: hidden; margin: 0 4px; }
+@supports (color: color-mix(in srgb, red 50%, blue)) { .rc-mode { border-color: color-mix(in srgb, currentColor 45%, transparent); } }
 .rc-mode button { min-height: 28px; padding: 0 12px; border: none; border-radius: 0; background: transparent; color: inherit; font: inherit; font-size: 13px; }
 .rc-mode button.on { background: rgba(255, 255, 255, 0.22); font-weight: 600; }
 #remote .set-row > label.set-label, #sw-panel .set-row > label.set-label { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; flex: 1 1 auto; min-width: 0; }
