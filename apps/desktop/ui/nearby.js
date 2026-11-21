@@ -594,7 +594,10 @@ const KagazNearby = (() => {
   const openWeb = (url) => invoke("open_web", { url }).catch((e) => snack(String(e)));
 
   async function lookCloser(h, every) {
-    openHost(h, null, every ? "every" : "ask");
+    // Closed while it looks (Back, a tap outside): the answer updates the
+    // list and does not open the sheet again by itself.
+    let shut = false;
+    openHost(h, null, every ? "every" : "ask").then(() => { shut = true; });
     let closer = null;
     try {
       closer = await invoke(every ? "nearby_every_port" : "nearby_look_closer", { host: h });
@@ -605,11 +608,11 @@ const KagazNearby = (() => {
     const i = hosts.findIndex((x) => x.ip === h.ip);
     if (i >= 0) hosts[i] = closer.host;
     render();
-    openHost(closer.host, closer);
+    if (!shut) openHost(closer.host, closer);
   }
 
   function openHost(h, closer, asking) {
-    KagazAsk.ask((dlg, finish) => {
+    return KagazAsk.ask((dlg, finish) => {
       dlg.classList.add("sheet", "tv-sheet", "nearby-sheet");
       dlg.appendChild(el("h3", "ask-title", hostName(h)));
       const facts = [kindWord(h), h.os, h.maker, h.model === "Kagaz" ? "" : h.model, h.ip, !PHONE && h.mac && !h.private_mac ? h.mac : ""].filter((x, i, a) => x && a.indexOf(x) === i);

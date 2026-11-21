@@ -21,9 +21,15 @@ const KagazAsk = (() => {
       build(dlg, finish);
       if (dlg.classList.contains("sheet")) sheetGestures(dlg, finish);
       dlg.addEventListener("close", () => {
-        if (open === dlg) open = null;
+        // A dialog replaced by the next (a sheet showing what it found)
+        // closes after that one opened: its Back level is the new one's
+        // now, so only the one on screen gives it up. Otherwise Back went
+        // past the new sheet and left the app (reported 2026-11-22).
+        if (open === dlg) {
+          open = null;
+          KagazNav.pop("ask");
+        }
         dlg.remove();
-        KagazNav.pop("ask");
         resolve(answer);
       });
       document.body.appendChild(dlg);
