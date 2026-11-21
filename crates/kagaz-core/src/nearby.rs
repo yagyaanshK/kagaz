@@ -14,15 +14,16 @@
 //! The maker comes from the IEEE's public list of hardware address blocks
 //! (`data/oui.tsv.gz`, made by `data/oui.py`).
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::io::Read;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpStream, UdpSocket};
-use std::sync::{mpsc, Arc, Mutex, OnceLock};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket};
+use std::sync::{mpsc, OnceLock};
 use std::time::{Duration, Instant};
 
 /// One address on the network and what it says about itself.
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
 pub struct Host {
     pub ip: Ipv4Addr,
     /// "aa:bb:cc:dd:ee:ff", where the neighbour table gives it.
@@ -189,8 +190,18 @@ pub fn sweep(wait: Duration) -> Vec<Host> {
             h.this_device = true;
         }
     }
-    if let Some(gw) = gateway {
-        if let Some(h) = on(&mut hosts, &nets, gw) {
+    // The router: the default route's gateway; where the system keeps that
+    // from apps (Android), each network's first address when it answered.
+    let routers: Vec<Ipv4Addr> = match gateway {
+        Some(gw) => vec![gw],
+        None => nets
+            .iter()
+            .map(|(ip, prefix)| Ipv4Addr::from((u32::from(*ip) & (u32::MAX << (32 - *prefix as u32))) | 1))
+            .filter(|ip| hosts.contains_key(ip))
+            .collect(),
+    };
+    for gw in routers {
+        if let Some(h) = hosts.get_mut(&gw) {
             h.router = true;
         }
     }
@@ -231,8 +242,24 @@ pub fn guess(h: &Host) -> &'static str {
     if has("ipp") || has("printer") || has("uscan") || has("upnp-printer") {
         return "printer";
     }
-    if has("onvif") {
+    if has("onvif") || h.open.contains(&2020) {
         return "camera";
+    }
+    // What a closer look's ports say (look_closer).
+    if h.open.iter().any(|p| [9100, 631, 515].contains(p)) {
+        return "printer";
+    }
+    if h.open.contains(&1400) {
+        return "speaker";
+    }
+    if h.open.contains(&8009) || h.open.contains(&8008) {
+        return "tv";
+    }
+    if h.open.contains(&6668) {
+        return "smart-home";
+    }
+    if h.open.contains(&3389) || h.open.contains(&5900) {
+        return "computer";
     }
     if any(&["ipad"]) {
         return "tablet";
@@ -285,6 +312,113 @@ pub fn guess(h: &Host) -> &'static str {
     }
 }
 
+// ---------- a closer look at one device ----------
+
+/// The ports a closer look knocks on, each with what it means.
+pub const SERVICES: &[(u16, &str)] = &[
+    (80, "web page"),
+    (443, "web page (https)"),
+    (8080, "web page"),
+    (8443, "web page (https)"),
+    (22, "SSH"),
+    (3389, "Remote Desktop"),
+    (5900, "VNC screen sharing"),
+    (445, "Windows file sharing"),
+    (139, "Windows file sharing"),
+    (548, "Apple file sharing"),
+    (631, "IPP printing"),
+    (9100, "printing"),
+    (515, "LPD printing"),
+    (554, "camera video (RTSP)"),
+    (8554, "camera video (RTSP)"),
+    (2020, "ONVIF camera control"),
+    (8008, "Google Cast"),
+    (8009, "Google Cast"),
+    (7000, "AirPlay"),
+    (1400, "Sonos"),
+    (5060, "SIP calls"),
+    (1883, "MQTT"),
+    (6668, "Tuya smart home"),
+    (55443, "Yeelight"),
+    (5000, "NAS or media server"),
+    (32400, "Plex"),
+    (8123, "Home Assistant"),
+    (53, "DNS"),
+    (21, "FTP"),
+    (23, "Telnet"),
+    (62078, "iPhone or iPad sync"),
+];
+
+/// What a closer look found: every port of [`SERVICES`] that took a
+/// connection, its web page's title and server, and the guess again.
+#[derive(Debug, Clone, Serialize)]
+pub struct Closer {
+    pub host: Host,
+    pub services: Vec<(u16, String)>,
+    pub title: Option<String>,
+    pub server: Option<String>,
+}
+
+/// Ask one device what it is: knock on every port of [`SERVICES`] at once,
+/// read its web page's title and Server line, and guess again with all of
+/// it. Only this device's address, a couple of seconds.
+pub fn look_closer(mut h: Host) -> Closer {
+    let targets: Vec<(Ipv4Addr, u16)> = SERVICES.iter().map(|(p, _)| (h.ip, *p)).collect();
+    let mut open: Vec<u16> = knock(targets, Duration::from_millis(1200)).into_iter().filter_map(|(_, p)| p).collect();
+    open.sort();
+    open.dedup();
+    let mut title = None;
+    let mut server = None;
+    for (port, https) in [(80, false), (8080, false), (443, true), (8443, true)] {
+        if !open.contains(&port) || title.is_some() {
+            continue;
+        }
+        let url = format!("{}://{}:{}/", if https { "https" } else { "http" }, h.ip, port);
+        let agent = ureq::AgentBuilder::new().timeout(Duration::from_millis(1500)).redirects(2).build();
+        let resp = match agent.get(&url).call() {
+            Ok(r) => r,
+            Err(ureq::Error::Status(_, r)) => r,
+            Err(_) => continue,
+        };
+        if server.is_none() {
+            server = resp.header("server").map(str::to_string).filter(|s| !s.is_empty());
+        }
+        let mut body = String::new();
+        let _ = resp.into_reader().take(64 * 1024).read_to_string(&mut body);
+        title = page_title(&body);
+    }
+    for p in &open {
+        if !h.open.contains(p) {
+            h.open.push(*p);
+        }
+    }
+    h.open.sort();
+    if h.model.is_none() {
+        h.model = title.clone();
+    }
+    h.kind = guess(&h).to_string();
+    let services = open
+        .iter()
+        .filter_map(|p| SERVICES.iter().find(|(q, _)| q == p).map(|(q, w)| (*q, w.to_string())))
+        .collect();
+    Closer { host: h, services, title, server }
+}
+
+/// A page's <title>, its entities and spacing tidied.
+fn page_title(html: &str) -> Option<String> {
+    let low = html.to_ascii_lowercase();
+    let start = low.find("<title")?;
+    let open_end = start + low[start..].find('>')? + 1;
+    let end = open_end + low[open_end..].find("</title")?;
+    let t = html[open_end..end]
+        .replace("&amp;", "&")
+        .replace("&nbsp;", " ")
+        .replace("&#39;", "'")
+        .replace("&quot;", "\"");
+    let t = t.split_whitespace().collect::<Vec<_>>().join(" ");
+    (!t.is_empty() && t.len() < 120).then_some(t)
+}
+
 // ---------- the knock ----------
 
 /// Each address of the local networks, knocked on each of [`KNOCK`]: the
@@ -298,9 +432,86 @@ fn knock_all(nets: &[(Ipv4Addr, u8)], timeout: Duration) -> Vec<(Ipv4Addr, Vec<u
             }
         }
     }
+    let mut out: BTreeMap<Ipv4Addr, BTreeSet<u16>> = BTreeMap::new();
+    for (host, port) in knock(targets, timeout) {
+        let ports = out.entry(host).or_default();
+        if let Some(p) = port {
+            ports.insert(p);
+        }
+    }
+    out.into_iter().map(|(ip, p)| (ip, p.into_iter().collect())).collect()
+}
+
+/// Every knock at once from one thread: non-blocking connections, a few
+/// hundred at a time, each batch waited on together (poll). In the phone's
+/// app a hundred threads knocking beside the other searches finished only
+/// part of the network (2026-11-22); this needs none. (host, Some(port))
+/// for a connection taken, (host, None) for one refused.
+#[cfg(unix)]
+fn knock(targets: Vec<(Ipv4Addr, u16)>, timeout: Duration) -> Vec<(Ipv4Addr, Option<u16>)> {
+    use socket2::{Domain, Socket, Type};
+    use std::os::fd::AsRawFd;
+    let mut found = Vec::new();
+    for batch in targets.chunks(256) {
+        let mut open: Vec<(Socket, Ipv4Addr, u16)> = Vec::new();
+        for &(host, port) in batch {
+            let Ok(sock) = Socket::new(Domain::IPV4, Type::STREAM, None) else { continue };
+            if sock.set_nonblocking(true).is_err() {
+                continue;
+            }
+            let addr = SocketAddr::new(IpAddr::V4(host), port);
+            match sock.connect(&addr.into()) {
+                Ok(()) => found.push((host, Some(port))),
+                Err(e) if e.raw_os_error() == Some(libc::EINPROGRESS) || e.kind() == std::io::ErrorKind::WouldBlock => {
+                    open.push((sock, host, port))
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::ConnectionRefused => found.push((host, None)),
+                Err(_) => {}
+            }
+        }
+        let deadline = Instant::now() + timeout;
+        while !open.is_empty() {
+            let left = deadline.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                break;
+            }
+            let mut fds: Vec<libc::pollfd> = open
+                .iter()
+                .map(|(s, _, _)| libc::pollfd { fd: s.as_raw_fd(), events: libc::POLLOUT, revents: 0 })
+                .collect();
+            let n = unsafe { libc::poll(fds.as_mut_ptr(), fds.len() as libc::nfds_t, left.as_millis().max(1) as libc::c_int) };
+            if n <= 0 {
+                if n < 0 && std::io::Error::last_os_error().kind() == std::io::ErrorKind::Interrupted {
+                    continue;
+                }
+                break;
+            }
+            let mut still = Vec::with_capacity(open.len());
+            for ((sock, host, port), fd) in open.into_iter().zip(fds) {
+                if fd.revents == 0 {
+                    still.push((sock, host, port));
+                    continue;
+                }
+                match sock.take_error() {
+                    Ok(None) => found.push((host, Some(port))),
+                    Ok(Some(e)) if e.kind() == std::io::ErrorKind::ConnectionRefused => found.push((host, None)),
+                    _ => {}
+                }
+            }
+            open = still;
+        }
+    }
+    found
+}
+
+/// Elsewhere (Windows), a few dozen threads, one blocking knock each.
+#[cfg(not(unix))]
+fn knock(targets: Vec<(Ipv4Addr, u16)>, timeout: Duration) -> Vec<(Ipv4Addr, Option<u16>)> {
+    use std::net::TcpStream;
+    use std::sync::{Arc, Mutex};
     let targets = Arc::new(Mutex::new(targets));
     let (tx, rx) = mpsc::channel();
-    for _ in 0..128 {
+    for _ in 0..96 {
         let (targets, tx) = (targets.clone(), tx.clone());
         std::thread::spawn(move || loop {
             let next = targets.lock().ok().and_then(|mut t| t.pop());
@@ -318,14 +529,7 @@ fn knock_all(nets: &[(Ipv4Addr, u8)], timeout: Duration) -> Vec<(Ipv4Addr, Vec<u
         });
     }
     drop(tx);
-    let mut out: BTreeMap<Ipv4Addr, BTreeSet<u16>> = BTreeMap::new();
-    for (host, port) in rx {
-        let ports = out.entry(host).or_default();
-        if let Some(p) = port {
-            ports.insert(p);
-        }
-    }
-    out.into_iter().map(|(ip, p)| (ip, p.into_iter().collect())).collect()
+    rx.into_iter().collect()
 }
 
 // ---------- mDNS ----------
@@ -822,5 +1026,11 @@ mod tests {
         assert_eq!(short_type("_googlecast._tcp.local."), "googlecast");
         assert_eq!(percent_decode("%5BLG%5D%20webOS%20TV"), "[LG] webOS TV");
         assert_eq!(percent_decode("100%"), "100%");
+        let rdp = Host { open: vec![3389], ..base.clone() };
+        assert_eq!(guess(&rdp), "computer");
+        let tuya = Host { open: vec![6668], ..base.clone() };
+        assert_eq!(guess(&tuya), "smart-home");
+        assert_eq!(page_title("<html><TITLE>\n Router &amp; Wi-Fi </title>").as_deref(), Some("Router & Wi-Fi"));
+        assert_eq!(page_title("<html>no title"), None);
     }
 }

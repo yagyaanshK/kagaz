@@ -1220,3 +1220,9 @@ button.kz-ic { display: inline-flex; align-items: center; justify-content: cente
 .nearby-ask .tile-sub { -webkit-line-clamp: 3; }
 [data-os="macos"] #main .nearby-card > .section-title { color: var(--text); }
 [data-os="ios"] #main .nearby-card > .section-title { font-size: 20px; }
+/* A device's sheet (nearby.js): the TV sheet's rows; a closer look's line
+   runs along the list's top. */
+.nearby-sheet .tv-ways { position: relative; }
+.nearby-sheet .nearby-progress { top: 0; }
+.nearby-sheet .tv-way-what { white-space: normal; }
+.nearby-host[role="button"] { cursor: default; }

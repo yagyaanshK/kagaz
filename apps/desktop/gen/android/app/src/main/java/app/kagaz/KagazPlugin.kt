@@ -85,6 +85,11 @@ class SaveArgs {
 }
 
 @InvokeArg
+class UrlArgs {
+    lateinit var url: String
+}
+
+@InvokeArg
 class FolderArgs {
     var folder: String? = null
 }
@@ -376,6 +381,18 @@ class KagazPlugin(private val first: Activity) : Plugin(first) {
         ret.put("uri", uri.toString())
         ret.put("label", label)
         invoke.resolve(ret)
+    }
+
+    /** A device's own page, in the phone's browser. */
+    @Command
+    fun openWeb(invoke: Invoke) {
+        val args = invoke.parseArgs(UrlArgs::class.java)
+        try {
+            activity.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(args.url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            invoke.resolve()
+        } catch (e: Exception) {
+            invoke.reject("No browser to open it in")
+        }
     }
 
     /** Let go of a folder chosen before. */

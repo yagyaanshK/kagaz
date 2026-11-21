@@ -447,6 +447,15 @@ struct FolderArgs {
     folder: Option<String>,
 }
 
+/// A web address (a device's own page) in the phone's browser.
+pub fn open_web(app: &AppHandle, url: &str) -> Result<(), String> {
+    #[derive(Serialize)]
+    struct UrlArgs<'a> {
+        url: &'a str,
+    }
+    phone(app)?.run_mobile_plugin::<()>("openWeb", UrlArgs { url }).map_err(|e| e.to_string())
+}
+
 /// Where saved files go (the chosen folder, else Kagaz's in Downloads),
 /// in the Files app.
 pub fn show_downloads(app: &AppHandle) -> Result<(), String> {

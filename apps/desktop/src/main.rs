@@ -75,6 +75,40 @@ async fn nearby_sweep(seconds: f32) -> Result<Vec<kagaz_core::nearby::Host>, Str
     blocking(move || Ok(kagaz_core::nearby::sweep(Duration::from_secs_f32(seconds.clamp(2.0, 10.0))))).await
 }
 
+/// One device from that list asked what it is (Ask it what it is).
+#[tauri::command]
+async fn nearby_look_closer(host: kagaz_core::nearby::Host) -> Result<kagaz_core::nearby::Closer, String> {
+    blocking(move || Ok(kagaz_core::nearby::look_closer(host))).await
+}
+
+/// A device's own web page (its settings), in the system's browser. Only
+/// a plain http(s) address.
+#[tauri::command]
+async fn open_web(app: AppHandle, url: String) -> Result<(), String> {
+    if !(url.starts_with("http://") || url.starts_with("https://")) || url.chars().any(|c| c.is_whitespace() || c == '"') {
+        return Err("not a web address".into());
+    }
+    #[cfg(mobile)]
+    {
+        mobile::open_web(&app, &url)
+    }
+    #[cfg(desktop)]
+    {
+        let _ = app;
+        let mut cmd = if cfg!(target_os = "windows") {
+            std::process::Command::new("explorer")
+        } else if cfg!(target_os = "macos") {
+            std::process::Command::new("open")
+        } else {
+            std::process::Command::new("xdg-open")
+        };
+        cmd.arg(&url)
+            .spawn()
+            .map(|mut child| drop(std::thread::spawn(move || child.wait())))
+            .map_err(|e| e.to_string())
+    }
+}
+
 #[tauri::command]
 async fn explain_device(device: Device) -> Result<Explanation, String> {
     blocking(move || {
@@ -629,6 +663,9 @@ struct CameraView {
 #[derive(Debug, Clone, Serialize)]
 struct CamerasStatus {
     logged_in: bool,
+    /// The brands signed in to ("tapo", "xiaomi"): their cameras are the
+    /// account's, in Kagaz whether or not the video engine runs yet.
+    signed_in: Vec<&'static str>,
     running: bool,
     api_port: u16,
     player_script: String,
@@ -795,12 +832,19 @@ fn xiaomi_cameras() -> Result<Vec<XiaomiCamera>, String> {
 #[tauri::command]
 fn cameras_status(state: tauri::State<CameraState>) -> CamerasStatus {
     use kagaz_core::cameras::tapo::Session;
-    let logged_in = Session::default_path().is_file()
-        || kagaz_core::cameras::xiaomi::Session::default_path().is_file();
+    let signed_in: Vec<&'static str> = [
+        ("tapo", Session::default_path().is_file()),
+        ("xiaomi", kagaz_core::cameras::xiaomi::Session::default_path().is_file()),
+    ]
+    .into_iter()
+    .filter_map(|(b, on)| on.then_some(b))
+    .collect();
+    let logged_in = !signed_in.is_empty();
     let guard = state.engine.lock().unwrap();
     match guard.as_ref() {
         Some(e) => CamerasStatus {
             logged_in,
+            signed_in,
             running: true,
             api_port: e.engine.as_ref().map(|g| g.api_port).unwrap_or(0),
             player_script: e
@@ -813,6 +857,7 @@ fn cameras_status(state: tauri::State<CameraState>) -> CamerasStatus {
         },
         None => CamerasStatus {
             logged_in,
+            signed_in,
             running: false,
             api_port: 0,
             player_script: String::new(),
@@ -1994,6 +2039,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             discover,
             nearby_sweep,
+            nearby_look_closer,
+            open_web,
             explain_device,
             scan_capabilities,
             choose_save_path,

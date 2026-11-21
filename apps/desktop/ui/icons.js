@@ -60,6 +60,7 @@ const KagazIcons = (() => {
     close: '<path d="M6 6l12 12M18 6 6 18"/>',
     check: '<path d="M5 12.5l4.5 4.5L19 7"/>',
     bolt: '<path d="M13 3 5.5 13.5H11L10 21l8.5-11H13z"/>',
+    globe: '<circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.4 2.3 3.6 5.1 3.6 8.5s-1.2 6.2-3.6 8.5c-2.4-2.3-3.6-5.1-3.6-8.5s1.2-6.2 3.6-8.5z"/>',
     info: '<circle cx="12" cy="12" r="8.5"/><path d="M12 11v5.5"/><path d="M12 7.5h.01" class="dot"/>',
     search: '<circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.2 15.2 20 20"/>',
     eye: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/>',

@@ -100,7 +100,7 @@ const KagazNearby = (() => {
   async function lookForUsable() {
     const out = [];
     const ok = (p) => p.catch(() => null);
-    const [printers, tvs, tvSaved, purifiers, fans, remote, door, cams] = await Promise.all([
+    const [printers, tvs, tvSaved, purifiers, fans, remote, door, cams, onetouch] = await Promise.all([
       ok(invoke("discover", { timeout: 3 })),
       ok(invoke("tvs_search")),
       ok(invoke("tvs_saved")),
@@ -109,6 +109,7 @@ const KagazNearby = (() => {
       ok(invoke("remote_nearby")),
       ok(invoke("doorbell_stations").then((s) => invoke("doorbell_discover", { port: s.listen_port }).then((f) => ({ saved: s.stations || [], found: f })))),
       ok(invoke("cameras_status")),
+      ok(invoke("onetouch_peek")),
     ]);
 
     known = new Map();
@@ -207,8 +208,14 @@ const KagazNearby = (() => {
     // Door stations that ring this device directly (Direct IP, SIP).
     if (door) {
       for (const s of door.saved) knownAs(s.address, "Your door station");
+      // Not Kagaz on another device (it answers the same way), and not a
+      // OneTouch station while the OneTouch account is signed in: those are
+      // in Kagaz through the account already.
+      const viaAccount = (f) => onetouch && onetouch.logged_in && /^(OT[-_ ]?IP|OTIPVDP|OneTouch)/i.test(f.agent || "");
       for (const f of door.found || []) {
         if (door.saved.some((s) => s.address === f.address)) continue;
+        if (/^Kagaz\b/i.test(f.agent || "")) { knownAs(f.address, "Runs Kagaz"); continue; }
+        if (viaAccount(f)) { knownAs(f.address, `Your door station (${onetouch.service_name || "OneTouch"})`); continue; }
         out.push({
           key: "door:" + f.address, kind: "doorbell", icon: "doorbell", ip: f.address,
           name: f.agent ? f.agent.split(/[\s/]/)[0] + " door station" : "Door station",
@@ -232,7 +239,8 @@ const KagazNearby = (() => {
   // that is not one of the cameras already signed in.
   function cameraSuggestions(sweep, cams) {
     const out = [];
-    const brands = new Set(((cams && cams.cameras) || []).map((c) => c.brand));
+    // A brand signed in to: its cameras are the account's, already here.
+    const brands = new Set([...((cams && cams.signed_in) || []), ...((cams && cams.cameras) || []).map((c) => c.brand)]);
     for (const h of sweep) {
       if (h.kind !== "camera" || known.has(h.ip)) continue;
       const tapo = h.maker === "TP-Link" || /tapo/i.test(h.name || "");
@@ -256,6 +264,21 @@ const KagazNearby = (() => {
     return out;
   }
 
+  // Computers the sweep saw (by their Windows or network name) that did not
+  // take a Remote Desktop or VNC connection: listed too, saying so, and
+  // their sheet says how to reach them.
+  function computerSuggestions(sweep, list) {
+    const taken = new Set(list.map((u) => u.ip));
+    return sweep
+      .filter((h) => h.kind === "computer" && !h.this_device && !taken.has(h.ip) && !known.has(h.ip))
+      .map((h) => ({
+        key: "computer:" + h.ip, kind: "remote", icon: "computer", ip: h.ip,
+        name: hostName(h),
+        sub: ["Computer", "Remote Desktop isn't on there", h.ip].join(" · "),
+        add: async () => { openHost(h); return null; },
+      }));
+  }
+
   async function search(opts = {}) {
     if (searching) return;
     if (ASKS_FIRST && !read(OK_KEY, false) && !opts.asked) { render(); return; }
@@ -271,7 +294,7 @@ const KagazNearby = (() => {
       ]);
       hosts = sweep || [];
       btReady = bt;
-      usable = [...found.list, ...cameraSuggestions(hosts, found.cams)];
+      usable = [...found.list, ...cameraSuggestions(hosts, found.cams), ...computerSuggestions(hosts, found.list)];
       usable.sort((a, b) => a.kind.localeCompare(b.kind) || a.name.localeCompare(b.name));
     } catch (e) {
       trouble = String(e);
@@ -351,7 +374,139 @@ const KagazNearby = (() => {
     text.append(el("span", "tile-name", hostName(h)), el("span", "tile-sub", hostLine(h)));
     li.append(icon(kindIcon(h)), text);
     if (!PHONE && h.mac && !h.private_mac) li.title = h.mac;
+    if (!h.this_device) {
+      li.tabIndex = 0;
+      li.setAttribute("role", "button");
+      li.setAttribute("aria-haspopup", "dialog");
+      const chev = el("span", "nearby-chev");
+      chev.innerHTML = KagazIcons.svg("forward");
+      li.appendChild(chev);
+      li.addEventListener("click", () => openHost(h));
+      li.addEventListener("keydown", (ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); openHost(h); } });
+    }
     return li;
+  }
+
+  // ---------- one device's sheet: what to do with it ----------
+
+  const PAGE_OF = { "Your printer": "print", "Your TV": "tvs", "Your purifier": "purifiers", "Your computer": "remote", "Your door station": "doorbell", "Your camera": "cameras" };
+  const PAGE_NAME = { print: "Printers & scanners", tvs: "TVs & displays", purifiers: "Air purifiers", remote: "Computers & phones", doorbell: "Doorbell", cameras: "Security cameras" };
+  const WEB = [[80, "http"], [8080, "http"], [443, "https"], [8443, "https"]];
+
+  // What can be done with a device, the likeliest first: what Kagaz does
+  // with its kind, then its web page, then asking it what it is.
+  function actions(h, closer) {
+    const open = new Set(h.open || []);
+    const out = [];
+    const name = hostName(h);
+    const k = known.get(h.ip) || "";
+    const page = Object.entries(PAGE_OF).find(([w]) => k.startsWith(w));
+    if (page) out.push({ icon: "forward", name: `Open in ${PAGE_NAME[page[1]]}`, what: k, go: () => selectCategory(page[1]) });
+    const remote = (speaks, words) => ({ icon: "computer", name: `Connect with ${words}`, what: "See and use its screen here", go: () => { selectCategory("remote"); KagazRemote.openAdd(h.ip, h.name || ""); } });
+    if (!page) {
+      if (open.has(3389)) out.push(remote("rdp", "Remote Desktop"));
+      if (open.has(5900)) out.push(remote("vnc", "VNC"));
+      switch (h.kind) {
+        case "computer":
+          if (!open.has(3389) && !open.has(5900)) {
+            out.push({ icon: "info", name: "Remote Desktop isn't on there", what: "On Windows Pro: Settings › System › Remote Desktop, then turn it on. On a Mac: Screen Sharing in System Settings › General › Sharing.", info: true });
+            out.push(remote("rdp", "Remote Desktop anyway"));
+          }
+          break;
+        case "printer":
+          out.push({ icon: "print", name: "Add this printer", what: "Print and scan from Kagaz", go: () => { selectCategory("print"); rescan(); } });
+          break;
+        case "tv": case "speaker":
+          if ((h.services || []).some((x) => x === "googlecast" || x === "airplay" || x === "upnp-tv")) {
+            out.push({ icon: "tv", name: "Add as a TV or display", what: "Show this device's screen on it", go: () => { selectCategory("tvs"); KagazTvs.rescan(); } });
+          }
+          break;
+        case "camera":
+          out.push({ icon: "cameras", name: "Watch it in Kagaz", what: h.maker === "Xiaomi" ? "Sign in to your Xiaomi account" : "Sign in to the camera's account (TP-Link, Xiaomi)", go: () => selectCategory("cameras") });
+          break;
+        case "intercom":
+          out.push({ icon: "doorbell", name: "Add as a door station", what: "Rings this device directly, no account", go: () => { selectCategory("doorbell"); openStation({ name: "", address: h.ip, port: 5060, saved: false }); } });
+          break;
+        case "smart-home": case "console": case "storage":
+          out.push({ icon: "info", name: "Kagaz doesn't work with this yet", what: `${kindWord(h)}s like this one aren't among the devices Kagaz controls.`, info: true });
+          break;
+        case "phone": case "tablet":
+          out.push({ icon: "info", name: "Nothing to connect to", what: "Phones and tablets don't take connections from other devices on the network.", info: true });
+          break;
+      }
+    }
+    for (const [port, scheme] of WEB) {
+      if (!open.has(port)) continue;
+      const url = `${scheme}://${h.ip}${port === 80 || port === 443 ? "" : ":" + port}/`;
+      out.push({ icon: "globe", name: h.router ? "Open the router's settings" : "Open its web page", what: (closer && closer.title) || url, go: () => invoke("open_web", { url }).catch((e) => snack(String(e))) });
+      break;
+    }
+    if (!closer) {
+      const ask = { icon: "search", name: "Ask it what it is", what: "Checks which connections it takes and reads its page", go: () => lookCloser(h) };
+      // For a device Kagaz cannot place, the first thing to do.
+      if (["unknown", "smart-home", "phone"].includes(h.kind) && !page) out.unshift(ask); else out.push(ask);
+    }
+    return out;
+  }
+
+  async function lookCloser(h) {
+    openHost(h, null, true);
+    let closer = null;
+    try {
+      closer = await invoke("nearby_look_closer", { host: h });
+    } catch (e) {
+      snack("Could not ask it: " + e);
+      return;
+    }
+    const i = hosts.findIndex((x) => x.ip === h.ip);
+    if (i >= 0) hosts[i] = closer.host;
+    render();
+    openHost(closer.host, closer);
+  }
+
+  function openHost(h, closer, asking) {
+    KagazAsk.ask((dlg, finish) => {
+      dlg.classList.add("sheet", "tv-sheet", "nearby-sheet");
+      dlg.appendChild(el("h3", "ask-title", hostName(h)));
+      const facts = [kindWord(h), h.maker, h.model, h.ip, !PHONE && h.mac && !h.private_mac ? h.mac : ""].filter((x, i, a) => x && a.indexOf(x) === i);
+      dlg.appendChild(el("p", "tv-sheet-state muted small", facts.join(" · ")));
+      if (closer) {
+        const words = closer.services.map(([p, w]) => w).filter((w, i, a) => a.indexOf(w) === i);
+        dlg.appendChild(el("p", "small", words.length ? "Takes connections for: " + words.join(", ") + "." : "It took no connection on the usual ports; it may keep to itself."));
+        if (closer.server) dlg.appendChild(el("p", "muted small", "Its web server: " + closer.server));
+      }
+      const list = el("div", "tv-ways");
+      if (asking) {
+        const r = el("div", "tv-way tv-way-info");
+        const words = el("span", "tv-way-words");
+        words.append(el("span", "tv-way-name", "Asking it what it is…"), el("span", "tv-way-what", "A few seconds"));
+        const bar = el("div", "nearby-progress");
+        r.append(icon("search"), words);
+        list.append(bar, r);
+      } else {
+        list.appendChild(el("div", "tv-way-section", "What you can do"));
+        for (const a of actions(h, closer)) {
+          const r = el(a.info ? "div" : "button", "tv-way" + (a.info ? " tv-way-info" : ""));
+          if (!a.info) r.type = "button";
+          const words = el("span", "tv-way-words");
+          words.append(el("span", "tv-way-name", a.name), el("span", "tv-way-what", a.what));
+          r.append(icon(a.icon), words);
+          if (!a.info) {
+            const chev = el("span", "nearby-chev");
+            chev.innerHTML = KagazIcons.svg("forward");
+            r.appendChild(chev);
+            r.addEventListener("click", () => { finish(null); a.go(); });
+          }
+          list.appendChild(r);
+        }
+      }
+      dlg.appendChild(list);
+      if (!PHONE) {
+        const actionsRow = el("div", "actions");
+        actionsRow.appendChild(textButton("", "Close", () => finish(null)));
+        dlg.appendChild(actionsRow);
+      }
+    });
   }
 
   function hide(u) {
@@ -423,7 +578,11 @@ const KagazNearby = (() => {
   function others() {
     const taken = new Set(usable.map((u) => u.ip).filter(Boolean));
     const rank = (h) => (h.this_device ? 0 : h.router ? 1 : 2);
-    return hosts
+    // This device once, with every address it has (a phone's Wi-Fi and its
+    // hotspot are two networks).
+    const mine = hosts.filter((h) => h.this_device);
+    const me = mine.length ? [{ ...mine[0], ip: mine.map((h) => h.ip).join(", ") }] : [];
+    return [...me, ...hosts.filter((h) => !h.this_device)]
       .filter((h) => !taken.has(h.ip))
       .sort((a, b) => rank(a) - rank(b) || kindWord(a).localeCompare(kindWord(b)) || ipNum(a.ip) - ipNum(b.ip));
   }
@@ -459,9 +618,9 @@ const KagazNearby = (() => {
       if (OS === "android" && !btReady && !read(BT_KEY, false) && searched) {
         const li = el("li", "rc-row nearby-row nearby-ask");
         const text = el("span", "tile-text");
-        text.append(el("span", "tile-name", "Find fans over Bluetooth too"), el("span", "tile-sub", "Android asks to allow Nearby devices for Kagaz."));
+        text.append(el("span", "tile-name", "Find devices over Bluetooth too"), el("span", "tile-sub", "Android asks to allow Nearby devices for Kagaz."));
         const later = textButton("link nearby-later", "Not now", () => { write(BT_KEY, true); render(); });
-        const allow = textButton("nearby-add", "Allow", (b) => allowBluetooth(b), "Allow Bluetooth to find fans");
+        const allow = textButton("nearby-add", "Allow", (b) => allowBluetooth(b), "Allow Bluetooth to find devices");
         li.append(icon("fan"), text, later, allow);
         rows.push(li);
       }
