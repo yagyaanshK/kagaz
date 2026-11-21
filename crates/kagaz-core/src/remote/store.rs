@@ -573,6 +573,18 @@ impl Devices {
         Ok(())
     }
 
+    /// Ways it was found to take since it was added (Remote Desktop turned on
+    /// on a computer that took only SSH): added after the ones it had.
+    pub fn note_ways(&mut self, id: &str, found: &[Way]) {
+        if let Some(d) = self.devices.iter_mut().find(|d| d.id == id) {
+            for w in found {
+                if !d.ways.iter().any(|x| x.speaks == w.speaks) {
+                    d.ways.push(*w);
+                }
+            }
+        }
+    }
+
     /// A path answered: when, and through what.
     pub fn note_reached(&mut self, id: &str, path: usize, at: u64) {
         if let Some(d) = self.devices.iter_mut().find(|d| d.id == id) {

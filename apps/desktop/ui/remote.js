@@ -87,7 +87,16 @@ const KagazRemote = (() => {
   // Can a session be opened with it from here?
   const canConnect = (d) => d.ways.some((w) => w.speaks === "vnc" || (canRdp && w.speaks === "rdp"));
   const overRdp = (d) => canRdp && d.ways.some((w) => w.speaks === "rdp");
-  const NOT_YET = "Remote Desktop sessions are not on this kind of device yet; VNC devices can be connected to.";
+  // Why Connect is off for a device: what it takes says what is missing.
+  // (A device that takes only SSH said Remote Desktop was missing on the
+  // phone, and its greyed Connect looked frozen: reported 2026-11-22.)
+  function whyNot(d) {
+    const takes = (s) => d.ways.some((w) => w.speaks === s);
+    if (!takes("rdp") && !takes("vnc")) {
+      return `${d.name} takes only SSH here, which shows no screen. To see and use its screen, turn on Remote Desktop on it (Ubuntu or Windows Pro: Settings › System › Remote Desktop; a Mac: Screen Sharing), then Check again.`;
+    }
+    return `${d.name} takes Remote Desktop, which Kagaz on a phone can't open yet. Connect from Kagaz on a computer, or turn on VNC on it and Check again.`;
+  }
 
   // On a computer every session has a window of its own, and several
   // run at once (remote_windows.rs); the list says which devices have
@@ -210,7 +219,7 @@ const KagazRemote = (() => {
     const st = states.get(d.id);
     if (!shown) {
       go.disabled = !canConnect(d) || !!(st && !st.within);
-      if (!canConnect(d)) go.title = NOT_YET;
+      if (!canConnect(d)) go.title = whyNot(d);
       else if (go.disabled) go.title = `${d.name} is out of reach`;
     }
     acts.append(go);
@@ -451,7 +460,9 @@ const KagazRemote = (() => {
     for (const x of mine) {
       const one = el("span", x.answers ? "rc-good" : "muted");
       if (x.answers) one.innerHTML = KagazIcons.svg("check");
-      const way = d.ways.length > 1 ? x.way + ": " : "";
+      // Named when there is more than one line: its ways, or Remote Desktop
+      // and VNC asked of a device that takes only SSH.
+      const way = d.ways.length > 1 || mine.length > 1 ? x.way + ": " : "";
       one.append(x.answers ? `${way}answers${x.address ? " at " + x.address : ""}, ${x.millis} ms` : `${way}${x.trouble}`);
       right.append(one);
     }
@@ -493,7 +504,7 @@ const KagazRemote = (() => {
       save(() => invoke("remote_rename", { id: d.id, name }), "Could not rename it");
     }), go);
 
-    const soon = el("p", "muted small", canConnect(d) ? "" : NOT_YET);
+    const soon = el("p", "muted small", canConnect(d) ? "" : whyNot(d));
     soon.classList.toggle("hidden", canConnect(d));
 
     // How its screen is shown and driven, and its sign-in: drawn as in a

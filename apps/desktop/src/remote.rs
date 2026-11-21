@@ -108,8 +108,24 @@ pub async fn remote_check(only: Option<String>) -> Result<Checked, String> {
             .iter()
             .filter(|d| only.as_deref().is_none_or(|id| d.id == id))
             .collect();
+        // A device that shows no screen yet (it took only SSH) is asked for
+        // Remote Desktop and VNC too: turned on there since, they are added.
+        let asked: Vec<Device> = wanted
+            .iter()
+            .map(|d| {
+                let mut d = (*d).clone();
+                if !d.ways.iter().any(|w| w.speaks.shows_screen()) {
+                    for s in remote::Speaks::ALL {
+                        if !d.ways.iter().any(|w| w.speaks == s) {
+                            d.ways.push(Way::new(s));
+                        }
+                    }
+                }
+                d
+            })
+            .collect();
         let (checks, tailscale) = std::thread::scope(|s| {
-            let jobs: Vec<_> = wanted.iter().map(|d| s.spawn(move || remote::check(d, QUICK))).collect();
+            let jobs: Vec<_> = asked.iter().map(|d| s.spawn(move || remote::check(d, QUICK))).collect();
             let tailscale = tailscale::status();
             let checks: Vec<Vec<PathReport>> = jobs.into_iter().map(|j| j.join().unwrap_or_default()).collect();
             (checks, tailscale)
@@ -117,6 +133,14 @@ pub async fn remote_check(only: Option<String>) -> Result<Checked, String> {
         let at = remote::store::now();
         let ((), saved) = update(|all| {
             for (d, reports) in wanted.iter().zip(&checks) {
+                let new: Vec<Way> = reports
+                    .iter()
+                    .filter(|r| r.outcome.is_ok() && !d.ways.iter().any(|w| w.speaks == r.way.speaks))
+                    .map(|r| r.way)
+                    .collect();
+                if !new.is_empty() {
+                    all.note_ways(&d.id, &new);
+                }
                 if let Some(a) = remote::best(d, reports) {
                     all.note_reached(&d.id, a.path, at);
                     all.note_identity(&d.id, &a.seen.identity);
