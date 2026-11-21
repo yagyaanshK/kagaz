@@ -71,7 +71,8 @@ const KagazNearby = (() => {
     "smart-home": ["Smart home device", "device"],
     unknown: ["Device", "device"],
   };
-  const kindWord = (h) => (KIND[h.kind] || KIND.unknown)[0];
+  const FORM = { laptop: "Laptop", desktop: "Desktop" };
+  const kindWord = (h) => (h.kind === "computer" && FORM[h.form]) || (KIND[h.kind] || KIND.unknown)[0];
   const kindIcon = (h) => (KIND[h.kind] || KIND.unknown)[1];
   // Its own name, else what it is by its maker ("Samsung phone").
   function hostName(h) {
@@ -82,16 +83,56 @@ const KagazNearby = (() => {
     if (h.maker) return `${h.maker} ${h.kind === "unknown" ? "device" : word.toLowerCase()}`;
     return word;
   }
+  // What it is to the person (a device of theirs in Kagaz): a TV saved at a
+  // computer's address is Kagaz there, taking screens, not a TV.
+  function knownFor(h) {
+    const k = known.get(h.ip) || "";
+    return k === "Your TV" && (h.kind === "computer" || h.model === "Kagaz") ? "Your Kagaz screen" : k;
+  }
   function hostLine(h) {
     const parts = [];
     if (!h.this_device && (h.name || h.maker)) parts.push(kindWord(h));
+    if (h.this_device && !PHONE && FORM[h.form]) parts.push(FORM[h.form]);
+    if (h.os) parts.push(h.os);
     if (h.name && h.maker) parts.push(h.maker);
-    if (h.model && !(h.name || "").includes(h.model)) parts.push(h.model);
+    if (h.model && h.model !== "Kagaz" && !(h.name || "").includes(h.model)) parts.push(h.model);
     if (h.private_mac && !h.this_device) parts.push("private address");
     parts.push(h.ip);
-    const k = known.get(h.ip);
+    const k = knownFor(h);
     if (k) parts.unshift(k);
     return parts.join(" · ");
+  }
+
+  // What each port's service is called on a label: short, and the same
+  // for one service on several ports (web pages on 80 and 8080).
+  const SHORT = {
+    "web page": "Web page", "web page (https)": "Web page", "VNC screen sharing": "VNC",
+    "Windows file sharing": "File sharing", "Apple file sharing": "File sharing", "NFS file sharing": "File sharing",
+    "IPP printing": "Printing", "printing": "Printing", "LPD printing": "Printing",
+    "camera video (RTSP)": "Camera video", "ONVIF camera control": "ONVIF", "Google Cast": "Cast",
+    "Android debugging (adb)": "adb", "media sharing and control (UPnP)": "UPnP",
+  };
+  // Not ways to connect, only signs of what it is.
+  const QUIET = new Set(["unknown", "Windows remote calls", "Windows network discovery", "iPhone or iPad sync", "DNS"]);
+  function protocols(h) {
+    const out = [];
+    for (const p of h.ports || []) {
+      if (QUIET.has(p.what)) continue;
+      const w = SHORT[p.what] || p.what.replace(/^./, (c) => c.toUpperCase());
+      if (!out.includes(w)) out.push(w);
+    }
+    return out;
+  }
+  // Its protocols as small labels under a row's text (a few, then "+n").
+  function tagsEl(h, all) {
+    const list = protocols(h);
+    if (!list.length) return null;
+    const box = el("span", "nearby-tags");
+    const shown = all ? list : list.slice(0, 4);
+    for (const w of shown) box.appendChild(el("span", "nearby-tag", w));
+    if (shown.length < list.length) box.appendChild(el("span", "nearby-tag nearby-tag-more", `+${list.length - shown.length}`));
+    box.setAttribute("aria-label", "Takes connections for " + list.join(", "));
+    return box;
   }
 
   // ---------- looking ----------
@@ -148,7 +189,8 @@ const KagazNearby = (() => {
     }
 
     // TVs (Cast, Miracast, AirPlay), not the ones added nor Kagaz itself.
-    for (const t of tvSaved || []) knownAs(t.address, "Your TV");
+    // Kagaz on another computer, added as a screen: a computer, not a TV.
+    for (const t of tvSaved || []) knownAs(t.address, /^Kagaz\b/.test(t.model || "") ? "Your Kagaz screen" : "Your TV");
     for (const f of tvs || []) {
       if (f.added || (tvSaved || []).some((s) => s.name === f.name) || f.model === "Kagaz") continue;
       out.push({
@@ -291,7 +333,12 @@ const KagazNearby = (() => {
       .map((h) => ({
         key: "computer:" + h.ip, kind: "remote", icon: "computer", ip: h.ip,
         name: hostName(h),
-        sub: peerNamed(h.name) ? ["Computer", BOTH, h.ip].join(" · ") : ["Computer", "Remote Desktop isn't on there", h.ip].join(" · "),
+        sub: [
+          kindWord(h), h.os,
+          peerNamed(h.name) ? BOTH : "",
+          (h.open || []).includes(3389) || (h.open || []).includes(5900) ? "" : "Remote Desktop isn't on there",
+          h.ip,
+        ].filter(Boolean).join(" · "),
         add: async () => { openHost(h); return null; },
       }));
   }
@@ -333,6 +380,12 @@ const KagazNearby = (() => {
       ]);
       hosts = sweep || [];
       btReady = bt;
+      // A computer's system from Tailscale, where the network didn't say.
+      const TS_OS = { linux: "Linux", windows: "Windows", macos: "macOS" };
+      for (const h of hosts) {
+        const p = h.kind === "computer" && !h.os && peerNamed(h.name);
+        if (p && TS_OS[p.os.toLowerCase()]) h.os = TS_OS[p.os.toLowerCase()];
+      }
       usable = [
         ...found.list,
         ...cameraSuggestions(hosts, found.cams),
@@ -380,6 +433,9 @@ const KagazNearby = (() => {
     const li = el("li", "rc-row nearby-row");
     const text = el("span", "tile-text");
     text.append(el("span", "tile-name", u.name), el("span", "tile-sub", u.sub));
+    const sweepHost = u.ip && hosts.find((x) => x.ip === u.ip);
+    const tags = sweepHost && tagsEl(sweepHost);
+    if (tags) text.append(tags);
     const add = textButton("nearby-add", "Add", async (b) => {
       b.disabled = true;
       try {
@@ -416,6 +472,8 @@ const KagazNearby = (() => {
     const li = el("li", "rc-row nearby-row nearby-host");
     const text = el("span", "tile-text");
     text.append(el("span", "tile-name", hostName(h)), el("span", "tile-sub", hostLine(h)));
+    const tags = tagsEl(h);
+    if (tags) text.append(tags);
     li.append(icon(kindIcon(h)), text);
     if (!PHONE && h.mac && !h.private_mac) li.title = h.mac;
     if (!h.this_device) {
@@ -433,9 +491,8 @@ const KagazNearby = (() => {
 
   // ---------- one device's sheet: what to do with it ----------
 
-  const PAGE_OF = { "Your printer": "print", "Your TV": "tvs", "Your purifier": "purifiers", "Your computer": "remote", "Your door station": "doorbell", "Your camera": "cameras" };
+  const PAGE_OF = { "Your printer": "print", "Your TV": "tvs", "Your Kagaz screen": "tvs", "Your purifier": "purifiers", "Your computer": "remote", "Your door station": "doorbell", "Your camera": "cameras" };
   const PAGE_NAME = { print: "Printers & scanners", tvs: "TVs & displays", purifiers: "Air purifiers", remote: "Computers & phones", doorbell: "Doorbell", cameras: "Security cameras" };
-  const WEB = [[80, "http"], [8080, "http"], [443, "https"], [8443, "https"]];
 
   // What can be done with a device, the likeliest first: what Kagaz does
   // with its kind, then its web page, then asking it what it is.
@@ -443,7 +500,7 @@ const KagazNearby = (() => {
     const open = new Set(h.open || []);
     const out = [];
     const name = hostName(h);
-    const k = known.get(h.ip) || "";
+    const k = knownFor(h);
     const page = Object.entries(PAGE_OF).find(([w]) => k.startsWith(w));
     if (page) out.push({ icon: "forward", name: `Open in ${PAGE_NAME[page[1]]}`, what: k, go: () => selectCategory(page[1]) });
     // Found here and in Tailscale too: one way each, this network's first
@@ -491,25 +548,56 @@ const KagazNearby = (() => {
           break;
       }
     }
-    for (const [port, scheme] of WEB) {
-      if (!open.has(port)) continue;
-      const url = `${scheme}://${h.ip}${port === 80 || port === 443 ? "" : ":" + port}/`;
-      out.push({ icon: "globe", name: h.router ? "Open the router's settings" : "Open its web page", what: (closer && closer.title) || url, go: () => invoke("open_web", { url }).catch((e) => snack(String(e))) });
-      break;
+    if (open.has(22)) {
+      // Kagaz has no SSH of its own: how to reach it.
+      out.push({ icon: "computer", name: "Connect with SSH", what: `From a terminal or an SSH app: ssh ${h.ip}`, info: true });
+    }
+    const web = webPorts(h)[0];
+    if (web) {
+      out.push({ icon: "globe", name: h.router ? "Open the router's settings" : "Open its web page", what: web.title || web.url, go: () => openWeb(web.url) });
     }
     if (!closer) {
       const ask = { icon: "search", name: "Ask it what it is", what: "Checks which connections it takes and reads its page", go: () => lookCloser(h) };
       // For a device Kagaz cannot place, the first thing to do.
       if (["unknown", "smart-home", "phone"].includes(h.kind) && !page) out.unshift(ask); else out.push(ask);
     }
+    if (!closer || closer.checked < 65535) {
+      out.push({ icon: "search", name: "Check every port", what: "All 65,535, each asked what it is: up to a minute", go: () => lookCloser(h, true) });
+    }
     return out;
   }
 
-  async function lookCloser(h) {
-    openHost(h, null, true);
+  // What a port's service said of itself, tidied: an SSH greeting
+  // ("SSH-2.0-OpenSSH_10.2p1 Ubuntu-2ubuntu3.8") as "OpenSSH 10.2p1 ·
+  // Ubuntu".
+  function said(p) {
+    const ssh = /^SSH-[\d.]+-(\S+)(?:\s+(.*))?$/.exec(p.detail || "");
+    if (!ssh) return p.detail || "";
+    const soft = ssh[1].replace(/_/g, " ").replace(/^OpenSSH for Windows/, "OpenSSH (Windows)");
+    const os = (ssh[2] || "").split(/[-\s]/)[0];
+    return [soft, os].filter(Boolean).join(" · ");
+  }
+
+  // Its web pages: each port that serves one, with its address and title,
+  // the usual ports first.
+  function webPorts(h) {
+    const usual = [80, 443, 8080, 8443];
+    return (h.ports || [])
+      .filter((p) => /^web page/.test(p.what))
+      .map((p) => {
+        const https = / \(https\)$/.test(p.what) || p.port === 443 || p.port === 8443;
+        const title = p.detail ? p.detail.split(" · server: ")[0].replace(/^server: .*/, "") : "";
+        return { port: p.port, url: `${https ? "https" : "http"}://${h.ip}${p.port === 80 || p.port === 443 ? "" : ":" + p.port}/`, title };
+      })
+      .sort((a, b) => (usual.indexOf(a.port) + 1 || 99) - (usual.indexOf(b.port) + 1 || 99) || a.port - b.port);
+  }
+  const openWeb = (url) => invoke("open_web", { url }).catch((e) => snack(String(e)));
+
+  async function lookCloser(h, every) {
+    openHost(h, null, every ? "every" : "ask");
     let closer = null;
     try {
-      closer = await invoke("nearby_look_closer", { host: h });
+      closer = await invoke(every ? "nearby_every_port" : "nearby_look_closer", { host: h });
     } catch (e) {
       snack("Could not ask it: " + e);
       return;
@@ -524,18 +612,19 @@ const KagazNearby = (() => {
     KagazAsk.ask((dlg, finish) => {
       dlg.classList.add("sheet", "tv-sheet", "nearby-sheet");
       dlg.appendChild(el("h3", "ask-title", hostName(h)));
-      const facts = [kindWord(h), h.maker, h.model, h.ip, !PHONE && h.mac && !h.private_mac ? h.mac : ""].filter((x, i, a) => x && a.indexOf(x) === i);
+      const facts = [kindWord(h), h.os, h.maker, h.model === "Kagaz" ? "" : h.model, h.ip, !PHONE && h.mac && !h.private_mac ? h.mac : ""].filter((x, i, a) => x && a.indexOf(x) === i);
       dlg.appendChild(el("p", "tv-sheet-state muted small", facts.join(" · ")));
-      if (closer) {
-        const words = closer.services.map(([p, w]) => w).filter((w, i, a) => a.indexOf(w) === i);
-        dlg.appendChild(el("p", "small", words.length ? "Takes connections for: " + words.join(", ") + "." : "It took no connection on the usual ports; it may keep to itself."));
-        if (closer.server) dlg.appendChild(el("p", "muted small", "Its web server: " + closer.server));
+      const tags = tagsEl(h, true);
+      if (tags) dlg.appendChild(tags);
+      if (closer && !(h.ports || []).length) {
+        dlg.appendChild(el("p", "small", closer.checked >= 65535 ? "It took no connection on any port; it keeps to itself." : "It took no connection on the usual ports; it may keep to itself."));
       }
       const list = el("div", "tv-ways");
       if (asking) {
         const r = el("div", "tv-way tv-way-info");
         const words = el("span", "tv-way-words");
-        words.append(el("span", "tv-way-name", "Asking it what it is…"), el("span", "tv-way-what", "A few seconds"));
+        if (asking === "every") words.append(el("span", "tv-way-name", "Checking all 65,535 ports…"), el("span", "tv-way-what", "Up to a minute"));
+        else words.append(el("span", "tv-way-name", "Asking it what it is…"), el("span", "tv-way-what", "A few seconds"));
         const bar = el("div", "nearby-progress");
         r.append(icon("search"), words);
         list.append(bar, r);
@@ -554,6 +643,32 @@ const KagazNearby = (() => {
             r.addEventListener("click", () => { finish(null); a.go(); });
           }
           list.appendChild(r);
+        }
+        // Every port that takes a connection, and what answers there; a web
+        // page's opens in the browser.
+        const ports = h.ports || [];
+        if (ports.length) {
+          const all = closer && closer.checked >= 65535;
+          list.appendChild(el("div", "tv-way-section", all ? `Listening ports: all ${ports.length}` : "Listening ports"));
+          const webs = new Map(webPorts(h).map((w) => [w.port, w]));
+          for (const p of ports) {
+            const w = webs.get(p.port);
+            const r = el(w ? "button" : "div", "tv-way nearby-port" + (w ? "" : " tv-way-info"));
+            if (w) r.type = "button";
+            const words = el("span", "tv-way-words");
+            const what = p.what === "unknown" ? "Something Kagaz doesn't know" : p.what.replace(/^./, (c) => c.toUpperCase());
+            words.append(el("span", "tv-way-name", what), el("span", "tv-way-what", said(p) || (w ? w.url : "")));
+            const num = el("span", "tile-icon nearby-port-num", String(p.port));
+            r.append(num, words);
+            if (w) {
+              const chev = el("span", "nearby-chev");
+              chev.innerHTML = KagazIcons.svg("forward");
+              r.appendChild(chev);
+              r.addEventListener("click", () => { finish(null); openWeb(w.url); });
+            }
+            list.appendChild(r);
+          }
+          if (!all) list.appendChild(el("p", "muted small nearby-port-note", "The usual ports only. Check every port for the rest."));
         }
       }
       dlg.appendChild(list);

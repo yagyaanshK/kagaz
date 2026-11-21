@@ -1226,3 +1226,15 @@ button.kz-ic { display: inline-flex; align-items: center; justify-content: cente
 .nearby-sheet .nearby-progress { top: 0; }
 .nearby-sheet .tv-way-what { white-space: normal; }
 .nearby-host[role="button"] { cursor: default; }
+/* A device's protocols (nearby.js): small outlined labels under its row's
+   text and in its sheet; each listening port's number in the icon's place. */
+.nearby-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.nearby-tag { display: inline-flex; align-items: center; min-height: 20px; padding: 0 7px; border: 1px solid var(--line); border-radius: 6px; font-size: 12px; line-height: 18px; color: var(--muted); white-space: nowrap; }
+.nearby-sheet > .nearby-tags { margin: 6px 0 2px; }
+.nearby-port-num { font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: -0.2px; }
+.nearby-port-note { margin: 4px 0 0; }
+:root:not([data-os="android"]):not([data-os="ios"]) .nearby-port-note { padding: 0 20px; }
+[data-os="android"] .nearby-tag { border-radius: 8px; min-height: 24px; padding: 0 8px; font-weight: 500; }
+[data-os="ios"] .nearby-tag { border: none; background: var(--icon-bg); color: var(--text); }
+[data-os="macos"] .nearby-tag { border-radius: 4px; font-size: 11px; }
+[data-os="windows"] .nearby-tag { border-radius: 4px; }

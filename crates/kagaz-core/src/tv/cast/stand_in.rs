@@ -46,7 +46,17 @@ pub fn announce(name: &str, model: &str, port: u16) -> Result<(Announced, IpAddr
     let ip = local_ip().ok_or("this computer has no address on the network")?;
     let daemon = mdns_sd::ServiceDaemon::new().map_err(|e| e.to_string())?;
     let id = hex(&super::super::miracast::random_bytes::<16>());
-    let txt = [("id", id.as_str()), ("fn", name), ("md", model), ("ve", "05"), ("ca", "4101"), ("st", "0"), ("rs", "")];
+    let mut txt = vec![("id", id.clone()), ("fn", name.to_string()), ("md", model.to_string()), ("ve", "05".into()), ("ca", "4101".into()), ("st", "0".into()), ("rs", String::new())];
+    // Kagaz on a phone lists this computer by what it is (nearby.rs): its
+    // system and whether it is a laptop. Only in this announcement, which
+    // goes out only while this computer is a screen.
+    if let Some(os) = crate::nearby::this_os() {
+        txt.push(("kz-os", os));
+    }
+    if let Some(form) = crate::nearby::this_form() {
+        txt.push(("kz-form", form.to_string()));
+    }
+    let txt: Vec<(&str, &str)> = txt.iter().map(|(k, v)| (*k, v.as_str())).collect();
     let info = mdns_sd::ServiceInfo::new("_googlecast._tcp.local.", &format!("Kagaz-{}", &id[..8]), "kagaz-screen.local.", ip, port, &txt[..])
         .map_err(|e| e.to_string())?;
     daemon.register(info).map_err(|e| e.to_string())?;

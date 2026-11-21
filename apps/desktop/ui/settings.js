@@ -447,6 +447,7 @@ const KagazDoorbellSettings = (() => {
 
 // The app's Settings page: what applies to the whole app.
 const KagazSettings = (() => {
+  const PHONE = /^(android|ios)$/.test(window.__KAGAZ_OS__ || "");
   const { el, section, row } = KagazSet;
 
   async function drawAccounts(body) {
@@ -681,6 +682,7 @@ const KagazSettings = (() => {
       ["Save pictures and videos in", "Where things are saved", () => openPage("saving"), "file"],
       ["Screenshots, recordings, scans", "Where things are saved", () => openPage("saving"), "file"],
       ["Optimise for performance or battery", "Power", () => openPage("power"), "bolt"],
+      ...(PHONE ? [] : [["Show screens here when Kagaz starts", "Kagaz", () => { typed = ""; drawIndex(); }, "tv"]]),
       ["Screen to a TV, encoded by", "Power", () => openPage("power"), "bolt"],
       ["Licence", "About Kagaz", () => openPage("about"), "info"],
     ];
@@ -710,12 +712,13 @@ const KagazSettings = (() => {
     const list = el("div", "set-index");
     body.replaceChildren(box, list);
     const kinds = typeof KagazHome !== "undefined" ? await KagazHome.list().catch(() => []) : [];
-    const [ot, cam, folder, dnd, power] = await Promise.all([
+    let [ot, cam, folder, dnd, power, atStart] = await Promise.all([
       invoke("onetouch_peek").catch(() => null),
       invoke("cameras_status").catch(() => null),
       invoke("save_folder").catch(() => null),
       invoke("ring_in_dnd").catch(() => null),
       invoke("pref_get", { key: "power" }).catch(() => null),
+      invoke("pref_get", { key: "screen_here_at_start" }).catch(() => null),
     ]);
     phoneRinging = dnd !== null && dnd !== undefined;
     const signed = [ot && ot.logged_in ? "OneTouch" : "", cam && cam.logged_in ? "Tapo" : ""].filter(Boolean);
@@ -751,6 +754,29 @@ const KagazSettings = (() => {
           KagazSet.attempt(r, () => invoke("ring_dnd_settings"));
         });
         dndToggle = t;
+        const c = el("span", "set-control");
+        c.append(t);
+        r.append(ic, l, c);
+        app.append(r);
+      }
+      if (!PHONE && atStart !== null) {
+        // A single switch too: this computer as a screen at each start.
+        // Off unless chosen; the TVs page's own switch lasts until Kagaz
+        // closes.
+        const r = el("div", "set-row set-door set-switch");
+        const ic = el("span", "set-door-icon ic");
+        ic.innerHTML = KagazIcons.svg("tv");
+        const l = el("label", "set-label");
+        l.append(el("span", "", "Show screens here when Kagaz starts"), el("span", "muted small", "Lists this computer as a screen for your phones and computers each time Kagaz opens. Off: turn it on on the TVs page when you need it."));
+        const t = el("input", "toggle");
+        t.type = "checkbox";
+        t.id = "set-here-start";
+        l.htmlFor = t.id;
+        t.checked = atStart === "on";
+        t.addEventListener("change", () => {
+          const want = t.checked;
+          KagazSet.attempt(r, async () => { await invoke("pref_set", { key: "screen_here_at_start", value: want ? "on" : "off" }); atStart = want ? "on" : "off"; }, () => { t.checked = !want; });
+        });
         const c = el("span", "set-control");
         c.append(t);
         r.append(ic, l, c);

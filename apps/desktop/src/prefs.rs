@@ -9,6 +9,9 @@ const ALLOWED: &[(&str, &[&str])] = &[
     ("power", &["performance", "battery"]),
     // Which encoder sends the screen to a TV.
     ("tv_encoder", &["auto", "hardware", "software"]),
+    // This computer as a screen: off at each start unless chosen here
+    // (here.rs; its switch on the TVs page lasts until Kagaz closes).
+    ("screen_here_at_start", &["off", "on"]),
 ];
 
 fn allowed(key: &str) -> Result<&'static [&'static str], String> {

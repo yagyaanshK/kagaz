@@ -81,6 +81,13 @@ async fn nearby_look_closer(host: kagaz_core::nearby::Host) -> Result<kagaz_core
     blocking(move || Ok(kagaz_core::nearby::look_closer(host))).await
 }
 
+/// Every port of one device (1 to 65535), each that takes a connection
+/// asked what it is (the sheet's Check every port).
+#[tauri::command]
+async fn nearby_every_port(host: kagaz_core::nearby::Host) -> Result<kagaz_core::nearby::Closer, String> {
+    blocking(move || Ok(kagaz_core::nearby::every_port(host))).await
+}
+
 /// A device's own web page (its settings), in the system's browser. Only
 /// a plain http(s) address.
 #[tauri::command]
@@ -2040,6 +2047,7 @@ pub fn run() {
             discover,
             nearby_sweep,
             nearby_look_closer,
+            nearby_every_port,
             open_web,
             explain_device,
             scan_capabilities,

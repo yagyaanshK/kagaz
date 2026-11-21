@@ -448,7 +448,7 @@ const KagazTvs = (() => {
     l.htmlFor = "here-on";
     l.append(
       el("span", "", "Let phones and computers show their screen here"),
-      el("span", "muted small", st.on ? `Listed as “${st.name}” on this network. Each one is asked about first.` : "This computer is listed as a screen on this network while this is on. Each one is asked about first.")
+      el("span", "muted small", st.on ? `Listed as “${st.name}” on this network until you turn this off or close Kagaz. Each one is asked about first.` : "This computer is listed as a screen on this network while this is on, until Kagaz closes (Settings can turn it on at each start). Each one is asked about first.")
     );
     const c = el("span", "set-control");
     const box = el("input", "tv-switch");

@@ -107,6 +107,7 @@ windows-sys = { version = "0.61", features = [
     "Win32_Graphics_Gdi",
     "Win32_Graphics_Printing",
     "Win32_Storage_Xps",
+    "Win32_System_Power",
 ] }
 # Mirroring to a TV on Windows: the screen through
 # Windows.Graphics.Capture, H.264 through Media Foundation (the graphics chip's encoder

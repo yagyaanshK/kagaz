@@ -46,6 +46,25 @@ pub struct Host {
     /// speaker, printer, camera, intercom, console, storage, smart-home,
     /// unknown.
     pub kind: String,
+    /// Its system where something gave it away ("Ubuntu", "Windows",
+    /// "macOS", "Android", "iOS"; "Ubuntu 26.04" from Kagaz on it).
+    pub os: Option<String>,
+    /// "laptop" or "desktop" where known (this device; Kagaz on another
+    /// computer says; a Mac's model).
+    pub form: Option<String>,
+    /// Each port that took a connection and what answers there.
+    pub ports: Vec<Port>,
+}
+
+/// A port that takes connections and what answers on it.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct Port {
+    pub port: u16,
+    /// "SSH", "web page", "Remote Desktop"…; "unknown" where nothing said.
+    pub what: String,
+    /// What it said of itself: an SSH greeting, a page's title.
+    pub detail: Option<String>,
 }
 
 impl Default for Host {
@@ -62,6 +81,9 @@ impl Default for Host {
             router: false,
             this_device: false,
             kind: String::new(),
+            os: None,
+            form: None,
+            ports: Vec::new(),
         }
     }
 }
@@ -144,6 +166,8 @@ pub fn sweep(wait: Duration) -> Vec<Host> {
         if let Some(h) = on(&mut hosts, &nets, ip) {
             h.services = seen.services.into_iter().collect();
             h.model = h.model.take().or(seen.model);
+            h.os = h.os.take().or(seen.os);
+            h.form = h.form.take().or(seen.form);
             h.name = h.name.take().or(seen.name).or(seen.host);
         }
     }
@@ -197,10 +221,41 @@ pub fn sweep(wait: Duration) -> Vec<Host> {
     // Asked once the rest is in, of what answered without a name only: a
     // question for every address at once is mostly lost (the Wi-Fi holds
     // the group's packets for sleeping devices and drops a long queue).
+    // At the same time, every one found is knocked on at the well-known
+    // ports of [`SERVICES`] (what it takes connections for), and those that
+    // take SSH say hello (OpenSSH names the system).
     let unnamed: Vec<Ipv4Addr> = hosts.values().filter(|h| h.name.is_none() && !mine.contains(&h.ip)).map(|h| h.ip).collect();
-    for (ip, name) in mdns_names(&nets, &unnamed, Duration::from_millis(800)) {
+    let found: Vec<Ipv4Addr> = hosts.keys().copied().collect();
+    let (named, served) = std::thread::scope(|s| {
+        let names = s.spawn(|| mdns_names(&nets, &unnamed, Duration::from_millis(800)));
+        let served = knock(
+            found.iter().flat_map(|ip| SERVICES.iter().map(move |(p, _)| (*ip, *p))).collect(),
+            Duration::from_millis(1000),
+        );
+        (names.join().unwrap_or_default(), served)
+    });
+    for (ip, port) in served {
+        if let (Some(port), Some(h)) = (port, hosts.get_mut(&ip)) {
+            if !h.open.contains(&port) {
+                h.open.push(port);
+            }
+        }
+    }
+    let ssh: Vec<Ipv4Addr> = hosts.values().filter(|h| h.open.contains(&22)).map(|h| h.ip).collect();
+    let hellos: Vec<(Ipv4Addr, Option<String>)> = std::thread::scope(|s| {
+        let asked: Vec<_> = ssh.iter().map(|ip| (*ip, s.spawn(move || greeting(*ip, 22, Duration::from_millis(900))))).collect();
+        asked.into_iter().map(|(ip, t)| (ip, t.join().ok().flatten())).collect()
+    });
+    for (ip, hello) in hellos {
+        if let (Some(hello), Some(h)) = (hello, hosts.get_mut(&ip)) {
+            h.ports.push(Port { port: 22, what: "SSH".into(), detail: Some(hello) });
+        }
+    }
+    for (ip, name) in named {
         if let Some(h) = on(&mut hosts, &nets, ip) {
-            if name.eq_ignore_ascii_case("android") {
+            // "Android", "Android-2"…: an Android phone's only name.
+            let lower = name.to_ascii_lowercase();
+            if lower == "android" || lower.strip_prefix("android-").is_some_and(|n| n.chars().all(|c| c.is_ascii_digit())) {
                 h.services.push("android".into());
             } else {
                 if h.name.is_none() {
@@ -241,9 +296,193 @@ pub fn sweep(wait: Duration) -> Vec<Host> {
         }
         h.services.sort();
         h.services.dedup();
+        h.open.sort();
+        h.open.dedup();
+        label_ports(h);
+        if h.this_device {
+            h.os = this_os();
+            h.form = this_form().map(str::to_string);
+        }
         h.kind = guess(h).to_string();
+        h.os = os_of(h);
+        if h.kind == "unknown" && matches!(h.os.as_deref().map(os_family), Some("Windows" | "macOS" | "Linux")) {
+            h.kind = "computer".into();
+        }
+        if h.form.is_none() {
+            h.form = form_of(h).map(str::to_string);
+        }
     }
     out
+}
+
+/// Each open port with what answers there: what was heard (an SSH
+/// greeting) or the well-known use of the port; Kagaz as a screen for
+/// Cast's port on a Kagaz computer.
+fn label_ports(h: &mut Host) {
+    let kagaz = h.model.as_deref() == Some("Kagaz");
+    for &port in &h.open {
+        if h.ports.iter().any(|p| p.port == port) {
+            continue;
+        }
+        let what = if kagaz && port == 8009 { "Kagaz screen" } else { service_name(port).unwrap_or("unknown") };
+        h.ports.push(Port { port, what: what.into(), detail: None });
+    }
+    h.ports.sort_by_key(|p| p.port);
+}
+
+/// The well-known use of a port.
+pub fn service_name(port: u16) -> Option<&'static str> {
+    SERVICES.iter().find(|(p, _)| *p == port).map(|(_, w)| *w)
+}
+
+/// The first line a service says by itself on connecting (SSH, FTP and
+/// mail do), within `wait`.
+fn greeting(ip: Ipv4Addr, port: u16, wait: Duration) -> Option<String> {
+    let mut tcp = std::net::TcpStream::connect_timeout(&SocketAddr::new(IpAddr::V4(ip), port), wait).ok()?;
+    tcp.set_read_timeout(Some(wait)).ok()?;
+    let mut buf = [0u8; 256];
+    let n = tcp.read(&mut buf).ok()?;
+    let text = String::from_utf8_lossy(&buf[..n]);
+    let line = text.lines().next()?.trim().to_string();
+    (!line.is_empty()).then_some(line)
+}
+
+/// A system named in what a service said of itself.
+fn os_in(text: &str) -> Option<&'static str> {
+    let t = text.to_ascii_lowercase();
+    [
+        ("ubuntu", "Ubuntu"),
+        ("raspbian", "Raspberry Pi OS"),
+        ("debian", "Debian"),
+        ("fedora", "Fedora"),
+        ("freebsd", "FreeBSD"),
+        ("for_windows", "Windows"),
+        ("microsoft", "Windows"),
+        ("darwin", "macOS"),
+    ]
+    .iter()
+    .find(|(w, _)| t.contains(w))
+    .map(|(_, o)| *o)
+}
+
+/// The family of a system's name, for the guess: Windows, macOS, Linux,
+/// or the name itself.
+fn os_family(os: &str) -> &str {
+    match os.split_whitespace().next().unwrap_or(os) {
+        "Ubuntu" | "Debian" | "Fedora" | "Raspberry" | "Linux" | "Mint" | "Arch" => "Linux",
+        other => other,
+    }
+}
+
+/// Its system, from what it showed: Kagaz's own word, an SSH greeting or
+/// web server, an iPhone's or Android's own port or name, a Mac's model,
+/// Windows' own ports (or a NetBIOS name from a computer without Avahi).
+fn os_of(h: &Host) -> Option<String> {
+    if h.os.is_some() {
+        return h.os.clone();
+    }
+    if let Some(o) = h.ports.iter().filter_map(|p| p.detail.as_deref()).find_map(os_in) {
+        return Some(o.into());
+    }
+    let has = |s: &str| h.services.iter().any(|x| x == s);
+    let model = h.model.as_deref().unwrap_or("");
+    if h.open.contains(&62078) || has("apple-mobdev2") {
+        return Some("iOS".into());
+    }
+    if has("android") || has("adb") || has("adb-tls-connect") {
+        return Some("Android".into());
+    }
+    if ["MacBook", "iMac", "Macmini", "MacPro", "MacStudio", "Mac1"].iter().any(|m| model.starts_with(m)) || h.open.contains(&548) {
+        return Some("macOS".into());
+    }
+    if h.open.contains(&135) || h.open.contains(&5357) || (has("netbios") && !has("mdns-host") && h.kind == "computer") {
+        return Some("Windows".into());
+    }
+    None
+}
+
+/// Laptop or desktop where it shows: a Mac's model.
+fn form_of(h: &Host) -> Option<&'static str> {
+    let model = h.model.as_deref().unwrap_or("");
+    if model.starts_with("MacBook") {
+        Some("laptop")
+    } else if ["iMac", "Macmini", "MacPro", "MacStudio"].iter().any(|m| model.starts_with(m)) {
+        Some("desktop")
+    } else {
+        None
+    }
+}
+
+/// This device's system, with its version where it gives one
+/// ("Ubuntu 26.04").
+pub fn this_os() -> Option<String> {
+    #[cfg(target_os = "linux")]
+    {
+        let text = std::fs::read_to_string("/etc/os-release").ok()?;
+        let field = |k: &str| {
+            text.lines()
+                .find_map(|l| l.strip_prefix(k).and_then(|v| v.strip_prefix('=')))
+                .map(|v| v.trim_matches('"').to_string())
+                .filter(|v| !v.is_empty())
+        };
+        let name = field("NAME").unwrap_or_else(|| "Linux".into());
+        let name = name.strip_suffix(" GNU/Linux").unwrap_or(&name).to_string();
+        Some(match field("VERSION_ID") {
+            Some(v) => format!("{name} {v}"),
+            None => name,
+        })
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        Some(
+            match std::env::consts::OS {
+                "android" => "Android",
+                "ios" => "iOS",
+                "macos" => "macOS",
+                "windows" => "Windows",
+                other => other,
+            }
+            .to_string(),
+        )
+    }
+}
+
+/// Whether this device is a laptop or a desktop, where the system says:
+/// the chassis on Linux, the model on a Mac, a battery on Windows.
+pub fn this_form() -> Option<&'static str> {
+    #[cfg(target_os = "linux")]
+    {
+        let kind: u32 = std::fs::read_to_string("/sys/class/dmi/id/chassis_type").ok()?.trim().parse().ok()?;
+        match kind {
+            8 | 9 | 10 | 14 | 30 | 31 | 32 => Some("laptop"),
+            3..=7 | 13 | 15 | 16 | 35 | 36 => Some("desktop"),
+            _ => None,
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let out = std::process::Command::new("sysctl").args(["-n", "hw.model"]).output().ok()?;
+        let model = String::from_utf8_lossy(&out.stdout);
+        Some(if model.contains("Book") { "laptop" } else { "desktop" })
+    }
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::System::Power::{GetSystemPowerStatus, SYSTEM_POWER_STATUS};
+        let mut st: SYSTEM_POWER_STATUS = unsafe { std::mem::zeroed() };
+        if unsafe { GetSystemPowerStatus(&mut st) } == 0 {
+            return None;
+        }
+        // 128: no system battery; 255: unknown.
+        match st.BatteryFlag {
+            255 => None,
+            f if f & 128 != 0 => Some("desktop"),
+            _ => Some("laptop"),
+        }
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
+    {
+        None
+    }
 }
 
 // ---------- what it probably is ----------
@@ -267,11 +506,17 @@ pub fn guess(h: &Host) -> &'static str {
     if has("ipp") || has("printer") || has("uscan") || has("upnp-printer") {
         return "printer";
     }
+    // Kagaz on a computer, listed as a screen (Cast): a computer.
+    if model == "kagaz" {
+        return "computer";
+    }
     if has("onvif") || h.open.contains(&2020) {
         return "camera";
     }
     // What a closer look's ports say (look_closer).
-    if h.open.iter().any(|p| [9100, 631, 515].contains(p)) {
+    // A TV takes print jobs' ports too (LG's webOS keeps 515 open).
+    let tv = has("googlecast") || has("airplay") || has("upnp-tv") || has("androidtvremote2") || h.open.contains(&8008) || h.open.contains(&8009);
+    if !tv && h.open.iter().any(|p| [9100, 631, 515].contains(p)) {
         return "printer";
     }
     if h.open.contains(&1400) {
@@ -307,7 +552,7 @@ pub fn guess(h: &Host) -> &'static str {
     if has("sonos") || has("spotify-connect") || has("raop") && !has("airplay") || any(&["speaker", "echo", "homepod", "soundbar"]) {
         return "speaker";
     }
-    if any(&["playstation", "xbox", "nintendo", "switch"]) || maker == "Nintendo" {
+    if any(&["playstation", "xbox", "nintendo"]) || maker == "Nintendo" {
         return "console";
     }
     if has("adisk") || any(&["nas", "diskstation", "synology", "wd my"]) || maker == "Synology" {
@@ -381,61 +626,185 @@ pub const SERVICES: &[(u16, &str)] = &[
     (21, "FTP"),
     (23, "Telnet"),
     (62078, "iPhone or iPad sync"),
+    (135, "Windows remote calls"),
+    (5357, "Windows network discovery"),
+    (3283, "Apple Remote Desktop"),
+    (5555, "Android debugging (adb)"),
+    (8000, "web page"),
+    (8081, "web page"),
+    (8888, "web page"),
+    (3000, "web page"),
+    (9000, "web page"),
+    (5001, "NAS (https)"),
+    (9090, "web console (Cockpit)"),
+    (8384, "Syncthing"),
+    (8096, "Jellyfin"),
+    (1080, "SOCKS proxy"),
+    (3128, "web proxy"),
+    (8118, "web proxy (Privoxy)"),
+    (9050, "Tor (SOCKS proxy)"),
+    (9150, "Tor Browser (SOCKS proxy)"),
+    (2049, "NFS file sharing"),
+    (25, "mail (SMTP)"),
+    (3306, "MySQL database"),
+    (5432, "PostgreSQL database"),
+    (6379, "Redis"),
+    (11434, "Ollama (AI models)"),
+    (7236, "Miracast"),
 ];
 
-/// What a closer look found: every port of [`SERVICES`] that took a
-/// connection, its web page's title and server, and the guess again.
+/// What a closer look found: the device again, its ports each with what
+/// answers there, its web page's title and server.
 #[derive(Debug, Clone, Serialize)]
 pub struct Closer {
     pub host: Host,
+    /// (port, what answers there), as [`Host::ports`] says it.
     pub services: Vec<(u16, String)>,
     pub title: Option<String>,
     pub server: Option<String>,
+    /// How many ports were knocked on.
+    pub checked: u32,
 }
 
 /// Ask one device what it is: knock on every port of [`SERVICES`] at once,
-/// read its web page's title and Server line, and guess again with all of
-/// it. Only this device's address, a couple of seconds.
-pub fn look_closer(mut h: Host) -> Closer {
-    let targets: Vec<(Ipv4Addr, u16)> = SERVICES.iter().map(|(p, _)| (h.ip, *p)).collect();
-    let mut open: Vec<u16> = knock(targets, Duration::from_millis(1200)).into_iter().filter_map(|(_, p)| p).collect();
+/// ask each one that takes a connection what it is (an SSH greeting, a web
+/// page's title and server), and guess again with all of it. A couple of
+/// seconds.
+pub fn look_closer(h: Host) -> Closer {
+    let ports: Vec<u16> = SERVICES.iter().map(|(p, _)| *p).collect();
+    closer(h, ports, Duration::from_millis(1200))
+}
+
+/// Every port of one device, 1 to 65535, each that takes a connection asked
+/// what it is. Several seconds on a computer, half a minute on a phone.
+pub fn every_port(h: Host) -> Closer {
+    closer(h, (1..=65535).collect(), Duration::from_millis(900))
+}
+
+fn closer(mut h: Host, ports: Vec<u16>, timeout: Duration) -> Closer {
+    let checked = ports.len() as u32;
+    let targets: Vec<(Ipv4Addr, u16)> = ports.into_iter().map(|p| (h.ip, p)).collect();
+    let mut open: Vec<u16> = knock(targets, timeout).into_iter().filter_map(|(_, p)| p).collect();
     open.sort();
     open.dedup();
-    let mut title = None;
-    let mut server = None;
-    for (port, https) in [(80, false), (8080, false), (443, true), (8443, true)] {
-        if !open.contains(&port) || title.is_some() {
-            continue;
-        }
-        let url = format!("{}://{}:{}/", if https { "https" } else { "http" }, h.ip, port);
-        let agent = ureq::AgentBuilder::new().timeout(Duration::from_millis(1500)).redirects(2).build();
-        let resp = match agent.get(&url).call() {
-            Ok(r) => r,
-            Err(ureq::Error::Status(_, r)) => r,
-            Err(_) => continue,
-        };
-        if server.is_none() {
-            server = resp.header("server").map(str::to_string).filter(|s| !s.is_empty());
-        }
-        let mut body = String::new();
-        let _ = resp.into_reader().take(64 * 1024).read_to_string(&mut body);
-        title = page_title(&body);
+    // Each asked at once, a few dozen at a time.
+    let ip = h.ip;
+    let mut found: Vec<Port> = Vec::new();
+    for group in open.chunks(48) {
+        found.extend(std::thread::scope(|s| {
+            let asked: Vec<_> = group.iter().map(|p| s.spawn(move || identify(ip, *p))).collect();
+            asked.into_iter().filter_map(|t| t.join().ok()).collect::<Vec<_>>()
+        }));
     }
+    let web = found.iter().find(|p| p.what.starts_with("web page") && p.detail.is_some());
+    let title = web.and_then(|p| p.detail.clone()).filter(|d| !d.starts_with("server: "));
+    let server = found
+        .iter()
+        .filter_map(|p| p.detail.as_deref())
+        .find_map(|d| d.split(" · ").find_map(|x| x.strip_prefix("server: ")))
+        .map(str::to_string);
     for p in &open {
         if !h.open.contains(p) {
             h.open.push(*p);
         }
     }
     h.open.sort();
-    if h.model.is_none() {
+    // What was heard replaces the well-known guess; ports that did not
+    // answer this time stay as they were.
+    for p in found {
+        h.ports.retain(|q| q.port != p.port);
+        h.ports.push(p);
+    }
+    label_ports(&mut h);
+    // A page's title names a gadget ("Smart Plug"), not a computer's
+    // own pages.
+    if h.model.is_none() && h.os.is_none() && !h.open.iter().any(|p| [22, 3389, 5900, 445].contains(p)) {
         h.model = title.clone();
     }
-    h.kind = guess(&h).to_string();
-    let services = open
-        .iter()
-        .filter_map(|p| SERVICES.iter().find(|(q, _)| q == p).map(|(q, w)| (*q, w.to_string())))
-        .collect();
-    Closer { host: h, services, title, server }
+    if !h.this_device {
+        h.kind = guess(&h).to_string();
+        h.os = os_of(&Host { os: None, ..h.clone() }).or(h.os.take());
+        if h.kind == "unknown" && matches!(h.os.as_deref().map(os_family), Some("Windows" | "macOS" | "Linux")) {
+            h.kind = "computer".into();
+        }
+    }
+    let services = h.ports.iter().map(|p| (p.port, p.what.clone())).collect();
+    Closer { host: h, services, title, server, checked }
+}
+
+/// What answers on one port: a service that speaks first (SSH, VNC, FTP,
+/// mail) by what it says, else a web page by its title (http, then https
+/// with whatever certificate it shows), else the port's well-known use.
+/// Ports whose service waits for its own kind of hello are named by number.
+fn identify(ip: Ipv4Addr, port: u16) -> Port {
+    let known = service_name(port);
+    let named = |what: &str, detail: Option<String>| Port { port, what: what.into(), detail };
+    if matches!(port, 53 | 135 | 139 | 445 | 554 | 8554 | 3389 | 5060 | 1883 | 62078 | 6668 | 9100 | 515 | 2049 | 1080 | 9050 | 9150 | 5432 | 3306 | 6379) {
+        return named(known.unwrap_or("unknown"), None);
+    }
+    if let Some(line) = greeting(ip, port, Duration::from_millis(700)) {
+        let what = if line.starts_with("SSH-") {
+            "SSH"
+        } else if line.starts_with("RFB ") {
+            "VNC screen sharing"
+        } else if line.starts_with("220") {
+            known.unwrap_or("FTP or mail")
+        } else {
+            known.unwrap_or("unknown")
+        };
+        return named(what, Some(line));
+    }
+    // https first where it is the custom; a plain request that an https
+    // port turns away ("The plain HTTP request was sent to HTTPS port") is
+    // asked again over https.
+    let order = if matches!(port, 443 | 8443 | 5001 | 9443) { [true, false] } else { [false, true] };
+    for https in order {
+        let Some((title, server)) = web_page(ip, port, https) else { continue };
+        if !https && title.as_deref().is_some_and(|t| t.to_ascii_lowercase().contains("https")) {
+            if let Some((t, s)) = web_page(ip, port, true) {
+                return named("web page (https)", web_detail(t, s));
+            }
+        }
+        // A port with a use of its own that answers over http (AirPlay,
+        // Cast, media sharing) keeps that name.
+        let upnp = server.as_deref().is_some_and(|s| s.contains("UPnP") || s.contains("DLNA"));
+        let what = match known {
+            Some(k) if !k.starts_with("web page") => k,
+            _ if upnp => "media sharing and control (UPnP)",
+            _ if https => "web page (https)",
+            _ => "web page",
+        };
+        return named(what, web_detail(title, server));
+    }
+    named(known.unwrap_or("unknown"), None)
+}
+
+/// "<title> · server: <server>", whichever there are.
+fn web_detail(title: Option<String>, server: Option<String>) -> Option<String> {
+    match (title, server) {
+        (Some(t), Some(s)) => Some(format!("{t} · server: {s}")),
+        (Some(t), None) => Some(t),
+        (None, Some(s)) => Some(format!("server: {s}")),
+        (None, None) => None,
+    }
+}
+
+/// A web page's title and server line, when the port serves one.
+fn web_page(ip: Ipv4Addr, port: u16, https: bool) -> Option<(Option<String>, Option<String>)> {
+    let mut agent = ureq::AgentBuilder::new().timeout(Duration::from_millis(1500)).redirects(2);
+    if https {
+        agent = agent.tls_config(crate::remote::reach::any_certificate_tls()?);
+    }
+    let url = format!("{}://{}:{}/", if https { "https" } else { "http" }, ip, port);
+    let resp = match agent.build().get(&url).call() {
+        Ok(r) => r,
+        Err(ureq::Error::Status(_, r)) => r,
+        Err(_) => return None,
+    };
+    let server = resp.header("server").map(str::to_string).filter(|s| !s.is_empty());
+    let mut body = String::new();
+    let _ = resp.into_reader().take(64 * 1024).read_to_string(&mut body);
+    Some((page_title(&body), server))
 }
 
 /// A page's <title>, its entities and spacing tidied.
@@ -476,24 +845,60 @@ fn knock_all(nets: &[(Ipv4Addr, u8)], timeout: Duration) -> Vec<(Ipv4Addr, Vec<u
     out.into_iter().map(|(ip, p)| (ip, p.into_iter().collect())).collect()
 }
 
-/// Every knock at once from one thread: non-blocking connections, a few
-/// hundred at a time, each batch waited on together (poll). In the phone's
-/// app a hundred threads knocking beside the other searches finished only
-/// part of the network (2026-11-22); this needs none. (host, Some(port))
-/// for a connection taken, (host, None) for one refused.
+/// Every knock from one thread: non-blocking connections, up to about a
+/// thousand under way at once, each new one started as another ends
+/// (refused, taken, or past `timeout`), all waited on together (poll). In
+/// the phone's app a hundred knocking threads beside the other searches
+/// finished only part of the network (2026-11-22); this needs none, and
+/// keeps a whole device's 65535 ports from going out in one burst (most of
+/// which were lost). (host, Some(port)) for a connection taken, (host, None)
+/// for one refused.
 #[cfg(unix)]
 fn knock(targets: Vec<(Ipv4Addr, u16)>, timeout: Duration) -> Vec<(Ipv4Addr, Option<u16>)> {
+    // On Android each connect goes by the system's network service (about
+    // 1.5 ms each, one after another): a whole device's ports took 99 s
+    // from one thread. Shared among a thread per core, a few at most.
+    let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).min(8);
+    if targets.len() < 1024 || threads < 2 {
+        return knock_poll(targets, timeout, 1);
+    }
+    let mut shards: Vec<Vec<(Ipv4Addr, u16)>> = vec![Vec::new(); threads];
+    for (i, t) in targets.into_iter().enumerate() {
+        shards[i % threads].push(t);
+    }
+    std::thread::scope(|s| {
+        let running: Vec<_> = shards.into_iter().map(|shard| s.spawn(move || knock_poll(shard, timeout, threads))).collect();
+        running.into_iter().flat_map(|t| t.join().unwrap_or_default()).collect()
+    })
+}
+
+/// One thread's share of a knock, `of` sharing the open-file limit.
+#[cfg(unix)]
+fn knock_poll(targets: Vec<(Ipv4Addr, u16)>, timeout: Duration, of: usize) -> Vec<(Ipv4Addr, Option<u16>)> {
     use socket2::{Domain, Socket, Type};
     use std::os::fd::AsRawFd;
     let mut found = Vec::new();
-    // All at once where the open-file limit allows (a phone's app has
-    // 32768; a terminal often 1024): batches each wait the whole timeout.
     let mut limit = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
-    let soft = if unsafe { libc::getrlimit(libc::RLIMIT_NOFILE, &mut limit) } == 0 { limit.rlim_cur as usize } else { 1024 };
-    let size = soft.saturating_sub(256).clamp(128, 2048);
-    for batch in targets.chunks(size) {
-        let mut open: Vec<(Socket, Ipv4Addr, u16)> = Vec::new();
-        for &(host, port) in batch {
+    let mut soft = 1024;
+    if unsafe { libc::getrlimit(libc::RLIMIT_NOFILE, &mut limit) } == 0 {
+        soft = limit.rlim_cur as usize;
+        // A terminal often allows 1024 open files; raise it to 4096 where
+        // the hard limit lets (a phone's app has 32768).
+        if limit.rlim_cur < 4096 && limit.rlim_max > limit.rlim_cur {
+            let raised = libc::rlimit { rlim_cur: limit.rlim_max.min(4096), rlim_max: limit.rlim_max };
+            if unsafe { libc::setrlimit(libc::RLIMIT_NOFILE, &raised) } == 0 {
+                soft = raised.rlim_cur as usize;
+            }
+        }
+    }
+    // About 1100 under way in all: more at once loses some (a laptop's
+    // 3800 missed two of a computer's three open ports).
+    let window = (soft.saturating_sub(256).min(1100) / of.max(1)).max(64);
+    let mut queue = targets.into_iter();
+    let mut open: Vec<(Socket, Ipv4Addr, u16, Instant)> = Vec::new();
+    loop {
+        while open.len() < window {
+            let Some((host, port)) = queue.next() else { break };
             let Ok(sock) = Socket::new(Domain::IPV4, Type::STREAM, None) else { continue };
             if sock.set_nonblocking(true).is_err() {
                 continue;
@@ -502,43 +907,39 @@ fn knock(targets: Vec<(Ipv4Addr, u16)>, timeout: Duration) -> Vec<(Ipv4Addr, Opt
             match sock.connect(&addr.into()) {
                 Ok(()) => found.push((host, Some(port))),
                 Err(e) if e.raw_os_error() == Some(libc::EINPROGRESS) || e.kind() == std::io::ErrorKind::WouldBlock => {
-                    open.push((sock, host, port))
+                    open.push((sock, host, port, Instant::now()))
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::ConnectionRefused => found.push((host, None)),
                 Err(_) => {}
             }
         }
-        let deadline = Instant::now() + timeout;
-        while !open.is_empty() {
-            let left = deadline.saturating_duration_since(Instant::now());
-            if left.is_zero() {
-                break;
-            }
-            let mut fds: Vec<libc::pollfd> = open
-                .iter()
-                .map(|(s, _, _)| libc::pollfd { fd: s.as_raw_fd(), events: libc::POLLOUT, revents: 0 })
-                .collect();
-            let n = unsafe { libc::poll(fds.as_mut_ptr(), fds.len() as libc::nfds_t, left.as_millis().max(1) as libc::c_int) };
-            if n <= 0 {
-                if n < 0 && std::io::Error::last_os_error().kind() == std::io::ErrorKind::Interrupted {
-                    continue;
-                }
-                break;
-            }
-            let mut still = Vec::with_capacity(open.len());
-            for ((sock, host, port), fd) in open.into_iter().zip(fds) {
-                if fd.revents == 0 {
-                    still.push((sock, host, port));
-                    continue;
-                }
-                match sock.take_error() {
-                    Ok(None) => found.push((host, Some(port))),
-                    Ok(Some(e)) if e.kind() == std::io::ErrorKind::ConnectionRefused => found.push((host, None)),
-                    _ => {}
-                }
-            }
-            open = still;
+        if open.is_empty() {
+            break;
         }
+        let mut fds: Vec<libc::pollfd> = open
+            .iter()
+            .map(|(s, _, _, _)| libc::pollfd { fd: s.as_raw_fd(), events: libc::POLLOUT, revents: 0 })
+            .collect();
+        let n = unsafe { libc::poll(fds.as_mut_ptr(), fds.len() as libc::nfds_t, 20) };
+        if n < 0 && std::io::Error::last_os_error().kind() != std::io::ErrorKind::Interrupted {
+            break;
+        }
+        let now = Instant::now();
+        let mut still = Vec::with_capacity(open.len());
+        for ((sock, host, port, at), fd) in open.into_iter().zip(fds) {
+            if fd.revents == 0 {
+                if now.duration_since(at) < timeout {
+                    still.push((sock, host, port, at));
+                }
+                continue;
+            }
+            match sock.take_error() {
+                Ok(None) => found.push((host, Some(port))),
+                Ok(Some(e)) if e.kind() == std::io::ErrorKind::ConnectionRefused => found.push((host, None)),
+                _ => {}
+            }
+        }
+        open = still;
     }
     found
 }
@@ -550,7 +951,8 @@ fn knock(targets: Vec<(Ipv4Addr, u16)>, timeout: Duration) -> Vec<(Ipv4Addr, Opt
     use std::sync::{Arc, Mutex};
     let targets = Arc::new(Mutex::new(targets));
     let (tx, rx) = mpsc::channel();
-    for _ in 0..96 {
+    let threads = (targets.lock().map(|t| t.len()).unwrap_or(0) / 8).clamp(16, 512);
+    for _ in 0..threads {
         let (targets, tx) = (targets.clone(), tx.clone());
         std::thread::spawn(move || loop {
             let next = targets.lock().ok().and_then(|mut t| t.pop());
@@ -581,6 +983,10 @@ struct Announced {
     /// "<host>.local." without the decoration.
     host: Option<String>,
     model: Option<String>,
+    /// Kagaz on another computer, while it is a screen: its system and
+    /// whether it is a laptop.
+    os: Option<String>,
+    form: Option<String>,
 }
 
 fn mdns_all(wait: Duration) -> HashMap<Ipv4Addr, Announced> {
@@ -638,6 +1044,12 @@ fn mdns_all(wait: Duration) -> HashMap<Ipv4Addr, Announced> {
                             }
                             if a.model.is_none() {
                                 a.model = txt("md").or_else(|| txt("model")).or_else(|| txt("am")).or_else(|| txt("ty"));
+                            }
+                            if let Some(o) = txt("kz-os") {
+                                a.os = Some(o);
+                            }
+                            if let Some(f) = txt("kz-form") {
+                                a.form = Some(f);
                             }
                         }
                     }
@@ -1236,6 +1648,41 @@ mod tests {
         assert_eq!(guess(&named("LGwebOSTV-1", "mdns-host")), "tv");
         assert_eq!(guess(&named("shelly1-ab12", "mdns-host")), "smart-home");
         assert_eq!(guess(&Host { services: vec!["android".into()], ..Default::default() }), "phone");
+    }
+
+    #[test]
+    fn systems_and_ports_say_what_it_is() {
+        assert_eq!(os_in("SSH-2.0-OpenSSH_10.2p1 Ubuntu-2ubuntu3.8"), Some("Ubuntu"));
+        assert_eq!(os_in("SSH-2.0-OpenSSH_for_Windows_9.5"), Some("Windows"));
+        assert_eq!(os_in("server: Microsoft-IIS/10.0"), Some("Windows"));
+        assert_eq!(os_in("SSH-2.0-dropbear_2022.83"), None);
+        assert_eq!(os_family("Ubuntu 26.04"), "Linux");
+        let with = |open: &[u16], services: &[&str]| Host {
+            open: open.to_vec(),
+            services: services.iter().map(|s| s.to_string()).collect(),
+            ..Default::default()
+        };
+        // A TV keeps a printing port open: still a TV.
+        assert_eq!(guess(&with(&[515, 8008, 8009], &[])), "tv");
+        assert_eq!(guess(&with(&[515], &[])), "printer");
+        // Windows by its own ports; a NetBIOS name without Avahi.
+        let mut pc = with(&[135, 445], &["netbios"]);
+        pc.kind = guess(&pc).into();
+        assert_eq!(os_of(&pc).as_deref(), Some("Windows"));
+        // Kagaz on a computer, a screen over Cast: a computer, its port named.
+        let mut k = with(&[8009], &["googlecast"]);
+        k.model = Some("Kagaz".into());
+        assert_eq!(guess(&k), "computer");
+        label_ports(&mut k);
+        assert_eq!(k.ports[0].what, "Kagaz screen");
+        // An SSH greeting names the system.
+        let mut b = with(&[22], &["mdns-host"]);
+        b.ports.push(Port { port: 22, what: "SSH".into(), detail: Some("SSH-2.0-OpenSSH_9.6p1 Ubuntu-3ubuntu13".into()) });
+        assert_eq!(os_of(&b).as_deref(), Some("Ubuntu"));
+        // A page title is no game console's name.
+        let mut t = with(&[8080], &[]);
+        t.name = Some("LightSwitch Panel".into());
+        assert_ne!(guess(&t), "console");
     }
 
     #[test]

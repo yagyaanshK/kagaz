@@ -1,6 +1,7 @@
-//! This computer as a screen: while turned on (the TVs page, off until
-//! then), Kagaz lists this computer on the network as a Google Cast
-//! screen and as a Miracast one; each sender (Kagaz on a phone or another
+//! This computer as a screen: while turned on (the TVs page; off at each
+//! start of Kagaz unless Settings says to turn it on then), Kagaz lists
+//! this computer on the network as a Google Cast screen and as a Miracast
+//! one; each sender (Kagaz on a phone or another
 //! computer over Cast, Windows' own Cast over Miracast) is asked about
 //! first in a small window on top (Allow or Decline, no answer in 30
 //! seconds is Decline); its picture opens in a window of its own (the
@@ -19,7 +20,10 @@ use std::time::{Duration, Instant};
 use tauri::ipc::{Channel, InvokeResponseBody};
 use tauri::{AppHandle, Emitter, Manager};
 
+/// What versions before 2026-11-22 kept the switch in (cleared at start).
 const SETTING: &str = "screen-here";
+/// Settings' "Show screens here when Kagaz starts" (prefs.rs).
+const AT_START: &str = "screen_here_at_start";
 const PORT: u16 = 8009;
 const ASK: &str = "here-ask";
 const VIEW: &str = "here-view";
@@ -80,10 +84,12 @@ pub fn here_status() -> Status {
     status()
 }
 
-/// Turns it on or off (and remembers which).
+/// Turns it on or off, until Kagaz closes: not remembered, so this
+/// computer is listed as a screen only after the person turns it on in this
+/// run, or when Settings says to at each start (2026-11-22: left on once
+/// in a test, it was listed after every start).
 #[tauri::command]
 pub fn here_set(app: AppHandle, on: bool) -> Status {
-    let _ = kagaz_core::paths::set_setting(SETTING, on.then_some("on"));
     if on {
         start(&app);
     } else {
@@ -113,9 +119,14 @@ pub fn here_stop() {
     END_SESSION.store(true, Ordering::SeqCst);
 }
 
-/// At Kagaz's start: on again only if it was left on.
+/// At Kagaz's start: on only when the person chose that in Settings
+/// ("screen_here_at_start", off unless set). Clears the switch's state that
+/// versions before 2026-11-22 remembered and turned back on by itself.
 pub fn resume(app: &AppHandle) {
-    if kagaz_core::paths::setting(SETTING).as_deref() == Some("on") {
+    if kagaz_core::paths::setting(SETTING).is_some() {
+        let _ = kagaz_core::paths::set_setting(SETTING, None);
+    }
+    if kagaz_core::paths::setting(AT_START).as_deref() == Some("on") {
         start(app);
     }
 }
