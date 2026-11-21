@@ -68,6 +68,13 @@ async fn discover(timeout: u64) -> Result<Vec<Device>, String> {
     .await
 }
 
+/// Everything on this device's networks for Home's "Found on your
+/// network": each address, what it calls itself and what it probably is.
+#[tauri::command]
+async fn nearby_sweep(seconds: f32) -> Result<Vec<kagaz_core::nearby::Host>, String> {
+    blocking(move || Ok(kagaz_core::nearby::sweep(Duration::from_secs_f32(seconds.clamp(2.0, 10.0))))).await
+}
+
 #[tauri::command]
 async fn explain_device(device: Device) -> Result<Explanation, String> {
     blocking(move || {
@@ -1986,6 +1993,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             discover,
+            nearby_sweep,
             explain_device,
             scan_capabilities,
             choose_save_path,
@@ -2078,6 +2086,7 @@ pub fn run() {
             printers::printer_state,
             fans::fans_saved,
             fans::fans_scan,
+            fans::fans_bluetooth_ready,
             fans::fan_add,
             fans::fan_forget,
             fans::fan_rename,

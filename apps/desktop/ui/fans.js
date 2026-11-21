@@ -593,5 +593,12 @@ const KagazFans = (() => {
     render();
   });
 
-  return { show, rescan, homeWords, words };
+  // Home's Found on your network: this fan's Add, with its name ready.
+  function addFound(x, suggested) {
+    if (!found.some((y) => y.id === x.id)) found.push(x);
+    render();
+    add(x, suggested);
+  }
+
+  return { show, rescan, homeWords, words, addFound };
 })();

@@ -78,8 +78,13 @@ async fn sighting(p: &Peripheral) -> Option<Sighting> {
     })
 }
 
-/// Fans advertising within reach, after listening for `seconds`.
-pub fn scan(seconds: f32) -> Result<Vec<Sighting>, FanError> {
+/// Fans advertising within reach, after listening for `seconds`. Without
+/// `ask`, nothing the system would ask the person first: on Apple's systems
+/// the first use of Bluetooth asks for permission, so there it is skipped.
+pub fn scan(seconds: f32, ask: bool) -> Result<Vec<Sighting>, FanError> {
+    if !ask && cfg!(any(target_os = "macos", target_os = "ios")) {
+        return Ok(Vec::new());
+    }
     runtime()?.block_on(async {
         let adapter = adapter().await?;
         adapter

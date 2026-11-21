@@ -34,8 +34,10 @@ pub struct Heard {
 
 /// The phone's Bluetooth, as the app reaches it.
 pub trait Radio: Send + Sync {
-    /// Named devices heard advertising over `seconds`.
-    fn scan(&self, seconds: f32) -> Result<Vec<Heard>, FanError>;
+    /// Named devices heard advertising over `seconds`; without `ask`, no
+    /// question to the person (permission, turning Bluetooth on): an error
+    /// instead.
+    fn scan(&self, seconds: f32, ask: bool) -> Result<Vec<Heard>, FanError>;
     /// On the fan's kept connection (opened when there is none): write
     /// `command` (when given) to the command characteristic, then read the
     /// state characteristic.
@@ -59,9 +61,9 @@ fn radio() -> Result<&'static dyn Radio, FanError> {
 }
 
 /// Fans advertising within reach, after listening for `seconds`.
-pub fn scan(seconds: f32) -> Result<Vec<Sighting>, FanError> {
+pub fn scan(seconds: f32, ask: bool) -> Result<Vec<Sighting>, FanError> {
     let mut out: Vec<Sighting> = Vec::new();
-    for h in radio()?.scan(seconds.clamp(1.0, 60.0))? {
+    for h in radio()?.scan(seconds.clamp(1.0, 60.0), ask)? {
         if let Some((id, series)) = parse_ble_name(&h.name) {
             if !out.iter().any(|o| o.id == id) {
                 out.push(Sighting {

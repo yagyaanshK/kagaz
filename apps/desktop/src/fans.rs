@@ -82,11 +82,26 @@ pub fn fans_saved() -> Result<Fans, String> {
 /// so a fan is asked only when `fresh` (the person pressed Look again) or
 /// when its last reading is more than ten minutes old.
 #[tauri::command]
-pub async fn fans_scan(seconds: f32, fresh: Option<bool>) -> Result<Scan, String> {
+pub async fn fans_bluetooth_ready() -> bool {
+    #[cfg(target_os = "android")]
+    {
+        super::mobile::jvm_ble_allowed()
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        true
+    }
+}
+
+/// Look for fans; `quiet` asks the person nothing (no Bluetooth permission
+/// or "turn on Bluetooth?"), for Home's look around the network.
+#[tauri::command]
+pub async fn fans_scan(seconds: f32, fresh: Option<bool>, quiet: Option<bool>) -> Result<Scan, String> {
     let fresh = fresh.unwrap_or(false);
+    let ask = !quiet.unwrap_or(false);
     blocking(move || {
         let _radio = RADIO.lock().map_err(|e| e.to_string())?;
-        let (found, trouble) = fans::scan(seconds.clamp(1.0, 30.0));
+        let (found, trouble) = fans::scan_with(seconds.clamp(1.0, 30.0), ask);
         let known = update(|f| {
             f.note_seen(&found);
             Ok(())

@@ -81,8 +81,16 @@
   <main id="main">
     <!-- Home (home.js): what needs a look first, favourites, then every
          device by kind; Add a device starts from a kind, then a brand. -->
-    <section id="home" class="pane hidden">
+    <section id="home" class="pane hidden" data-refresh>
       <div id="home-chips" class="status-chips" role="list" aria-label="At a glance"></div>
+      <!-- Found on your network (nearby.js): devices here Kagaz can use and
+           are not added yet, and a way to everything else that answered. -->
+      <section id="home-nearby" class="nearby-card hidden" aria-labelledby="home-nearby-title">
+        <div class="nearby-progress hidden" id="home-nearby-progress" role="progressbar" aria-label="Looking on this network"></div>
+        <h2 id="home-nearby-title" class="section-title">Found on your network</h2>
+        <p id="home-nearby-sub" class="muted small" role="status" aria-live="polite"></p>
+        <ul id="home-nearby-list" class="nearby-list"></ul>
+      </section>
       <div id="home-favs-box" class="hidden">
         <div class="section-head"><h2 class="section-title">Favourites</h2><button id="home-fav-edit" type="button" class="link">Edit</button></div>
         <div id="home-favs" class="home-tiles"></div>
@@ -96,6 +104,20 @@
       </div>
       <button id="home-add" type="button" class="add-device"><span class="ic" data-icon="plus"></span><span>Add a device</span></button>
     </section>
+
+    <!-- Everything on your network (nearby.js): what Kagaz can add, what was
+         hidden from Home, and every other address that answered. -->
+    <section id="nearby" class="pane hidden" data-title="On your network" data-refresh>
+      <div class="nearby-progress hidden" id="nearby-progress" role="progressbar" aria-label="Looking on this network"></div>
+      <p id="nearby-note" class="muted small" role="status" aria-live="polite"></p>
+      <h3 id="nearby-usable-head" class="list-head hidden">Kagaz can use</h3>
+      <ul id="nearby-usable" class="nearby-list"></ul>
+      <h3 id="nearby-hidden-head" class="list-head hidden">Hidden from Home</h3>
+      <ul id="nearby-hidden" class="nearby-list"></ul>
+      <h3 id="nearby-others-head" class="list-head hidden">Everything else</h3>
+      <ul id="nearby-others" class="nearby-list"></ul>
+    </section>
+    <div id="nearby-snack" class="tv-toast nearby-snack hidden" role="status" aria-live="polite"></div>
 
     <section id="add" class="pane hidden">
       <div class="pane-head">
@@ -1007,6 +1029,7 @@
   <script src="settings.js"></script>
   <script src="prefs-android.js"></script>
   <script src="home.js"></script>
+  <script src="nearby.js"></script>
   <script src="shell.js"></script>
 </body>
 </html>

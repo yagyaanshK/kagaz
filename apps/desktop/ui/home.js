@@ -331,6 +331,7 @@ const KagazHome = (() => {
     $("home-empty").classList.toggle("hidden", kinds.length > 0);
     $("home-all-title").textContent = kinds.length ? "All devices" : "Your devices";
     tellShell(kinds);
+    if (typeof KagazNearby !== "undefined") KagazNearby.homeShown();
 
     // The added printers' states; their addresses are refreshed by a quiet
     // search now and then (a router can hand them new ones).

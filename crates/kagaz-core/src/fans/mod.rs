@@ -99,8 +99,15 @@ impl Reach {
 /// adapter, turned off) is returned apart, so a Wi-Fi-only computer still
 /// gets its list.
 pub fn scan(seconds: f32) -> (Vec<Found>, Option<FanError>) {
+    scan_with(seconds, true)
+}
+
+/// [`scan`], where `ask` false never asks the person anything (a phone's
+/// Bluetooth permission, turning Bluetooth on): Home's look around the
+/// network uses Bluetooth only when it is already allowed and on.
+pub fn scan_with(seconds: f32, ask: bool) -> (Vec<Found>, Option<FanError>) {
     let wifi = std::thread::spawn(move || udp::listen(seconds));
-    let ble = ble::scan(seconds);
+    let ble = ble::scan(seconds, ask);
     let mut found: Vec<Found> = Vec::new();
     let mut trouble = None;
     match ble {

@@ -79,14 +79,25 @@ object KagazBle {
         return latch.await(2, TimeUnit.MINUTES)
     }
 
-    private fun adapter(context: Context): BluetoothAdapter {
+    /** Permission given and Bluetooth on: a scan would ask nothing. */
+    fun ready(context: Context): Boolean {
+        if (!allowed(context)) return false
+        val manager = context.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
+        return manager?.adapter?.isEnabled == true
+    }
+
+    // `mayAsk`: may the person be asked (permission, turning Bluetooth on)?
+    // Home's look around the network never asks; it fails quietly instead.
+    private fun adapter(context: Context, mayAsk: Boolean = true): BluetoothAdapter {
         if (!allowed(context)) {
+            if (!mayAsk) throw Failed("denied", "Bluetooth permission not given")
             ask { it.requestPermissions(needed(), ASK_PERMISSION) }
             if (!allowed(context)) throw Failed("denied", "Bluetooth permission not given")
         }
         val manager = context.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
         val adapter = manager?.adapter ?: throw Failed("none", "this phone has no Bluetooth")
         if (!adapter.isEnabled) {
+            if (!mayAsk) throw Failed("off", "Bluetooth is turned off")
             // Android's own "Turn on Bluetooth?" question.
             @Suppress("DEPRECATION")
             ask { it.startActivityForResult(Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE), ASK_TURN_ON) }
@@ -108,8 +119,8 @@ object KagazBle {
     // ---- Listening for adverts
 
     /** Named devices heard over `millis`, as a JSON list. */
-    fun scan(context: Context, millis: Int): String = answer {
-        val scanner = adapter(context).bluetoothLeScanner ?: throw Failed("off", "Bluetooth is turned off")
+    fun scan(context: Context, millis: Int, mayAsk: Boolean = true): String = answer {
+        val scanner = adapter(context, mayAsk).bluetoothLeScanner ?: throw Failed("off", "Bluetooth is turned off")
         val heard = LinkedHashMap<String, JSONObject>()
         val callback = object : ScanCallback() {
             override fun onScanResult(callbackType: Int, result: ScanResult) {

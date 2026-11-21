@@ -714,7 +714,7 @@ function showCameras() {
 // device (each with its own settings). The sidebar (wide windows) and the
 // bottom bar (phones) switch between them; every kind's page has a way
 // back to Home.
-const PANES = ["empty", "home", "add", "settings", "tools", "picker", "detail", "cameras", "doorbell", "fans", "purifiers", "tvs", "society", "remote"];
+const PANES = ["empty", "home", "add", "settings", "tools", "picker", "detail", "cameras", "doorbell", "fans", "purifiers", "tvs", "society", "remote", "nearby"];
 let currentView = null;
 
 function selectCategory(cat) {
@@ -736,7 +736,8 @@ function selectCategory(cat) {
   document.querySelectorAll("#categories li[data-cat], #bottom-nav button").forEach((el) => {
     // On a phone's bar a page reached from Home keeps Home marked, as
     // Android's navigation bar does (it marked nothing, or Tools).
-    const bar = el.tagName === "BUTTON" && !["home", "tools", "settings"].includes(cat) ? "home" : cat;
+    // Everything on your network is Home's own page: Home stays marked.
+    const bar = cat === "nearby" || (el.tagName === "BUTTON" && !["home", "tools", "settings"].includes(cat)) ? "home" : cat;
     const on = el.dataset.cat === bar;
     el.classList.toggle("active", on);
     if (on) el.setAttribute("aria-current", "page");

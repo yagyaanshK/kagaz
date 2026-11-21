@@ -139,11 +139,16 @@ mod jvm {
 
     /// KagazBle.scan: "ok:" and a JSON list of the named devices heard, or
     /// "err:<code>:<detail>".
-    pub fn ble_scan(millis: i32) -> Result<String, String> {
+    pub fn ble_scan(millis: i32, ask: bool) -> Result<String, String> {
         call(|env, class| {
-            let out = env.call_static_method(class, "bleScan", "(I)Ljava/lang/String;", &[JValue::Int(millis)])?;
+            let out = env.call_static_method(class, "bleScan", "(IZ)Ljava/lang/String;", &[JValue::Int(millis), JValue::Bool(ask as u8)])?;
             text(env, out)
         })
+    }
+
+    /// KagazBle.allowed: may Kagaz look for Bluetooth devices now?
+    pub fn ble_allowed() -> Result<bool, String> {
+        call(|env, class| env.call_static_method(class, "bleAllowed", "()Z", &[])?.z())
     }
 
     /// KagazBle.exchange, on the kept connection to `address`: "ok:" and
@@ -215,6 +220,13 @@ pub fn secret_delete(name: &str) -> Result<(), String> {
     }
 }
 
+/// May Kagaz look for Bluetooth devices without asking anything first
+/// (permission given, Bluetooth on)?
+#[cfg(target_os = "android")]
+pub fn jvm_ble_allowed() -> bool {
+    jvm::ble_allowed().unwrap_or(false)
+}
+
 /// The phone's Bluetooth for the fans (kagaz-core `fans::ble` on Android),
 /// through KagazBle.kt.
 #[cfg(target_os = "android")]
@@ -252,14 +264,14 @@ fn fan_answer(out: Result<String, String>) -> Result<String, kagaz_core::fans::F
 
 #[cfg(target_os = "android")]
 impl kagaz_core::fans::ble::Radio for FanRadio {
-    fn scan(&self, seconds: f32) -> Result<Vec<kagaz_core::fans::ble::Heard>, kagaz_core::fans::FanError> {
+    fn scan(&self, seconds: f32, ask: bool) -> Result<Vec<kagaz_core::fans::ble::Heard>, kagaz_core::fans::FanError> {
         #[derive(Deserialize)]
         struct One {
             address: String,
             name: String,
             rssi: Option<i16>,
         }
-        let text = fan_answer(jvm::ble_scan((seconds * 1000.0) as i32))?;
+        let text = fan_answer(jvm::ble_scan((seconds * 1000.0) as i32, ask))?;
         let heard: Vec<One> =
             serde_json::from_str(&text).map_err(|e| kagaz_core::fans::FanError::Bluetooth(e.to_string()))?;
         Ok(heard

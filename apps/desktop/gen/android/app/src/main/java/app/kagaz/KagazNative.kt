@@ -86,9 +86,16 @@ object KagazNative {
     // ---- The fans' Bluetooth (KagazBle), from Rust's own threads.
 
     @JvmStatic
-    fun bleScan(millis: Int): String {
+    fun bleScan(millis: Int, ask: Boolean): String {
         val context = app ?: return "err:other:Android is not ready"
-        return KagazBle.scan(context, millis)
+        return KagazBle.scan(context, millis, ask)
+    }
+
+    /** May Kagaz look for Bluetooth devices now (permission given, Bluetooth on)? */
+    @JvmStatic
+    fun bleAllowed(): Boolean {
+        val context = app ?: return false
+        return KagazBle.ready(context)
     }
 
     @JvmStatic

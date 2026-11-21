@@ -30,7 +30,7 @@ const KagazShell = (() => {
     home: "Home", add: "Add a device", settings: "Settings", tools: "Tools",
     doorbell: "Doorbell", cameras: "Security cameras", print: "Printers & scanners",
     fans: "Fans", purifiers: "Air purifiers", tvs: "TVs & displays", society: "Society gate",
-    remote: "Computers & phones",
+    remote: "Computers & phones", nearby: "On your network",
   };
   // Places the navigation itself reaches: there, Back has nowhere to go
   // unless something is open inside the page.
