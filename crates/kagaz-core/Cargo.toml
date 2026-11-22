@@ -52,12 +52,19 @@ salsa20 = "0.10"
 # Pictures in the clipboard tests are made and read as PNG.
 png = "0.18"
 
-# USB printers and scanners: computers only (a phone has no such port use).
+# Computers only. USB printers and scanners (a phone has no such port use).
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 nusb = "0.2"
+# H.264 for screen mirroring to TVs (the same OpenH264 build from source).
+openh264 = { version = "0.9", default-features = false, features = ["source"] }
+# A Remote Desktop computer's sound through the system's own (on Android,
+# rdp/play_android.rs: cpal links AAudio, which Android 7 does not have).
+cpal = "0.17"
+
 # Remote Desktop sessions (IronRDP's parts, MIT or Apache-2.0), on
-# computers for now; the phone's viewer comes with step 2 of
-# docs/remote-connection.md.
+# computers and on Android (2026-11-22, the owner: as Microsoft's Windows
+# App does there); not on an iPhone yet.
+[target.'cfg(not(target_os = "ios"))'.dependencies]
 ironrdp-connector = "0.12"
 ironrdp-session = "0.13"
 ironrdp-blocking = "0.12"
@@ -74,14 +81,11 @@ ironrdp-cliprdr-format = "0.3"
 # decoded by OpenH264 (BSD-2-Clause), built into Kagaz from its source,
 # the owner's choice (2026-11-17).
 ironrdp-egfx = { version = "0.5", features = ["openh264-bundled"] }
-# H.264 for screen mirroring to TVs (the same OpenH264 build from source).
-openh264 = { version = "0.9", default-features = false, features = ["source"] }
 # The computer's sound: the library's channel for it and its decoders of
 # the plainer forms. Kagaz's own player (rdp/play.rs) plays it through
 # cpal (Apache-2.0) to the system's own sound, from a ring it shares with
 # the sound's own thread (ringbuf, MIT or Apache-2.0).
 ironrdp-rdpsnd = "0.11"
-cpal = "0.17"
 ringbuf = "0.5"
 # Windows starts its sound only for a viewer that also offers the channel
 # for redirected devices; Kagaz offers it with no device on it.
@@ -141,7 +145,7 @@ windows = { version = "0.62", features = [
 # A computer's sound packed as Opus is decoded by libopus (BSD-3-Clause),
 # built in from its source. That build does not cross to Windows from
 # Linux, so Kagaz on Windows takes the sound in its plainer forms.
-[target.'cfg(all(not(windows), not(any(target_os = "android", target_os = "ios"))))'.dependencies]
+[target.'cfg(all(not(windows), not(target_os = "ios")))'.dependencies]
 opus2 = { version = "0.4", features = ["bundled"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]

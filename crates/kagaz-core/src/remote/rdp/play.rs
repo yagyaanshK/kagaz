@@ -18,8 +18,8 @@
 //! little more.
 //!
 //! [`Player`] is the rest: decoding what the computer packed, the ring
-//! the blocks wait in, and the system's own sound (through cpal) taking
-//! from it on a thread of its own.
+//! the blocks wait in, and the system's own sound (through cpal; on Android
+//! AAudio, play_android.rs) taking from it on a thread of its own.
 
 use ironrdp_rdpsnd::codec::AudioDecoder;
 use ironrdp_rdpsnd::pdu::AudioFormat;
@@ -29,7 +29,9 @@ use ironrdp_rdpsnd::playout::stretch;
 use ringbuf::traits::{Consumer as _, Observer as _, Producer as _, Split as _};
 use ringbuf::{HeapCons, HeapProd, HeapRb};
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+#[cfg(not(target_os = "android"))]
+use std::sync::Mutex;
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
@@ -418,8 +420,11 @@ impl Player {
         // Short turns (a fiftieth of a second): what the system's sound
         // holds of its own plays late too, and left to itself it holds a
         // tenth of a second and more.
+        #[cfg(not(target_os = "android"))]
         let config =
             cpal::StreamConfig { channels: format.n_channels, sample_rate: rate, buffer_size: cpal::BufferSize::Fixed(rate / 50) };
+        #[cfg(target_os = "android")]
+        let config = android::OutConfig { channels: format.n_channels, sample_rate: rate };
         let thread = {
             let shared = shared.clone();
             let volume = self.volume.clone();
@@ -488,9 +493,17 @@ impl Drop for Player {
     }
 }
 
+// On Android, AAudio looked up when needed (Android 7 has none).
+#[cfg(target_os = "android")]
+#[path = "play_android.rs"]
+mod android;
+#[cfg(target_os = "android")]
+use android::speakers;
+
 /// Holds the way to the speakers for as long as the sound lasts (it cannot
 /// be handed between threads), and finds it again when it goes: earphones
 /// pulled out, the system's sound restarted.
+#[cfg(not(target_os = "android"))]
 fn speakers(config: &cpal::StreamConfig, fill: Fill, shared: &Arc<Shared>, volume: &Arc<AtomicU32>) {
     use cpal::traits::{DeviceTrait as _, HostTrait as _, StreamTrait as _};
     let fill = Arc::new(Mutex::new(fill));

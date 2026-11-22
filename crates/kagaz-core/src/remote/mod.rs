@@ -13,7 +13,7 @@ pub mod keys;
 pub mod link;
 pub mod pair;
 pub mod pattern;
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[cfg(not(target_os = "ios"))]
 pub mod rdp;
 pub mod reach;
 pub mod screen;

@@ -362,7 +362,7 @@ pub fn way_for(device: &Device) -> Option<Way> {
 }
 
 /// Does this build open Remote Desktop sessions?
-pub const RDP_HERE: bool = cfg!(not(any(target_os = "android", target_os = "ios")));
+pub const RDP_HERE: bool = cfg!(not(target_os = "ios"));
 
 /// Open a session at an address that answered (see [`super::reach`]).
 pub fn open(
@@ -376,13 +376,13 @@ pub fn open(
 ) -> Result<Session, OpenError> {
     match way.speaks {
         Speaks::Vnc => super::vnc::open(addr, sign_in, settings, timeout),
-        #[cfg(not(any(target_os = "android", target_os = "ios")))]
+        #[cfg(not(target_os = "ios"))]
         Speaks::Rdp => super::rdp::open(addr, sign_in, settings, trust, view, timeout),
-        #[cfg(any(target_os = "android", target_os = "ios"))]
+        #[cfg(target_os = "ios")]
         Speaks::Rdp => {
             let _ = (trust, view);
             Err(OpenError::Unsupported(
-                "Remote Desktop sessions are not on phones yet; a device that speaks VNC can be connected to".into(),
+                "Remote Desktop sessions are not on an iPhone yet; a device that speaks VNC can be connected to".into(),
             ))
         }
         Speaks::Ssh => Err(OpenError::Unsupported("SSH shows no screen".into())),
