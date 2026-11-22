@@ -488,6 +488,13 @@ struct SpeakerArgs {
     on: bool,
 }
 
+/// A Remote Desktop session's full screen: the phone's status and
+/// navigation bars hidden (a swipe in from the edge shows them for a
+/// moment), or shown again.
+pub fn immersive(app: &AppHandle, on: bool) -> Result<(), String> {
+    phone(app)?.run_mobile_plugin::<()>("immersive", SpeakerArgs { on }).map_err(|e| e.to_string())
+}
+
 /// Call sound on the loudspeaker (unless a headset is connected), or back
 /// to the phone's own choice.
 pub fn loudspeaker(app: &AppHandle, on: bool) -> Result<(), String> {

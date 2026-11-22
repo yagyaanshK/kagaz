@@ -1257,6 +1257,8 @@ dialog.ask.member-form { width: min(460px, calc(100vw - 32px)); max-height: calc
 [data-viewer] #column { grid-column: 1 / -1; }
 [data-viewer] #main { padding: 0 !important; display: flex; overflow: hidden; }
 [data-viewer] #remote { flex: 1 1 auto; display: flex; flex-direction: column; min-width: 0; min-height: 0; max-width: none; margin: 0; padding: 0; }
+/* Over the phone skin's room under each page: the screen goes to the bottom. */
+[data-viewer] #main > #remote { padding: 0; }
 /* The viewer's bar is Kagaz's green: told apart at a glance from the
    device's own screen under it, in full screen above all. */
 html[data-viewer] #bar { background: var(--accent); color: var(--accent-text); }
@@ -1270,7 +1272,10 @@ html[data-viewer] #bar .rc-chip.open svg { color: inherit; }
 .rc-stage { position: relative; flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; background: #16181a; outline: none; }
 .rc-stage.own-size { overflow: auto; align-items: flex-start; justify-content: flex-start; }
 .rc-stage:focus-visible { box-shadow: inset 0 0 0 1px var(--accent); }
-.rc-screen { display: block; flex: none; background: #000; touch-action: none; }
+.rc-screen { position: relative; display: block; flex: none; background: #000; touch-action: none; }
+/* The phone's keyboard up: the picture's top stays put (remote-view.js
+   moves it up only to keep the pointer in sight). */
+.rc-stage.typing { align-items: flex-start; }
 .bar-remote { display: inline-flex; align-items: center; gap: 4px; }
 .rc-chip { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; padding: 0 10px; margin-right: 4px; border-radius: 999px; border: 1px solid var(--line); font-size: var(--small, 13px); color: var(--muted); white-space: nowrap; }
 .rc-chip svg { width: 15px; height: 15px; }
@@ -1281,6 +1286,20 @@ html[data-viewer] #bar .rc-chip.open svg { color: inherit; }
 [data-layout="bar"][data-viewer] .bar-remote .bar-btn, [data-layout="bar"] .rc-chip-path { display: none; }
 /* + and − stay in a narrow window's bar: a phone's screen is small. */
 [data-layout="bar"][data-viewer] .bar-remote .bar-btn.rc-size { display: inline-flex; }
+/* A phone's full screen (remote-view.js): Kagaz's bars step aside, and a
+   small handle at the top of the picture keeps the tools. */
+html[data-rv-full] #bar, html[data-rv-full] #rv-touchbar, html[data-rv-full] #rv-banner { display: none !important; }
+.rc-float { position: absolute; top: 6px; left: 50%; z-index: 4; display: flex; align-items: center; gap: 2px; padding: 2px; transform: translateX(-50%); border-radius: 999px; background: rgba(18, 20, 22, 0.8); color: #fff; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35); transition: opacity 0.3s; touch-action: none; -webkit-user-select: none; user-select: none; }
+.rc-float.idle { opacity: 0.45; }
+.rc-float.hidden, .rc-float-tools.hidden { display: none; }
+html #rv-stage .rc-float button { display: inline-flex; align-items: center; justify-content: center; min-width: 44px; min-height: 40px; margin: 0; padding: 0; border: none !important; border-radius: 999px; background: none !important; box-shadow: none !important; color: inherit; }
+html #rv-stage .rc-float .rc-float-grip { min-width: 56px; min-height: 30px; }
+.rc-float button svg { width: 22px; height: 22px; }
+.rc-float .rc-float-grip svg { transition: transform 0.2s; }
+.rc-float[aria-expanded="true"] .rc-float-grip svg { transform: rotate(180deg); }
+html #rv-stage .rc-float button[aria-pressed="true"] { color: var(--accent); }
+html #rv-stage .rc-float button:disabled { opacity: 0.35; }
+.rc-float-tools { display: flex; gap: 2px; }
 /* The pointer moved with a finger (remote-view.js), drawn over the picture. */
 .rc-cursor { position: absolute; left: 0; top: 0; z-index: 2; pointer-events: none; image-rendering: auto; filter: drop-shadow(0 0 1px rgba(0, 0, 0, 0.6)); }
 .rc-touchbar { display: none; }

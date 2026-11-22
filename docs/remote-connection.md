@@ -274,7 +274,13 @@ two-finger tap right-clicks, two fingers scroll there). A Pointer / Touch
 button under the screen switches to touching directly, remembered for each
 device. Minus and plus in the bar have the device draw its screen for a
 window larger or smaller (50% to 200%, remembered for each device), as
-resizing the window does on a computer.
+resizing the window does on a computer. Full screen on a phone lays Kagaz's bars and
+Android's aside (a swipe in from the edge shows Android's for a moment);
+a small handle at the top, which fades when left alone and moves along
+the top with a drag, opens the keyboard, Pointer or Touch, the keys to
+send, minus and plus, and leaving full screen. Back leaves it too (the
+first Back puts the keyboard away when it is up). With the keyboard up the
+picture keeps its top and moves up only to keep the pointer in sight.
 
 ### 4. More existing protocols
 

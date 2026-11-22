@@ -31,6 +31,9 @@ import android.net.Uri
 import android.os.PowerManager
 import android.provider.Settings
 import androidx.core.content.ContextCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.Looper
@@ -406,6 +409,24 @@ class KagazPlugin(private val first: Activity) : Plugin(first) {
                 )
             }
         } catch (e: Exception) {
+        }
+        invoke.resolve()
+    }
+
+    // A Remote Desktop session's full screen: the status and navigation
+    // bars hide, and a swipe in from the edge shows them for a moment.
+    @Command
+    fun immersive(invoke: Invoke) {
+        val args = invoke.parseArgs(SpeakerArgs::class.java)
+        activity.runOnUiThread {
+            val window = activity.window
+            val bars = WindowCompat.getInsetsController(window, window.decorView)
+            if (args.on) {
+                bars.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                bars.hide(WindowInsetsCompat.Type.systemBars())
+            } else {
+                bars.show(WindowInsetsCompat.Type.systemBars())
+            }
         }
         invoke.resolve()
     }

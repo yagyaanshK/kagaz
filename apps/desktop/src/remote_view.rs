@@ -1588,10 +1588,22 @@ pub fn remote_fullscreen(window: tauri::WebviewWindow, on: Option<bool>) -> Resu
         }
         window.is_fullscreen().map_err(|e| e.to_string())
     }
-    #[cfg(not(desktop))]
+    // A phone: the page lays its bars aside, and Android's own bars hide.
+    #[cfg(target_os = "android")]
+    {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        static FULL: AtomicBool = AtomicBool::new(false);
+        if let Some(on) = on {
+            super::mobile::immersive(window.app_handle(), on)?;
+            FULL.store(on, Ordering::Relaxed);
+            return Ok(on);
+        }
+        Ok(FULL.load(Ordering::Relaxed))
+    }
+    #[cfg(target_os = "ios")]
     {
         let _ = (window, on);
-        Err("a phone's window has the whole screen already".into())
+        Err("an iPhone's window has the whole screen already".into())
     }
 }
 

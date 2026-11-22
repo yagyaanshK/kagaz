@@ -1069,10 +1069,13 @@ const KagazRemoteView = (() => {
       return true;
     }
   }
-  // The button is there where the touch bar is (a phone, a narrow window).
+  // On a phone (its full screen too, which hides the button), and where
+  // the touch bar with the button shows (a narrow window).
   function pointing() {
+    if (!pointerWay) return false;
+    if (PHONE) return true;
     const bar = $("rv-touchbar");
-    return pointerWay && !!bar && getComputedStyle(bar).display !== "none";
+    return !!bar && getComputedStyle(bar).display !== "none";
   }
   const fingers = new Map(); // pointerId -> { x, y }
   let one = null; // { id, x0, y0, x, y, t, ptr, timer, state: "wait" | "second" | "move" | "drag" | "done" }
@@ -1194,7 +1197,8 @@ const KagazRemoteView = (() => {
     p.y = Math.min(cur.height - 1, Math.max(0, p.y + dy * gain));
     follow();
     ptrSend(buttons, false);
-    showCursor();
+    if (typing()) keepInSight();
+    else showCursor();
   }
 
   function oneEnds(lettingGo) {
@@ -1371,6 +1375,7 @@ const KagazRemoteView = (() => {
     b.title = pointerWay ? "Your finger moves a pointer, as on a touchpad. Tap to click where you touch instead"
       : "Your finger clicks where it touches. Tap to move a pointer instead, as on a touchpad";
     showCursor();
+    floatSync();
   }
   $("rv-touch").addEventListener("click", () => {
     if (!cur) return;
@@ -1449,7 +1454,10 @@ const KagazRemoteView = (() => {
   });
   typeField.addEventListener("blur", () => {
     $("rv-type").setAttribute("aria-pressed", "false");
+    keyboardUp = false;
+    keepInSight();
     stageResized();
+    floatSync();
   });
   $("rv-type").addEventListener("click", () => {
     if (typing()) {
@@ -1458,9 +1466,42 @@ const KagazRemoteView = (() => {
     }
     typeField.value = BASE;
     typed = BASE;
+    roomBefore = window.innerHeight;
+    keyboardUp = false;
     typeField.focus({ preventScroll: true });
     $("rv-type").setAttribute("aria-pressed", "true");
+    floatSync();
   });
+  // The phone's keyboard put away by the phone itself (its own key, Back)
+  // leaves the field focused: seen as the window getting its height back.
+  let roomBefore = 0, keyboardUp = false;
+  window.addEventListener("resize", () => {
+    if (!typing()) return;
+    if (window.innerHeight < roomBefore - 100) keyboardUp = true;
+    else if (keyboardUp && window.innerHeight >= roomBefore - 24) typeField.blur();
+    keepInSight();
+  });
+  // While the keyboard is up the picture keeps its size, its top where it
+  // was, and moves up only as far as keeps the pointer (where the typing
+  // goes) in sight above the keyboard.
+  function keepInSight() {
+    if (!typing() || !cur || !cur.width) {
+      stage.classList.remove("typing");
+      if (canvas.style.top) {
+        canvas.style.top = "";
+        showCursor();
+      }
+      return;
+    }
+    stage.classList.add("typing");
+    const p = cur.ptr || cur.point;
+    const k = (parseFloat(canvas.style.width) || canvas.offsetWidth) / cur.width;
+    const tall = canvas.offsetHeight * zoom, room = stage.clientHeight;
+    const y = p ? p.y * k * zoom + panY : 0;
+    const shift = Math.max(0, Math.min(tall - room, y - room * 0.6));
+    canvas.style.top = shift > 0 ? `${-Math.round(shift)}px` : "";
+    showCursor();
+  }
 
   // Keys, while the screen has the focus. Each is remembered until it is
   // let go, so that none stays held on the device when the focus leaves.
@@ -2143,6 +2184,17 @@ const KagazRemoteView = (() => {
   }
   async function fullScreen(on) {
     if (on === full) return;
+    // A phone: Kagaz's bars step aside and Android's hide (a swipe in from
+    // the edge shows them for a moment); a handle at the top keeps the
+    // tools, and Back leaves. An iPhone does the page's part only.
+    if (PHONE) {
+      try {
+        await invoke("remote_fullscreen", { on });
+      } catch (e) {}
+      full = on;
+      phoneFull();
+      return;
+    }
     try {
       full = await invoke("remote_fullscreen", { on });
     } catch (e) {
@@ -2161,8 +2213,151 @@ const KagazRemoteView = (() => {
       toast(`Ctrl + Esc leaves full screen.${keyMode() === "never" ? "" : ` Print Screen, the Windows key and Alt + Tab go to ${cur.device.name} meanwhile.`}`, 5000);
     }
   }
+  // ---------- a phone's full screen ----------
+  // Nothing of Kagaz over the device's screen but a small handle at its
+  // top, as in Microsoft's Windows App: a tap opens the tools (the
+  // keyboard, Pointer or Touch, keys to send, smaller and bigger, and
+  // leaving full screen), a drag moves it along the top out of the way.
+  // Left alone it closes and fades; it stays while the keyboard is up or
+  // the keys to send are open, so that either can be put away.
+  const float = el("div", "rc-float hidden");
+  float.setAttribute("role", "toolbar");
+  float.setAttribute("aria-label", "Session tools");
+  const grip = document.createElement("button");
+  grip.type = "button";
+  grip.className = "rc-float-grip";
+  setIcon(grip, "down");
+  const tools = el("span", "rc-float-tools hidden");
+  const FLOAT_TOOLS = [
+    ["keyboard", "Keyboard", "rv-type"],
+    ["pointer", "Pointer", "rv-touch"],
+    ["grid", "Send keys", "rv-keys"],
+    ["minus", "Smaller", "rv-smaller"],
+    ["plus", "Bigger", "rv-bigger"],
+    ["unfull", "Leave full screen", null],
+  ];
+  const floatButtons = FLOAT_TOOLS.map(([icon, label, id]) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.title = label;
+    b.setAttribute("aria-label", label);
+    setIcon(b, icon);
+    // The phone's keyboard stays up while the tools are used.
+    b.addEventListener("pointerdown", (ev) => ev.preventDefault());
+    b.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      if (!id) {
+        fullScreen(false);
+        return;
+      }
+      $(id).click();
+      floatSync();
+      floatLater();
+    });
+    tools.appendChild(b);
+    return b;
+  });
+  float.append(grip, tools);
+  stage.appendChild(float);
+  let floatOpen = false, floatTimer = 0, floatX = null, gripDrag = null, gripMoved = false;
+  // The tools as they are now: the keyboard up, the fingers' way, the
+  // size's ends.
+  function floatSync() {
+    if (float.classList.contains("hidden")) return;
+    const [kb, way, , smaller, bigger] = floatButtons;
+    kb.setAttribute("aria-pressed", String(typing()));
+    setIcon(way, pointerWay ? "pointer" : "touch");
+    way.title = pointerWay ? "Pointer: your finger moves it. Tap for Touch" : "Touch: a tap clicks there. Tap for Pointer";
+    way.setAttribute("aria-label", way.title);
+    smaller.disabled = $("rv-smaller").disabled;
+    bigger.disabled = $("rv-bigger").disabled;
+  }
+  // Along the top, wholly on the screen.
+  function floatPlace() {
+    if (float.classList.contains("hidden")) return;
+    const half = float.offsetWidth / 2, room = stage.clientWidth;
+    const x = floatX == null ? room / 2 : floatX;
+    float.style.left = `${Math.round(Math.min(room - half - 4, Math.max(half + 4, x)))}px`;
+  }
+  function floatSet(open) {
+    floatOpen = open;
+    tools.classList.toggle("hidden", !open);
+    float.setAttribute("aria-expanded", String(open));
+    grip.setAttribute("aria-label", open ? "Hide the tools" : "Show the tools");
+    grip.title = grip.getAttribute("aria-label");
+    floatSync();
+    floatPlace();
+    floatLater();
+  }
+  function floatLater() {
+    float.classList.remove("idle");
+    clearTimeout(floatTimer);
+    floatTimer = setTimeout(() => {
+      if (popFor || typing()) {
+        floatLater();
+        return;
+      }
+      if (floatOpen) floatSet(false);
+      else float.classList.add("idle");
+    }, floatOpen ? 5000 : 2500);
+  }
+  grip.addEventListener("pointerdown", (ev) => {
+    ev.preventDefault();
+    gripDrag = { x0: ev.clientX, at: float.offsetLeft };
+    gripMoved = false;
+    try {
+      grip.setPointerCapture(ev.pointerId);
+    } catch (e) {}
+    float.classList.remove("idle");
+    clearTimeout(floatTimer);
+  });
+  grip.addEventListener("pointermove", (ev) => {
+    if (!gripDrag) return;
+    const dx = ev.clientX - gripDrag.x0;
+    if (!gripMoved && Math.abs(dx) < 8) return;
+    gripMoved = true;
+    floatX = gripDrag.at + dx;
+    floatPlace();
+  });
+  for (const kind of ["pointerup", "pointercancel"]) {
+    grip.addEventListener(kind, () => {
+      gripDrag = null;
+      floatLater();
+    });
+  }
+  grip.addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    if (gripMoved) {
+      gripMoved = false;
+      return;
+    }
+    floatSet(!floatOpen);
+  });
+  window.addEventListener("resize", floatPlace);
+  // Into or out of a phone's full screen.
+  function phoneFull() {
+    const root = document.documentElement;
+    if (full) root.dataset.rvFull = "on";
+    else delete root.dataset.rvFull;
+    float.classList.toggle("hidden", !full);
+    clearTimeout(floatTimer);
+    if (full) {
+      floatX = null;
+      floatSet(false);
+      KagazNav.push("full", () => fullScreen(false));
+      toast("Full screen. Back, or the handle at the top, brings the bars back.", 3500);
+    } else {
+      floatOpen = false;
+      KagazNav.pop("full");
+    }
+    fullIcon();
+    wantKeys();
+    stageResized();
+  }
+
   // The system may take the window out of full screen by itself.
   async function fullScreenNow() {
+    if (PHONE) return; // the page holds it there
     try {
       full = await invoke("remote_fullscreen", { on: null });
     } catch (e) {
