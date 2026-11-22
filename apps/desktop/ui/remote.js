@@ -426,8 +426,10 @@ const KagazRemote = (() => {
   function closeDevice() {
     if (viewIs("device")) {
       openId = null;
-      KagazNav.pop("remote-device");
+      // The list first, then the level: the bar takes its title when the
+      // level goes (a forgotten device's name stayed there).
       leaveDevice();
+      KagazNav.pop("remote-device");
     }
   }
 

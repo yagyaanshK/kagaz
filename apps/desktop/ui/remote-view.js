@@ -13,6 +13,9 @@
 // viewer takes over the main window as before.
 
 const KagazRemoteView = (() => {
+  // Where a password or PIN is kept: the system's own store (the phone's
+  // on a phone).
+  const STORE = /^(android|ios)$/.test(window.__KAGAZ_OS__ || "") ? "this phone's password store" : "this computer's password store";
   const LEFT = 1, MIDDLE = 2, RIGHT = 4;
   let cur = null; // the session shown, or being opened
   let attempt = 0; // which opening is the latest
@@ -141,7 +144,7 @@ const KagazRemoteView = (() => {
     const keep = el("input");
     keep.type = "checkbox";
     keep.checked = !!d.remember;
-    keepLabel.append(keep, " Remember the password in this computer's password store");
+    keepLabel.append(keep, ` Remember the password in ${STORE}`);
     const go = el("button", "accent", "Connect");
     go.type = "submit";
     form.append(label, hint);
@@ -177,7 +180,7 @@ const KagazRemoteView = (() => {
     const keep = el("input");
     keep.type = "checkbox";
     keep.checked = !!d.remember;
-    keepLabel.append(keep, " Remember the PIN in this computer's password store");
+    keepLabel.append(keep, ` Remember the PIN in ${STORE}`);
     const go = el("button", "accent", "Connect");
     go.type = "submit";
     const ask = button("", "Ask someone there", () => connect({ password: "", remember: null }));

@@ -5,6 +5,9 @@
 // around it saves.
 
 const KagazRemoteSettings = (() => {
+  // Where a password or PIN is kept: the system's own store (the phone's
+  // on a phone).
+  const STORE = /^(android|ios)$/.test(window.__KAGAZ_OS__ || "") ? "this phone's password store" : "this computer's password store";
   function el(tag, cls, text) {
     const e = document.createElement(tag);
     if (cls) e.className = cls;
@@ -247,7 +250,7 @@ const KagazRemoteSettings = (() => {
       // the computer's PIN, or the person there is asked.
       signIn.append(el("p", "muted small", "Paired with Kagaz on it. It lets this device in with its PIN, or asks the person there."));
       if (o.canRemember) {
-        signIn.append(switchRow(!!d.remember, "Remember the PIN", "In this computer's password store, once the computer accepts it. Turning this off forgets it.", (on) => o.remember(on)));
+        signIn.append(switchRow(!!d.remember, "Remember the PIN", `In ${STORE}, once the computer accepts it. Turning this off forgets it.`, (on) => o.remember(on)));
       }
       return { screen, mouse, keys, signIn, files };
     }
@@ -264,7 +267,7 @@ const KagazRemoteSettings = (() => {
     userRow.append(userLabel, user);
     signIn.append(userRow);
     if (o.canRemember) {
-      signIn.append(switchRow(!!d.remember, "Remember the password", "In this computer's password store, once the device accepts it. Turning this off forgets it.", (on) => o.remember(on)));
+      signIn.append(switchRow(!!d.remember, "Remember the password", `In ${STORE}, once the device accepts it. Turning this off forgets it.`, (on) => o.remember(on)));
     }
     return { screen, mouse, keys, signIn, files };
   }
