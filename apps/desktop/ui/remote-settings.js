@@ -7,7 +7,8 @@
 const KagazRemoteSettings = (() => {
   // Where a password or PIN is kept: the system's own store (the phone's
   // on a phone).
-  const STORE = /^(android|ios)$/.test(window.__KAGAZ_OS__ || "") ? "this phone's password store" : "this computer's password store";
+  const PHONE = /^(android|ios)$/.test(window.__KAGAZ_OS__ || "");
+  const STORE = PHONE ? "this phone's password store" : "this computer's password store";
   function el(tag, cls, text) {
     const e = document.createElement(tag);
     if (cls) e.className = cls;
@@ -145,6 +146,9 @@ const KagazRemoteSettings = (() => {
       keep();
     }));
     keys.append(keysRow, el("p", "muted small", "Print Screen, the Windows key, Alt + Tab, Ctrl + Alt + Del and the like, which this computer otherwise keeps. Each press goes to one of the two, never both. Ctrl + Esc leaves full screen; the first time, this computer asks whether Kagaz may have its keys."));
+    // A phone keeps these keys to itself, keyboard plugged in or not: the
+    // choice is a computer's only.
+    if (PHONE) keys.classList.add("hidden");
 
     // Files sent from here to a Remote Desktop computer, and a folder of
     // this computer shown there as a drive.

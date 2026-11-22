@@ -15,7 +15,8 @@
 const KagazRemoteView = (() => {
   // Where a password or PIN is kept: the system's own store (the phone's
   // on a phone).
-  const STORE = /^(android|ios)$/.test(window.__KAGAZ_OS__ || "") ? "this phone's password store" : "this computer's password store";
+  const PHONE = /^(android|ios)$/.test(window.__KAGAZ_OS__ || "");
+  const STORE = PHONE ? "this phone's password store" : "this computer's password store";
   const LEFT = 1, MIDDLE = 2, RIGHT = 4;
   let cur = null; // the session shown, or being opened
   let attempt = 0; // which opening is the latest
@@ -1918,6 +1919,13 @@ const KagazRemoteView = (() => {
       b.setAttribute("role", "menuitem");
       return b;
     });
+    // A phone keeps its own keys (Home, the app switcher, and Alt + Tab
+    // even from a keyboard plugged in): only the keys to send are listed.
+    // A keyboard plugged in types on the device as on a computer.
+    if (PHONE) {
+      if (openPop("rv-keys", "keys", [el("strong", "", "Send keys"), ...list])) pop.setAttribute("role", "menu");
+      return;
+    }
     // And where this computer's own keys go, for this device.
     const where = el("label", "rc-keys-where");
     const choose = el("select");
