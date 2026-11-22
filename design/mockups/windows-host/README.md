@@ -7,7 +7,7 @@ A Windows computer seen and used from afar while the person at it goes on using 
   device, pairing on both ends, the question on the laptop, the sign during a
   session, and the session window with Control and Watch.
 - `host.html?os=windows|gnome|macos&scene=settings|device|pair|add|desk|viewer`, with
-  `ask=service`, `step=words`, `pop=ask|sign|watch`, `wait=1`, `mode=watch`: one
+  `ask=service`, `far=router|ipv6|meet|none` (From anywhere, on, and what it found), `step=words`, `pop=ask|sign|watch`, `wait=1`, `mode=watch`: one
   screen on its own.
 
 The screens use the app's own `style.css`, `skins.css`, `platform.js` and `icons.js`

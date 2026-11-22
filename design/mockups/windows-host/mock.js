@@ -4,6 +4,7 @@
 //            &scene=settings|device|pair|desk|viewer|add
 //            &off=1                             (settings: sharing off, as it is until turned on)
 //            &ask=service                       (settings: the helper service's question)
+//            &far=router|ipv6|meet|none         (settings: From anywhere on, and what it found)
 //            &step=choose|code|words            (add: the ways in; pair, add: before and after the code)
 //            &pop=ask|sign|watch|two            (desk: the question, or the sign while connected)
 //            &wait=1                            (viewer: waiting for someone at the computer)
@@ -172,6 +173,25 @@
       door("mobile", "Asha's phone", "Watch only · asks each time"));
     const add = button("Pair a device", "accent");
     paired.append(add);
+    // From anywhere: off until turned on; then what it found, in one line.
+    const far = q.get("far");
+    const net = section("Port and networks");
+    const FAR = {
+      router: ["Ready · your router lets Kagaz in", "Only paired devices get an answer; to anyone else it looks closed."],
+      ipv6: ["Ready · through IPv6", "Only paired devices get an answer; to anyone else it looks closed."],
+      meet: ["Ready · paired devices meet it halfway", "Your router doesn't open doors for apps, so a connection from afar takes up to 30 seconds to start."],
+      none: ["Not reachable from afar on this connection", "Your internet provider and router allow no way in. Tailscale still works."],
+    };
+    const farSub = far && FAR[far] ? FAR[far][0] : "Paired devices only, on other networks too";
+    net.append(row("Port", "3390 unless changed; Windows' own Remote Desktop keeps 3389", (() => {
+      const i = el("input");
+      i.type = "number";
+      i.value = 3390;
+      return i;
+    })()),
+    row("Listen on", "", select(["Local network and Tailscale", "Tailscale only", "This computer only"])),
+    row("From anywhere", farSub, onoff(!!far)));
+    if (far && FAR[far]) net.append(el("p", "muted small", FAR[far][1]));
     if (q.get("ask") === "service") {
       question("Install Kagaz's helper service?",
         ["Lets a paired device answer the sign-in screen and administrator prompts.",
