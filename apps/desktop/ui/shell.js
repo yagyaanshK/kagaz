@@ -48,8 +48,12 @@ const KagazShell = (() => {
   } catch (e) {}
 
   function pickLayout() {
-    const w = window.innerWidth;
-    const h = window.innerHeight;
+    // On a phone, the screen's own width: innerWidth grows when the page is
+    // zoomed out, and something too wide for a moment (the bar's buttons
+    // as the phone turns upright) would then keep the wide layout for good.
+    const phone = os === "android" || os === "ios";
+    const w = phone ? document.documentElement.clientWidth || window.innerWidth : window.innerWidth;
+    const h = phone ? document.documentElement.clientHeight || window.innerHeight : window.innerHeight;
     switch (os) {
       case "android":
         if (w < 600 && !(h < 500 && w > h)) return "bar";

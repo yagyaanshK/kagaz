@@ -26,6 +26,9 @@ const KagazNearby = (() => {
   let usable = [];   // devices Kagaz can add: { key, kind, icon, name, sub, ip, add }
   let hosts = [];    // every address that answered (nearby_sweep)
   let known = new Map(); // address → what it is in Kagaz already ("Your printer")
+  let savedNames = new Set(); // the names of computers and phones added already
+  // A name as compared: any case, without ".local" or a domain's dot.
+  const bareName = (n) => String(n || "").trim().toLowerCase().replace(/\.$/, "").replace(/\.local$/, "");
   let searching = false;
   let searched = false;
   let lastRun = 0;
@@ -150,7 +153,7 @@ const KagazNearby = (() => {
   async function lookForUsable() {
     const out = [];
     const ok = (p) => p.catch(() => null);
-    const [printers, tvs, tvSaved, purifiers, fans, remote, door, cams, onetouch] = await Promise.all([
+    const [printers, tvs, tvSaved, purifiers, fans, remote, door, cams, onetouch, remoteSaved] = await Promise.all([
       ok(invoke("discover", { timeout: 3 })),
       ok(invoke("tvs_search")),
       ok(invoke("tvs_saved")),
@@ -160,11 +163,27 @@ const KagazNearby = (() => {
       ok(invoke("doorbell_stations").then((s) => invoke("doorbell_discover", { port: s.listen_port }).then((f) => ({ saved: s.stations || [], found: f })))),
       ok(invoke("cameras_status")),
       ok(invoke("onetouch_peek")),
+      ok(invoke("remote_saved")),
     ]);
 
     known = new Map();
     tsPeers = ((remote && remote.peers) || []).filter((p) => p.online && /^(windows|linux|macos)$/i.test(p.os));
     const knownAs = (addr, words) => { if (addr && !known.has(addr)) known.set(addr, words); };
+
+    // Computers and phones already in Computers & phones: by each address
+    // they are reached at, and by name, as one may be saved by its name
+    // (or found here at an address other than the one saved).
+    savedNames = new Set();
+    for (const d of (remoteSaved && remoteSaved.devices) || []) {
+      const words = d.shape === "phone" ? "Your phone" : "Your computer";
+      for (const p of d.paths || []) {
+        knownAs(p.host, words);
+        savedNames.add(bareName(p.host));
+      }
+      savedNames.add(bareName(d.name));
+      if (d.identity && d.identity.name) savedNames.add(bareName(d.identity.name));
+    }
+    savedNames.delete("");
 
     // Printers and scanners, as their page lists them.
     if (typeof savedPrinters !== "undefined") for (const p of savedPrinters) for (const a of p.addresses || []) knownAs(a, "Your printer");
@@ -241,6 +260,7 @@ const KagazNearby = (() => {
     // Computers and phones that show their screen (Remote Desktop, VNC).
     if (remote) {
       for (const n of remote.network || []) {
+        if (n.name && savedNames.has(bareName(n.name))) continue;
         const peer = peerNamed(n.name);
         out.push({
           key: "remote:" + n.address, kind: "remote", icon: n.way && n.way.speaks === "vnc" ? "mobile" : "computer", ip: n.address,
@@ -329,7 +349,7 @@ const KagazNearby = (() => {
   function computerSuggestions(sweep, list) {
     const taken = new Set(list.map((u) => u.ip));
     return sweep
-      .filter((h) => h.kind === "computer" && !h.this_device && !taken.has(h.ip) && !known.has(h.ip))
+      .filter((h) => h.kind === "computer" && !h.this_device && !taken.has(h.ip) && !known.has(h.ip) && !savedNames.has(bareName(h.name)))
       .map((h) => ({
         key: "computer:" + h.ip, kind: "remote", icon: "computer", ip: h.ip,
         name: hostName(h),
@@ -352,7 +372,7 @@ const KagazNearby = (() => {
       ...list.map((u) => (u.name || "").toLowerCase()),
     ]);
     return peers
-      .filter((p) => !here.has(p.name.toLowerCase()) && !known.has(p.address))
+      .filter((p) => !here.has(p.name.toLowerCase()) && !known.has(p.address) && !savedNames.has(bareName(p.name)))
       .map((p) => ({
         key: "tailscale:" + p.address, kind: "remote", icon: "computer", ip: p.address,
         name: p.name,
