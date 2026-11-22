@@ -1,6 +1,13 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
     <!-- Base application theme. -->
     <style name="Theme.kagaz_desktop" parent="Theme.Material3.DayNight.NoActionBar">
-        <!-- Customize your theme here. -->
+        <!-- Kagaz green for what acts (Android's own controls, text selection),
+             neutral grey behind (the page's own colours, skins.css). -->
+        <item name="colorPrimary">#FF2F6F4E</item>
+        <item name="colorOnPrimary">#FFFFFFFF</item>
+        <item name="colorAccent">#FF2F6F4E</item>
+        <item name="android:colorBackground">#FFF8F8F8</item>
+        <item name="android:statusBarColor">#FFF8F8F8</item>
+        <item name="android:navigationBarColor">#FFF8F8F8</item>
     </style>
 </resources>

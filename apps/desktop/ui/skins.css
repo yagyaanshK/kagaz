@@ -156,21 +156,23 @@ body {
   --icon-stroke: 1.9; --nav-icon: 24px;
   --tap: 48px; --row: 56px; --chip-h: 32px;
   --r-card: 12px; --r-btn: 999px; --r-ctl: 4px; --r-chip: 8px; --r-icon: 50%; --r-icon-btn: 50%; --edge: 16px;
-  --bg: #F6FBF4; --panel: #F0F5EE; --text: #171D19; --muted: #404942; --line: #C0C9C0; --control: #707972;
+  /* Surfaces in neutral greys (the owner's choice, 2026-11-22): Kagaz green
+     only on what acts or marks (buttons, icons, the place you are). */
+  --bg: #F8F8F8; --panel: #F1F1F1; --text: #1B1B1B; --muted: #474747; --line: #C6C6C6; --control: #777777;
   --accent: #2f6f4e; --accent-text: #FFFFFF; --accent-soft: #ADF2C7;
   --ok: #2E6B30; --warn: #7A4F00; --bad: #B3261E;
-  --nav-bg: #F6FBF4; --nav-fg: #404942; --nav-active-bg: #D0E8D6; --nav-active-fg: #0B2015; --bar-bg: #F6FBF4;
-  --tile-bg: #EAEFE9; --group-bg: #F0F5EE; --tile-in-group: #E4EAE3; --chip-bg: transparent; --icon-bg: #D0E8D6; --icon-fg: #374B3E;
-  --urgent-bg: #BA1A1A; --urgent-fg: #FFFFFF; --hover: rgba(23, 29, 25, 0.08);
+  --nav-bg: #F8F8F8; --nav-fg: #474747; --nav-active-bg: #D0E8D6; --nav-active-fg: #0B2015; --bar-bg: #F8F8F8;
+  --tile-bg: #EBEBEB; --group-bg: #F1F1F1; --tile-in-group: #E4E4E4; --chip-bg: transparent; --icon-bg: #D0E8D6; --icon-fg: #374B3E;
+  --urgent-bg: #BA1A1A; --urgent-fg: #FFFFFF; --hover: rgba(27, 27, 27, 0.08);
 }
 @media (prefers-color-scheme: dark) {
   :root[data-os="android"] {
-    --bg: #0F1511; --panel: #1B211D; --text: #DFE4DD; --muted: #C0C9C0; --line: #404942; --control: #8A938B;
+    --bg: #121212; --panel: #1E1E1E; --text: #E3E3E3; --muted: #C4C4C4; --line: #444444; --control: #8E8E8E;
     --accent: #6fbf93; --accent-text: #10201a; --accent-soft: #045233;
     --ok: #8FD694; --warn: #FFB95D; --bad: #F2B8B5;
-    --nav-bg: #0F1511; --nav-fg: #C0C9C0; --nav-active-bg: #374B3E; --nav-active-fg: #D0E8D6; --bar-bg: #0F1511;
-    --tile-bg: #1B211D; --group-bg: #171D19; --tile-in-group: #262B27; --icon-bg: #374B3E; --icon-fg: #D0E8D6;
-    --urgent-bg: #93000A; --urgent-fg: #FFDAD6; --hover: rgba(223, 228, 221, 0.08);
+    --nav-bg: #121212; --nav-fg: #C4C4C4; --nav-active-bg: #374B3E; --nav-active-fg: #D0E8D6; --bar-bg: #121212;
+    --tile-bg: #1E1E1E; --group-bg: #191919; --tile-in-group: #282828; --icon-bg: #374B3E; --icon-fg: #D0E8D6;
+    --urgent-bg: #93000A; --urgent-fg: #FFDAD6; --hover: rgba(227, 227, 227, 0.08);
   }
 }
 [data-os="android"] #bar { min-height: 64px; padding: 0 4px; gap: 4px; }
@@ -179,8 +181,8 @@ body {
 [data-os="android"] .bar-btn svg { width: 24px; height: 24px; }
 [data-os="android"] .side-head { display: none; }
 /* The navigation bar: a pill behind the current place's icon. */
-[data-os="android"] #bottom-nav { min-height: 64px; padding-bottom: env(safe-area-inset-bottom); background: #EAEFE9; }
-@media (prefers-color-scheme: dark) { [data-os="android"] #bottom-nav { background: #1B211D; } }
+[data-os="android"] #bottom-nav { min-height: 64px; padding-bottom: env(safe-area-inset-bottom); background: #EBEBEB; }
+@media (prefers-color-scheme: dark) { [data-os="android"] #bottom-nav { background: #1E1E1E; } }
 [data-os="android"] #bottom-nav button { gap: 4px; padding: 6px 0 12px; }
 [data-os="android"] #bottom-nav .cat-icon, [data-os="android"][data-layout="rail"] #categories .cat-icon { width: 56px; height: 32px; border-radius: 16px; }
 [data-os="android"] #bottom-nav button.active .cat-icon { background: var(--nav-active-bg); color: var(--nav-active-fg); }
@@ -698,8 +700,8 @@ body.here-idle { cursor: none; }
 .set-search { display: flex; align-items: center; gap: 8px; margin: 4px 0 8px; padding: 0 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
 .set-search svg { width: 18px; height: 18px; color: var(--muted); }
 #main .set-search input { flex: 1 1 auto; min-height: 40px; padding: 0; border: none; background: none; color: var(--text); font: inherit; outline: none; box-shadow: none; }
-[data-os="android"] .set-search { min-height: 56px; padding: 0 16px; gap: 16px; border: none; border-radius: 28px; background: #E4EAE3; }
-@media (prefers-color-scheme: dark) { [data-os="android"] .set-search { background: #262B27; } }
+[data-os="android"] .set-search { min-height: 56px; padding: 0 16px; gap: 16px; border: none; border-radius: 28px; background: #E4E4E4; }
+@media (prefers-color-scheme: dark) { [data-os="android"] .set-search { background: #282828; } }
 [data-os="android"] .set-search svg { width: 24px; height: 24px; }
 #main [data-os="android"] .set-search input, [data-os="android"] #main .set-search input { min-height: 56px; font-size: 16px; }
 #settings-body { max-width: 760px; }
@@ -775,8 +777,8 @@ body.here-idle { cursor: none; }
 /* ===================== Android: menus and Add a device =====================
    A gear's or ⋮'s menu is Material's menu: a raised surface, each choice
    a 48 high row of text, settings in it as rows. */
-[data-os="android"] .cam-settings { top: 48px; min-width: 220px; padding: 8px 0; gap: 0; border: none; border-radius: 4px; background: #EAEFE9; box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15), 0 1px 2px rgba(0, 0, 0, 0.3); }
-@media (prefers-color-scheme: dark) { [data-os="android"] .cam-settings { background: #262B27; } }
+[data-os="android"] .cam-settings { top: 48px; min-width: 220px; padding: 8px 0; gap: 0; border: none; border-radius: 4px; background: #EBEBEB; box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15), 0 1px 2px rgba(0, 0, 0, 0.3); }
+@media (prefers-color-scheme: dark) { [data-os="android"] .cam-settings { background: #282828; } }
 [data-os="android"] .cam-settings button { width: 100%; min-height: 48px; padding: 0 16px; border: none; border-radius: 0; background: none; color: var(--text); text-align: left; justify-content: flex-start; font-size: 14px; font-weight: 400; }
 [data-os="android"] .cam-settings button:hover { background: var(--hover); }
 [data-os="android"] .cam-settings label { flex-direction: row; justify-content: space-between; align-items: center; gap: 16px; min-height: 48px; padding: 0 16px; font-size: 14px; color: var(--text); }
@@ -958,7 +960,6 @@ button, [role="button"], .set-door { transition: background-color 120ms ease-out
   color: var(--text);
   box-shadow: 0 8px 24px rgb(0 0 0 / 20%);
 }
-@supports (color: color-mix(in srgb, red 50%, blue)) { [data-os="android"] dialog:not(.sheet):not(.tv-sheet) { background: color-mix(in srgb, var(--accent) 6%, var(--panel, var(--bg))); } }
 [data-os="android"] dialog::backdrop { background: rgb(0 0 0 / 32%); }
 [data-os="android"] dialog:not(.sheet):not(.tv-sheet) .ask-title { font-size: 24px; font-weight: 400; line-height: 32px; margin: 0 0 16px; }
 [data-os="android"] dialog:not(.sheet):not(.tv-sheet) .ask-title + .muted, [data-os="android"] dialog .muted.small { font-size: 14px; line-height: 20px; }
@@ -1031,7 +1032,6 @@ button, [role="button"], .set-door { transition: background-color 120ms ease-out
    scrolls under it (prefs-android.js marks it), so cut-off rows no longer
    show right under the title. */
 [data-os="android"][data-scrolled] #bar { background: var(--panel, var(--bg)); transition: background-color .2s; }
-@supports (color: color-mix(in srgb, red 50%, blue)) { [data-os="android"][data-scrolled] #bar { background: color-mix(in srgb, var(--accent) 8%, var(--bg)); } }
 
 /* Bottom sticky action rows: their own surface, nothing showing under. */
 [data-os="android"] #main .actions.bar { background: var(--bg); box-shadow: 0 -1px 0 var(--line); margin-left: calc(-1 * var(--edge)); margin-right: calc(-1 * var(--edge)); padding: 12px var(--edge); }
@@ -1111,12 +1111,10 @@ button, [role="button"], .set-door { transition: background-color 120ms ease-out
    over a label, evenly spaced, no boxes), and Keys and Picture as bottom
    sheets with a handle rather than floating desktop panels. */
 [data-os="android"] .rc-touchbar { display: flex; justify-content: space-around; gap: 0; padding: 8px 8px calc(8px + env(safe-area-inset-bottom)); background: var(--panel, var(--bg)); }
-@supports (color: color-mix(in srgb, red 50%, blue)) { [data-os="android"] .rc-touchbar { background: color-mix(in srgb, var(--accent) 8%, var(--bg)); } }
 [data-os="android"] .rc-touchbar > button { flex: 1 1 0; display: flex; flex-direction: column; align-items: center; gap: 4px; min-height: 56px; padding: 4px 0; border: none !important; border-radius: 16px; background: none !important; color: var(--text); font-size: 12px; font-weight: 500; }
 [data-os="android"] .rc-touchbar > button .ic svg { width: 24px; height: 24px; }
 [data-os="android"] .rc-touchbar > button:disabled { opacity: .38; }
 [data-os="android"][data-layout="bar"] .rc-pop { left: 0; right: 0; bottom: 0; max-width: 100%; min-width: 0; padding: 12px 24px 24px; border: none; border-radius: 28px 28px 0 0; background: var(--panel, var(--bg)); box-shadow: 0 -4px 16px rgb(0 0 0 / 20%); }
-@supports (color: color-mix(in srgb, red 50%, blue)) { [data-os="android"][data-layout="bar"] .rc-pop { background: color-mix(in srgb, var(--accent) 6%, var(--panel, var(--bg))); } }
 [data-os="android"][data-layout="bar"] .rc-pop::before { content: ""; display: block; flex: none; width: 32px; height: 4px; margin: 0 auto 12px; border-radius: 2px; background: var(--muted); opacity: .5; }
 [data-os="android"] .rc-pop.keys button { min-height: 48px; padding: 0 8px; border-radius: 0; color: var(--text); font-size: 16px; font-weight: 400; }
 [data-os="android"] .rc-pop p { font-size: 14px; line-height: 20px; }
