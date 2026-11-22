@@ -259,6 +259,14 @@ start on mobile data, with the amount used shown. A saved device shared to
 another Kagaz by QR code (its paths, never its passwords): a phone cannot
 read Tailscale's list.
 
+Built 2026-11-22, with Remote Desktop sessions on Android (sound through
+AAudio on Android 8.0 and later, none on Android 7): tap, long-press for
+right-click, one finger drags, two fingers scroll, pinch zooms the picture
+here; a Keyboard button opens the phone's own keyboard (typed letters go as
+characters, Backspace and Enter as keys; the picture keeps its size under
+it). Still to come: trackpad mode, the fingerprint or PIN, the frugal start
+on mobile data, sharing a device by QR code.
+
 ### 4. More existing protocols
 
 Wake-on-LAN, an adb link to an Android phone over USB or Wi-Fi, and SFTP

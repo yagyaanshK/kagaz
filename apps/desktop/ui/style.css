@@ -1372,3 +1372,7 @@ body.share-sign-body { background: var(--accent); overflow: hidden; }
 .share-ask-inline .share-ask-title { font-weight: 600; }
 .pair-digits { font-size: 32px; font-weight: 700; letter-spacing: 4px; margin: 8px 0; }
 .share-row { border-radius: var(--r-card, 12px); background: var(--panel); margin-bottom: 12px; padding: 10px 14px; }
+/* The phone's keyboard types into this (remote-view.js): out of sight,
+   16px so that focusing it does not zoom the page. */
+.rv-type-field { position: fixed; left: 0; bottom: 0; width: 1px; height: 1px; padding: 0; border: 0; opacity: 0; font-size: 16px; resize: none; pointer-events: none; }
+#rv-type[aria-pressed="true"] { color: var(--accent); }

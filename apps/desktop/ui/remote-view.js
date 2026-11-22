@@ -19,6 +19,7 @@ const KagazRemoteView = (() => {
   let hooks = {};
   const stage = $("rv-stage");
   const canvas = $("rv-canvas");
+  let typeField = null; // the hidden field the phone's keyboard types into (below)
   const ctx = canvas.getContext("2d", { alpha: false });
   const card = $("rv-card");
   const pop = $("rv-pop");
@@ -216,6 +217,7 @@ const KagazRemoteView = (() => {
     $("bar-remote").classList.remove("hidden");
     canvas.classList.add("hidden");
     canvas.style.cursor = "";
+    unzoom();
     $("rv-banner").classList.add("hidden");
     stage.classList.remove("own-size");
     setTools(null);
@@ -360,6 +362,8 @@ const KagazRemoteView = (() => {
     delete document.documentElement.dataset.viewer;
     $("bar-remote").classList.add("hidden");
     canvas.classList.add("hidden");
+    if (typeField) typeField.blur();
+    unzoom();
     if (hooks.closed) hooks.closed();
   }
 
@@ -409,7 +413,7 @@ const KagazRemoteView = (() => {
 
   function setTools(info) {
     const on = !!info;
-    for (const id of ["rv-keys", "rv-clip", "rv-picture", "rv-full"]) $(id).disabled = !on;
+    for (const id of ["rv-keys", "rv-clip", "rv-picture", "rv-full", "rv-type"]) $(id).disabled = !on;
     document.querySelectorAll("#rv-touchbar button").forEach((b) => (b.disabled = !on));
     const not = (what) => (info && info.speaks === "rdp" ? `${what} over Remote Desktop is not built yet`
       : `${what}: not over VNC; the device needs Remote Desktop for it`);
@@ -695,6 +699,8 @@ const KagazRemoteView = (() => {
   // The canvas on the stage: as large as fits, or the device's own size.
   function fit() {
     if (!cur || !cur.width) return;
+    // The phone's keyboard open: the picture keeps its size under it.
+    if (typing()) return;
     const { width: w, height: h } = cur;
     const dpr = window.devicePixelRatio || 1;
     let scale = 1 / dpr; // one device pixel for one of the screen's
@@ -713,7 +719,7 @@ const KagazRemoteView = (() => {
     fit();
     clearTimeout(resizing);
     resizing = setTimeout(() => {
-      if (!cur || cur.session == null || !cur.info || !cur.info.resizes) return;
+      if (!cur || cur.session == null || !cur.info || !cur.info.resizes || typing()) return;
       const now = view();
       if (cur.asked && now[0] === cur.asked[0] && now[1] === cur.asked[1]) return;
       if (now[0] < 200 || now[1] < 200) return;
@@ -961,6 +967,226 @@ const KagazRemoteView = (() => {
     const p = at(ev);
     did({ t: "wheel", x: p.x, y: p.y, up, right }, true);
   }, { passive: false });
+
+
+  // ---------- touch: a phone's or a touch screen's fingers ----------
+  // As docs/remote-connection.md (step 3) has it, and as Microsoft's
+  // Windows App does on a phone: a tap clicks where it lands, a long press
+  // right-clicks there, one finger moving drags (from where it went down),
+  // two fingers moving together scroll, and two fingers spreading or
+  // closing zoom the picture here (moving it about too; pinched back in it
+  // fills the screen again). Mice and pens go on as before.
+  const LONG_PRESS = 500, SLOP = 10, NOTCH = 40;
+  const fingers = new Map(); // pointerId -> { x, y }
+  let one = null; // { id, x0, y0, x, y, timer, state: "wait" | "drag" | "done" }
+  let two = null; // { d0, cx0, cy0, mode, acc, zoom0, panX0, panY0, lastCy }
+  let zoom = 1, panX = 0, panY = 0;
+  const spread = () => {
+    const [a, b] = [...fingers.values()];
+    return { d: Math.hypot(a.x - b.x, a.y - b.y), cx: (a.x + b.x) / 2, cy: (a.y + b.y) / 2 };
+  };
+  function showZoom() {
+    canvas.style.transformOrigin = "0 0";
+    canvas.style.transform = zoom === 1 ? "" : `translate(${panX}px, ${panY}px) scale(${zoom})`;
+  }
+  function unzoom() {
+    zoom = 1;
+    panX = panY = 0;
+    showZoom();
+  }
+  function touchAt(x, y) {
+    return at({ clientX: x, clientY: y });
+  }
+  function touchSend(x, y, buttons) {
+    const p = touchAt(x, y);
+    cur.point = p;
+    cur.buttons = buttons;
+    did({ t: "pointer", x: p.x, y: p.y, buttons }, true);
+  }
+  function oneEnds(lettingGo) {
+    if (!one) return;
+    clearTimeout(one.timer);
+    if (one.state === "wait" && lettingGo) {
+      touchSend(one.x0, one.y0, 0);
+      touchSend(one.x0, one.y0, LEFT);
+      touchSend(one.x0, one.y0, 0);
+    } else if (one.state === "drag") {
+      touchSend(one.x, one.y, 0);
+    }
+    one = null;
+  }
+  function touchDown(ev) {
+    if (!cur || cur.session == null) return;
+    // The keyboard stays open while the screen is tapped.
+    if (!typing()) stage.focus({ preventScroll: true });
+    closePop();
+    try {
+      canvas.setPointerCapture(ev.pointerId);
+    } catch (e) {}
+    fingers.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+    if (fingers.size === 1) {
+      one = { id: ev.pointerId, x0: ev.clientX, y0: ev.clientY, x: ev.clientX, y: ev.clientY, state: "wait", timer: 0 };
+      one.timer = setTimeout(() => {
+        if (!one || one.state !== "wait") return;
+        touchSend(one.x0, one.y0, 0);
+        touchSend(one.x0, one.y0, RIGHT);
+        touchSend(one.x0, one.y0, 0);
+        one.state = "done";
+        if (navigator.vibrate) navigator.vibrate(15);
+      }, LONG_PRESS);
+    } else if (fingers.size === 2) {
+      // A second finger: no click or drag from the first after all.
+      if (one) {
+        clearTimeout(one.timer);
+        if (one.state === "drag") touchSend(one.x, one.y, 0);
+        one = null;
+      }
+      const s = spread();
+      two = { d0: s.d, cx0: s.cx, cy0: s.cy, mode: null, acc: 0, zoom0: zoom, panX0: panX, panY0: panY, lastCy: s.cy };
+    }
+  }
+  function touchMove(ev) {
+    const f = fingers.get(ev.pointerId);
+    if (!f || !cur || cur.session == null) return;
+    f.x = ev.clientX;
+    f.y = ev.clientY;
+    if (one && one.id === ev.pointerId) {
+      one.x = f.x;
+      one.y = f.y;
+      if (one.state === "wait" && Math.hypot(f.x - one.x0, f.y - one.y0) > SLOP) {
+        clearTimeout(one.timer);
+        one.state = "drag";
+        touchSend(one.x0, one.y0, 0);
+        touchSend(one.x0, one.y0, LEFT);
+      }
+      if (one.state === "drag") {
+        const p = touchAt(f.x, f.y);
+        cur.point = p;
+        cur.buttons = LEFT;
+        const last = outbox[outbox.length - 1];
+        if (last && last.t === "pointer" && last.buttons === LEFT) outbox.pop();
+        did({ t: "pointer", x: p.x, y: p.y, buttons: LEFT }, false);
+      }
+      return;
+    }
+    if (!two || fingers.size !== 2) return;
+    const s = spread();
+    if (!two.mode) {
+      if (Math.abs(s.d - two.d0) > 12) two.mode = "zoom";
+      else if (Math.hypot(s.cx - two.cx0, s.cy - two.cy0) > 12) two.mode = "scroll";
+      else return;
+    }
+    if (two.mode === "scroll") {
+      two.acc += s.cy - two.lastCy;
+      two.lastCy = s.cy;
+      const up = Math.trunc(two.acc / NOTCH);
+      if (!up) return;
+      two.acc -= up * NOTCH;
+      const p = touchAt(s.cx, s.cy);
+      did({ t: "wheel", x: p.x, y: p.y, up, right: 0 }, true);
+      return;
+    }
+    // Zoom about the fingers: the point first under them stays under them.
+    const r = canvas.getBoundingClientRect();
+    const baseX = r.left - panX, baseY = r.top - panY;
+    const w = r.width / zoom, h = r.height / zoom;
+    const next = Math.min(4, Math.max(1, two.zoom0 * (s.d / Math.max(1, two.d0))));
+    const lx = (two.cx0 - baseX - two.panX0) / two.zoom0, ly = (two.cy0 - baseY - two.panY0) / two.zoom0;
+    zoom = next;
+    panX = Math.min(0, Math.max(w * (1 - zoom), s.cx - baseX - lx * zoom));
+    panY = Math.min(0, Math.max(h * (1 - zoom), s.cy - baseY - ly * zoom));
+    if (zoom < 1.02) unzoom();
+    else showZoom();
+  }
+  function touchUp(ev) {
+    if (!fingers.has(ev.pointerId)) return;
+    fingers.delete(ev.pointerId);
+    if (one && one.id === ev.pointerId) oneEnds(ev.type === "pointerup");
+    if (fingers.size < 2) two = null;
+  }
+  for (const [kind, fn] of [["pointerdown", touchDown], ["pointermove", touchMove], ["pointerup", touchUp], ["pointercancel", touchUp]]) {
+    canvas.addEventListener(kind, (ev) => {
+      if (ev.pointerType !== "touch") return;
+      ev.preventDefault();
+      ev.stopImmediatePropagation();
+      fn(ev);
+    }, { capture: true });
+  }
+
+  // ---------- typing with the phone's own keyboard ----------
+  // The Keyboard button opens it over a hidden field. What it types is
+  // read as the change to that field (so composing, corrections and
+  // suggestions arrive as the letters they end with): letters taken back
+  // go as Backspace, new ones as the characters themselves, a new line as
+  // Enter. The field keeps one space before the cursor so that Backspace
+  // always has something to take. A keyboard plugged in or paired sends
+  // its keys as on a computer. While it is open the picture keeps its size
+  // and the device is not asked to change its own.
+  const BASE = " ";
+  typeField = document.createElement("textarea");
+  typeField.className = "rv-type-field";
+  for (const [k, v] of [["autocapitalize", "off"], ["autocomplete", "off"], ["autocorrect", "off"], ["spellcheck", "false"], ["aria-label", "Type on the device"], ["enterkeyhint", "enter"]]) typeField.setAttribute(k, v);
+  typeField.value = BASE;
+  let typed = BASE;
+  document.body.appendChild(typeField);
+  function typing() {
+    return !!typeField && document.activeElement === typeField;
+  }
+  const tap = (code, key) => {
+    did({ t: "key", key, code, down: true }, true);
+    did({ t: "key", key, code, down: false }, true);
+  };
+  function typedNow() {
+    if (!cur || cur.session == null) return;
+    const now = typeField.value;
+    let same = 0;
+    while (same < typed.length && same < now.length && typed[same] === now[same]) same++;
+    const gone = [...typed.slice(same)].length;
+    for (let i = 0; i < gone; i++) tap("Backspace", "Backspace");
+    for (const c of now.slice(same)) {
+      if (c === "\n") tap("Enter", "Enter");
+      else tap("", c);
+    }
+    typed = now;
+    // Back to the one space, between words, so the field never grows.
+    if (!now.startsWith(BASE) || now.length > 64 || now.endsWith("\n")) {
+      typeField.value = BASE;
+      typed = BASE;
+    }
+  }
+  typeField.addEventListener("input", (ev) => {
+    if (ev.isComposing) return;
+    typedNow();
+  });
+  typeField.addEventListener("compositionend", typedNow);
+  typeField.addEventListener("keydown", (ev) => {
+    ev.stopPropagation();
+    if (!cur || cur.session == null) return;
+    // A real key (a keyboard plugged in): as on a computer.
+    if (ev.keyCode !== 229 && ev.key !== "Unidentified" && !ev.isComposing && ev.code) {
+      key(ev, true);
+      return;
+    }
+  });
+  typeField.addEventListener("keyup", (ev) => {
+    ev.stopPropagation();
+    if (!cur || cur.session == null) return;
+    if (ev.keyCode !== 229 && ev.key !== "Unidentified" && !ev.isComposing && ev.code) key(ev, false);
+  });
+  typeField.addEventListener("blur", () => {
+    $("rv-type").setAttribute("aria-pressed", "false");
+    stageResized();
+  });
+  $("rv-type").addEventListener("click", () => {
+    if (typing()) {
+      typeField.blur();
+      return;
+    }
+    typeField.value = BASE;
+    typed = BASE;
+    typeField.focus({ preventScroll: true });
+    $("rv-type").setAttribute("aria-pressed", "true");
+  });
 
   // Keys, while the screen has the focus. Each is remembered until it is
   // let go, so that none stays held on the device when the focus leaves.
@@ -1726,7 +1952,7 @@ const KagazRemoteView = (() => {
   }
 
   // A narrow window's tools under the picture do what the bar's do.
-  document.querySelectorAll("#rv-touchbar button").forEach((b) => b.addEventListener("click", () => $(b.dataset.tool).click()));
+  document.querySelectorAll("#rv-touchbar button[data-tool]").forEach((b) => b.addEventListener("click", () => $(b.dataset.tool).click()));
   // A click on the screen closes an open panel.
   stage.addEventListener("pointerdown", (ev) => {
     if (ev.target === stage) closePop();
