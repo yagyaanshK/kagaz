@@ -616,7 +616,7 @@ async fn route(
                 let pairs: Vec<far::Pair> =
                     asks.paired.store.lock().unwrap().devices.iter().map(|d| far::Pair::new(&d.id, &d.secret)).collect();
                 let addresses = asks.found.as_ref().map(|f| f.lock().unwrap().addresses.clone()).unwrap_or_default();
-                let _ = far::answer_ask(&mut s, &pairs, &addresses);
+                let _ = far::answer_ask(&mut s, &pairs, asks.found.is_some(), &addresses);
             }
         });
     } else {

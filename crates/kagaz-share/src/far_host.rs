@@ -7,6 +7,10 @@
 //! for the door's port only, never the Remote Desktop port, for ten
 //! minutes at a time, renewed while this runs: when it stops, however it
 //! stops, the opening closes by itself soon after.
+//!
+//! Where it can be knocked at is posted in BitTorrent's address book for
+//! each paired device (far.rs says how only that device can find it),
+//! when it changes and every twenty minutes.
 
 use crate::far::{self, Door, Pair, Role};
 use crate::paired::Paired;
@@ -68,6 +72,10 @@ pub fn start(
     }
     let found: Shared = Arc::new(Mutex::new(Found { state: "looking".into(), addresses: Vec::new() }));
     told(&found.lock().unwrap());
+    {
+        let (found, paired) = (found.clone(), paired.clone());
+        std::thread::Builder::new().name("far-book".into()).spawn(move || book(found, paired))?;
+    }
     let shared = found.clone();
     let port = door.port();
     tokio::spawn(async move {
@@ -95,6 +103,39 @@ pub fn start(
         }
     });
     Ok(shared)
+}
+
+/// Post where it can be knocked at, for each paired device, when that
+/// changes (or the devices, or the day) and every twenty minutes.
+#[allow(deprecated)]
+fn book(found: Shared, paired: Arc<Paired>) {
+    let dht = loop {
+        match mainline::Dht::client() {
+            Ok(d) => break d,
+            Err(e) => {
+                say(&format!("the address book could not be reached ({e}): trying again in a minute"));
+                std::thread::sleep(Duration::from_secs(60));
+            }
+        }
+    };
+    let mut last: Option<(Vec<SocketAddr>, usize, u64, std::time::Instant)> = None;
+    loop {
+        let addresses = found.lock().unwrap().addresses.clone();
+        let pairs = pairs(&paired);
+        let day = far::unix_now() / far::DAY;
+        let due = match &last {
+            None => true,
+            Some((a, n, d, t)) => *a != addresses || *n != pairs.len() || *d != day || t.elapsed() > Duration::from_secs(20 * 60),
+        };
+        if due && !addresses.is_empty() && !pairs.is_empty() {
+            let ok = pairs.iter().filter(|p| far::post(&dht, p, far::BOOK, &addresses).is_ok()).count();
+            say(&format!("where it can be reached, posted in the address book for {ok} of {} paired devices", pairs.len()));
+            if ok > 0 {
+                last = Some((addresses, pairs.len(), day, std::time::Instant::now()));
+            }
+        }
+        std::thread::sleep(Duration::from_secs(30));
+    }
 }
 
 /// The opening now, to close as this ends.

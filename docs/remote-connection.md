@@ -344,6 +344,19 @@ wants in.
   computer's port; only a paired device is told the addresses. The owner's
   router takes none of the three requests (checked 2026-11-23), so (1) is
   tried elsewhere.
+- *(2) Built 2026-11-23:* while From anywhere is on, kagaz-share posts
+  where it can be knocked at in BitTorrent's address book (mainline), one
+  record for each paired device: a BEP 44 item signed with a key made from
+  that device's secret and the day, sealed (ChaCha20-Poly1305) with
+  another, posted when the addresses, the devices or the day change and
+  every twenty minutes. Only that device can find the record or read it;
+  to anyone else it is one record among millions, under a name that
+  changes daily. A computer's answer to KGZA now says whether From
+  anywhere is on, and the device keeps a From afar way while it is, even
+  before any address is known; from afar it knocks at what it was told
+  and at what the address book says, for up to 40 seconds. Tried here on
+  a local address book of ten nodes: another device's keys find nothing,
+  the paired device reads the door's address and gets through it.
 
 The iPhone as a viewer comes later.
 

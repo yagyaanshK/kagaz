@@ -255,7 +255,8 @@ pub struct Device {
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub paired: bool,
     /// Where a paired computer said it can be reached from afar, the last
-    /// time it was asked (none while it has From anywhere off).
+    /// time it was asked (none while it has From anywhere off; it may
+    /// know none and post them in the address book later).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub far: Vec<String>,
 }
@@ -595,11 +596,11 @@ impl Devices {
 
     /// A path answered: when, and through what.
     /// What a paired computer said of reaching it from afar: kept, with a
-    /// path for it while there is somewhere to knock, none while not.
-    pub fn note_far(&mut self, id: &str, addresses: Vec<String>) {
+    /// path for it while it has From anywhere on, none while off.
+    pub fn note_far(&mut self, id: &str, on: bool, addresses: Vec<String>) {
         if let Some(d) = self.devices.iter_mut().find(|d| d.id == id) {
             let has = d.paths.iter().any(|p| p.kind == PathKind::Far);
-            if addresses.is_empty() {
+            if !on {
                 d.paths.retain(|p| p.kind != PathKind::Far);
             } else if !has {
                 d.paths.push(PathTo { kind: PathKind::Far, host: String::new(), last_ok: None });

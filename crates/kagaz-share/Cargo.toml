@@ -49,12 +49,16 @@ anyhow = "1"
 # From anywhere (remote/far.rs, as the viewer builds it): the door on UDP
 # and the encrypted connection behind it (quinn, MIT or Apache-2.0), and
 # asking the router to let it in: UPnP (igd-next, MIT), PCP and NAT-PMP
-# (crab_nat, MIT), the router's address from the system (netdev, MIT).
+# (crab_nat, MIT), the router's address from the system (netdev, MIT);
+# its addresses posted in BitTorrent's address book for its paired
+# devices (mainline, MIT), sealed (chacha20poly1305, MIT or Apache-2.0).
 quinn = { version = "0.11", default-features = false, features = ["runtime-tokio", "rustls-aws-lc-rs", "log"] }
 socket2 = "0.6"
 igd-next = { version = "0.18", default-features = false, features = ["io_sync"] }
 crab_nat = "0.8"
 netdev = { version = "0.48", default-features = false, features = ["gateway"] }
+mainline = { version = "8", default-features = false, features = ["node"] }
+chacha20poly1305 = "0.10"
 
 [target.'cfg(windows)'.dependencies]
 # The screen through DXGI's desktop duplication (GDI when that is not

@@ -207,7 +207,9 @@ fn from_afar(list: &Path, device: &Device) -> Result<far::Reached, String> {
     let at: Vec<std::net::SocketAddr> = device.far.iter().filter_map(|a| a.parse().ok()).collect();
     let pair = far::Pair::new(&device.id, &link::hash(&secret));
     let provider = std::sync::Arc::new(rustls::crypto::ring::default_provider());
-    far::reach(pair, fingerprint, at, Duration::from_secs(4), provider)
+    // Where it said, and where it posted since in the address book.
+    let looking = far::Looking { book: true, bootstrap: None };
+    far::reach(pair, fingerprint, at, looking, provider)
 }
 
 /// Ask a paired computer, reached at `addr` (near or from afar), where it
@@ -221,10 +223,10 @@ pub fn learn_far(list: &Path, id: &str, addr: std::net::SocketAddr) {
     }
     let Some(secret) = store::link_secret(list, id) else { return };
     let pair = far::Pair::new(id, &link::hash(&secret));
-    if let Ok(said) = far::ask(addr, &pair, Duration::from_secs(5)) {
-        let said: Vec<String> = said.iter().map(|a| a.to_string()).collect();
+    if let Ok(told) = far::ask(addr, &pair, Duration::from_secs(5)) {
+        let said: Vec<String> = told.addresses.iter().map(|a| a.to_string()).collect();
         let _ = Devices::update(list, |d| {
-            d.note_far(id, said);
+            d.note_far(id, told.on, said);
             Ok(())
         });
     }
