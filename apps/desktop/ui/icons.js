@@ -53,6 +53,10 @@ const KagazIcons = (() => {
 
     // ---- actions ----
     plus: '<path d="M12 5v14M5 12h14"/>',
+    minus: '<path d="M5 12h14"/>',
+    // A session's two ways with fingers: a pointer moved about, or touch.
+    pointer: '<path d="M6 3.5v15.5l4.2-4 2.7 5.8 2.7-1.3-2.7-5.6h5.6z"/>',
+    touch: '<circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="8"/>',
     menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
     back: '<path d="M15 5l-7 7 7 7"/>',
     forward: '<path d="M9 5l7 7-7 7"/>',

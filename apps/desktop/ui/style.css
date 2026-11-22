@@ -1279,6 +1279,10 @@ html[data-viewer] #bar .rc-chip.open svg { color: inherit; }
 .bar-btn[aria-expanded="true"] { background: var(--accent-soft, rgba(47, 111, 78, 0.14)); color: var(--accent); }
 /* A narrow window: the tools move under the picture. */
 [data-layout="bar"][data-viewer] .bar-remote .bar-btn, [data-layout="bar"] .rc-chip-path { display: none; }
+/* + and − stay in a narrow window's bar: a phone's screen is small. */
+[data-layout="bar"][data-viewer] .bar-remote .bar-btn.rc-size { display: inline-flex; }
+/* The pointer moved with a finger (remote-view.js), drawn over the picture. */
+.rc-cursor { position: absolute; left: 0; top: 0; z-index: 2; pointer-events: none; image-rendering: auto; filter: drop-shadow(0 0 1px rgba(0, 0, 0, 0.6)); }
 .rc-touchbar { display: none; }
 [data-layout="bar"] .rc-touchbar { display: flex; justify-content: space-around; flex: none; padding: 6px 4px calc(6px + env(safe-area-inset-bottom)); background: var(--bar-bg, var(--bg)); border-top: 1px solid var(--line); }
 .rc-touchbar button { flex-direction: column; gap: 2px; min-width: 64px; min-height: 48px; border: none; background: none; font-size: 11px; color: var(--text); }

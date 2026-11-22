@@ -215,7 +215,8 @@ const KagazRemoteView = (() => {
   // ---------- opening and closing ----------
   function open(device, h) {
     hooks = h || {};
-    cur = { device, session: null, owed: 0, width: 0, height: 0, held: new Map(), buttons: 0, frames: 0, paintMs: 0, bytes: 0, told: null, ownSize: false, asked: null, responses: [], lastResponse: null };
+    pointerWay = keptWay(device.id);
+    cur = { device, session: null, owed: 0, width: 0, height: 0, held: new Map(), buttons: 0, frames: 0, paintMs: 0, bytes: 0, told: null, ownSize: false, asked: null, responses: [], lastResponse: null, size: keptSize(device.id), ptr: null, shape: null };
     document.documentElement.dataset.viewer = "on";
     $("bar-remote").classList.remove("hidden");
     canvas.classList.add("hidden");
@@ -231,10 +232,59 @@ const KagazRemoteView = (() => {
 
   // The viewer as the device should draw for it: the stage in the
   // screen's own pixels, and how many of them make a point, in percent.
+  // With + and − in the bar the device draws its screen for a window this
+  // many times smaller (everything bigger) or larger, as resizing the
+  // window does; the picture still fills the window. Remembered for each
+  // device on this computer or phone. Up to 2: fit() grows a picture that
+  // far and no further.
   function view() {
-    const dpr = window.devicePixelRatio || 1;
-    return [Math.round(stage.clientWidth * dpr), Math.round(stage.clientHeight * dpr), Math.round(dpr * 100)];
+    const dpr = window.devicePixelRatio || 1, k = sizeOf();
+    const side = (n) => Math.min(8192, Math.round((n * dpr) / k));
+    return [side(stage.clientWidth), side(stage.clientHeight), Math.round(dpr * 100)];
   }
+  const SIZES = [0.5, 0.67, 0.8, 1, 1.25, 1.5, 2];
+  const SIZE_KEY = (id) => `kagaz.remote.size.${id}`;
+  function sizeOf() {
+    return cur && SIZES.includes(cur.size) ? cur.size : 1;
+  }
+  function keptSize(id) {
+    try {
+      const k = Number(localStorage.getItem(SIZE_KEY(id)));
+      return SIZES.includes(k) ? k : 1;
+    } catch (e) {
+      return 1;
+    }
+  }
+  function sizeButtons() {
+    const on = !!(cur && cur.session != null && cur.info && cur.info.resizes);
+    const k = sizeOf(), pct = `${Math.round(k * 100)}%`;
+    const why = cur && cur.info && !cur.info.resizes
+      ? "This device keeps its own screen size; pinch the picture or use Picture to zoom" : "";
+    $("rv-bigger").disabled = !on || k === SIZES[SIZES.length - 1];
+    $("rv-smaller").disabled = !on || k === SIZES[0];
+    $("rv-bigger").title = why || `Bigger (now ${pct}): the device draws its screen larger, as for a smaller window`;
+    $("rv-smaller").title = why || `Smaller (now ${pct}): more of the device's screen fits, as in a larger window`;
+  }
+  function sizeBy(step) {
+    if (!cur || cur.session == null || !cur.info || !cur.info.resizes) return;
+    const i = SIZES.indexOf(sizeOf());
+    const k = SIZES[Math.min(SIZES.length - 1, Math.max(0, i + step))];
+    if (k === sizeOf()) return;
+    cur.size = k;
+    try {
+      if (k === 1) localStorage.removeItem(SIZE_KEY(cur.device.id));
+      else localStorage.setItem(SIZE_KEY(cur.device.id), String(k));
+    } catch (e) {}
+    sizeButtons();
+    toast(k === 1 ? "Size 100%: as the window asks" : `Size ${Math.round(k * 100)}%`, 1500);
+    log(`size ${Math.round(k * 100)}%`);
+    // With the phone's keyboard open the device keeps its size; closing
+    // the keyboard asks for the new one.
+    if (typing()) typeField.blur();
+    else stageResized();
+  }
+  $("rv-bigger").addEventListener("click", () => sizeBy(1));
+  $("rv-smaller").addEventListener("click", () => sizeBy(-1));
 
   // `asking`: what the person typed, if the device asked: `user`,
   // `password`, `remember` (keep the password once accepted), and
@@ -442,6 +492,8 @@ const KagazRemoteView = (() => {
     $("rv-mode").classList.toggle("hidden", !paired);
     if (cur) cur.watching = false;
     modeButtons();
+    sizeButtons();
+    touchButton();
   }
 
   function modeButtons() {
@@ -674,7 +726,11 @@ const KagazRemoteView = (() => {
         return;
       }
       if (news.type === "ended") ended(news.why);
-      else if (news.type === "pointer-default") canvas.style.cursor = "default";
+      else if (news.type === "pointer-default") {
+        canvas.style.cursor = "default";
+        cur.shape = null;
+        showCursor();
+      }
       else if (news.type === "clipboard") {
         const what = news.picture ? "a picture is" : `${news.characters} characters are`;
         // Its size only, never what it says: whether copies arrive.
@@ -697,6 +753,9 @@ const KagazRemoteView = (() => {
     canvas.height = h;
     canvas.classList.remove("hidden");
     fit();
+    // The Pointer way's pointer: in the middle to begin with.
+    if (cur.ptr || pointing()) ptrHome();
+    showCursor();
   }
 
   // The canvas on the stage: as large as fits, or the device's own size.
@@ -714,6 +773,7 @@ const KagazRemoteView = (() => {
     }
     canvas.style.width = `${Math.max(1, Math.round(w * scale))}px`;
     canvas.style.height = `${Math.max(1, Math.round(h * scale))}px`;
+    showCursor();
   }
   // The window changed size: fit the picture now, and a moment after the
   // last change ask a device that can to draw its screen at the new size.
@@ -739,13 +799,18 @@ const KagazRemoteView = (() => {
   function pointerShape(w, h, hx, hy, rgba) {
     if (!w || !h) {
       canvas.style.cursor = "none";
+      if (cur) cur.shape = null;
+      showCursor();
       return;
     }
     const c = document.createElement("canvas");
     c.width = w;
     c.height = h;
     c.getContext("2d").putImageData(new ImageData(new Uint8ClampedArray(rgba), w, h), 0, 0);
-    canvas.style.cursor = `url(${c.toDataURL()}) ${Math.min(hx, w - 1)} ${Math.min(hy, h - 1)}, default`;
+    const url = c.toDataURL();
+    canvas.style.cursor = `url(${url}) ${Math.min(hx, w - 1)} ${Math.min(hy, h - 1)}, default`;
+    if (cur) cur.shape = { url, w, h, hx: Math.min(hx, w - 1), hy: Math.min(hy, h - 1) };
+    showCursor();
   }
 
   function ended(why) {
@@ -758,6 +823,9 @@ const KagazRemoteView = (() => {
     setTools(null);
     setChip(null);
     canvas.style.cursor = "";
+    if (tapWait) clearTimeout(tapWait.timer);
+    tapWait = null;
+    showCursor();
     if (why !== "closed") endedCard(state.device, why);
   }
 
@@ -973,16 +1041,42 @@ const KagazRemoteView = (() => {
 
 
   // ---------- touch: a phone's or a touch screen's fingers ----------
-  // As docs/remote-connection.md (step 3) has it, and as Microsoft's
-  // Windows App does on a phone: a tap clicks where it lands, a long press
-  // right-clicks there, one finger moving drags (from where it went down),
-  // two fingers moving together scroll, and two fingers spreading or
-  // closing zoom the picture here (moving it about too; pinched back in it
-  // fills the screen again). Mice and pens go on as before.
-  const LONG_PRESS = 500, SLOP = 10, NOTCH = 40;
+  // Two ways, as in Microsoft's Windows App, switched with the button under
+  // the screen (Pointer / Touch, remembered for each device):
+  //
+  // Pointer, the first way: the finger moves a pointer drawn here, as on a
+  // laptop's touchpad, further the faster it goes. A tap clicks where the
+  // pointer is (a moment later, in case a second touch follows); a tap and
+  // then a touch moved drags; two taps click twice; a long press or a tap
+  // with two fingers right-clicks; two fingers moving together scroll.
+  //
+  // Touch, as docs/remote-connection.md (step 3) has it: a tap clicks where
+  // it lands, a long press right-clicks there, one finger moving drags
+  // (from where it went down), two fingers moving together scroll.
+  //
+  // Both: two fingers spreading or closing zoom the picture here (moving it
+  // about too; pinched back in it fills the screen again). A computer's
+  // touch screen, without the button, is always Touch. Mice and pens go on
+  // as before.
+  const LONG_PRESS = 500, SLOP = 10, NOTCH = 40, DOUBLE = 250, TWO_TAP = 300;
+  const TOUCH_KEY = (id) => `kagaz.remote.touch.${id}`;
+  let pointerWay = true;
+  function keptWay(id) {
+    try {
+      return localStorage.getItem(TOUCH_KEY(id)) !== "touch";
+    } catch (e) {
+      return true;
+    }
+  }
+  // The button is there where the touch bar is (a phone, a narrow window).
+  function pointing() {
+    const bar = $("rv-touchbar");
+    return pointerWay && !!bar && getComputedStyle(bar).display !== "none";
+  }
   const fingers = new Map(); // pointerId -> { x, y }
-  let one = null; // { id, x0, y0, x, y, timer, state: "wait" | "drag" | "done" }
-  let two = null; // { d0, cx0, cy0, mode, acc, zoom0, panX0, panY0, lastCy }
+  let one = null; // { id, x0, y0, x, y, t, ptr, timer, state: "wait" | "second" | "move" | "drag" | "done" }
+  let two = null; // { d0, cx0, cy0, t0, ptr, mode, acc, zoom0, panX0, panY0, lastCy }
+  let tapWait = null; // Pointer: a tap's click, held back a moment { x, y, timer }
   let zoom = 1, panX = 0, panY = 0;
   const spread = () => {
     const [a, b] = [...fingers.values()];
@@ -991,6 +1085,7 @@ const KagazRemoteView = (() => {
   function showZoom() {
     canvas.style.transformOrigin = "0 0";
     canvas.style.transform = zoom === 1 ? "" : `translate(${panX}px, ${panY}px) scale(${zoom})`;
+    showCursor();
   }
   function unzoom() {
     zoom = 1;
@@ -1006,10 +1101,114 @@ const KagazRemoteView = (() => {
     cur.buttons = buttons;
     did({ t: "pointer", x: p.x, y: p.y, buttons }, true);
   }
+
+  // The pointer of the Pointer way: where it is on the device (its pixels,
+  // kept with fractions so that slow moves add up), drawn over the picture
+  // in the device's own shape for it, at least big enough to see.
+  const cursorEl = document.createElement("img");
+  cursorEl.className = "rc-cursor";
+  cursorEl.alt = "";
+  cursorEl.hidden = true;
+  stage.appendChild(cursorEl);
+  const ARROW = {
+    url: "data:image/svg+xml," + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><path d="M1.5 1.5v19l4.7-4.5 3.1 7 3-1.4-3-6.8h6.5z" fill="#fff" stroke="#000" stroke-width="1.3" stroke-linejoin="round"/></svg>'),
+    w: 32, h: 32, hx: 1, hy: 1,
+  };
+  function showCursor() {
+    const p = cur && cur.ptr;
+    if (!p || cur.session == null || !cur.width || canvas.classList.contains("hidden") || !pointing()) {
+      cursorEl.hidden = true;
+      return;
+    }
+    const shape = cur.shape || ARROW;
+    const r = canvas.getBoundingClientRect(), s = stage.getBoundingClientRect();
+    const k = r.width / cur.width;
+    const scale = Math.max(k, 32 / Math.max(1, shape.h));
+    if (cursorEl.getAttribute("src") !== shape.url) cursorEl.src = shape.url;
+    cursorEl.style.width = `${shape.w * scale}px`;
+    cursorEl.style.height = `${shape.h * scale}px`;
+    const x = r.left - s.left + stage.scrollLeft + p.x * k - shape.hx * scale;
+    const y = r.top - s.top + stage.scrollTop + p.y * k - shape.hy * scale;
+    cursorEl.style.transform = `translate(${x}px, ${y}px)`;
+    cursorEl.hidden = false;
+  }
+  function ptrHome() {
+    if (!cur.ptr) cur.ptr = cur.point ? { x: cur.point.x, y: cur.point.y } : { x: cur.width / 2, y: cur.height / 2 };
+    cur.ptr.x = Math.min(cur.width - 1, Math.max(0, cur.ptr.x));
+    cur.ptr.y = Math.min(cur.height - 1, Math.max(0, cur.ptr.y));
+    return cur.ptr;
+  }
+  function ptrSend(buttons, now) {
+    const p = ptrHome();
+    const x = Math.round(p.x), y = Math.round(p.y);
+    cur.point = { x, y };
+    cur.buttons = buttons;
+    // Of moves waiting to go, only the last matters.
+    const last = outbox[outbox.length - 1];
+    if (!now && last && last.t === "pointer" && last.buttons === buttons) outbox.pop();
+    did({ t: "pointer", x, y, buttons }, now);
+  }
+  function ptrClick(button, times) {
+    ptrSend(0, true);
+    for (let i = 0; i < times; i++) {
+      ptrSend(button, true);
+      ptrSend(0, true);
+    }
+  }
+  // A tap held back: clicked now (its time is up, or something else began).
+  function tapNow() {
+    if (!tapWait) return;
+    clearTimeout(tapWait.timer);
+    tapWait = null;
+    if (cur && cur.session != null) ptrClick(LEFT, 1);
+  }
+  // Zoomed in, the picture moves along so that the pointer stays in sight.
+  function follow() {
+    if (zoom === 1) return;
+    const r = canvas.getBoundingClientRect(), s = stage.getBoundingClientRect();
+    const k = r.width / cur.width, M = 40;
+    const w = r.width / zoom, h = r.height / zoom;
+    const boxL = r.left - panX, boxT = r.top - panY;
+    const L = Math.max(s.left, boxL) + M, R = Math.min(s.right, boxL + w) - M;
+    const T = Math.max(s.top, boxT) + M, B = Math.min(s.bottom, boxT + h) - M;
+    const x = r.left + cur.ptr.x * k, y = r.top + cur.ptr.y * k;
+    let nx = panX, ny = panY;
+    if (x < L) nx += L - x;
+    else if (x > R) nx -= x - R;
+    if (y < T) ny += T - y;
+    else if (y > B) ny -= y - B;
+    if (nx === panX && ny === panY) return;
+    panX = Math.min(0, Math.max(w * (1 - zoom), nx));
+    panY = Math.min(0, Math.max(h * (1 - zoom), ny));
+    showZoom();
+  }
+  // The finger moved dx, dy on the screen in dt ms: the pointer moves as
+  // far over the picture, up to two and a half times that when quick.
+  function ptrMove(dx, dy, dt, buttons) {
+    const k = canvas.getBoundingClientRect().width / cur.width;
+    const speed = Math.hypot(dx, dy) / Math.max(1, dt);
+    const gain = Math.min(2.5, 1 + speed * 0.8) / k;
+    const p = ptrHome();
+    p.x = Math.min(cur.width - 1, Math.max(0, p.x + dx * gain));
+    p.y = Math.min(cur.height - 1, Math.max(0, p.y + dy * gain));
+    follow();
+    ptrSend(buttons, false);
+    showCursor();
+  }
+
   function oneEnds(lettingGo) {
     if (!one) return;
     clearTimeout(one.timer);
-    if (one.state === "wait" && lettingGo) {
+    if (one.ptr) {
+      if (one.state === "wait" && lettingGo) {
+        // A tap: its click waits a moment for a second touch (a drag).
+        tapWait = { x: one.x0, y: one.y0, timer: setTimeout(tapNow, DOUBLE) };
+      } else if (one.state === "second" && lettingGo) {
+        ptrClick(LEFT, 2);
+      } else if (one.state === "drag") {
+        ptrSend(0, true);
+      }
+    } else if (one.state === "wait" && lettingGo) {
       touchSend(one.x0, one.y0, 0);
       touchSend(one.x0, one.y0, LEFT);
       touchSend(one.x0, one.y0, 0);
@@ -1019,7 +1218,7 @@ const KagazRemoteView = (() => {
     one = null;
   }
   function touchDown(ev) {
-    if (!cur || cur.session == null) return;
+    if (!cur || cur.session == null || !cur.width) return;
     // The keyboard stays open while the screen is tapped.
     if (!typing()) stage.focus({ preventScroll: true });
     closePop();
@@ -1028,24 +1227,48 @@ const KagazRemoteView = (() => {
     } catch (e) {}
     fingers.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
     if (fingers.size === 1) {
-      one = { id: ev.pointerId, x0: ev.clientX, y0: ev.clientY, x: ev.clientX, y: ev.clientY, state: "wait", timer: 0 };
+      const ptr = pointing();
+      one = { id: ev.pointerId, x0: ev.clientX, y0: ev.clientY, x: ev.clientX, y: ev.clientY, t: ev.timeStamp, ptr, state: "wait", timer: 0 };
+      if (ptr) {
+        ptrHome();
+        showCursor();
+        // Soon after a tap and near it: a drag if this one moves, two
+        // clicks if not.
+        if (tapWait && Math.hypot(ev.clientX - tapWait.x, ev.clientY - tapWait.y) < 48) {
+          clearTimeout(tapWait.timer);
+          tapWait = null;
+          one.state = "second";
+          return;
+        }
+        tapNow();
+      }
       one.timer = setTimeout(() => {
         if (!one || one.state !== "wait") return;
-        touchSend(one.x0, one.y0, 0);
-        touchSend(one.x0, one.y0, RIGHT);
-        touchSend(one.x0, one.y0, 0);
+        if (one.ptr) ptrClick(RIGHT, 1);
+        else {
+          touchSend(one.x0, one.y0, 0);
+          touchSend(one.x0, one.y0, RIGHT);
+          touchSend(one.x0, one.y0, 0);
+        }
         one.state = "done";
         if (navigator.vibrate) navigator.vibrate(15);
       }, LONG_PRESS);
     } else if (fingers.size === 2) {
-      // A second finger: no click or drag from the first after all.
+      // A second finger: no click or drag from the first after all (a tap
+      // held back still clicks).
       if (one) {
         clearTimeout(one.timer);
-        if (one.state === "drag") touchSend(one.x, one.y, 0);
+        if (one.state === "drag") {
+          if (one.ptr) ptrSend(0, true);
+          else touchSend(one.x, one.y, 0);
+        } else if (one.state === "second") {
+          ptrClick(LEFT, 1);
+        }
         one = null;
       }
+      tapNow();
       const s = spread();
-      two = { d0: s.d, cx0: s.cx, cy0: s.cy, mode: null, acc: 0, zoom0: zoom, panX0: panX, panY0: panY, lastCy: s.cy };
+      two = { d0: s.d, cx0: s.cx, cy0: s.cy, t0: ev.timeStamp, ptr: pointing(), mode: null, acc: 0, zoom0: zoom, panX0: panX, panY0: panY, lastCy: s.cy };
     }
   }
   function touchMove(ev) {
@@ -1054,14 +1277,31 @@ const KagazRemoteView = (() => {
     f.x = ev.clientX;
     f.y = ev.clientY;
     if (one && one.id === ev.pointerId) {
+      if ((one.state === "wait" || one.state === "second") && Math.hypot(f.x - one.x0, f.y - one.y0) > SLOP) {
+        clearTimeout(one.timer);
+        if (!one.ptr) {
+          one.state = "drag";
+          touchSend(one.x0, one.y0, 0);
+          touchSend(one.x0, one.y0, LEFT);
+        } else if (one.state === "second") {
+          one.state = "drag";
+          ptrSend(0, true);
+          ptrSend(LEFT, true);
+        } else {
+          one.state = "move";
+        }
+      }
+      if (one.ptr) {
+        // Still: its first steps count once it has moved past the slop.
+        if (one.state === "wait" || one.state === "second") return;
+        ptrMove(f.x - one.x, f.y - one.y, ev.timeStamp - one.t, one.state === "drag" ? LEFT : 0);
+        one.x = f.x;
+        one.y = f.y;
+        one.t = ev.timeStamp;
+        return;
+      }
       one.x = f.x;
       one.y = f.y;
-      if (one.state === "wait" && Math.hypot(f.x - one.x0, f.y - one.y0) > SLOP) {
-        clearTimeout(one.timer);
-        one.state = "drag";
-        touchSend(one.x0, one.y0, 0);
-        touchSend(one.x0, one.y0, LEFT);
-      }
       if (one.state === "drag") {
         const p = touchAt(f.x, f.y);
         cur.point = p;
@@ -1085,8 +1325,9 @@ const KagazRemoteView = (() => {
       const up = Math.trunc(two.acc / NOTCH);
       if (!up) return;
       two.acc -= up * NOTCH;
-      const p = touchAt(s.cx, s.cy);
-      did({ t: "wheel", x: p.x, y: p.y, up, right: 0 }, true);
+      // At the pointer in the Pointer way, under the fingers in Touch.
+      const p = two.ptr ? ptrHome() : touchAt(s.cx, s.cy);
+      did({ t: "wheel", x: Math.round(p.x), y: Math.round(p.y), up, right: 0 }, true);
       return;
     }
     // Zoom about the fingers: the point first under them stays under them.
@@ -1105,7 +1346,12 @@ const KagazRemoteView = (() => {
     if (!fingers.has(ev.pointerId)) return;
     fingers.delete(ev.pointerId);
     if (one && one.id === ev.pointerId) oneEnds(ev.type === "pointerup");
-    if (fingers.size < 2) two = null;
+    if (two && fingers.size < 2) {
+      // Two fingers down and up again without moving: a right click where
+      // the pointer is.
+      if (two.ptr && !two.mode && ev.type === "pointerup" && ev.timeStamp - two.t0 < TWO_TAP) ptrClick(RIGHT, 1);
+      two = null;
+    }
   }
   for (const [kind, fn] of [["pointerdown", touchDown], ["pointermove", touchMove], ["pointerup", touchUp], ["pointercancel", touchUp]]) {
     canvas.addEventListener(kind, (ev) => {
@@ -1115,6 +1361,30 @@ const KagazRemoteView = (() => {
       fn(ev);
     }, { capture: true });
   }
+  // The button under the screen: says the way the fingers work now.
+  function touchButton() {
+    const b = $("rv-touch");
+    if (!b) return;
+    setIcon(b.querySelector(".ic"), pointerWay ? "pointer" : "touch");
+    b.lastElementChild.textContent = pointerWay ? "Pointer" : "Touch";
+    b.title = pointerWay ? "Your finger moves a pointer, as on a touchpad. Tap to click where you touch instead"
+      : "Your finger clicks where it touches. Tap to move a pointer instead, as on a touchpad";
+    showCursor();
+  }
+  $("rv-touch").addEventListener("click", () => {
+    if (!cur) return;
+    pointerWay = !pointerWay;
+    try {
+      if (pointerWay) localStorage.removeItem(TOUCH_KEY(cur.device.id));
+      else localStorage.setItem(TOUCH_KEY(cur.device.id), "touch");
+    } catch (e) {}
+    tapNow();
+    if (cur && cur.width && pointerWay) ptrHome();
+    touchButton();
+    toast(pointerWay
+      ? "Pointer: your finger moves it. Tap to click, tap and then drag to drag, two fingers to scroll; a long press or a two-finger tap right-clicks."
+      : "Touch: a tap clicks where you touch, a long press right-clicks, a drag drags, two fingers scroll.", 5000);
+  });
 
   // ---------- typing with the phone's own keyboard ----------
   // The Keyboard button opens it over a hidden field. What it types is

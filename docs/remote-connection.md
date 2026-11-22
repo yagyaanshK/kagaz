@@ -264,8 +264,17 @@ AAudio on Android 8.0 and later, none on Android 7): tap, long-press for
 right-click, one finger drags, two fingers scroll, pinch zooms the picture
 here; a Keyboard button opens the phone's own keyboard (typed letters go as
 characters, Backspace and Enter as keys; the picture keeps its size under
-it). Still to come: trackpad mode, the fingerprint or PIN, the frugal start
-on mobile data, sharing a device by QR code.
+it). Still to come: the fingerprint or PIN, the frugal start on mobile
+data, sharing a device by QR code.
+
+Later the same day, at the owner's word, the pointer comes first on a phone:
+the finger moves a pointer drawn over the picture, as on a touchpad (a tap
+clicks where it is, a tap and then a drag drags, a long press or a
+two-finger tap right-clicks, two fingers scroll there). A Pointer / Touch
+button under the screen switches to touching directly, remembered for each
+device. Minus and plus in the bar have the device draw its screen for a
+window larger or smaller (50% to 200%, remembered for each device), as
+resizing the window does on a computer.
 
 ### 4. More existing protocols
 

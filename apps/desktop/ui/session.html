@@ -21,6 +21,8 @@
         <span id="bar-remote" class="bar-remote hidden">
         <span id="rv-chip" class="rc-chip" title="How this session travels"><span id="rv-chip-icon" class="ic" data-icon="lock"></span><span id="rv-chip-path" class="rc-chip-path"></span><span id="rv-chip-text"></span></span>
         <span id="rv-mode" class="rc-mode hidden" role="group" aria-label="Control or watch"><button id="rv-mode-control" type="button" class="on" aria-pressed="true" title="Use its mouse and keys">Control</button><button id="rv-mode-watch" type="button" aria-pressed="false" title="Only watch: this computer's mouse and keys stay here">Watch</button></span>
+        <button id="rv-smaller" type="button" class="bar-btn rc-size" title="Smaller: more of the device's screen fits, as in a larger window" aria-label="Smaller"><span class="ic" data-icon="minus"></span></button>
+        <button id="rv-bigger" type="button" class="bar-btn rc-size" title="Bigger: the device draws its screen larger, as for a smaller window" aria-label="Bigger"><span class="ic" data-icon="plus"></span></button>
         <button id="rv-keys" type="button" class="bar-btn" aria-haspopup="true" aria-expanded="false" title="Send keys such as Ctrl + Alt + Del" aria-label="Send keys"><span class="ic" data-icon="keyboard"></span></button>
         <button id="rv-clip" type="button" class="bar-btn" title="Send this computer's clipboard (text or a picture) to the device; what is copied there arrives here by itself" aria-label="Send the clipboard"><span class="ic" data-icon="clipboard"></span></button>
         <button id="rv-file" type="button" class="bar-btn" aria-label="Send a file" disabled><span class="ic" data-icon="file"></span></button>
@@ -65,7 +67,9 @@
         </aside>
         <!-- A narrow window has no room in the bar: the tools sit here. -->
         <div id="rv-touchbar" class="rc-touchbar">
-        <button type="button" data-tool="rv-keys"><span class="ic" data-icon="keyboard"></span><span>Keys</span></button>
+        <button type="button" id="rv-touch"><span class="ic" data-icon="pointer"></span><span>Pointer</span></button>
+        <button type="button" id="rv-type" aria-pressed="false"><span class="ic" data-icon="keyboard"></span><span>Keyboard</span></button>
+        <button type="button" data-tool="rv-keys"><span class="ic" data-icon="grid"></span><span>Keys</span></button>
         <button type="button" data-tool="rv-clip"><span class="ic" data-icon="clipboard"></span><span>Paste</span></button>
         <button type="button" data-tool="rv-picture"><span class="ic" data-icon="picture"></span><span>Picture</span></button>
         <button type="button" data-tool="rv-full"><span class="ic" data-icon="full"></span><span>Full screen</span></button>
