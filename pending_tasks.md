@@ -833,6 +833,29 @@ Plan: `docs/remote-connection.md` (agreed 2026-11-16).
       program waits up to two minutes). To try: drag a file from
       Explorer there out of the window onto the desktop here; a folder;
       a large file; and a window drag out of it (nothing should happen).
+- [ ] **From anywhere: a paired computer reached from another network**
+      (the owner, 2026-11-23: no server in between, never open to the
+      whole internet; docs/remote-connection.md step 7). Built, **not
+      yet tried between two networks**: This computer › Port and
+      networks › From anywhere (off until turned on) opens a door on UDP
+      at the sharing port's number that answers paired devices only; the
+      router is asked to let it in (UPnP, PCP, NAT-PMP; the owner's router
+      takes none of them); its addresses go to each paired device on
+      every connection and into BitTorrent's address book, sealed; with
+      neither, the two meet halfway (it looks every 30 s for a device that
+      wants in). The owner's connection has no IPv6 of its own (the one
+      global address here is Tailscale's), so it shows "Ready · paired
+      devices meet it halfway". Tried here: the door's tests, a pairing
+      and a session nearby that learned the outside address, and the real
+      address book both ways (the computer posted, the viewer's want was
+      seen and met); the last step cannot work on one network (both send
+      to the router's own address). To try: (1) on the PC, Kagaz share ›
+      From anywhere on, see its line; (2) connect from Kagaz here once at
+      home (it learns the way); (3) the phone on mobile data (Wi-Fi off)
+      or this laptop elsewhere: connect to the PC; it shows From afar and
+      may take up to a minute when meeting halfway; (4) turn From anywhere
+      off there: the device stops trying from afar after its next
+      connection.
 - [ ] **Session windows open at their last size** (the owner,
       2026-11-20): each device's window opens as it was last closed
       (size, maximised or not; full screen is not kept); a device's

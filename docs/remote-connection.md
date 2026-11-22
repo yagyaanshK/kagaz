@@ -357,6 +357,27 @@ wants in.
   and at what the address book says, for up to 40 seconds. Tried here on
   a local address book of ten nodes: another device's keys find nothing,
   the paired device reads the door's address and gets through it.
+- *(3) Built 2026-11-23:* the computer's own IPv6 addresses (lasting
+  ones first) and its outside address as the address book's computers
+  see it (their answer to a ping says where it came from, BEP 42; asked
+  every minute from the door itself, which also keeps the router's way
+  back open; not believed when they disagree, as behind a router that
+  gives each destination a port of its own) join the router's opening.
+  The line under the switch says router, IPv6, meet halfway or none. A
+  device that finds no answer posts where it is (its IPv6 and its outside
+  address) as a "want" record of the same sealed kind; the computer looks
+  for one every 30 seconds (the owner's choice) and, for a fresh one,
+  lets those addresses through and sends them answers for 40 seconds
+  while the device knocks, so that each router takes the other's packets
+  for replies. Tried here: on a local address book the two meet with
+  neither knowing the other's address; on the real one, between a
+  kagaz-share and a viewer on this computer, the record was posted, the
+  want was posted, seen and met (the connection itself cannot be made on
+  one network: both send to the router's own address, which it does not
+  loop back). The owner's connection has no IPv6 of its own and an
+  outside address that stays the same for each destination, so it meets
+  halfway. Still to try between two networks (the phone on mobile data,
+  this laptop elsewhere).
 
 The iPhone as a viewer comes later.
 

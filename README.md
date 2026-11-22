@@ -243,6 +243,19 @@ to the older picture on its page. VNC is spoken by Kagaz itself, and protects no
 itself, so Kagaz says "not encrypted on this network" unless the session
 travels through Tailscale.
 
+A Windows computer shared with Kagaz can also be reached **from anywhere**
+(This computer › Port and networks, off until turned on), with no server
+in between and nothing of it open to the internet at large: a door of its
+own on UDP answers only knocks sealed with a paired device's secret and
+says nothing to anything else; behind it an encrypted connection with the
+certificate pinned at pairing carries the session to the computer, where
+the PIN and the question apply as at home. The router is asked to let the
+door in where it takes such a request; the computer's addresses reach its
+paired devices on every connection and through BitTorrent's address book,
+sealed so that only each device finds and reads its own; where neither
+side can be reached, the two meet halfway. A device shows it as one more
+way in, From afar, tried when nothing nearby answers.
+
 `remote open` starts the Kagaz window on the device's screen. `remote
 try` opens a session and tells it in numbers, a line a second (how often
 the picture came, how much travelled, the delay), without showing or

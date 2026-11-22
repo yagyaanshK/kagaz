@@ -24,6 +24,14 @@
 //! read it, and nobody can tell it from any other record or follow it
 //! from one day to the next.
 //!
+//! Where neither side can be reached directly (routers that open nothing,
+//! firewalls that let in only replies), the two meet halfway: the device
+//! posts where it is in a record of the same kind ("want"), the computer
+//! looks for one every 30 seconds, and both send to each other at once,
+//! so that each one's router takes what arrives for a reply. Each learns
+//! its own outside address from the address book's computers, which say
+//! where they see a question come from.
+//!
 //! Both programs build this same file.
 
 use super::link;
@@ -175,6 +183,10 @@ struct Kept {
     nonces: HashMap<[u8; 16], Instant>,
     /// The computer answered from these (the device's side).
     answered: Vec<SocketAddr>,
+    /// Address book computers asked where they see this door.
+    asking: HashMap<SocketAddr, Instant>,
+    /// What they said: who, and where they see it.
+    seen: Vec<(SocketAddr, SocketAddr, Instant)>,
 }
 
 /// A UDP socket that lets through to the encrypted connection only what
@@ -242,6 +254,46 @@ impl Door {
         std::mem::take(&mut self.kept.lock().unwrap().answered)
     }
 
+    /// Meet a device halfway (the computer's side): let `to` through,
+    /// and send each an answer, as if it had knocked.
+    pub fn punch(&self, pair: &Pair, to: &[SocketAddr]) {
+        {
+            let mut k = self.kept.lock().unwrap();
+            for a in to {
+                k.admitted.insert(plain(*a), (pair.id.clone(), Instant::now()));
+            }
+        }
+        for a in to {
+            let _ = self.send_raw(*a, &knock(pair, true, fresh(), unix_now()));
+        }
+    }
+
+    /// Ask address book computers (`nodes`) where they see this door.
+    pub fn ask_where(&self, nodes: &[SocketAddr]) {
+        let now = Instant::now();
+        {
+            let mut k = self.kept.lock().unwrap();
+            k.asking.retain(|_, t| now.duration_since(*t) < Duration::from_secs(300));
+            for n in nodes {
+                k.asking.insert(plain(*n), now);
+            }
+        }
+        for n in nodes {
+            let _ = self.send_raw(*n, &ping());
+        }
+    }
+
+    /// Where the internet sees this door, by what the address book's
+    /// computers said in the last minutes; none when they disagree (the
+    /// router gives each destination a port of its own, and meeting
+    /// halfway cannot work through it).
+    pub fn seen_as(&self) -> Option<SocketAddr> {
+        let mut k = self.kept.lock().unwrap();
+        k.seen.retain(|(_, _, t)| t.elapsed() < Duration::from_secs(600));
+        let first = k.seen.first()?.1;
+        k.seen.iter().all(|(_, me, _)| *me == first).then_some(first)
+    }
+
     /// One datagram from `from`: for the encrypted connection (true), or a
     /// knock dealt with here, or nothing anyone asked for (false, and no
     /// word back).
@@ -249,6 +301,13 @@ impl Door {
         let from = plain(from);
         let now = Instant::now();
         let mut k = self.kept.lock().unwrap();
+        if data.first() == Some(&b'd') && k.asking.contains_key(&from) {
+            if let Some(me) = seen_in(data) {
+                k.seen.retain(|(who, _, _)| *who != from);
+                k.seen.push((from, me, now));
+            }
+            return false;
+        }
         if data.len() == KNOCK {
             if let Some((pair, answer, nonce)) = read_knock(&k.pairs, data, unix_now()) {
                 let pair = pair.clone();
@@ -347,6 +406,36 @@ fn transport() -> Arc<quinn::TransportConfig> {
 
 fn says(e: impl std::fmt::Display) -> String {
     e.to_string()
+}
+
+/// A question to an address book computer ("ping", BEP 5): its answer
+/// says where it sees the question come from (BEP 42).
+fn ping() -> Vec<u8> {
+    let mut id = [0u8; 20];
+    getrandom::fill(&mut id).expect("the system's random numbers");
+    let mut m = b"d1:ad2:id20:".to_vec();
+    m.extend_from_slice(&id);
+    m.extend_from_slice(b"e1:q4:ping1:t4:kgzf1:y1:qe");
+    m
+}
+
+/// Where an address book computer's answer says it saw the question come
+/// from.
+fn seen_in(answer: &[u8]) -> Option<SocketAddr> {
+    let at = answer.windows(6).position(|w| w == b"2:ip6:")? + 6;
+    let b = answer.get(at..at + 6)?;
+    Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::new(b[0], b[1], b[2], b[3])), u16::from_be_bytes([b[4], b[5]])))
+}
+
+/// The address book computers everyone starts from (or a test's own).
+pub fn dht_nodes(bootstrap: Option<&[String]>) -> Vec<SocketAddr> {
+    use std::net::ToSocketAddrs;
+    const NODES: [&str; 4] = ["router.bittorrent.com:6881", "dht.transmissionbt.com:6881", "dht.libtorrent.org:25401", "router.utorrent.com:6881"];
+    let names: Vec<String> = match bootstrap {
+        Some(b) => b.to_vec(),
+        None => NODES.iter().map(|n| n.to_string()).collect(),
+    };
+    names.iter().filter_map(|n| n.to_socket_addrs().ok()?.find(SocketAddr::is_ipv4)).collect()
 }
 
 /// The computer's end: the encrypted connection behind the door, with the
@@ -479,6 +568,11 @@ pub struct Reached {
 pub struct Looking {
     /// In BitTorrent's address book, for what the computer posted there.
     pub book: bool,
+    /// Meet it halfway: post where this device is ("want"), for the
+    /// computer to send to it as it sends to the computer.
+    pub meet: bool,
+    /// This device's own IPv6 addresses the internet reaches.
+    pub v6: Vec<Ipv6Addr>,
     /// Its nodes to start from (none: the usual ones; a test's own).
     pub bootstrap: Option<Vec<String>>,
 }
@@ -520,7 +614,7 @@ pub fn reach(
             runtime.block_on(tunnel(pair, fingerprint, known, looking, provider, told));
         })
         .map_err(says)?;
-    heard.recv_timeout(Duration::from_secs(90)).map_err(|_| "the computer did not answer from afar".to_string())?
+    heard.recv_timeout(Duration::from_secs(90)).map_err(|_| "it did not answer in time".to_string())?
 }
 
 /// What the knocking learns as it goes: more places to knock, and whether
@@ -530,6 +624,9 @@ struct Search {
     at: Vec<SocketAddr>,
     /// When the last look ended (none: still looking).
     looked: Option<Instant>,
+    /// A want was posted: the computer may take up to half a minute to
+    /// see it.
+    meeting: bool,
     why: Option<String>,
 }
 
@@ -564,24 +661,52 @@ async fn tunnel(
         Err(e) => return fail(says(e)),
     };
     let began = Instant::now();
-    let search = Arc::new(Mutex::new(Search { at: known, looked: None, why: None }));
-    if looking.book {
-        let (search, pair) = (search.clone(), pair.clone());
+    let search = Arc::new(Mutex::new(Search { at: known, ..Search::default() }));
+    if looking.book || looking.meet {
+        let (search, pair, door) = (search.clone(), pair.clone(), door.clone());
         std::thread::spawn(move || {
-            let found = looking.dht().map(|dht| read(&dht, &pair, BOOK));
-            let mut s = search.lock().unwrap();
-            match found {
-                Ok(Some(r)) => {
-                    for a in r.addresses {
-                        if !s.at.contains(&a) {
-                            s.at.push(a);
+            let dht = match looking.dht() {
+                Ok(d) => d,
+                Err(e) => {
+                    let mut s = search.lock().unwrap();
+                    s.why = Some(format!("the address book could not be reached ({e})"));
+                    s.looked = Some(Instant::now());
+                    return;
+                }
+            };
+            // Where this door is seen, asked while the book is read.
+            if looking.meet {
+                door.ask_where(&dht_nodes(looking.bootstrap.as_deref()));
+            }
+            if looking.book {
+                let found = read(&dht, &pair, BOOK);
+                let mut s = search.lock().unwrap();
+                match found {
+                    Some(r) => {
+                        for a in r.addresses {
+                            if !s.at.contains(&a) {
+                                s.at.push(a);
+                            }
                         }
                     }
+                    None => s.why = Some("it has posted no address in the address book".into()),
                 }
-                Ok(None) => s.why = Some("it has posted no address in the address book".into()),
-                Err(e) => s.why = Some(format!("the address book could not be reached ({e})")),
             }
-            s.looked = Some(Instant::now());
+            if looking.meet {
+                let port = door.port();
+                let mut here: Vec<SocketAddr> = looking.v6.iter().map(|ip| SocketAddr::new(IpAddr::V6(*ip), port)).collect();
+                for _ in 0..20 {
+                    if door.seen_as().is_some() {
+                        break;
+                    }
+                    std::thread::sleep(Duration::from_millis(100));
+                }
+                here.extend(door.seen_as());
+                if !here.is_empty() && post(&dht, &pair, WANT, &here).is_ok() {
+                    search.lock().unwrap().meeting = true;
+                }
+            }
+            search.lock().unwrap().looked = Some(Instant::now());
         });
     } else {
         search.lock().unwrap().looked = Some(began);
@@ -591,7 +716,8 @@ async fn tunnel(
     let via = loop {
         let (at, over) = {
             let s = search.lock().unwrap();
-            let over = s.looked.is_some_and(|t| t.elapsed() > Duration::from_secs(4)) || began.elapsed() > Duration::from_secs(40);
+            let after = Duration::from_secs(if s.meeting { 45 } else { 4 });
+            let over = s.looked.is_some_and(|t| t.elapsed() > after) || began.elapsed() > Duration::from_secs(75);
             (s.at.clone(), over)
         };
         for a in &at {
@@ -604,7 +730,7 @@ async fn tunnel(
             let why = search.lock().unwrap().why.clone();
             return fail(match why {
                 Some(w) if at.is_empty() => w,
-                _ => "the computer did not answer from afar (switched off, asleep, or From anywhere is off there)".into(),
+                _ => "it did not answer (switched off or asleep, From anywhere off there, or the two networks let nothing through)".into(),
             });
         }
         let _ = tokio::time::timeout(Duration::from_millis(300), door.heard.notified()).await;
@@ -670,6 +796,8 @@ async fn tunnel(
 
 /// The computer's addresses, for a paired device.
 pub const BOOK: &str = "book";
+/// A device's addresses, as it wants in, for the computer.
+pub const WANT: &str = "want";
 
 /// What a record says.
 #[derive(Debug, Clone, PartialEq)]
@@ -851,7 +979,7 @@ mod tests {
 
     /// A computer with its door open, its Remote Desktop port echoing
     /// what it is sent; the device's keys, and the certificate to pin.
-    fn computer() -> (tokio::runtime::Runtime, SocketAddr, Pair, String) {
+    fn computer() -> (tokio::runtime::Runtime, SocketAddr, Pair, String, Arc<Door>) {
         let runtime = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().unwrap();
         let provider = Arc::new(rustls::crypto::ring::default_provider());
         let cert = rcgen::generate_simple_self_signed(vec![NAME.into()]).unwrap();
@@ -877,15 +1005,14 @@ mod tests {
         });
         let host_pair = Pair::new("dev", &link::hash("secret"));
         let p = provider.clone();
-        let port = runtime.block_on(async move {
+        let door = runtime.block_on(async move {
             let door = Door::open(Role::Host, 0).unwrap();
             door.set_pairs(vec![host_pair]);
-            let port = door.port();
-            let ep = host_endpoint(door, der, key, p).unwrap();
+            let ep = host_endpoint(door.clone(), der, key, p).unwrap();
             tokio::spawn(serve(ep, rdp_at));
-            port
+            door
         });
-        (runtime, (Ipv4Addr::LOCALHOST, port).into(), pair, fingerprint)
+        (runtime, (Ipv4Addr::LOCALHOST, door.port()).into(), pair, fingerprint, door)
     }
 
     fn echoes(r: &Reached) {
@@ -899,7 +1026,7 @@ mod tests {
 
     #[test]
     fn the_door_lets_only_a_paired_device_through_to_the_computer() {
-        let (runtime, door_at, pair, fingerprint) = computer();
+        let (runtime, door_at, pair, fingerprint, _) = computer();
         let provider = Arc::new(rustls::crypto::ring::default_provider());
         // A stranger hears nothing back.
         let stranger = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
@@ -921,7 +1048,7 @@ mod tests {
     #[allow(deprecated)]
     fn the_address_book_leads_only_a_paired_device_to_the_computer() {
         let testnet = mainline::Testnet::builder(10).bind_address(Ipv4Addr::LOCALHOST).build().unwrap();
-        let (runtime, door_at, pair, fingerprint) = computer();
+        let (runtime, door_at, pair, fingerprint, _) = computer();
         // The computer posts where it is, for its paired device.
         let dht = mainline::Dht::builder().bootstrap(&testnet.bootstrap).bind_address(Ipv4Addr::LOCALHOST).build().unwrap();
         post(&dht, &pair, BOOK, &[door_at]).unwrap();
@@ -930,12 +1057,48 @@ mod tests {
         assert!(read(&other, &Pair::new("x", "another secret"), BOOK).is_none());
         assert_eq!(read(&other, &pair, BOOK).unwrap().addresses, vec![door_at]);
         // Knowing no address, the device finds it there and gets through.
-        let looking = Looking { book: true, bootstrap: Some(testnet.bootstrap.clone()) };
+        let looking = Looking { book: true, bootstrap: Some(testnet.bootstrap.clone()), ..Looking::default() };
         let provider = Arc::new(rustls::crypto::ring::default_provider());
         let r = reach(pair, fingerprint, Vec::new(), looking, provider).unwrap();
         assert_eq!(r.via, door_at);
         echoes(&r);
         drop(runtime);
+    }
+
+    #[test]
+    #[allow(deprecated)]
+    fn they_meet_halfway_when_neither_knows_where_the_other_is() {
+        let testnet = mainline::Testnet::builder(10).bind_address(Ipv4Addr::LOCALHOST).build().unwrap();
+        let (runtime, door_at, pair, fingerprint, door) = computer();
+        // The computer posts nothing, and looks for wants (every half
+        // second here; every 30 seconds in kagaz-share).
+        let dht = mainline::Dht::builder().bootstrap(&testnet.bootstrap).bind_address(Ipv4Addr::LOCALHOST).build().unwrap();
+        let p = pair.clone();
+        std::thread::spawn(move || {
+            for _ in 0..120 {
+                if let Some(w) = read(&dht, &p, WANT) {
+                    door.punch(&p, &w.addresses);
+                }
+                std::thread::sleep(Duration::from_millis(500));
+            }
+        });
+        // The device knows no address: it says where it is (as the
+        // address book's computers see it), and is met there.
+        let looking = Looking { book: true, meet: true, bootstrap: Some(testnet.bootstrap.clone()), ..Looking::default() };
+        let provider = Arc::new(rustls::crypto::ring::default_provider());
+        let r = reach(pair, fingerprint, Vec::new(), looking, provider).unwrap();
+        assert_eq!(r.via, door_at);
+        echoes(&r);
+        drop(runtime);
+    }
+
+    #[test]
+    fn where_an_address_book_computer_saw_the_question() {
+        let mut answer = b"d2:ip6:".to_vec();
+        answer.extend_from_slice(&[203, 0, 113, 9, 0x0d, 0x3e]);
+        answer.extend_from_slice(b"1:rd2:id20:aaaaaaaaaaaaaaaaaaaae1:t4:kgzf1:y1:re");
+        assert_eq!(seen_in(&answer), Some("203.0.113.9:3390".parse().unwrap()));
+        assert_eq!(seen_in(b"d1:y1:re"), None);
     }
 
     #[test]

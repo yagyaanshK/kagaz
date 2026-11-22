@@ -8,23 +8,27 @@
 //! minutes at a time, renewed while this runs: when it stops, however it
 //! stops, the opening closes by itself soon after.
 //!
-//! Where it can be knocked at is posted in BitTorrent's address book for
-//! each paired device (far.rs says how only that device can find it),
-//! when it changes and every twenty minutes.
+//! Where it can be knocked at (the router's opening, its own IPv6
+//! addresses, and where the address book's computers see the door) is
+//! posted in BitTorrent's address book for each paired device (far.rs says
+//! how only that device can find it), when it changes and every twenty
+//! minutes; and every half minute it looks there for a device that wants
+//! in, to meet it halfway.
 
 use crate::far::{self, Door, Pair, Role};
 use crate::paired::Paired;
 use crate::say;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::num::NonZeroU16;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// How the computer can be reached from afar now.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Found {
-    /// "looking" at first; then "router" (the router lets Kagaz in) or
-    /// "none" (no way in found on this connection).
+    /// "looking" at first; then "router" (the router lets Kagaz in),
+    /// "ipv6" (it has an address of its own), "meet" (paired devices meet
+    /// it halfway) or "none" (no way in on this connection).
     pub state: String,
     /// Where a paired device can knock.
     pub addresses: Vec<SocketAddr>,
@@ -35,8 +39,13 @@ pub type Shared = Arc<Mutex<Found>>;
 /// How long the router keeps the opening, and how often it is renewed.
 const LEASE: u32 = 10 * 60;
 const RENEW: Duration = Duration::from_secs(4 * 60);
-/// How often a computer with no way in looks again (it may have moved).
+/// How often a router that gave nothing is asked again.
 const AGAIN: Duration = Duration::from_secs(5 * 60);
+/// How often its addresses are looked at again.
+const LOOK: Duration = Duration::from_secs(60);
+/// How often a device that wants in is looked for (the owner's choice,
+/// 2026-11-23).
+const WANTS: Duration = Duration::from_secs(30);
 
 /// The paired devices, as the door knows them.
 fn pairs(paired: &Paired) -> Vec<Pair> {
@@ -73,42 +82,92 @@ pub fn start(
     let found: Shared = Arc::new(Mutex::new(Found { state: "looking".into(), addresses: Vec::new() }));
     told(&found.lock().unwrap());
     {
-        let (found, paired) = (found.clone(), paired.clone());
-        std::thread::Builder::new().name("far-book".into()).spawn(move || book(found, paired))?;
+        let (found, paired, door) = (found.clone(), paired.clone(), door.clone());
+        std::thread::Builder::new().name("far-book".into()).spawn(move || book(found, paired, door))?;
     }
     let shared = found.clone();
     let port = door.port();
     tokio::spawn(async move {
+        let mut opened: Option<Opened> = None;
+        let mut asked: Option<Instant> = None;
+        let mut renewed = Instant::now();
         loop {
-            let opened = open(port).await;
+            // The router: asked at first and every few minutes while it
+            // has given nothing; what it gave, renewed.
+            if let Some(o) = &mut opened {
+                if renewed.elapsed() >= RENEW {
+                    if o.renew().await {
+                        renewed = Instant::now();
+                    } else {
+                        say("the router's opening could not be renewed: asking again");
+                        opened = None;
+                    }
+                }
+            }
+            if opened.is_none() && asked.is_none_or(|t| t.elapsed() >= AGAIN) {
+                opened = open(port).await;
+                asked = Some(Instant::now());
+                renewed = Instant::now();
+            }
             *OPEN.lock().unwrap() = opened.as_ref().map(|o| (o.outside.port(), o.how.clone()));
-            let now = match &opened {
-                Some(o) => Found { state: "router".into(), addresses: vec![o.outside] },
-                None => Found { state: "none".into(), addresses: Vec::new() },
+            // IPv6, and where the address book's computers see the door
+            // (asking also keeps the router's way back open).
+            let v6 = tokio::task::spawn_blocking(public_v6).await.unwrap_or_default();
+            let nodes = tokio::task::spawn_blocking(|| far::dht_nodes(None)).await.unwrap_or_default();
+            door.ask_where(&nodes);
+            tokio::time::sleep(Duration::from_secs(3)).await;
+            let seen = door.seen_as().filter(|a| far::public(a.ip()));
+            let mut addresses: Vec<SocketAddr> = Vec::new();
+            addresses.extend(opened.as_ref().map(|o| o.outside));
+            addresses.extend(v6.iter().map(|ip| SocketAddr::new(IpAddr::V6(*ip), port)));
+            if let Some(a) = seen {
+                if !addresses.contains(&a) {
+                    addresses.push(a);
+                }
+            }
+            let state = if opened.is_some() {
+                "router"
+            } else if !v6.is_empty() {
+                "ipv6"
+            } else if seen.is_some() {
+                "meet"
+            } else {
+                "none"
             };
+            let now = Found { state: state.into(), addresses };
             if *found.lock().unwrap() != now {
                 *found.lock().unwrap() = now.clone();
                 told(&now);
             }
-            match opened {
-                Some(mut o) => loop {
-                    tokio::time::sleep(RENEW).await;
-                    if !o.renew().await {
-                        say("the router's opening could not be renewed: asking again");
-                        break;
-                    }
-                },
-                None => tokio::time::sleep(AGAIN).await,
-            }
+            tokio::time::sleep(LOOK).await;
         }
     });
     Ok(shared)
 }
 
+/// This computer's IPv6 addresses the internet reaches: its lasting ones
+/// first (a privacy address changes every day or so).
+fn public_v6() -> Vec<Ipv6Addr> {
+    let Ok(i) = netdev::get_default_interface() else { return Vec::new() };
+    let mut all: Vec<(bool, Ipv6Addr)> = i
+        .ipv6
+        .iter()
+        .enumerate()
+        .filter(|(_, n)| far::public(IpAddr::V6(n.addr())))
+        .filter_map(|(k, n)| {
+            let flags = i.ipv6_addr_flags.get(k).copied().unwrap_or_default();
+            (!flags.deprecated && !flags.tentative).then_some((flags.temporary, n.addr()))
+        })
+        .collect();
+    all.sort_by_key(|(temporary, _)| *temporary);
+    all.into_iter().map(|(_, a)| a).take(2).collect()
+}
+
 /// Post where it can be knocked at, for each paired device, when that
-/// changes (or the devices, or the day) and every twenty minutes.
+/// changes (or the devices, or the day) and every twenty minutes; and
+/// look every half minute for a device that wants in, to meet it halfway.
 #[allow(deprecated)]
-fn book(found: Shared, paired: Arc<Paired>) {
+fn book(found: Shared, paired: Arc<Paired>, door: Arc<Door>) {
     let dht = loop {
         match mainline::Dht::client() {
             Ok(d) => break d,
@@ -119,7 +178,9 @@ fn book(found: Shared, paired: Arc<Paired>) {
         }
     };
     let mut last: Option<(Vec<SocketAddr>, usize, u64, std::time::Instant)> = None;
+    let mut met: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
     loop {
+        let began = Instant::now();
         let addresses = found.lock().unwrap().addresses.clone();
         let pairs = pairs(&paired);
         let day = far::unix_now() / far::DAY;
@@ -134,7 +195,25 @@ fn book(found: Shared, paired: Arc<Paired>) {
                 last = Some((addresses, pairs.len(), day, std::time::Instant::now()));
             }
         }
-        std::thread::sleep(Duration::from_secs(30));
+        // A device that wants in, said in the last minute and a half.
+        for p in &pairs {
+            let Some(want) = far::read(&dht, p, far::WANT) else { continue };
+            let fresh = far::unix_now().saturating_sub(want.at) < 90;
+            if !fresh || met.get(&p.id) == Some(&want.at) || want.addresses.is_empty() {
+                continue;
+            }
+            met.insert(p.id.clone(), want.at);
+            say("a paired device wants in from afar: meeting it halfway");
+            let (door, p, to) = (door.clone(), p.clone(), want.addresses);
+            std::thread::spawn(move || {
+                // Its knocks and these cross; for 40 seconds.
+                for _ in 0..130 {
+                    door.punch(&p, &to);
+                    std::thread::sleep(Duration::from_millis(300));
+                }
+            });
+        }
+        std::thread::sleep(WANTS.saturating_sub(began.elapsed()));
     }
 }
 

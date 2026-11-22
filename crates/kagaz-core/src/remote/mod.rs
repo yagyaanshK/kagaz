@@ -207,9 +207,24 @@ fn from_afar(list: &Path, device: &Device) -> Result<far::Reached, String> {
     let at: Vec<std::net::SocketAddr> = device.far.iter().filter_map(|a| a.parse().ok()).collect();
     let pair = far::Pair::new(&device.id, &link::hash(&secret));
     let provider = std::sync::Arc::new(rustls::crypto::ring::default_provider());
-    // Where it said, and where it posted since in the address book.
-    let looking = far::Looking { book: true, bootstrap: None };
+    // Where it said, where it posted since in the address book, and,
+    // when neither answers, meeting it halfway.
+    let looking = far::Looking { book: true, meet: true, v6: public_v6(), bootstrap: None };
     far::reach(pair, fingerprint, at, looking, provider)
+}
+
+/// This device's IPv6 addresses the internet reaches (a few).
+#[cfg(not(target_os = "ios"))]
+fn public_v6() -> Vec<std::net::Ipv6Addr> {
+    if_addrs::get_if_addrs()
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|i| match i.ip() {
+            std::net::IpAddr::V6(v6) if far::public(v6.into()) => Some(v6),
+            _ => None,
+        })
+        .take(3)
+        .collect()
 }
 
 /// Ask a paired computer, reached at `addr` (near or from afar), where it

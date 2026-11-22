@@ -554,6 +554,11 @@ fn open_session(which: &str, picture: Option<u8>, sound: bool) -> Result<(Device
                     }
                     Ok(())
                 });
+                // A paired computer says where it can be reached from
+                // afar, for the next time this computer is elsewhere.
+                if paired {
+                    remote::learn_far(&list, &device.id, answer.addr);
+                }
                 return Ok((device, answer, session));
             }
             Err(OpenError::NeedsUser) => {
