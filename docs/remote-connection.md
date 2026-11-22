@@ -306,10 +306,46 @@ other). Planned with it: the remote camera (Kagaz driving the phone's
 camera with the screen off) and a Bluetooth shutter, from a computer to a
 phone and from a phone to a phone.
 
-### 7. Beyond Tailscale
+### 7. Beyond Tailscale: From anywhere
 
-A relay that sees only encrypted bytes and can be self-hosted. The iPhone
-as a viewer.
+The owner, 2026-11-23: a paired computer on another network, reached with
+no server of anyone's in between, and never open to the internet at large.
+Three ways, built in this order: (1) the router asked to let Kagaz in, and
+the computer's addresses told to the device on every connection; (2) the
+computer's addresses posted in BitTorrent's address book (the DHT) for its
+paired devices; (3) IPv6, and the two meeting halfway (hole punching), the
+computer looking in the address book every 30 seconds for a device that
+wants in.
+
+- *Off until turned on:* "From anywhere" on This computer › Port and
+  networks (approved mockup: `design/mockups/windows-host/host.html?far=…`),
+  one line for what was found: the router lets Kagaz in, through IPv6,
+  paired devices meet it halfway, or not reachable from afar.
+- *The door* (`kagaz-core/src/remote/far.rs`, built by both programs): a
+  UDP port of its own (the Remote Desktop port's number). It answers only a
+  knock sealed with a key from a paired device's secret, with the time and
+  a number used once (one sent again is refused), the device told apart by
+  a tag that changes daily; anything else gets no reply, so to a scan it
+  looks closed. Only the address that knocked is let through, while it
+  keeps talking. Behind it QUIC (quinn), its certificate the one pinned at
+  pairing, carries the device's Remote Desktop connection to the
+  computer's own port, where the secret, the PIN and the question apply as
+  on the home network. The Remote Desktop port itself is never opened to
+  the internet.
+- *(1) Built 2026-11-23:* kagaz-share asks the router (UPnP, then PCP and
+  NAT-PMP) for the door's port only, for ten minutes at a time, renewed,
+  and closes it on leaving; an opening counts only when the router's own
+  address is a public one (not shared by the internet provider). After
+  every connection the viewer asks the computer (`KGZA` on its port, proved
+  both ways) where it can be reached from afar and keeps it; a device's
+  ways then include "From afar", tried when nothing nearby answers. Tried
+  here: the door says nothing to a stranger's knock or to anything else,
+  refuses a wrong certificate, and lets the paired device through to the
+  computer's port; only a paired device is told the addresses. The owner's
+  router takes none of the three requests (checked 2026-11-23), so (1) is
+  tried elsewhere.
+
+The iPhone as a viewer comes later.
 
 ## Rules
 

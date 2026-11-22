@@ -81,6 +81,11 @@ mod pattern;
 #[path = "../../kagaz-core/src/remote/link.rs"]
 #[allow(dead_code)]
 mod link;
+// Reaching it from another network, as the viewer builds it too.
+#[path = "../../kagaz-core/src/remote/far.rs"]
+#[allow(dead_code)]
+mod far;
+mod far_host;
 mod clip;
 mod control;
 mod paired;
@@ -485,8 +490,9 @@ fn helper_settings(at: &std::path::Path, text: &str, lock: Option<&std::sync::Mu
     if let Some(lock) = lock {
         *lock.lock().unwrap() = new.lock.clone();
     }
-    if (new.on, new.port, &new.listen, new.record) != (old.on, old.port, &old.listen, old.record) {
+    if (new.on, new.port, &new.listen, new.record, new.far) != (old.on, old.port, &old.listen, old.record, old.far) {
         say("settings changed: starting again with them");
+        far_host::close();
         std::process::exit(0);
     }
 }
@@ -503,6 +509,7 @@ fn commands(commands: Arc<Commands>) {
         // left running unseen.
         if DRIVEN.load(Ordering::Relaxed) {
             say("Kagaz closed: sharing stops");
+            far_host::close();
             std::process::exit(0);
         }
     });
@@ -518,11 +525,13 @@ struct HelperSettings {
     listen: String,
     lock: String,
     record: bool,
+    /// From anywhere: paired devices on other networks too.
+    far: bool,
 }
 
 impl Default for HelperSettings {
     fn default() -> HelperSettings {
-        HelperSettings { on: false, port: 3390, listen: "all".into(), lock: "unused".into(), record: true }
+        HelperSettings { on: false, port: 3390, listen: "all".into(), lock: "unused".into(), record: true, far: false }
     }
 }
 
@@ -557,9 +566,22 @@ impl paired::Asker for Either {
     }
 }
 
-/// A new connection: a pairing (it starts with Kagaz's mark) or a Remote
-/// Desktop session (which never does).
-async fn route(stream: tokio::net::TcpStream, sessions: tokio::sync::mpsc::Sender<tokio::net::TcpStream>, pairing: Arc<pairing::Pairing>) {
+/// What a paired device may ask besides a session: where this computer
+/// can be reached from afar.
+#[derive(Clone)]
+struct Asks {
+    paired: Arc<paired::Paired>,
+    found: Option<far_host::Shared>,
+}
+
+/// A new connection: a pairing or a paired device's question (each starts
+/// with a mark of Kagaz's) or a Remote Desktop session (which never does).
+async fn route(
+    stream: tokio::net::TcpStream,
+    sessions: tokio::sync::mpsc::Sender<tokio::net::TcpStream>,
+    pairing: Arc<pairing::Pairing>,
+    asks: Asks,
+) {
     let mut first = [0u8; 4];
     let began = Instant::now();
     loop {
@@ -583,6 +605,20 @@ async fn route(stream: tokio::net::TcpStream, sessions: tokio::sync::mpsc::Sende
                 pairing.handle(s);
             }
         });
+    } else if &first == far::ASK {
+        let Ok(mut s) = stream.into_std() else { return };
+        let _ = s.set_nonblocking(false);
+        let _ = s.set_read_timeout(Some(Duration::from_secs(10)));
+        std::thread::spawn(move || {
+            use std::io::Read;
+            let mut mark = [0u8; 4];
+            if s.read_exact(&mut mark).is_ok() {
+                let pairs: Vec<far::Pair> =
+                    asks.paired.store.lock().unwrap().devices.iter().map(|d| far::Pair::new(&d.id, &d.secret)).collect();
+                let addresses = asks.found.as_ref().map(|f| f.lock().unwrap().addresses.clone()).unwrap_or_default();
+                let _ = far::answer_ask(&mut s, &pairs, &addresses);
+            }
+        });
     } else {
         let _ = sessions.send(stream).await;
     }
@@ -591,7 +627,7 @@ async fn route(stream: tokio::net::TcpStream, sessions: tokio::sync::mpsc::Sende
 fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().collect();
     if args.iter().any(|a| a == "--help" || a == "-h") {
-        say("kagaz-share [--port 3390] [--local | --bind IP] [--name NAME] [--driven] [--lock never|always|unused] [--no-record] [--pin 123456] [--watch] [--rate 30] [--capture dxgi|gdi] [--ask-on-input] [--no-sound] [--no-clipboard] [--no-files] [--pattern [--size 1280x720] [--card-rate 5] [--tone] [--answer control|watch|deny]] [--keep DIR]");
+        say("kagaz-share [--port 3390] [--local | --bind IP] [--far] [--name NAME] [--driven] [--lock never|always|unused] [--no-record] [--pin 123456] [--watch] [--rate 30] [--capture dxgi|gdi] [--ask-on-input] [--no-sound] [--no-clipboard] [--no-files] [--pattern [--size 1280x720] [--card-rate 5] [--tone] [--answer control|watch|deny]] [--keep DIR]");
         return Ok(());
     }
     #[cfg(windows)]
@@ -671,6 +707,10 @@ fn main() -> anyhow::Result<()> {
     if args.iter().any(|a| a == "--driven") {
         DRIVEN.store(true, Ordering::Relaxed);
     }
+    let far = match &helper {
+        Some(h) => h.far,
+        None => args.iter().any(|a| a == "--far"),
+    };
     let rate: u32 = value(&args, "--rate").map(|p| p.parse()).transpose()?.unwrap_or(30).clamp(1, 60);
     let pattern = args.iter().any(|a| a == "--pattern");
     let watch = args.iter().any(|a| a == "--watch");
@@ -685,6 +725,7 @@ fn main() -> anyhow::Result<()> {
         anyhow::ensure!(paired.set_pin(&pin), "a PIN is at least 4 digits");
     }
     let allowed = paired::Allowed::default();
+    let far_keys = (der.clone(), key.clone());
     let provider = Arc::new(rustls::crypto::aws_lc_rs::default_provider());
     let config = rustls::ServerConfig::builder_with_provider(provider)
         .with_safe_default_protocol_versions()?
@@ -882,12 +923,34 @@ fn main() -> anyhow::Result<()> {
         if watch {
             say("watch only: the mouse and keys stay with this computer");
         }
+        // From anywhere: the door, and the router asked to let it in.
+        // Connections through it come to this port as any other.
+        let found = if far {
+            let rdp = if addr.ip().is_unspecified() { std::net::SocketAddr::new(std::net::Ipv4Addr::LOCALHOST.into(), addr.port()) } else { addr };
+            let (der, key) = far_keys;
+            match far_host::start(port, der, key, rdp, paired.clone(), |f| {
+                event(serde_json::json!({ "kind": "far", "state": f.state }));
+            }) {
+                Ok(f) => {
+                    say(&format!("from anywhere: paired devices only, through UDP {port}"));
+                    Some(f)
+                }
+                Err(e) => {
+                    say(&format!("from anywhere could not start: {e:#}"));
+                    event(serde_json::json!({ "kind": "far", "state": "none" }));
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        let asks = Asks { paired: paired.clone(), found };
         // Connections are sorted as they come; sessions run one at a time.
         let (to_sessions, mut sessions) = tokio::sync::mpsc::channel(4);
         tokio::spawn(async move {
             loop {
                 let Ok((stream, _)) = listener.accept().await else { continue };
-                tokio::spawn(route(stream, to_sessions.clone(), pairing.clone()));
+                tokio::spawn(route(stream, to_sessions.clone(), pairing.clone(), asks.clone()));
             }
         });
         while let Some(stream) = sessions.recv().await {

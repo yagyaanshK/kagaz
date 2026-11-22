@@ -50,6 +50,10 @@ pub struct Settings {
     /// Windows' Run box: `kagaz-share --drops` at sign-in (win_drops.rs).
     /// A use of its own: whether this computer is shared or not.
     pub drops: bool,
+    /// From anywhere: paired devices on other networks reach it through
+    /// its door (remote/far.rs), its port opened in the router if the
+    /// router takes such a request. Off until turned on.
+    pub far: bool,
 }
 
 impl Default for Settings {
@@ -64,6 +68,7 @@ impl Default for Settings {
             startup: false,
             prompts: "person".into(),
             drops: false,
+            far: false,
         }
     }
 }
@@ -107,6 +112,9 @@ pub struct Status {
     pub steering: bool,
     /// Windows' own Remote Desktop is turned on here (None: not known).
     pub rdp: Option<bool>,
+    /// From anywhere, while on: "looking", "router", "ipv6", "meet" or
+    /// "none" (what kagaz-share found).
+    pub far: Option<String>,
 }
 
 /// How Kagaz reaches the share: the program it started, or the helper's.
@@ -386,6 +394,9 @@ impl Share {
         if !settings.record {
             cmd.arg("--no-record");
         }
+        if settings.far {
+            cmd.arg("--far");
+        }
         if std::env::var_os("KAGAZ_SHARE_PATTERN").is_some() {
             cmd.args(["--pattern", "--tone"]);
             if let Some(keep) = std::env::var_os("KAGAZ_SHARE_KEEP") {
@@ -463,6 +474,7 @@ impl Share {
             }
             None => {}
         }
+        self.status.lock().unwrap().far = None;
     }
 
     pub fn send(&self, line: &str) -> Result<(), String> {
@@ -552,11 +564,13 @@ fn heard(app: &AppHandle, ev: Value) {
                 st.session = Some(ev.clone());
             }
             "mode" => st.control = ev["control"].as_bool().unwrap_or(false),
+            "far" => st.far = ev["state"].as_str().map(String::from),
             // The helper's share, turned off: nothing listens.
             "off" => {
                 st.running = false;
                 st.listening = None;
                 st.session = None;
+                st.far = None;
             }
             "left" => {
                 st.session = None;
@@ -782,7 +796,7 @@ fn apply(app: &AppHandle, before: Settings, settings: Settings) -> Result<Status
     } else if !supported() {
         return Err("This computer cannot share its screen yet: Kagaz shares Windows computers for now.".into());
     } else {
-        let restart = before.port != settings.port || before.listen != settings.listen || before.record != settings.record;
+        let restart = before.port != settings.port || before.listen != settings.listen || before.record != settings.record || before.far != settings.far;
         if restart {
             share.stop();
         }

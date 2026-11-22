@@ -11,6 +11,7 @@ authors.workspace = true
 flate2 = "1"
 libc = "0.2"
 socket2 = "0.6"
+getrandom = "0.3"
 if-addrs = "0.15"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "tiff"] }
 mdns-sd = "0.21"
@@ -91,6 +92,12 @@ ringbuf = "0.5"
 # for redirected devices; Kagaz offers it with no device on it.
 ironrdp-rdpdr = "0.9"
 x509-cert = { version = "0.2", default-features = false, features = ["std"] }
+# Reaching a paired computer from another network (remote/far.rs): an
+# encrypted connection over UDP (quinn, MIT or Apache-2.0) through a door
+# that answers paired devices only.
+quinn = { version = "0.11", default-features = false, features = ["runtime-tokio", "rustls-ring", "log"] }
+tokio = { version = "1", default-features = false, features = ["rt", "rt-multi-thread", "time", "net", "sync", "io-util", "macros"] }
+socket2 = "0.6"
 
 # Folders of this computer shown to a Remote Desktop computer as drives
 # (files sent from here, a shared folder): IronRDP's filesystem backend

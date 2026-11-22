@@ -9,6 +9,8 @@
 //!
 //! Plan and limits: `docs/remote-connection.md`.
 
+#[cfg(not(target_os = "ios"))]
+pub mod far;
 pub mod keys;
 pub mod link;
 pub mod pair;
@@ -127,7 +129,7 @@ pub fn locate(list: &Path, which: &str, speaks: Speaks, timeout: Duration) -> Re
             speaks,
         });
     }
-    let failed = match reach(&device, speaks, timeout) {
+    let mut failed = match reach(&device, speaks, timeout) {
         Ok(answer) => {
             let at = store::now();
             let ((), saved) = Devices::update(list, |d| {
@@ -165,8 +167,67 @@ pub fn locate(list: &Path, which: &str, speaks: Speaks, timeout: Duration) -> Re
             return Ok((device, answer));
         }
     }
+    // From afar: a paired computer that gave addresses to knock at.
+    #[cfg(not(target_os = "ios"))]
+    if speaks == Speaks::Rdp {
+        if let Some(path) = device.paths.iter().position(|p| p.kind == PathKind::Far) {
+            let way = device.way(speaks).expect("checked above");
+            let began = std::time::Instant::now();
+            match from_afar(list, &device) {
+                Ok(r) => {
+                    let at = store::now();
+                    let ((), saved) = Devices::update(list, |d| {
+                        d.note_reached(&device.id, path, at);
+                        Ok(())
+                    })?;
+                    let device = saved.find(&device.id)?.clone();
+                    let answer = Answer {
+                        path,
+                        way,
+                        addr: r.local,
+                        millis: began.elapsed().as_millis() as u32,
+                        seen: Seen { speaks, banner: String::new(), identity: device.identity.clone() },
+                    };
+                    return Ok((device, answer));
+                }
+                Err(why) => failed.push(PathReport { path, way, outcome: Err(Trouble::Far(why)) }),
+            }
+        }
+    }
     let why = why_not(&device, &failed, &tailscale::status());
     Err(LocateError::NotReached(NotReached { reports: failed, why }))
+}
+
+/// A paired computer reached from afar, through its door; Remote Desktop
+/// then goes to the address this returns, on this device.
+#[cfg(not(target_os = "ios"))]
+fn from_afar(list: &Path, device: &Device) -> Result<far::Reached, String> {
+    let secret = store::link_secret(list, &device.id).ok_or("it is not paired with this device any more")?;
+    let fingerprint = device.identity.certificate.clone().ok_or("its certificate is not known")?;
+    let at: Vec<std::net::SocketAddr> = device.far.iter().filter_map(|a| a.parse().ok()).collect();
+    let pair = far::Pair::new(&device.id, &link::hash(&secret));
+    let provider = std::sync::Arc::new(rustls::crypto::ring::default_provider());
+    far::reach(pair, fingerprint, at, Duration::from_secs(4), provider)
+}
+
+/// Ask a paired computer, reached at `addr` (near or from afar), where it
+/// can be reached from afar, and keep what it says for the next time.
+/// Quietly nothing when it is not paired or does not say.
+#[cfg(not(target_os = "ios"))]
+pub fn learn_far(list: &Path, id: &str, addr: std::net::SocketAddr) {
+    let Ok(device) = Devices::load(list).and_then(|d| d.find(id).cloned()) else { return };
+    if !device.paired {
+        return;
+    }
+    let Some(secret) = store::link_secret(list, id) else { return };
+    let pair = far::Pair::new(id, &link::hash(&secret));
+    if let Ok(said) = far::ask(addr, &pair, Duration::from_secs(5)) {
+        let said: Vec<String> = said.iter().map(|a| a.to_string()).collect();
+        let _ = Devices::update(list, |d| {
+            d.note_far(id, said);
+            Ok(())
+        });
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -222,6 +283,12 @@ pub fn why_not(device: &Device, reports: &[PathReport], tailscale: &tailscale::T
     }
     if has(PathKind::Gateway) && reach::gateways().is_empty() {
         parts.push("this device is not on its hotspot".into());
+    }
+    if let Some(w) = reports.iter().find_map(|r| match &r.outcome {
+        Err(Trouble::Far(w)) => Some(w.clone()),
+        _ => None,
+    }) {
+        parts.push(format!("from afar, {w}"));
     }
     if parts.is_empty() {
         return "no way to reach it is saved".into();

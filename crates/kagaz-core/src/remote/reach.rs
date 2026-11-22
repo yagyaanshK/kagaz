@@ -41,6 +41,9 @@ pub enum Trouble {
     SomethingElse,
     #[error("another device answers there: {0}")]
     AnotherDevice(String),
+    /// From afar (remote/far.rs), in its own words.
+    #[error("{0}")]
+    Far(String),
 }
 
 /// A path that answered.
@@ -326,6 +329,7 @@ fn try_path(device: &Device, path: usize, way: Way, timeout: Duration) -> Result
             }
             all
         }
+        PathKind::Far => return Err(Trouble::NoAddress),
         _ => resolve(&p.host, way.port)?,
     };
     let mut last = Trouble::NoAnswer;
@@ -358,7 +362,8 @@ fn start(device: &Device, ways: &[Way], timeout: Duration) -> (mpsc::Receiver<Pa
     let (tx, rx) = mpsc::channel();
     let device = Arc::new(device.clone());
     let mut count = 0;
-    for path in 0..device.paths.len() {
+    // From afar is tried on its own, when none of these answers.
+    for path in (0..device.paths.len()).filter(|p| device.paths[*p].kind != PathKind::Far) {
         for way in ways {
             let (tx, device, way) = (tx.clone(), device.clone(), *way);
             count += 1;

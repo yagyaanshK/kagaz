@@ -229,6 +229,17 @@ const KagazShare = (() => {
       row("Port", "3390 unless changed; Windows' own Remote Desktop keeps 3389", port),
       row("Listen on", "", select([["all", "Local network and Tailscale"], ["tailscale", "Tailscale only"], ["local", "This computer only"]], s.listen, (v) => save({ listen: v }))),
     );
+    // From anywhere: off until turned on; then what was found, in a line.
+    const FAR = {
+      looking: ["Looking for a way in…", ""],
+      router: ["Ready · your router lets Kagaz in", "Only paired devices get an answer; to anyone else it looks closed."],
+      ipv6: ["Ready · through IPv6", "Only paired devices get an answer; to anyone else it looks closed."],
+      meet: ["Ready · paired devices meet it halfway", "Your router doesn't open doors for apps, so a connection from afar takes up to 30 seconds to start."],
+      none: ["Not reachable from afar on this connection", "Your internet provider and router allow no way in. Tailscale still works."],
+    };
+    const found = s.far && st.far ? FAR[st.far] : null;
+    net.append(row("From anywhere", found ? found[0] : "Paired devices only, on other networks too", check(s.far, (v) => save({ far: v }))));
+    if (found && found[1]) net.append(el("p", "muted small", found[1]));
     box.append(net);
     if (st.windows) box.append(drawPrompts());
   }

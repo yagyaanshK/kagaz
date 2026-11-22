@@ -468,9 +468,14 @@ const KagazRemote = (() => {
       one.append(x.answers ? `${way}answers${x.address ? " at " + x.address : ""}, ${x.millis} ms` : `${way}${x.trouble}`);
       right.append(one);
     }
-    if (!mine.length) right.append(el("span", "muted", checking ? "checking…" : p.last_ok ? `answered ${ago(p.last_ok)}` : "not tried yet"));
+    if (!mine.length) {
+      // From afar is tried only on connecting, when nothing nearby answers.
+      const idle = p.kind === "far" ? "tried when nothing nearby answers" : "not tried yet";
+      right.append(el("span", "muted", checking && p.kind !== "far" ? "checking…" : p.last_ok ? `answered ${ago(p.last_ok)}` : idle));
+    }
     row.append(right);
-    if (d.paths.length > 1) {
+    // From afar comes and goes with the computer's own setting.
+    if (d.paths.length > 1 && p.kind !== "far") {
       const name = p.host || "its hotspot";
       row.append(button("danger-text rc-remove", "Remove", async () => {
         if (!(await KagazAsk.confirm(`Remove ${name} from the ways to reach ${d.name}?`, "Remove", "The device stays; this address is no longer tried."))) return;
@@ -479,7 +484,7 @@ const KagazRemote = (() => {
     }
     return row;
   }
-  const PATH_LABEL = { address: "Local network", name: "Name", tailscale: "Tailscale", gateway: "Its hotspot" };
+  const PATH_LABEL = { address: "Local network", name: "Name", tailscale: "Tailscale", gateway: "Its hotspot", far: "From afar" };
 
   function renderDevice() {
     const d = data.devices.find((x) => x.id === openId);

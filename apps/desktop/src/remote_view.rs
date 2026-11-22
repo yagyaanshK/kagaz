@@ -669,6 +669,12 @@ pub async fn remote_connect(
             sent: session.info.sent.clone(),
         };
         let (width, height) = session.screen.size();
+        // A paired computer is asked, every time, where it can be reached
+        // from afar, for the next time this device is elsewhere.
+        if device.paired {
+            let (list, id, addr) = (list.clone(), device.id.clone(), answer.addr);
+            std::thread::spawn(move || remote::learn_far(&list, &id, addr));
+        }
         let path = &device.paths[answer.path];
         let connected = Connected {
             session: id,
@@ -676,9 +682,10 @@ pub async fn remote_connect(
             width,
             height,
             path: path.kind.label().to_string(),
-            address: answer.addr.ip().to_string(),
+            address: if path.kind == PathKind::Far { String::new() } else { answer.addr.ip().to_string() },
             millis: answer.millis,
-            protected: session.info.encrypted || path.kind == PathKind::Tailscale,
+            // From afar it is inside an encrypted connection of its own.
+            protected: session.info.encrypted || matches!(path.kind, PathKind::Tailscale | PathKind::Far),
             settings: device.settings.clone(),
             pipe: None,
         };

@@ -22,6 +22,9 @@ pub enum PathKind {
     /// Whatever gateway this device has now: a phone sharing its hotspot
     /// is the gateway of everything joined to it, at a random address.
     Gateway,
+    /// A paired computer from another network, through its door
+    /// (remote/far.rs), at the addresses it last gave (`Device::far`).
+    Far,
 }
 
 impl PathKind {
@@ -31,6 +34,7 @@ impl PathKind {
             PathKind::Name => "Name",
             PathKind::Tailscale => "Tailscale",
             PathKind::Gateway => "Its hotspot",
+            PathKind::Far => "From afar",
         }
     }
 
@@ -250,6 +254,10 @@ pub struct Device {
     /// that the list can be shown anywhere.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub paired: bool,
+    /// Where a paired computer said it can be reached from afar, the last
+    /// time it was asked (none while it has From anywhere off).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub far: Vec<String>,
 }
 
 /// Where the secrets of paired computers are kept: next to the list,
@@ -586,6 +594,20 @@ impl Devices {
     }
 
     /// A path answered: when, and through what.
+    /// What a paired computer said of reaching it from afar: kept, with a
+    /// path for it while there is somewhere to knock, none while not.
+    pub fn note_far(&mut self, id: &str, addresses: Vec<String>) {
+        if let Some(d) = self.devices.iter_mut().find(|d| d.id == id) {
+            let has = d.paths.iter().any(|p| p.kind == PathKind::Far);
+            if addresses.is_empty() {
+                d.paths.retain(|p| p.kind != PathKind::Far);
+            } else if !has {
+                d.paths.push(PathTo { kind: PathKind::Far, host: String::new(), last_ok: None });
+            }
+            d.far = addresses;
+        }
+    }
+
     pub fn note_reached(&mut self, id: &str, path: usize, at: u64) {
         if let Some(d) = self.devices.iter_mut().find(|d| d.id == id) {
             d.last_seen = Some(at);

@@ -63,16 +63,16 @@ const KagazRemoteView = (() => {
     for (const p of d.paths) {
       const li = el("li");
       const state = el("span", "muted");
-      state.append(el("span", "rc-spin"), " trying");
+      state.append(el("span", "rc-spin"), p.kind === "far" ? " if none of these answers" : " trying");
       li.append(el("span", "", `${PATH[p.kind] || p.kind}${p.host ? " · " + p.host : ""}`), state);
       list.append(li);
     }
     const status = el("p", "muted", asking ? `Waiting for someone at ${d.name} to allow it. No answer in 30 seconds means no.`
-      : "Every way is tried at once; the first to answer is used.");
+      : d.paths.some((p) => p.kind === "far") ? "Every way nearby is tried at once, then from afar." : "Every way is tried at once; the first to answer is used.");
     status.setAttribute("role", "status");
     showCard(el("h3", "", asking ? `Asking ${d.name}` : `Connecting to ${d.name}`), list, status, buttons(button("", "Cancel", () => close())));
   }
-  const PATH = { address: "Local network", name: "Name", tailscale: "Tailscale", gateway: "Its hotspot" };
+  const PATH = { address: "Local network", name: "Name", tailscale: "Tailscale", gateway: "Its hotspot", far: "From afar" };
   // Leaving the viewer goes back to the page it came from, or closes the
   // session's own window.
   const leave = () => (hooks.window ? "Close window" : "Back");

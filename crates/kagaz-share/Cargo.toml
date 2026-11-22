@@ -33,7 +33,7 @@ ironrdp-core = "0.2"
 # The screen goes as H.264, encoded by OpenH264 (BSD-2-Clause) built from
 # its source, as in the viewer.
 openh264 = { version = "0.9", default-features = false, features = ["source"] }
-tokio = { version = "1", features = ["rt", "net", "time", "sync"] }
+tokio = { version = "1", features = ["rt", "net", "time", "sync", "io-util", "macros"] }
 rcgen = { version = "0.14", default-features = false, features = ["aws_lc_rs"] }
 x509-cert = { version = "0.2", default-features = false, features = ["std"] }
 sha2 = "0.11"
@@ -46,6 +46,15 @@ serde_json = "1"
 getrandom = "0.3"
 async-trait = "0.1"
 anyhow = "1"
+# From anywhere (remote/far.rs, as the viewer builds it): the door on UDP
+# and the encrypted connection behind it (quinn, MIT or Apache-2.0), and
+# asking the router to let it in: UPnP (igd-next, MIT), PCP and NAT-PMP
+# (crab_nat, MIT), the router's address from the system (netdev, MIT).
+quinn = { version = "0.11", default-features = false, features = ["runtime-tokio", "rustls-aws-lc-rs", "log"] }
+socket2 = "0.6"
+igd-next = { version = "0.18", default-features = false, features = ["io_sync"] }
+crab_nat = "0.8"
+netdev = { version = "0.48", default-features = false, features = ["gateway"] }
 
 [target.'cfg(windows)'.dependencies]
 # The screen through DXGI's desktop duplication (GDI when that is not
